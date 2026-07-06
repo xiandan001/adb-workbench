@@ -918,6 +918,36 @@ function App() {
     });
   };
 
+  const handleUnlock = async (deviceId) => {
+    showConfirm({
+      title: '设备解锁 Unlock',
+      message: `即将对设备 ${deviceId} 执行 Unlock 解锁流程。`,
+      detail: '执行前必须先在开发者模式中打开 OEM 解锁。设备端可能需要手动确认解锁，解锁过程可能会清除设备数据。',
+      confirmLabel: '开始 Unlock',
+      rememberKey: 'device.unlock',
+      onConfirm: async () => {
+        setOperationLoading(prev => ({ ...prev, [`unlock_${deviceId}`]: true }));
+        try {
+          if (window.electronAPI) {
+            const res = await window.electronAPI.adbUnlock(deviceId);
+            if (res.success) {
+              showToast(res.message || 'Unlock 命令已执行，设备正在重启...');
+              setTimeout(() => fetchDevices(), 8000);
+            } else {
+              showToast(`Unlock 失败: ${res.error}`);
+            }
+          } else {
+            showToast('Unlock 功能需要 Electron 环境');
+          }
+        } catch (err) {
+          showToast(`Unlock 执行失败: ${err.message}`);
+        } finally {
+          setOperationLoading(prev => ({ ...prev, [`unlock_${deviceId}`]: false }));
+        }
+      }
+    });
+  };
+
   const handleRoot = async (deviceId) => {
     setOperationLoading(prev => ({ ...prev, [`root_${deviceId}`]: true }));
     try {
@@ -1611,6 +1641,7 @@ function App() {
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}
                       onReboot={() => handleReboot(device.id)}
                       onRebootLoader={() => handleRebootLoader(device.id)}
+                      onUnlock={() => handleUnlock(device.id)}
                       onRoot={() => handleRoot(device.id)}
                       onRemount={() => handleRemount(device.id)}
                       onDisconnect={() => handleDisconnect(device.id)}

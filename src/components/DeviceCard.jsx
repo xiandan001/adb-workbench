@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
+import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
 // 设备巡检面板：采集逻辑在主进程 inspection 模块中
@@ -9,7 +9,7 @@ import PackageManagerPanel from './PackageManagerPanel';
 // 通用危险确认弹窗（用于 su 不支持等提醒）
 import DangerConfirmModal from './DangerConfirmModal';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter }) {
   const isOnline = device.status === 'device';
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(deviceName || '');
@@ -413,6 +413,15 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           onClick={onRebootLoader}
           disabled={!isOnline || isLoading(`loader_${device.id}`)}
           loading={isLoading(`loader_${device.id}`)}
+          theme={t}
+          isOnline={isOnline}
+        />
+        <ControlButton
+          icon={<Unlock size={16} />}
+          label={isLoading(`unlock_${device.id}`) ? 'Unlock中...' : 'Unlock'}
+          onClick={onUnlock}
+          disabled={!isOnline || isLoading(`unlock_${device.id}`)}
+          loading={isLoading(`unlock_${device.id}`)}
           theme={t}
           isOnline={isOnline}
         />

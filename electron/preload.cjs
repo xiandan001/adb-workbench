@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   adbScreenRecordStatus: (deviceId) => ipcRenderer.invoke('adb:screenrecord:status', { deviceId }),
   adbReboot: (deviceId) => ipcRenderer.invoke('adb:reboot', { deviceId }),
   adbRebootLoader: (deviceId) => ipcRenderer.invoke('adb:rebootLoader', { deviceId }),
+  adbUnlock: (deviceId) => ipcRenderer.invoke('adb:unlock', { deviceId }),
   adbRoot: (deviceId) => ipcRenderer.invoke('adb:root', { deviceId }),
   adbRemount: (deviceId) => ipcRenderer.invoke('adb:remount', { deviceId }),
   adbConnect: (ipAddress) => ipcRenderer.invoke('adb:connect', ipAddress),

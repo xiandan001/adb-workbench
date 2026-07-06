@@ -1,8 +1,9 @@
 // ADB / scrcpy 操作 IPC handlers
 // 该模块管理 screenRecordProcs（只在内部使用），并提供 stopAllScreenRecords 供 before-quit 调用
 
-const { exec, spawn } = require('child_process');
+const { exec, execFile, spawn } = require('child_process');
 const { runCommand, checkCommandExists, findScrcpyPath } = require('./commands.cjs');
+const { findExecutable } = require('./android-tool-cleanup.cjs');
 
 // ScreenRecord: Android native screen recording via adb shell screenrecord
 const screenRecordProcs = new Map();
@@ -12,6 +13,8 @@ const screenRecordProcs = new Map();
 const shellProcs = new Map();
 // 交互式命令（su/sh/top 等）不会自然退出，设置兜底超时强制结束
 const SHELL_TIMEOUT_MS = 30000;
+const UNLOCK_ADB_REBOOT_TIMEOUT_MS = 15000;
+const UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS = 300000;
 
 // 应用退出时自动停止所有录屏进程
 async function stopAllScreenRecords() {
@@ -39,6 +42,27 @@ async function stopAllScreenRecords() {
 // 判断是否有正在进行的录屏（供 before-quit 决定是否 preventDefault）
 function hasActiveScreenRecords() {
   return screenRecordProcs.size > 0;
+}
+
+function runTool(command, args, timeoutMs) {
+  return new Promise((resolve) => {
+    execFile(command, args, { windowsHide: true, timeout: timeoutMs }, (error, stdout, stderr) => {
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+      resolve({
+        success: !error,
+        output,
+        error: error ? (output || error.message) : ''
+      });
+    });
+  });
+}
+
+function getAndroidToolCommand(executableName) {
+  return findExecutable(executableName) || executableName.replace(/\.exe$/i, '');
+}
+
+function hasFastbootFinished(output) {
+  return /\bFinished\./i.test(String(output || ''));
 }
 
 // 应用退出时清理所有未结束的终端 shell 进程
@@ -302,6 +326,40 @@ function register(ipcMain) {
         stdio: 'ignore'
       }).unref();
       return { success: true, message: '设备正在进入loader模式' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('adb:unlock', async (event, { deviceId }) => {
+    try {
+      const adbCommand = getAndroidToolCommand('adb.exe');
+      const fastbootCommand = getAndroidToolCommand('fastboot.exe');
+      const reboot = await runTool(adbCommand, ['-s', deviceId, 'reboot', 'bootloader'], UNLOCK_ADB_REBOOT_TIMEOUT_MS);
+      if (!reboot.success) {
+        return { success: false, error: `进入 bootloader 失败：${reboot.error}` };
+      }
+
+      const unlock = await runTool(fastbootCommand, ['flashing', 'unlock'], UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS);
+      if (!unlock.success) {
+        return { success: false, error: `Unlock 失败：${unlock.error}` };
+      }
+      if (!hasFastbootFinished(unlock.output)) {
+        return { success: false, error: `Unlock 未检测到 Finished 标识：${unlock.output || '无输出'}` };
+      }
+
+      const fastbootReboot = await runTool(fastbootCommand, ['reboot'], 30000);
+      if (!fastbootReboot.success) {
+        return { success: false, error: `Unlock 已执行，但重启失败：${fastbootReboot.error}` };
+      }
+      if (!hasFastbootFinished(fastbootReboot.output)) {
+        return { success: false, error: `Unlock 已执行，但重启未检测到 Finished 标识：${fastbootReboot.output || '无输出'}` };
+      }
+
+      return {
+        success: true,
+        message: 'Unlock 已完成，设备正在重启'
+      };
     } catch (error) {
       return { success: false, error: error.message };
     }
