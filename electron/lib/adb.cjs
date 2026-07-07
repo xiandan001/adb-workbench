@@ -2,6 +2,7 @@
 // 该模块管理 screenRecordProcs（只在内部使用），并提供 stopAllScreenRecords 供 before-quit 调用
 
 const { exec, execFile, spawn } = require('child_process');
+const path = require('path');
 const { runCommand, checkCommandExists, findScrcpyPath } = require('./commands.cjs');
 const { findExecutable } = require('./android-tool-cleanup.cjs');
 
@@ -15,6 +16,250 @@ const shellProcs = new Map();
 const SHELL_TIMEOUT_MS = 30000;
 const UNLOCK_ADB_REBOOT_TIMEOUT_MS = 15000;
 const UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS = 300000;
+const SCRCPY_STARTUP_WATCH_MS = 10000;
+const SCRCPY_READY_GRACE_MS = 800;
+const SCRCPY_AUDIO_PROBE_MS = 7000;
+const scrcpyAudioModeCache = new Map();
+
+function buildScrcpyArgs(deviceId, settings, extraArgs = []) {
+  const args = ['-s', deviceId, '--window-title', `Scrcpy - ${deviceId}`];
+
+  if (settings) {
+    if (settings.screenOff) {
+      args.push('--turn-screen-off');
+    }
+    if (settings.stayAwake) {
+      args.push('--stay-awake');
+    }
+    if (settings.bitrate && settings.bitrate !== '0') {
+      const bitrateValue = settings.bitrate.replace(' Mbps', 'M');
+      args.push('--video-bit-rate', bitrateValue);
+    }
+    if (settings.maxSize && settings.maxSize !== '0') {
+      args.push('--max-size', settings.maxSize);
+    }
+  }
+
+  return args.concat(extraArgs);
+}
+
+function isScrcpyAudioStartupError(output) {
+  return output.includes('Cannot create AudioRecord')
+    || output.includes("Demuxer 'audio': stream configuration error")
+    || (output.includes('Demuxer error') && output.toLowerCase().includes('audio'));
+}
+
+function isScrcpyVideoReady(output) {
+  return /INFO:\s+(?:Texture|New texture|Initial texture):/i.test(output);
+}
+
+function quoteWindowsCommandArg(value) {
+  const text = String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildScrcpySpawn(scrcpyPath, args) {
+  if (process.platform !== 'win32') {
+    return {
+      command: scrcpyPath,
+      args,
+      options: {
+        cwd: path.dirname(scrcpyPath),
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    };
+  }
+
+  const commandLine = ['call', quoteWindowsCommandArg(scrcpyPath), ...args.map(quoteWindowsCommandArg)].join(' ');
+  return {
+    command: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/c', commandLine],
+    options: {
+      cwd: path.dirname(scrcpyPath),
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  };
+}
+
+function stopScrcpyStartupProcess(proc) {
+  return new Promise((resolve) => {
+    if (!proc || !proc.pid || proc.killed) {
+      resolve();
+      return;
+    }
+
+    try {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+      } else {
+        proc.kill('SIGTERM');
+        resolve();
+      }
+    } catch (error) {
+      console.error('Failed to stop failed scrcpy process:', error);
+      resolve();
+    }
+  });
+}
+
+function probeScrcpyAudio(deviceId, scrcpyPath, args) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let output = '';
+    let timer = null;
+    const probeArgs = args
+      .filter(arg => arg !== '--no-audio')
+      .concat('--no-window', '--require-audio');
+    const scrcpySpawn = buildScrcpySpawn(scrcpyPath, probeArgs);
+    const proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options);
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      proc.stdout?.removeListener('data', handleOutput);
+      proc.stderr?.removeListener('data', handleOutput);
+      proc.removeListener('close', handleClose);
+      proc.removeListener('error', handleError);
+      stopScrcpyStartupProcess(proc).then(() => resolve(result));
+    };
+
+    const handleOutput = (data) => {
+      output += data.toString();
+      if (isScrcpyAudioStartupError(output)) {
+        console.warn(`[Scrcpy] Audio probe failed for ${deviceId}`);
+        finish(false);
+      }
+    };
+
+    const handleClose = () => {
+      finish(!isScrcpyAudioStartupError(output));
+    };
+
+    const handleError = (error) => {
+      console.warn(`[Scrcpy] Audio probe failed to start for ${deviceId}:`, error.message);
+      finish(true);
+    };
+
+    proc.stdout?.on('data', handleOutput);
+    proc.stderr?.on('data', handleOutput);
+    proc.on('close', handleClose);
+    proc.on('error', handleError);
+
+    timer = setTimeout(() => {
+      finish(true);
+    }, SCRCPY_AUDIO_PROBE_MS);
+  });
+}
+
+function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
+  const { retryWithoutAudio = true, retriedWithoutAudio = false } = options;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let output = '';
+    let startupTimer = null;
+    let readyTimer = null;
+
+    console.log(`Starting scrcpy with device: ${deviceId}, args: ${args.join(' ')}`);
+
+    const scrcpySpawn = buildScrcpySpawn(scrcpyPath, args);
+    const proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options);
+
+    const cleanup = () => {
+      clearTimeout(startupTimer);
+      clearTimeout(readyTimer);
+      proc.stdout?.removeListener('data', handleOutput);
+      proc.stderr?.removeListener('data', handleOutput);
+      proc.removeListener('error', handleError);
+      proc.removeListener('close', handleClose);
+      proc.stdout?.resume();
+      proc.stderr?.resume();
+      proc.stdout?.unref?.();
+      proc.stderr?.unref?.();
+      proc.unref?.();
+    };
+
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const retryNoAudio = () => {
+      console.warn(`[Scrcpy] Audio startup failed for ${deviceId}, retrying with --no-audio`);
+      scrcpyAudioModeCache.set(deviceId, 'no-audio');
+      const noAudioArgs = args.includes('--no-audio') ? args : args.concat('--no-audio');
+      stopScrcpyStartupProcess(proc)
+        .then(() => startScrcpyProcess(deviceId, scrcpyPath, noAudioArgs, {
+          retryWithoutAudio: false,
+          retriedWithoutAudio: true
+        }))
+        .then(resolve, reject);
+    };
+
+    const resolveStarted = () => {
+      settle(() => {
+        resolve({
+          success: true,
+          message: retriedWithoutAudio ? 'Scrcpy 已使用无音频模式启动' : 'Scrcpy 已启动'
+        });
+      });
+    };
+
+    const scheduleReadyResolve = () => {
+      if (readyTimer) return;
+      readyTimer = setTimeout(resolveStarted, SCRCPY_READY_GRACE_MS);
+    };
+
+    function handleOutput(data) {
+      output += data.toString();
+      if (retryWithoutAudio && isScrcpyAudioStartupError(output)) {
+        settle(retryNoAudio);
+        return;
+      }
+      if (isScrcpyVideoReady(output)) {
+        scheduleReadyResolve();
+      }
+    }
+
+    function handleError(error) {
+      settle(() => {
+        console.error('Scrcpy spawn error:', error);
+        reject(new Error(`Scrcpy 启动失败: ${error.message}`));
+      });
+    }
+
+    function handleClose(code, signal) {
+      if (settled) return;
+      if (retryWithoutAudio && isScrcpyAudioStartupError(output)) {
+        settle(retryNoAudio);
+        return;
+      }
+      if (code !== 0) {
+        const lastOutput = output.trim().split(/\r?\n/).slice(-3).join('；');
+        const suffix = lastOutput ? `，${lastOutput}` : '';
+        settle(() => reject(new Error(`Scrcpy 启动失败，退出码: ${code ?? signal ?? 'unknown'}${suffix}`)));
+      }
+    }
+
+    proc.stdout?.on('data', handleOutput);
+    proc.stderr?.on('data', handleOutput);
+    proc.on('error', handleError);
+    proc.on('close', handleClose);
+    proc.on('spawn', () => {
+      console.log('Scrcpy process spawned successfully');
+    });
+
+    startupTimer = setTimeout(() => {
+      resolveStarted();
+    }, SCRCPY_STARTUP_WATCH_MS);
+  });
+}
 
 // 应用退出时自动停止所有录屏进程
 async function stopAllScreenRecords() {
@@ -124,58 +369,37 @@ function register(ipcMain) {
   });
 
   ipcMain.handle('scrcpy:start', async (event, { deviceId, settings }) => {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const scrcpyPath = await findScrcpyPath();
-        if (!scrcpyPath) {
-          reject(new Error('Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH'));
-          return;
-        }
-
-        const args = ['-s', deviceId, '--window-title', `Scrcpy - ${deviceId}`];
-
-        if (settings) {
-          if (settings.screenOff) {
-            args.push('--turn-screen-off');
-          }
-          if (settings.stayAwake) {
-            args.push('--stay-awake');
-          }
-          if (settings.bitrate && settings.bitrate !== '0') {
-            const bitrateValue = settings.bitrate.replace(' Mbps', 'M');
-            args.push('--video-bit-rate', bitrateValue);
-          }
-          if (settings.maxSize && settings.maxSize !== '0') {
-            args.push('--max-size', settings.maxSize);
-          }
-        }
-
-        console.log(`Starting scrcpy with device: ${deviceId}, args: ${args.join(' ')}`);
-
-        const scrcpyProcess = spawn('scrcpy', args, {
-          detached: true,
-          stdio: 'ignore'
-        });
-
-        scrcpyProcess.on('error', (error) => {
-          console.error('Scrcpy spawn error:', error);
-          reject(new Error(`Scrcpy 启动失败: ${error.message}`));
-        });
-
-        scrcpyProcess.on('spawn', () => {
-          console.log('Scrcpy process spawned successfully');
-          resolve({ success: true, message: 'Scrcpy 已启动' });
-        });
-
-        setTimeout(() => {
-          resolve({ success: true, message: 'Scrcpy 已启动' });
-        }, 500);
-
-      } catch (error) {
-        console.error('Scrcpy error:', error);
-        reject(error);
+    try {
+      const scrcpyPath = await findScrcpyPath();
+      if (!scrcpyPath) {
+        throw new Error('Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH');
       }
-    });
+
+      const args = buildScrcpyArgs(deviceId, settings);
+      const audioMode = scrcpyAudioModeCache.get(deviceId);
+      if (audioMode === 'no-audio') {
+        return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
+          retryWithoutAudio: false,
+          retriedWithoutAudio: true
+        });
+      }
+
+      if (audioMode !== 'normal') {
+        const audioAvailable = await probeScrcpyAudio(deviceId, scrcpyPath, args);
+        scrcpyAudioModeCache.set(deviceId, audioAvailable ? 'normal' : 'no-audio');
+        if (!audioAvailable) {
+          return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
+            retryWithoutAudio: false,
+            retriedWithoutAudio: true
+          });
+        }
+      }
+
+      return await startScrcpyProcess(deviceId, scrcpyPath, args);
+    } catch (error) {
+      console.error('Scrcpy error:', error);
+      throw error;
+    }
   });
 
   // Basic device control handlers

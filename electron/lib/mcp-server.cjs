@@ -691,6 +691,13 @@ function startMcpHttpServer() {
 
 function initMcpServer() {
   const server = startMcpHttpServer();
+  server.on('error', (error) => {
+    if (error?.code === 'EADDRINUSE') {
+      console.warn(`[MCP] Server port ${mcpPort} is already in use, skip starting local MCP server.`);
+      return;
+    }
+    console.error('[MCP] Server failed:', error);
+  });
   server.listen(mcpPort, '127.0.0.1', () => {
     console.log(`[MCP] Server listening on http://127.0.0.1:${mcpPort}`);
     mcpServerInstance = server;

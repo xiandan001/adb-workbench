@@ -35,16 +35,17 @@ const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
   console.log('Another instance is already running. Quitting...');
-  app.quit();
+  app.exit(0);
 } else {
   // 当第二个实例尝试启动时，聚焦到第一个实例的窗口
   app.on('second-instance', (event, commandLine, workingDirectory) => {
     console.log('Second instance tried to launch');
     const mainWindow = ctx.getMainWindow();
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }
+      mainWindow.show();
       mainWindow.focus();
     }
   });
@@ -81,6 +82,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!gotTheLock) return;
+
   // 检测版本升级：必须在 createWindow() 之前执行。
   // 因为 createWindow() 会立即加载页面，渲染进程会马上调用 app:checkChangelog
   // 查询 pendingChangelog；如果此时还没设置标志位，弹窗就会丢失。

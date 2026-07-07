@@ -743,15 +743,18 @@ function App() {
   };
 
   const handleStartScrcpy = async (deviceId) => {
+    setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: true }));
     try {
       if (window.electronAPI) {
-        await window.electronAPI.startScrcpy(deviceId, scrcpySettings);
-        showToast(`开始投屏 ${deviceId}`);
+        const res = await window.electronAPI.startScrcpy(deviceId, scrcpySettings);
+        showToast(res?.message || `开始投屏 ${deviceId}`);
       } else {
         showToast(`开始投屏 ${deviceId}`);
       }
     } catch (err) {
       showToast(`启动失败: ${err.message}`);
+    } finally {
+      setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: false }));
     }
   };
 

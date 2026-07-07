@@ -256,6 +256,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
   const isLoading = (key) => operationLoading?.[key] || false;
 
   const t = theme || themes.default;
+  const scrcpyLoading = isLoading(`scrcpy_${device.id}`);
 
   return (
     <div className={`${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col`}>
@@ -315,11 +316,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           </button>
           <button
             onClick={onStart}
-            disabled={!isOnline}
-            className={`${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 rounded-lg font-medium flex items-center space-x-2 transition-colors`}
+            disabled={!isOnline || scrcpyLoading}
+            className={`${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors`}
           >
-            <Play size={18} />
-            <span>开始投屏</span>
+            {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
+            <span>{scrcpyLoading ? '启动中...' : '开始投屏'}</span>
           </button>
         </div>
       </div>

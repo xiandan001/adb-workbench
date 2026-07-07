@@ -2,6 +2,8 @@
 // 这三个工具被 ADB 模块和窗口/对话框等模块复用
 
 const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 // Run a shell command and return a Promise
 function runCommand(command) {
@@ -28,7 +30,18 @@ function checkCommandExists(command) {
 // Find scrcpy path
 function findScrcpyPath() {
   return new Promise((resolve) => {
-    exec('where scrcpy', (error, stdout) => {
+    const installedCandidates = [
+      process.resourcesPath ? path.join(process.resourcesPath, '..', 'scrcpy-win64', 'scrcpy.exe') : '',
+      process.execPath ? path.join(path.dirname(process.execPath), 'scrcpy-win64', 'scrcpy.exe') : ''
+    ].filter(Boolean);
+
+    const installedPath = installedCandidates.find(candidate => fs.existsSync(candidate));
+    if (installedPath) {
+      resolve(installedPath);
+      return;
+    }
+
+    exec('where scrcpy', { windowsHide: true }, (error, stdout) => {
       if (error) {
         resolve(null);
       } else {
