@@ -10,6 +10,8 @@ const performanceMonitor = require('./performance-monitor.cjs');
 const { getAppVersion } = require('./version.cjs');
 
 const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
+const SETTINGS_FILE = 'settings.json';
+const QUALITY_CENTER_DIR = 'quality-center';
 const BASELINE_DIR = 'regression-baselines';
 const REPORT_DIR = 'regression-reports';
 const COMMAND_TIMEOUT_MS = 20000;
@@ -375,16 +377,17 @@ function appendChangedPackageRows(lines, rows) {
 }
 
 async function listBaselines() {
-  const dir = getBaselineBaseDir();
-  if (!fs.existsSync(dir)) return [];
-  const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
   const rows = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-    const filePath = path.join(dir, entry.name);
-    const data = readJson(filePath);
-    if (!data?.snapshot) continue;
-    rows.push(toPublicBaseline(filePath, data));
+  for (const dir of getBaselineBaseDirs()) {
+    if (!fs.existsSync(dir)) continue;
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const filePath = path.join(dir, entry.name);
+      const data = readJson(filePath);
+      if (!data?.snapshot) continue;
+      rows.push(toPublicBaseline(filePath, data));
+    }
   }
   return rows
     .sort((a, b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0))
@@ -454,8 +457,8 @@ function normalizeBaselinePath(value) {
   const text = String(value || '').trim();
   if (!text) return '';
   const resolved = path.resolve(text);
-  const base = path.resolve(getBaselineBaseDir());
-  return resolved.startsWith(base) && fs.existsSync(resolved) ? resolved : '';
+  const allowed = getBaselineBaseDirs().map(item => path.resolve(item));
+  return allowed.some(base => resolved === base || resolved.startsWith(`${base}${path.sep}`)) && fs.existsSync(resolved) ? resolved : '';
 }
 
 function runAdb(args, timeoutMs = COMMAND_TIMEOUT_MS) {
@@ -469,11 +472,33 @@ function runAdb(args, timeoutMs = COMMAND_TIMEOUT_MS) {
 }
 
 function getBaselineBaseDir() {
-  return path.join(app.getPath('userData'), BASELINE_DIR);
+  return path.join(getQualityCenterBaseDir(), BASELINE_DIR);
 }
 
 function getReportBaseDir() {
-  return path.join(app.getPath('userData'), REPORT_DIR);
+  return path.join(getQualityCenterBaseDir(), REPORT_DIR);
+}
+
+function getBaselineBaseDirs() {
+  return uniquePaths([
+    getBaselineBaseDir(),
+    path.join(app.getPath('userData'), BASELINE_DIR)
+  ]);
+}
+
+function getQualityCenterBaseDir() {
+  return readQualityCenterPath() || path.join(app.getPath('userData'), QUALITY_CENTER_DIR);
+}
+
+function readQualityCenterPath() {
+  try {
+    const settingsFilePath = path.join(app.getPath('userData'), SETTINGS_FILE);
+    if (!fs.existsSync(settingsFilePath)) return '';
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    return String(settings.qualityCenterPath || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 function getAdbCommand() {
@@ -504,6 +529,10 @@ function sanitizeName(value) {
 function formatStamp(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function uniquePaths(values) {
+  return Array.from(new Set(values.map(item => String(item || '').trim()).filter(Boolean).map(item => path.resolve(item))));
 }
 
 function trim(value, max) {

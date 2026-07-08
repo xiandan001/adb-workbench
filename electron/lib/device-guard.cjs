@@ -10,6 +10,8 @@ const performanceMonitor = require('./performance-monitor.cjs');
 const { getAppVersion } = require('./version.cjs');
 
 const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
+const SETTINGS_FILE = 'settings.json';
+const QUALITY_CENTER_DIR = 'quality-center';
 const GUARD_DIR = 'device-guard';
 const DEFAULT_INTERVAL_MS = 15000;
 const COMMAND_TIMEOUT_MS = 12000;
@@ -153,7 +155,7 @@ async function stopGuard(guard, reason) {
 }
 
 async function writeGuardArtifacts(guard) {
-  const outputDir = path.join(app.getPath('userData'), GUARD_DIR, `guard-${formatStamp(new Date(guard.startedAt))}-${sanitizeName(guard.deviceId)}`);
+  const outputDir = path.join(getQualityCenterBaseDir(), GUARD_DIR, `guard-${formatStamp(new Date(guard.startedAt))}-${sanitizeName(guard.deviceId)}`);
   await fs.promises.mkdir(outputDir, { recursive: true });
   const summaryPath = path.join(outputDir, 'device-guard-result.json');
   const reportPath = path.join(outputDir, 'device-guard-report.md');
@@ -391,6 +393,21 @@ function getAdbCommand() {
     process.execPath ? path.join(path.dirname(process.execPath), 'scrcpy-win64', 'adb.exe') : ''
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate)) || 'adb';
+}
+
+function getQualityCenterBaseDir() {
+  return readQualityCenterPath() || path.join(app.getPath('userData'), QUALITY_CENTER_DIR);
+}
+
+function readQualityCenterPath() {
+  try {
+    const settingsFilePath = path.join(app.getPath('userData'), SETTINGS_FILE);
+    if (!fs.existsSync(settingsFilePath)) return '';
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    return String(settings.qualityCenterPath || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 function normalizeDeviceId(value) {

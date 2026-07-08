@@ -17,7 +17,7 @@ import {
   Trash2
 } from 'lucide-react';
 
-function QualityCenter({ devices, theme, showToast }) {
+function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast }) {
   const isDark = theme.primary === 'tech';
   const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
   const [deviceId, setDeviceId] = useState('');
@@ -94,6 +94,13 @@ function QualityCenter({ devices, theme, showToast }) {
       setError(res?.error || '基线列表加载失败');
     }
     setLoading(false);
+  }
+
+  async function refreshQualityCenter() {
+    await Promise.all([
+      loadBaselines(),
+      onRefreshDevices?.()
+    ]);
   }
 
   async function loadSuites() {
@@ -278,12 +285,12 @@ function QualityCenter({ devices, theme, showToast }) {
           <div className={`flex items-center gap-2 text-xs ${muted}`}>
             <span>{onlineDevices.length} 台在线设备</span>
             <button
-              onClick={loadBaselines}
-              disabled={loading}
+              onClick={refreshQualityCenter}
+              disabled={loading || deviceLoading}
               className={outlineButton(isDark)}
             >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              刷新基线
+              <RefreshCw size={14} className={loading || deviceLoading ? 'animate-spin' : ''} />
+              刷新基线/设备
             </button>
           </div>
         </div>

@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SETTINGS_FILE = 'settings.json';
+const QUALITY_CENTER_DIR = 'quality-center';
 const MAX_ITEMS = 160;
 
 function register(ipcMain) {
@@ -33,8 +34,16 @@ async function listArtifacts() {
   buckets.push(...await scanInspection(uniquePaths([settings.inspectionPath, path.join(userData, 'inspection')])));
   buckets.push(...await scanPerformance(uniquePaths([settings.performancePath, path.join(userData, 'performance-monitor')])));
   buckets.push(...await scanTaskCenter(uniquePaths([settings.taskCenterPath, path.join(userData, 'task-center-artifacts')])));
-  buckets.push(...await scanRegression(path.join(userData, 'regression-reports')));
-  buckets.push(...await scanDeviceGuard(path.join(userData, 'device-guard')));
+  buckets.push(...await scanRegression(uniquePaths([
+    settings.qualityCenterPath ? path.join(settings.qualityCenterPath, 'regression-reports') : '',
+    path.join(userData, QUALITY_CENTER_DIR, 'regression-reports'),
+    path.join(userData, 'regression-reports')
+  ])));
+  buckets.push(...await scanDeviceGuard(uniquePaths([
+    settings.qualityCenterPath ? path.join(settings.qualityCenterPath, 'device-guard') : '',
+    path.join(userData, QUALITY_CENTER_DIR, 'device-guard'),
+    path.join(userData, 'device-guard')
+  ])));
 
   return buckets
     .filter(Boolean)
@@ -154,9 +163,10 @@ async function scanTaskCenter(baseDirs) {
   }));
 }
 
-async function scanRegression(baseDir) {
-  const dirs = await recentDirectories(baseDir, 80);
-  return Promise.all(dirs.map(async (dir) => {
+async function scanRegression(baseDirs) {
+  const allDirs = [];
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
+  return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'regression-report.md');
     const resultPath = path.join(dir, 'regression-result.json');
     if (!exists(reportPath) && !exists(resultPath)) return null;
@@ -181,9 +191,10 @@ async function scanRegression(baseDir) {
   }));
 }
 
-async function scanDeviceGuard(baseDir) {
-  const dirs = await recentDirectories(baseDir, 80);
-  return Promise.all(dirs.map(async (dir) => {
+async function scanDeviceGuard(baseDirs) {
+  const allDirs = [];
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
+  return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'device-guard-report.md');
     const resultPath = path.join(dir, 'device-guard-result.json');
     if (!exists(reportPath) && !exists(resultPath)) return null;

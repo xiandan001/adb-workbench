@@ -1,25 +1,58 @@
 // src/components/MemberCenter.jsx
-// 会员中心：状态卡 + 开通支付向导 + 激活区 + 功能对比表
+// 会员中心：状态卡 + 开通支付向导 + 激活区 + 分组功能对比
 
 import { useState, useEffect } from 'react';
-// 同步会员中心功能对比表所需图标。
-import { Crown, Copy, Check, Lock, Sparkles, ShieldCheck, Brain, Server, Loader2, Smartphone, History, X, ChevronRight, Wallet, QrCode, Package, Activity, ClipboardCheck, ListChecks } from 'lucide-react';
+// 同步会员中心功能对比所需图标。
+import { Crown, Copy, Check, Lock, Brain, Loader2, Smartphone, History, X, ChevronRight, Wallet, QrCode, Package, ClipboardCheck } from 'lucide-react';
 // 会员激活记录增强面板
 import ActivationRecordsPanel from './ActivationRecordsPanel';
 
-// 同步当前版本已提供的会员权益与功能对比。
-const FEATURES = [
-  { icon: Smartphone, name: '同时管理设备数量', free: '1 台', vip: '不限' },
-  { icon: History, name: '连接历史记录', free: '5 条', vip: '不限' },
-  { icon: Package, name: 'App 包管理增强', free: '基础操作', vip: '完整管理' },
-  { icon: ListChecks, name: '日志诊断规则库', free: '内置规则', vip: '规则管理' },
-  { icon: Activity, name: '性能监控面板', free: '基础采样', vip: '阈值与导出' },
-  { icon: ClipboardCheck, name: '巡检报告与证据包', free: '不可用', vip: '可用' },
-  { icon: ShieldCheck, name: 'AI 自动诊断', free: '可用', vip: '可用' },
-  { icon: Sparkles, name: 'AI 深度分析', free: '不可用', vip: '可用' },
-  { icon: Brain, name: '自然语言搜索日志', free: '不可用', vip: '可用' },
-  { icon: Server, name: 'MCP 服务集成', free: '不可用', vip: '可用' },
-  { icon: History, name: '激活记录与复制历史', free: '可用', vip: '可用' }
+// 同步当前版本已提供的会员权益，并按使用场景分组展示。
+const FEATURE_GROUPS = [
+  {
+    title: '设备与历史',
+    icon: Smartphone,
+    items: [
+      { name: '同时管理设备数量', free: '1 台', vip: '不限' },
+      { name: '连接历史记录', free: '最近 5 条', vip: '不限' }
+    ]
+  },
+  {
+    title: 'App 包管理',
+    icon: Package,
+    items: [
+      { name: '安装、推送和文件浏览', free: '可用', vip: '可用' },
+      { name: '应用详情、权限和批量操作', free: '基础操作', vip: '完整管理' }
+    ]
+  },
+  {
+    title: '质量与自动化',
+    icon: ClipboardCheck,
+    items: [
+      { name: '回归基线与差异报告', free: '可用', vip: '可用' },
+      { name: '一键验收与任务中心', free: '基础执行', vip: '完整产物' },
+      { name: '设备巡检报告与证据包', free: '不可用', vip: '可用' },
+      { name: '性能监控面板', free: '基础采样', vip: '阈值与导出' }
+    ]
+  },
+  {
+    title: '日志与 AI',
+    icon: Brain,
+    items: [
+      { name: '日志诊断规则库', free: '内置规则', vip: '规则管理' },
+      { name: 'AI 自动诊断', free: '可用', vip: '可用' },
+      { name: 'AI 深度分析', free: '不可用', vip: '可用' },
+      { name: '自然语言搜索日志', free: '不可用', vip: '可用' },
+      { name: 'MCP 服务集成', free: '不可用', vip: '可用' }
+    ]
+  },
+  {
+    title: '会员记录',
+    icon: History,
+    items: [
+      { name: '激活记录与复制历史', free: '可用', vip: '可用' }
+    ]
+  }
 ];
 
 // 支付预留：套餐与支付方式数据结构（常量化，便于未来接入在线支付）
@@ -300,55 +333,48 @@ export default function MemberCenter({ theme, vipStatus, onActivated, showToast 
         recordData={activationRecordData}
       />
 
-      {/* 功能对比表 */}
+      {/* 功能对比 */}
       <div className={`p-6 rounded-xl border shadow-sm ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-        <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>功能对比</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}>
-                <th className="text-left font-medium pb-3">功能</th>
-                <th className="text-center font-medium pb-3 px-4">
-                  <div className="flex flex-col items-center gap-1">
-                    <Lock size={16} />
-                    <span>基础版</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>功能对比</h3>
+            <p className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>按常用场景整理基础版与会员版差异</p>
+          </div>
+          <div className={`hidden sm:grid grid-cols-2 w-72 text-xs font-medium ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+            <div className="flex items-center justify-center gap-1">
+              <Lock size={14} />
+              基础版
+            </div>
+            <div className="flex items-center justify-center gap-1 text-amber-500">
+              <Crown size={14} />
+              会员版
+            </div>
+          </div>
+        </div>
+
+        <div className={`divide-y ${isDark ? 'divide-[#3E4145]/70' : 'divide-slate-100'}`}>
+          {FEATURE_GROUPS.map((group) => {
+            const Icon = group.icon;
+            return (
+              <section key={group.title} className="py-4 first:pt-0 last:pb-0">
+                <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
+                  <div className="flex items-center gap-2">
+                    <Icon size={17} className="text-amber-500" />
+                    <span className={`text-sm font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{group.title}</span>
                   </div>
-                </th>
-                <th className="text-center font-medium pb-3 px-4">
-                  <div className="flex flex-col items-center gap-1 text-amber-500">
-                    <Crown size={16} />
-                    <span>会员版</span>
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {FEATURES.map((f, i) => {
-                const Icon = f.icon;
-                const freeOk = f.free === '可用';
-                return (
-                  <tr key={i} className={i < FEATURES.length - 1 ? (isDark ? 'border-b border-[#3E4145]/50' : 'border-b border-slate-100') : ''}>
-                    <td className="py-3">
-                      <div className="flex items-center gap-2.5">
-                        <Icon size={16} className={isDark ? 'text-[#80868B]' : 'text-slate-400'} />
-                        <span className={isDark ? 'text-[#E8EAED]' : 'text-slate-700'}>{f.name}</span>
+                  <div className="space-y-2">
+                    {group.items.map((item) => (
+                      <div key={item.name} className="grid gap-2 sm:grid-cols-[minmax(160px,1fr)_140px_140px] sm:items-center">
+                        <div className={`text-sm ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>{item.name}</div>
+                        <FeatureValue value={item.free} tone="free" isDark={isDark} />
+                        <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
                       </div>
-                    </td>
-                    <td className="text-center py-3">
-                      <span className={freeOk ? 'text-emerald-500 font-medium' : isDark ? 'text-[#80868B]' : 'text-slate-400'}>
-                        {freeOk ? <span className="inline-flex items-center gap-1"><Check size={14} />可用</span> : f.free}
-                      </span>
-                    </td>
-                    <td className="text-center py-3">
-                      <span className="text-amber-500 font-medium">
-                        {f.vip === '可用' ? <span className="inline-flex items-center gap-1"><Check size={14} />可用</span> : f.vip}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            );
+          })}
         </div>
       </div>
 
@@ -512,6 +538,33 @@ export default function MemberCenter({ theme, vipStatus, onActivated, showToast 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function FeatureValue({ value, tone, isDark }) {
+  const text = String(value || '-');
+  const isAvailable = text === '可用';
+  const isUnavailable = text === '不可用';
+  const color = tone === 'vip'
+    ? 'text-amber-500'
+    : isAvailable
+      ? 'text-emerald-500'
+      : isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
+
+  return (
+    <div className={`text-sm font-medium sm:text-center ${color}`}>
+      {isAvailable ? (
+        <span className="inline-flex items-center gap-1">
+          <Check size={14} />
+          可用
+        </span>
+      ) : isUnavailable ? (
+        <span className="inline-flex items-center gap-1">
+          <X size={14} />
+          不可用
+        </span>
+      ) : text}
     </div>
   );
 }

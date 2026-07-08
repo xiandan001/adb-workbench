@@ -2,6 +2,16 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.0.1': {
+    title: 'v4.0.1',
+    date: '2026-07-08',
+    items: [
+      { type: 'feature', text: '新增质量中心保存路径设置' },
+      { type: 'improve', text: '优化会员中心功能对比展示' },
+      { type: 'improve', text: '优化质量中心刷新体验' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '4.0.0': {
     title: 'v4.0.0',
     date: '2026-07-08',
