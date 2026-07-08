@@ -33,6 +33,8 @@ async function listArtifacts() {
   buckets.push(...await scanInspection(uniquePaths([settings.inspectionPath, path.join(userData, 'inspection')])));
   buckets.push(...await scanPerformance(uniquePaths([settings.performancePath, path.join(userData, 'performance-monitor')])));
   buckets.push(...await scanTaskCenter(uniquePaths([settings.taskCenterPath, path.join(userData, 'task-center-artifacts')])));
+  buckets.push(...await scanRegression(path.join(userData, 'regression-reports')));
+  buckets.push(...await scanDeviceGuard(path.join(userData, 'device-guard')));
 
   return buckets
     .filter(Boolean)
@@ -142,6 +144,59 @@ async function scanTaskCenter(baseDirs) {
       subtitle: result.status ? `状态：${result.status}` : '任务产物',
       status: result.status || 'done',
       deviceId: Array.isArray(result.devices) ? result.devices.map(item => item.deviceId).filter(Boolean).join(', ') : '',
+      createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
+      updatedAt: result.endedAt || stat?.mtime?.toISOString(),
+      rootPath: dir,
+      reportPath: exists(reportPath) ? reportPath : '',
+      summaryPath: exists(resultPath) ? resultPath : '',
+      artifactCount: countFilesShallow(dir)
+    };
+  }));
+}
+
+async function scanRegression(baseDir) {
+  const dirs = await recentDirectories(baseDir, 80);
+  return Promise.all(dirs.map(async (dir) => {
+    const reportPath = path.join(dir, 'regression-report.md');
+    const resultPath = path.join(dir, 'regression-result.json');
+    if (!exists(reportPath) && !exists(resultPath)) return null;
+    const result = readJson(resultPath) || {};
+    const diff = result.diff || {};
+    const stat = await safeStat(dir);
+    return {
+      id: `regression:${dir}`,
+      type: 'regression',
+      typeLabel: '回归差异',
+      title: result.name || '回归差异报告',
+      subtitle: diff.summary || (result.status ? `状态：${result.status}` : path.basename(dir)),
+      status: result.status || 'done',
+      deviceId: result.deviceId || '',
+      createdAt: result.comparedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
+      updatedAt: result.comparedAt || stat?.mtime?.toISOString(),
+      rootPath: dir,
+      reportPath: exists(reportPath) ? reportPath : '',
+      summaryPath: exists(resultPath) ? resultPath : '',
+      artifactCount: countFilesShallow(dir)
+    };
+  }));
+}
+
+async function scanDeviceGuard(baseDir) {
+  const dirs = await recentDirectories(baseDir, 80);
+  return Promise.all(dirs.map(async (dir) => {
+    const reportPath = path.join(dir, 'device-guard-report.md');
+    const resultPath = path.join(dir, 'device-guard-result.json');
+    if (!exists(reportPath) && !exists(resultPath)) return null;
+    const result = readJson(resultPath) || {};
+    const stat = await safeStat(dir);
+    return {
+      id: `deviceGuard:${dir}`,
+      type: 'deviceGuard',
+      typeLabel: '设备守护',
+      title: result.name || '设备守护报告',
+      subtitle: `事件 ${Array.isArray(result.events) ? result.events.length : 0} 项 / 采样 ${result.tickCount || 0} 次`,
+      status: result.status || 'done',
+      deviceId: result.deviceId || '',
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: result.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,

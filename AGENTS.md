@@ -1,4 +1,4 @@
-# 项目记忆 - scrcpy-gui
+# 项目记忆 - adb-workbench
 
 ## 更新日志（changelog）措辞规范
 
@@ -21,25 +21,25 @@
 ### 1. 构建安装包
 ```powershell
 # 先清理旧产物，避免 NSIS "Can't open output file" 错误
-Get-Process -Name "AdbDeviceManagement*" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name "卓控台*" -ErrorAction SilentlyContinue | Stop-Process -Force
 if (Test-Path release) { Remove-Item release -Recurse -Force }
 npm run electron:build
 ```
 
 ### 2. 上传 OTA 产物到 GitHub Release
 构建后在 `release/` 目录生成 3 个文件，**全部必须上传**，否则 OTA 自动更新不生效：
-- `AdbDeviceManagement Setup X.X.X.exe` — 安装包（约 114MB）
-- `AdbDeviceManagement Setup X.X.X.exe.blockmap` — 差分更新块映射（OTA 增量更新必需）
+- `adb-workbench-setup-X.X.X.exe` — 安装包（约 114MB）
+- `adb-workbench-setup-X.X.X.exe.blockmap` — 差分更新块映射（OTA 增量更新必需）
 - `latest.yml` — OTA 元数据（electron-updater 据此检查版本和下载路径）
 
 上传方式（PowerShell + GitHub API）：
 ```powershell
 $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/xiandan001/scrcpy-gui/releases/tags/vX.X.X" -Headers $headers
+$release = Invoke-RestMethod -Uri "https://api.github.com/repos/xiandan001/adb-workbench/releases/tags/vX.X.X" -Headers $headers
 $uploadUrl = $release.upload_url -replace '\{.*\}', ''
 
-# 上传文件名需规范化：Setup 前用连字符，去掉空格
-# AdbDeviceManagement Setup 3.0.0.exe → AdbDeviceManagement-Setup-3.0.0.exe
+# 上传文件名需与 electron-builder 产物保持一致
+# adb-workbench-setup-3.0.0.exe
 foreach ($f in $files) {
   $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $f.path))
   Invoke-RestMethod -Uri "$uploadUrl`?name=$($f.name)" -Method POST -Headers @{
@@ -50,8 +50,8 @@ foreach ($f in $files) {
 
 ### 3. Release 产物命名规范
 上传时文件名必须用连字符格式（参考历史版本 v2.0.13、v2.1.0）：
-- `AdbDeviceManagement-Setup-3.0.0.exe`
-- `AdbDeviceManagement-Setup-3.0.0.exe.blockmap`
+- `adb-workbench-setup-3.0.0.exe`
+- `adb-workbench-setup-3.0.0.exe.blockmap`
 - `latest.yml`
 
 ### 4. Git 操作

@@ -143,25 +143,7 @@ function register(ipcMain) {
   });
 
   ipcMain.handle('task-center:run', async (event, args) => {
-    try {
-      const devices = normalizeDeviceIds(args?.deviceIds);
-      if (devices.length === 0) return { ok: false, error: '请至少选择一台在线设备' };
-      const script = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(args?.script);
-      if (!script) return { ok: false, error: 'script_not_found' };
-      const task = createTask(script, devices, event.sender, args || {});
-      activeTasks.set(task.id, task);
-      broadcastState();
-      const started = startWorkerTask(task);
-      if (!started.ok) {
-        task.status = 'failed';
-        task.error = started.error || '任务 Worker 启动失败';
-        task.endedAt = new Date().toISOString();
-        await finishWorkerTask(publicTask(task));
-      }
-      return { ok: true, task: publicTask(task) };
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
+    return runInlineScript(args?.script, args?.deviceIds, event.sender, args || {});
   });
 
   ipcMain.handle('task-center:cancel', async (event, args) => {
@@ -194,6 +176,28 @@ function register(ipcMain) {
       history: readHistory()
     };
   });
+}
+
+async function runInlineScript(script, deviceIds, sender, args = {}) {
+  try {
+    const devices = normalizeDeviceIds(deviceIds);
+    if (devices.length === 0) return { ok: false, error: '请至少选择一台在线设备' };
+    const nextScript = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(script);
+    if (!nextScript) return { ok: false, error: 'script_not_found' };
+    const task = createTask(nextScript, devices, sender, args || {});
+    activeTasks.set(task.id, task);
+    broadcastState();
+    const started = startWorkerTask(task);
+    if (!started.ok) {
+      task.status = 'failed';
+      task.error = started.error || '任务 Worker 启动失败';
+      task.endedAt = new Date().toISOString();
+      await finishWorkerTask(publicTask(task));
+    }
+    return { ok: true, task: publicTask(task) };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 }
 
 function startWorkerTask(task) {
@@ -2460,4 +2464,4 @@ function cleanup() {
   }
 }
 
-module.exports = { register, cleanup };
+module.exports = { register, cleanup, runInlineScript };

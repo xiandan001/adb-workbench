@@ -1,4 +1,4 @@
-# AdbDeviceManagement
+# 卓控台
 
 > 基于 Electron + React 19 + TailwindCSS 构建的跨平台 Android 设备全生命周期管理桌面应用，底层封装 `adb` 与 `scrcpy`，并集成 AI 智能日志分析与 MCP（Model Context Protocol）服务。
 
@@ -55,7 +55,7 @@
 ## 安装与运行
 
 ### 方式一：下载安装包（推荐普通用户）
-从 [GitHub Releases](https://github.com/xiandan001/scrcpy-gui/releases) 下载最新版安装包，双击安装即可使用。
+从 [GitHub Releases](https://github.com/xiandan001/adb-workbench/releases) 下载最新版安装包，双击安装即可使用。
 
 ### 方式二：源码运行（推荐开发者）
 ```bash
@@ -89,7 +89,7 @@ npm run electron:build
 ## 项目结构
 
 ```
-scrcpy-gui/
+adb-workbench/
 ├── electron/                # Electron 主进程
 │   ├── main.cjs             # 主进程入口（IPC、自动更新、MCP 服务）
 │   └── preload.cjs          # 预加载脚本（IPC 桥接）

@@ -421,7 +421,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             />
             报告包含 AI 分析
           </label>
-          <div className="min-w-0 flex-1 truncate">保存目录：{performancePath || '默认 %APPDATA%/scrcpy-gui/performance-monitor/'}</div>
+          <div className="min-w-0 flex-1 truncate">保存目录：{performancePath || '默认 %APPDATA%/adb-workbench/performance-monitor/'}</div>
         </div>
       </div>
 

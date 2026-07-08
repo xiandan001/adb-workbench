@@ -3,6 +3,7 @@ export const COMMAND_ACTIONS = [
   { value: 'environmentCheck', label: '打开环境自检弹窗' },
   { value: 'tab:troubleshoot', label: '打开问题排查' },
   { value: 'tab:artifacts', label: '打开产物中心' },
+  { value: 'tab:quality', label: '打开质量中心' },
   { value: 'tab:history', label: '打开连接历史' },
   { value: 'tab:tasks', label: '打开任务中心' },
   { value: 'tab:performance', label: '打开性能监控' },

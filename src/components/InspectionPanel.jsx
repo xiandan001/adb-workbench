@@ -129,7 +129,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
   };
 
   const progressPercent = progress?.total ? Math.round((progress.index / progress.total) * 100) : 0;
-  const defaultInspectionPath = '默认: %APPDATA%/scrcpy-gui/inspection/';
+  const defaultInspectionPath = '默认: %APPDATA%/adb-workbench/inspection/';
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4" onClick={closePanel}>

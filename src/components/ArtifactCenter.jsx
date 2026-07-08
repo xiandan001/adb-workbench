@@ -3,12 +3,14 @@ import {
   Activity,
   AlertCircle,
   ClipboardCheck,
+  FileDiff,
   FileJson,
   FileText,
   FolderOpen,
   Loader2,
   RefreshCw,
   Search,
+  ShieldCheck,
   Wrench
 } from 'lucide-react';
 
@@ -16,6 +18,8 @@ const TYPE_FILTERS = [
   { id: 'all', label: '全部' },
   { id: 'troubleshooting', label: '问题排查' },
   { id: 'inspection', label: '设备巡检' },
+  { id: 'regression', label: '回归差异' },
+  { id: 'deviceGuard', label: '设备守护' },
   { id: 'performance', label: '性能报告' },
   { id: 'task', label: '任务中心' }
 ];
@@ -23,6 +27,8 @@ const TYPE_FILTERS = [
 const TYPE_META = {
   troubleshooting: { icon: Wrench, color: 'text-emerald-400', bg: 'bg-emerald-500/15' },
   inspection: { icon: ClipboardCheck, color: 'text-cyan-400', bg: 'bg-cyan-500/15' },
+  regression: { icon: FileDiff, color: 'text-blue-400', bg: 'bg-blue-500/15' },
+  deviceGuard: { icon: ShieldCheck, color: 'text-teal-400', bg: 'bg-teal-500/15' },
   performance: { icon: Activity, color: 'text-purple-400', bg: 'bg-purple-500/15' },
   task: { icon: FileJson, color: 'text-amber-400', bg: 'bg-amber-500/15' }
 };
@@ -137,10 +143,12 @@ function ArtifactCenter({ theme, showToast }) {
             </div>
           </div>
 
-          <div className="grid sm:grid-cols-4 gap-3">
+          <div className="grid sm:grid-cols-6 gap-3">
             <Stat label="全部产物" value={items.length} isDark={isDark} />
             <Stat label="问题排查" value={items.filter(item => item.type === 'troubleshooting').length} isDark={isDark} />
             <Stat label="巡检报告" value={items.filter(item => item.type === 'inspection').length} isDark={isDark} />
+            <Stat label="回归差异" value={items.filter(item => item.type === 'regression').length} isDark={isDark} />
+            <Stat label="设备守护" value={items.filter(item => item.type === 'deviceGuard').length} isDark={isDark} />
             <Stat label="任务/性能" value={items.filter(item => item.type === 'task' || item.type === 'performance').length} isDark={isDark} />
           </div>
 

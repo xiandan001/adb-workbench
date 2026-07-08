@@ -2,6 +2,16 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.0.0': {
+    title: 'v4.0.0',
+    date: '2026-07-08',
+    items: [
+      { type: 'feature', text: '新增质量中心：支持回归差异报告、一键验收套餐和设备守护' },
+      { type: 'improve', text: '连接历史入口调整到设备列表，并支持从历史页返回设备列表' },
+      { type: 'improve', text: '应用更名为“卓控台”，安装包和更新包更名为 adb-workbench' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '3.8.7': {
     title: 'v3.8.7',
     date: '2026-07-07',

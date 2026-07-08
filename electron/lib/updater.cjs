@@ -14,7 +14,7 @@ const UPDATER_MAX_RETRIES = 2;
 const UPDATER_RETRY_DELAYS_MS = [2000, 5000];
 const UPDATER_MAX_ATTEMPTS = UPDATER_MAX_RETRIES + 1;
 const UPDATER_REQUEST_HEADERS = {
-  'User-Agent': `AdbDeviceManagement/${getAppVersion()} (${process.platform}; ${process.arch})`,
+  'User-Agent': `adb-workbench/${getAppVersion()} (${process.platform}; ${process.arch})`,
   'Cache-Control': 'no-cache',
   Pragma: 'no-cache'
 };

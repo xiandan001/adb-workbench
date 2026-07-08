@@ -292,6 +292,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 报告/产物中心
   artifactsList: () => ipcRenderer.invoke('artifacts:list'),
   artifactOpenPath: (targetPath) => ipcRenderer.invoke('artifacts:openPath', targetPath),
+  // Quality center: regression baselines and difference reports
+  regressionListBaselines: () => ipcRenderer.invoke('regression:listBaselines'),
+  regressionCaptureBaseline: (args) => ipcRenderer.invoke('regression:captureBaseline', args),
+  regressionDeleteBaseline: (args) => ipcRenderer.invoke('regression:deleteBaseline', args),
+  regressionRun: (args) => ipcRenderer.invoke('regression:run', args),
+  acceptanceListSuites: () => ipcRenderer.invoke('acceptance:listSuites'),
+  acceptanceRun: (args) => ipcRenderer.invoke('acceptance:run', args),
+  deviceGuardStart: (args) => ipcRenderer.invoke('device-guard:start', args),
+  deviceGuardStop: (args) => ipcRenderer.invoke('device-guard:stop', args),
+  deviceGuardState: () => ipcRenderer.invoke('device-guard:state'),
+  onDeviceGuardUpdate: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('device-guard:update', listener);
+    return () => ipcRenderer.off('device-guard:update', listener);
+  },
   // 设备连接与环境自检
   envCheckRun: (args) => ipcRenderer.invoke('env-check:run', args),
   envCheckRestartAdb: () => ipcRenderer.invoke('env-check:restartAdb')

@@ -1,6 +1,7 @@
 {
   "appId": "com.scrcpy.gui",
-  "productName": "AdbDeviceManagement",
+  "productName": "卓控台",
+  "artifactName": "adb-workbench-setup-${version}.${ext}",
   "directories": {
     "buildResources": "build",
     "output": "release"
@@ -54,7 +55,7 @@
   "publish": {
     "provider": "github",
     "owner": "xiandan001",
-    "repo": "scrcpy-gui",
+    "repo": "adb-workbench",
     "releaseType": "release"
   }
 }

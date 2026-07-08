@@ -3,6 +3,9 @@
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+configureUserDataPath();
 
 const ctx = require('./lib/app-context.cjs');
 const { isDev } = ctx;
@@ -28,7 +31,34 @@ const performanceMonitor = require('./lib/performance-monitor.cjs');
 const taskCenter = require('./lib/task-center.cjs');
 const artifactCenter = require('./lib/artifact-center.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
+const regressionReport = require('./lib/regression-report.cjs');
+const acceptanceSuite = require('./lib/acceptance-suite.cjs');
+const deviceGuard = require('./lib/device-guard.cjs');
 const { cleanupAndroidToolProcesses } = require('./lib/android-tool-cleanup.cjs');
+
+function configureUserDataPath() {
+  const appDataDir = app.getPath('appData');
+  const targetDir = path.join(appDataDir, 'adb-workbench');
+  const legacyDirs = [
+    path.join(appDataDir, 'AdbDeviceManagement'),
+    path.join(appDataDir, 'ADB-device-management'),
+    path.join(appDataDir, 'scrcpy-gui'),
+    path.join(appDataDir, '卓控台')
+  ];
+
+  if (!fs.existsSync(targetDir)) {
+    const sourceDir = legacyDirs.find(dir => fs.existsSync(dir) && dir !== targetDir);
+    if (sourceDir) {
+      try {
+        fs.cpSync(sourceDir, targetDir, { recursive: true, force: false, errorOnExist: false });
+      } catch (error) {
+        console.warn('[App] userData migration failed:', error);
+      }
+    }
+  }
+
+  app.setPath('userData', targetDir);
+}
 
 // 单实例锁定 - 确保只有一个应用实例在运行
 const gotTheLock = app.requestSingleInstanceLock();
@@ -112,6 +142,9 @@ app.whenReady().then(() => {
   taskCenter.register(ipcMain);
   artifactCenter.register(ipcMain);
   environmentCheck.register(ipcMain);
+  regressionReport.register(ipcMain);
+  acceptanceSuite.register(ipcMain);
+  deviceGuard.register(ipcMain);
 
   vip.preload();
 
@@ -141,6 +174,7 @@ function cleanupRuntimeResources() {
   performanceMonitor.cleanup();
   // 取消任务中心仍在执行的复现脚本，避免退出后残留 ADB 子进程。
   taskCenter.cleanup();
+  deviceGuard.cleanup();
   // 终止终端中未结束的 shell 命令（如挂起的 su）
   adb.stopAllShellProcs();
 }

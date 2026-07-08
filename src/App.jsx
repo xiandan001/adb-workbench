@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -10,6 +10,7 @@ import PerformanceDashboard from './components/PerformanceDashboard';
 import TaskCenter from './components/TaskCenter';
 import TroubleshootingWizard from './components/TroubleshootingWizard';
 import ArtifactCenter from './components/ArtifactCenter';
+import QualityCenter from './components/QualityCenter';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import DangerConfirmModal from './components/DangerConfirmModal';
@@ -317,6 +318,7 @@ function App() {
       { id: 'cmd-environment', title: '环境自检', description: '检查 ADB、scrcpy 和设备授权', action: 'environmentCheck', group: '工具' },
       { id: 'cmd-troubleshoot', title: '问题排查', description: '按问题场景自动采集证据', action: 'tab:troubleshoot', group: '导航' },
       { id: 'cmd-artifacts', title: '产物中心', description: '查看报告、数据和证据目录', action: 'tab:artifacts', group: '导航' },
+      { id: 'cmd-quality', title: '质量中心', description: '生成回归差异报告和验收证据', action: 'tab:quality', group: '导航' },
       { id: 'cmd-history', title: '连接历史', description: '查看无线连接历史', action: 'tab:history', group: '导航' },
       { id: 'cmd-tasks', title: '任务中心', description: '运行复现脚本和自动化压测', action: 'tab:tasks', group: '导航' },
       { id: 'cmd-performance', title: '性能监控', description: '查看设备资源与进程状态', action: 'tab:performance', group: '导航' },
@@ -1431,7 +1433,7 @@ function App() {
       <div className={`w-72 flex flex-col pt-8 bg-[#202124] text-[#E8EAED]`}>
         <div className={`px-6 mb-8 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
-          <h1 className="text-xl font-bold tracking-wide">ADB Device Management</h1>
+          <h1 className="text-xl font-bold tracking-wide">卓控台</h1>
         </div>
 
         <nav className="flex-1 px-4 space-y-2">
@@ -1460,12 +1462,12 @@ function App() {
             <span className="font-medium">产物中心</span>
           </button>
           <button
-            onClick={() => setActiveTab('history')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'history' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
+            onClick={() => setActiveTab('quality')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'quality' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
-            <History size={20} />
-            <span className="font-medium">连接历史</span>
+            <ShieldCheck size={20} />
+            <span className="font-medium">质量中心</span>
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
@@ -1550,10 +1552,10 @@ function App() {
           <div>
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-2xl font-bold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? '已连接设备' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
+              {activeTab === 'devices' ? '已连接设备' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
             <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
-              {activeTab === 'devices' ? '管理并投屏您的 Android 设备' : activeTab === 'troubleshoot' ? '按问题场景自动采集诊断证据' : activeTab === 'artifacts' ? '集中查看报告、数据和证据目录' : activeTab === 'history' ? '查看无线连接历史记录' : activeTab === 'tasks' ? '编排复现脚本并批量运行到多台设备' : activeTab === 'performance' ? '观察设备资源与进程状态' : activeTab === 'member' ? '管理您的会员权益与激活' : '配置 Scrcpy 及 ADB 相关偏好'}
+              {activeTab === 'devices' ? '管理并投屏您的 Android 设备' : activeTab === 'troubleshoot' ? '按问题场景自动采集诊断证据' : activeTab === 'artifacts' ? '集中查看报告、数据和证据目录' : activeTab === 'quality' ? '生成回归差异报告、验收证据和设备守护记录' : activeTab === 'history' ? '查看无线连接历史记录' : activeTab === 'tasks' ? '编排复现脚本并批量运行到多台设备' : activeTab === 'performance' ? '观察设备资源与进程状态' : activeTab === 'member' ? '管理您的会员权益与激活' : '配置 Scrcpy 及 ADB 相关偏好'}
             </p>
           </div>
 
@@ -1591,11 +1593,25 @@ function App() {
             <>
               {/* Wi-Fi Connect Section */}
               <div className={`mb-8 p-5 rounded-xl border shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-                <div>
-                  <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                    <Wifi size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
-                    Wi-Fi 无线连接
-                  </h3>
+                <div className="w-full sm:w-auto">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                      <Wifi size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
+                      Wi-Fi 无线连接
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('history')}
+                      title="查看无线连接历史"
+                      className={`inline-flex w-fit items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                    >
+                      <History size={16} />
+                      <span>连接历史</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-500'}`}>
+                        {connectionHistory.length}
+                      </span>
+                    </button>
+                  </div>
                   <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>输入设备的 IP 地址和端口 (例如: 192.168.1.100:5555)</p>
                 </div>
                 <form onSubmit={handleWifiConnect} className="flex w-full sm:w-auto gap-2">
@@ -1722,18 +1738,36 @@ function App() {
             />
           )}
 
+          {activeTab === 'quality' && (
+            <QualityCenter
+              devices={devices}
+              theme={theme}
+              showToast={showToast}
+            />
+          )}
+
           {activeTab === 'history' && (
             <div className="space-y-6">
               {/* 连接历史记录页面 */}
               <div className={`p-6 rounded-xl border shadow-sm ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                    <History size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
-                    连接历史
-                    <span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
-                      {connectionHistory.length} 条
-                    </span>
-                  </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('devices')}
+                      className={`inline-flex w-fit items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                    >
+                      <ArrowLeft size={16} />
+                      返回设备列表
+                    </button>
+                    <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                      <History size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
+                      连接历史
+                      <span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
+                        {connectionHistory.length} 条
+                      </span>
+                    </h3>
+                  </div>
                   {connectionHistory.length > 0 && (
                     <button
                       onClick={() => {
@@ -1965,7 +1999,7 @@ function App() {
                       type="text"
                       value={screenshotPath}
                       onChange={(e) => setScreenshotPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/scrcpy-gui/screenshot/"
+                      placeholder="默认: %APPDATA%/adb-workbench/screenshot/"
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2002,7 +2036,7 @@ function App() {
                     </button>
                   </div>
                   <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    截图将保存到此目录，默认为 %APPDATA%/scrcpy-gui/screenshot/
+                    截图将保存到此目录，默认为 %APPDATA%/adb-workbench/screenshot/
                   </p>
                 </div>
 
@@ -2017,7 +2051,7 @@ function App() {
                       type="text"
                       value={screenRecordPath}
                       onChange={(e) => setScreenRecordPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/scrcpy-gui/screenrecord/"
+                      placeholder="默认: %APPDATA%/adb-workbench/screenrecord/"
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2054,7 +2088,7 @@ function App() {
                     </button>
                   </div>
                   <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    录屏文件将保存到此目录，默认为 %APPDATA%/scrcpy-gui/screenrecord/
+                    录屏文件将保存到此目录，默认为 %APPDATA%/adb-workbench/screenrecord/
                   </p>
                 </div>
 
@@ -2069,7 +2103,7 @@ function App() {
                       type="text"
                       value={inspectionPath}
                       onChange={(e) => setInspectionPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/scrcpy-gui/inspection/"
+                      placeholder="默认: %APPDATA%/adb-workbench/inspection/"
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2106,7 +2140,7 @@ function App() {
                     </button>
                   </div>
                   <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    巡检报告和证据包将保存到此目录，默认为 %APPDATA%/scrcpy-gui/inspection/
+                    巡检报告和证据包将保存到此目录，默认为 %APPDATA%/adb-workbench/inspection/
                   </p>
                 </div>
 
@@ -2121,7 +2155,7 @@ function App() {
                       type="text"
                       value={performancePath}
                       onChange={(e) => setPerformancePath(e.target.value)}
-                      placeholder="默认: %APPDATA%/scrcpy-gui/performance-monitor/"
+                      placeholder="默认: %APPDATA%/adb-workbench/performance-monitor/"
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2159,7 +2193,7 @@ function App() {
                     </button>
                   </div>
                   <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    性能数据和分析报告将保存到此目录，默认为 %APPDATA%/scrcpy-gui/performance-monitor/
+                    性能数据和分析报告将保存到此目录，默认为 %APPDATA%/adb-workbench/performance-monitor/
                   </p>
                 </div>
 
@@ -2174,7 +2208,7 @@ function App() {
                       type="text"
                       value={taskCenterPath}
                       onChange={(e) => setTaskCenterPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/scrcpy-gui/task-center-artifacts/"
+                      placeholder="默认: %APPDATA%/adb-workbench/task-center-artifacts/"
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
