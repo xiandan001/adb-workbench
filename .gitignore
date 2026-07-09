@@ -28,6 +28,7 @@ docs/*
 
 # 忽略本地设计规格文档目录，避免 specs 和 superpowers/specs 上传到仓库。
 specs/
+/specs/
 **/specs/
 docs/superpowers/specs/
 superpowers/specs/
