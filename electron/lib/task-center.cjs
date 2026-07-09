@@ -13,8 +13,8 @@ const vip = require('./vip.cjs');
 const inspection = require('./inspection.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
+const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 const SCRIPTS_FILE = 'task-center-scripts.json';
 const HISTORY_FILE = 'task-center-history.json';
 const SETTINGS_FILE = 'settings.json';
@@ -1492,37 +1492,59 @@ function bufferToText(buffer) {
   return Buffer.isBuffer(buffer) ? buffer.toString('utf8').trim() : String(buffer || '').trim();
 }
 
-function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  return runProcess(task, getAdbCommand(), args, timeoutMs);
+async function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (task.cancelled) return { ok: false, error: '用户取消', output: '' };
+  let currentProc = null;
+  const res = await runRuntimeAdb(args, {
+    timeoutMs,
+    isCancelled: () => task.cancelled,
+    onProcess: (proc) => {
+      currentProc = proc;
+      task.currentProc = proc;
+    }
+  });
+  if (task.currentProc === currentProc) task.currentProc = null;
+  const stdout = res.stdout || '';
+  const stderr = res.stderr || '';
+  if (!res.ok) {
+    return {
+      ok: false,
+      stdout,
+      stderr,
+      output: trimOutput(`${stdout}${stderr}`),
+      error: task.cancelled ? '用户取消' : (res.error || stderr || 'ADB command failed')
+    };
+  }
+  return { ok: true, stdout, stderr, output: trimOutput(stdout || stderr || '') };
 }
 
-function runAdbBuffer(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    if (task.cancelled) {
-      resolve({ ok: false, error: '用户取消', stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
-      return;
+async function runAdbBuffer(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (task.cancelled) {
+    return { ok: false, error: '用户取消', stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  }
+  let currentProc = null;
+  const res = await runRuntimeAdb(args, {
+    timeoutMs,
+    maxBuffer: MAX_SCREENSHOT_BYTES,
+    encoding: 'buffer',
+    isCancelled: () => task.cancelled,
+    onProcess: (proc) => {
+      currentProc = proc;
+      task.currentProc = proc;
     }
-    const proc = execFile(getAdbCommand(), args, {
-      windowsHide: true,
-      timeout: timeoutMs,
-      maxBuffer: MAX_SCREENSHOT_BYTES,
-      encoding: 'buffer'
-    }, (error, stdout, stderr) => {
-      if (task.currentProc === proc) task.currentProc = null;
-      if (error) {
-        resolve({
-          ok: false,
-          stdout: stdout || Buffer.alloc(0),
-          stderr: stderr || Buffer.alloc(0),
-          error: bufferToText(stderr) || error.message
-        });
-      } else {
-        resolve({ ok: true, stdout: stdout || Buffer.alloc(0), stderr: stderr || Buffer.alloc(0) });
-      }
-    });
-    task.currentProc = proc;
-    proc.stdin?.end?.();
   });
+  if (task.currentProc === currentProc) task.currentProc = null;
+  const stdout = res.stdout || Buffer.alloc(0);
+  const stderr = res.stderr || Buffer.alloc(0);
+  if (!res.ok) {
+    return {
+      ok: false,
+      stdout,
+      stderr,
+      error: task.cancelled ? '用户取消' : (bufferToText(stderr) || res.error || 'ADB command failed')
+    };
+  }
+  return { ok: true, stdout, stderr };
 }
 
 function runProcess(task, command, args, timeoutMs, cwd = undefined) {
@@ -2322,10 +2344,6 @@ function readTaskCenterPath() {
 
 function getDataPath(fileName) {
   return path.join(app.getPath('userData'), fileName);
-}
-
-function getAdbCommand() {
-  return fs.existsSync(BUNDLED_ADB_PATH) ? BUNDLED_ADB_PATH : 'adb';
 }
 
 function killCurrentProcess(task) {

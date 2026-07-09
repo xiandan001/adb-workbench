@@ -352,76 +352,83 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   return (
     <div className="space-y-6">
-      <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
-        <div className="flex flex-col xl:flex-row xl:items-center gap-4">
-          <div className="flex-1 min-w-0">
-            <h3 className={`text-lg font-semibold flex items-center gap-2 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              <Gauge size={20} className="text-emerald-500" />
-              性能监控
-            </h3>
-            <div className={`text-sm mt-1 ${muted}`}>{selectedDevice?.name || selectedDevice?.id || '未选择设备'}</div>
+      <div className={`p-4 lg:p-5 rounded-xl border shadow-sm ${panelClass}`}>
+        <div className="space-y-4">
+          <div className="flex flex-col 2xl:flex-row 2xl:items-center gap-4">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+                <Gauge size={20} />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>性能监控</h3>
+                <div className={`text-sm mt-1 truncate ${muted}`}>{selectedDevice?.name || selectedDevice?.id || '未选择设备'}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(220px,1fr)_140px_auto] gap-2 w-full 2xl:w-auto 2xl:min-w-[620px]">
+              <CustomSelect
+                value={selectedDeviceId}
+                options={deviceOptions}
+                onChange={switchDevice}
+                isDark={isDark}
+                className="w-full"
+              />
+              <CustomSelect
+                value={intervalMs}
+                options={intervalOptions}
+                onChange={(value) => {
+                  if (value < 5000 && !isVip) {
+                    requireVip('高频采样');
+                    return;
+                  }
+                  setIntervalMs(value);
+                }}
+                isDark={isDark}
+                className="w-full"
+              />
+              {running ? (
+                <button onClick={stopMonitor} disabled={loading} className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
+                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Square size={16} />}
+                  停止
+                </button>
+              ) : (
+                <button onClick={startMonitor} disabled={!selectedDeviceId || loading} className="px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
+                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                  开始
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <CustomSelect
-              value={selectedDeviceId}
-              options={deviceOptions}
-              onChange={switchDevice}
-              isDark={isDark}
-              className="w-72 max-w-full"
-            />
-            <CustomSelect
-              value={intervalMs}
-              options={intervalOptions}
-              onChange={(value) => {
-                if (value < 5000 && !isVip) {
-                  requireVip('高频采样');
-                  return;
-                }
-                setIntervalMs(value);
-              }}
-              isDark={isDark}
-              className="w-36"
-            />
-            {running ? (
-              <button onClick={stopMonitor} disabled={loading} className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
-                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Square size={16} />}
-                停止
+
+          <div className={`rounded-lg border p-3 flex flex-col xl:flex-row xl:items-center gap-3 ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
+            <label className={`inline-flex items-center gap-2 w-fit rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'} ${muted}`}>
+              <input
+                type="checkbox"
+                checked={includeAiSummary}
+                onChange={(e) => setIncludeAiSummary(e.target.checked)}
+                className="h-4 w-4 accent-emerald-500"
+              />
+              报告包含 AI 分析
+            </label>
+            <div className={`min-w-0 flex-1 truncate text-xs ${muted}`}>保存目录：{performancePath || '默认 %APPDATA%/adb-workbench/performance-monitor/'}</div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={takeSnapshot} disabled={!selectedDeviceId || loading} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                采样
               </button>
-            ) : (
-              <button onClick={startMonitor} disabled={!selectedDeviceId || loading} className="px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center gap-2">
-                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
-                开始
+              <button onClick={exportHistory} disabled={!selectedDeviceId || history.length === 0} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
+                {isVip ? <Download size={15} /> : <Lock size={15} />}
+                导出
               </button>
-            )}
-            <button onClick={takeSnapshot} disabled={!selectedDeviceId || loading} className={`px-4 py-2 rounded-lg border flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}>
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-              采样
-            </button>
-            <button onClick={exportHistory} disabled={!selectedDeviceId || history.length === 0} className={`px-4 py-2 rounded-lg border flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
-              {isVip ? <Download size={16} /> : <Lock size={16} />}
-              导出
-            </button>
-            <button onClick={exportReport} disabled={!selectedDeviceId || history.length === 0 || reportActive} className={`px-4 py-2 rounded-lg border flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
-              {isVip ? (reportActive ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />) : <Lock size={16} />}
-              {reportActive ? '生成中' : '报告'}
-            </button>
-            <button onClick={() => openPerformanceDir('')} className={`px-4 py-2 rounded-lg border flex items-center gap-2 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}>
-              <FolderOpen size={16} />
-              打开目录
-            </button>
+              <button onClick={exportReport} disabled={!selectedDeviceId || history.length === 0 || reportActive} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
+                {isVip ? (reportActive ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />) : <Lock size={15} />}
+                {reportActive ? '生成中' : '报告'}
+              </button>
+              <button onClick={() => openPerformanceDir('')} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+                <FolderOpen size={15} />
+                打开目录
+              </button>
+            </div>
           </div>
-        </div>
-        <div className={`mt-4 flex flex-col xl:flex-row xl:items-center gap-3 text-xs ${muted}`}>
-          <label className={`inline-flex items-center gap-2 w-fit rounded-lg border px-3 py-2 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-            <input
-              type="checkbox"
-              checked={includeAiSummary}
-              onChange={(e) => setIncludeAiSummary(e.target.checked)}
-              className="h-4 w-4 accent-emerald-500"
-            />
-            报告包含 AI 分析
-          </label>
-          <div className="min-w-0 flex-1 truncate">保存目录：{performancePath || '默认 %APPDATA%/adb-workbench/performance-monitor/'}</div>
         </div>
       </div>
 

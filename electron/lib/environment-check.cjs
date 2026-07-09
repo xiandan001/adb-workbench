@@ -4,8 +4,9 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+const { getAdbCommand } = require('./adb-runtime.cjs');
+
 const BUNDLED_DIR = path.join(__dirname, '../../scrcpy-win64');
-const BUNDLED_ADB_PATH = path.join(BUNDLED_DIR, 'adb.exe');
 const BUNDLED_SCRCPY_PATH = path.join(BUNDLED_DIR, 'scrcpy.exe');
 const COMMAND_TIMEOUT_MS = 12000;
 
@@ -167,10 +168,6 @@ function parseProps(text) {
 
 function firstLine(text) {
   return String(text || '').split(/\r?\n/).find(Boolean) || '';
-}
-
-function getAdbCommand() {
-  return fs.existsSync(BUNDLED_ADB_PATH) ? BUNDLED_ADB_PATH : 'adb';
 }
 
 function runCommand(command, args, timeout) {

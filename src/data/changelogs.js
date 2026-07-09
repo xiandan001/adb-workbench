@@ -2,6 +2,18 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.0': {
+    title: 'v4.1.0',
+    date: '2026-07-09',
+    items: [
+      { type: 'feature', text: 'APK 管理新增应用列表隐藏开关' },
+      { type: 'improve', text: '优化偏好设置分组导航与固定导航展示' },
+      { type: 'improve', text: '优化会员中心页面布局与权益对比展示' },
+      { type: 'improve', text: '优化性能监控顶部工具栏布局' },
+      { type: 'improve', text: '优化应用性能' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '4.0.1': {
     title: 'v4.0.1',
     date: '2026-07-08',

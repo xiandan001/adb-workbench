@@ -1,15 +1,14 @@
 // Regression difference reports: capture reusable baselines and compare current devices.
 
 const { app } = require('electron');
-const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const packageManager = require('./package-manager.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const { getAppVersion } = require('./version.cjs');
+const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
 const BASELINE_DIR = 'regression-baselines';
@@ -462,13 +461,12 @@ function normalizeBaselinePath(value) {
 }
 
 function runAdb(args, timeoutMs = COMMAND_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    const proc = execFile(getAdbCommand(), Array.isArray(args) ? args : [], { windowsHide: true, timeout: timeoutMs }, (error, stdout, stderr) => {
-      if (error) resolve({ ok: false, stdout: stdout || '', stderr: stderr || '', error: stderr || error.message });
-      else resolve({ ok: true, stdout: stdout || '', stderr: stderr || '' });
-    });
-    proc.stdin?.end?.();
-  });
+  return runRuntimeAdb(args, { timeoutMs }).then((res) => ({
+    ok: res.ok,
+    stdout: res.stdout || '',
+    stderr: res.stderr || '',
+    error: res.ok ? undefined : (res.stderr || res.error || 'ADB command failed')
+  }));
 }
 
 function getBaselineBaseDir() {
@@ -499,15 +497,6 @@ function readQualityCenterPath() {
   } catch {
     return '';
   }
-}
-
-function getAdbCommand() {
-  const candidates = [
-    BUNDLED_ADB_PATH,
-    process.resourcesPath ? path.join(process.resourcesPath, '..', 'scrcpy-win64', 'adb.exe') : '',
-    process.execPath ? path.join(path.dirname(process.execPath), 'scrcpy-win64', 'adb.exe') : ''
-  ].filter(Boolean);
-  return candidates.find(candidate => fs.existsSync(candidate)) || 'adb';
 }
 
 function readJson(filePath) {

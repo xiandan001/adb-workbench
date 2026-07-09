@@ -1,7 +1,7 @@
 // 设备巡检报告与证据包导出：独立主进程模块，避免扩大现有 ADB/日志模块职责
 
 const { app, shell } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -9,13 +9,13 @@ const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { getAppVersion } = require('./version.cjs');
+const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
 const STANDARD_TIMEOUT_MS = 15000;
 const LONG_TIMEOUT_MS = 45000;
 const LOG_TIMEOUT_MS = 30000;
 const BUGREPORT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEVICE_TEMP_SCREEN = '/sdcard/inspection-screen.png';
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 
 let currentTask = null;
 let lastTaskState = null;
@@ -312,40 +312,30 @@ async function captureBugreport(task, deviceId, step, bugreportDir) {
   };
 }
 
-function runAdb(task, args, timeoutMs) {
-  return runProcess(task, getAdbCommand(), args, timeoutMs);
-}
-
-function runProcess(task, command, args, timeoutMs) {
-  return new Promise((resolve) => {
-    if (task.cancelled) {
-      resolve({ ok: false, error: '用户取消' });
-      return;
+async function runAdb(task, args, timeoutMs) {
+  if (task.cancelled) return { ok: false, error: '用户取消' };
+  let currentProc = null;
+  const res = await runRuntimeAdb(args, {
+    timeoutMs,
+    isCancelled: () => task.cancelled,
+    onProcess: (proc) => {
+      currentProc = proc;
+      task.currentProc = proc;
     }
-    const proc = spawn(command, args, { windowsHide: true });
-    task.currentProc = proc;
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try { proc.kill(); } catch {}
-    }, timeoutMs);
-
-    proc.stdout.on('data', data => { stdout += data.toString('utf8'); });
-    proc.stderr.on('data', data => { stderr += data.toString('utf8'); });
-    proc.on('error', error => {
-      clearTimeout(timer);
-      if (task.currentProc === proc) task.currentProc = null;
-      resolve({ ok: false, stdout, stderr, error: error.message });
-    });
-    proc.on('close', code => {
-      clearTimeout(timer);
-      if (task.currentProc === proc) task.currentProc = null;
-      const error = task.cancelled ? '用户取消' : timedOut ? `命令超时（${Math.round(timeoutMs / 1000)} 秒）` : null;
-      resolve({ ok: code === 0 && !error, code, stdout, stderr, error });
-    });
   });
+  if (task.currentProc === currentProc) task.currentProc = null;
+  const error = task.cancelled
+    ? '用户取消'
+    : res.timedOut
+      ? `命令超时（${Math.round(timeoutMs / 1000)} 秒）`
+      : (res.ok ? null : (res.error || res.stderr || 'ADB command failed'));
+  return {
+    ok: res.ok && !error,
+    code: res.code,
+    stdout: res.stdout || '',
+    stderr: res.stderr || '',
+    error
+  };
 }
 
 async function createOutputDir(deviceId, outputBaseDir) {
@@ -705,10 +695,6 @@ function escapePs(value) {
 
 async function writeJson(filePath, data) {
   await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function getAdbCommand() {
-  return fs.existsSync(BUNDLED_ADB_PATH) ? BUNDLED_ADB_PATH : 'adb';
 }
 
 module.exports = { register, runInspection };

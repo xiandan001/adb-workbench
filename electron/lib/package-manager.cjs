@@ -1,15 +1,14 @@
 // App package management backend: package list/detail plus VIP-gated mutating actions.
 
 const { app } = require('electron');
-const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const vip = require('./vip.cjs');
+const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const LONG_TIMEOUT_MS = 60000;
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 const SNAPSHOT_DIR = 'package-manager';
 
 function register(ipcMain) {
@@ -292,17 +291,7 @@ function csvCell(value) {
 }
 
 function runAdb(args, timeoutMs) {
-  return new Promise((resolve) => {
-    const adbCommand = fs.existsSync(BUNDLED_ADB_PATH) ? BUNDLED_ADB_PATH : 'adb';
-    const proc = execFile(adbCommand, args, { windowsHide: true, timeout: timeoutMs }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({ ok: false, stdout: stdout || '', stderr: stderr || '', error: stderr || error.message, code: error.code });
-      } else {
-        resolve({ ok: true, stdout: stdout || '', stderr: stderr || '', code: 0 });
-      }
-    });
-    proc.stdin?.end?.();
-  });
+  return runRuntimeAdb(args, { timeoutMs });
 }
 
 function normalizeDeviceId(value) {

@@ -1,10 +1,11 @@
 // ADB / scrcpy 操作 IPC handlers
 // 该模块管理 screenRecordProcs（只在内部使用），并提供 stopAllScreenRecords 供 before-quit 调用
 
-const { exec, execFile, spawn } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const path = require('path');
-const { runCommand, checkCommandExists, findScrcpyPath } = require('./commands.cjs');
+const { findScrcpyPath } = require('./commands.cjs');
 const { findExecutable } = require('./android-tool-cleanup.cjs');
+const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 
 // ScreenRecord: Android native screen recording via adb shell screenrecord
 const screenRecordProcs = new Map();
@@ -274,10 +275,11 @@ async function stopAllScreenRecords() {
         console.error(`[ScreenRecord] Failed to kill process for ${deviceId}:`, e.message);
       }
       // 尝试通过 adb 停止设备端的 screenrecord 进程
-      exec(`adb -s ${deviceId} shell pkill -l 2 -f screenrecord`, { windowsHide: true }, () => {
-        screenRecordProcs.delete(deviceId);
-        resolve();
-      });
+      runAdb(['-s', deviceId, 'shell', 'pkill', '-l', '2', '-f', 'screenrecord'], { timeoutMs: 5000 })
+        .finally(() => {
+          screenRecordProcs.delete(deviceId);
+          resolve();
+        });
     }));
   }
   await Promise.all(promises);
@@ -310,6 +312,59 @@ function hasFastbootFinished(output) {
   return /\bFinished\./i.test(String(output || ''));
 }
 
+function adbOutput(res) {
+  return [res?.stdout, res?.stderr]
+    .map(value => Buffer.isBuffer(value) ? value.toString('utf8') : String(value || ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+async function runAdbText(args, options = {}) {
+  const res = await runAdb(args, options);
+  const output = adbOutput(res);
+  if (!res.ok) {
+    throw new Error(output || res.error || 'ADB command failed');
+  }
+  return output;
+}
+
+function parseAdbDevices(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .slice(1)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [id, status, ...rest] = line.split(/\s+/);
+      if (!id || !status) return null;
+      const detail = rest.join(' ');
+      const model = detail.match(/model:([^\s]+)/)?.[1] || '';
+      return {
+        id,
+        status,
+        model: status === 'device' ? model : 'Unauthorized / Offline'
+      };
+    })
+    .filter(Boolean);
+}
+
+async function fillMissingDeviceModels(devices) {
+  await Promise.all(devices.map(async (device) => {
+    if (device.status !== 'device') return;
+    if (device.model) return;
+    try {
+      const model = await runAdbText(['-s', device.id, 'shell', 'getprop', 'ro.product.model'], {
+        timeoutMs: 8000
+      });
+      device.model = model || 'Unknown Device';
+    } catch {
+      device.model = 'Unknown Device';
+    }
+  }));
+  return devices;
+}
+
 // 应用退出时清理所有未结束的终端 shell 进程
 function stopAllShellProcs() {
   if (shellProcs.size === 0) return;
@@ -325,43 +380,8 @@ function register(ipcMain) {
   // IPC Handlers for ADB
   ipcMain.handle('adb:getDevices', async () => {
     try {
-      const adbExists = await checkCommandExists('adb');
-      if (!adbExists) {
-        throw new Error('ADB 未安装或未添加到 PATH。请确保 Android SDK platform-tools 已安装并配置。');
-      }
-      const output = await runCommand('adb devices');
-      const lines = output.split('\n');
-      const devices = [];
-
-      // Skip the first line "List of devices attached"
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line) {
-          const parts = line.split('\t');
-          if (parts.length >= 2) {
-            devices.push({
-              id: parts[0],
-              status: parts[1] // 'device', 'offline', 'unauthorized'
-            });
-          }
-        }
-      }
-
-      // Fetch device models
-      for (let device of devices) {
-        if (device.status === 'device') {
-          try {
-            const model = await runCommand(`adb -s ${device.id} shell getprop ro.product.model`);
-            device.model = model;
-          } catch (e) {
-            device.model = 'Unknown Device';
-          }
-        } else {
-          device.model = 'Unauthorized / Offline';
-        }
-      }
-
-      return devices;
+      const output = await runAdbText(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true });
+      return fillMissingDeviceModels(parseAdbDevices(output));
     } catch (error) {
       console.error('ADB error:', error);
       throw new Error('ADB is not installed or not running.');
@@ -408,8 +428,7 @@ function register(ipcMain) {
     const requestId = `${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const result = await new Promise((resolve) => {
-        const proc = spawn('adb', ['-s', deviceId, 'shell', command], {
-          windowsHide: true,
+        const proc = spawnAdb(['-s', deviceId, 'shell', command], {
           encoding: 'utf8'
         });
         let stdout = '';
@@ -477,7 +496,7 @@ function register(ipcMain) {
   // Screenshot: pull file from device
   ipcMain.handle('adb:screenshot', async (event, { deviceId, localPath }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} pull /sdcard/screen.png "${localPath}"`);
+      const output = await runAdbText(['-s', deviceId, 'pull', '/sdcard/screen.png', localPath]);
       return { success: true, output };
     } catch (error) {
       return { success: false, error: error.message };
@@ -489,8 +508,7 @@ function register(ipcMain) {
       if (screenRecordProcs.has(deviceId)) {
         return { success: false, error: '当前设备正在录屏中，请先停止' };
       }
-      const p = spawn('adb', ['-s', deviceId, 'shell', 'screenrecord', remotePath || '/sdcard/screenrecord.mp4'], {
-        windowsHide: true,
+      const p = spawnAdb(['-s', deviceId, 'shell', 'screenrecord', remotePath || '/sdcard/screenrecord.mp4'], {
         detached: false
       });
       screenRecordProcs.set(deviceId, p);
@@ -513,12 +531,12 @@ function register(ipcMain) {
         p.kill();
         screenRecordProcs.delete(deviceId);
       } else {
-        await runCommand(`adb -s ${deviceId} shell pkill -l 2 -f screenrecord`).catch(() => {});
+        await runAdb(['-s', deviceId, 'shell', 'pkill', '-l', '2', '-f', 'screenrecord'], { timeoutMs: 5000 }).catch(() => {});
       }
       await new Promise(r => setTimeout(r, 800));
       const remotePath = '/sdcard/screenrecord.mp4';
-      await runCommand(`adb -s ${deviceId} pull "${remotePath}" "${localPath}"`);
-      await runCommand(`adb -s ${deviceId} shell rm -f "${remotePath}"`).catch(() => {});
+      await runAdbText(['-s', deviceId, 'pull', remotePath, localPath]);
+      await runAdb(['-s', deviceId, 'shell', 'rm', '-f', remotePath], { timeoutMs: 5000 }).catch(() => {});
       return { success: true, message: '录屏已停止并保存', path: localPath };
     } catch (error) {
       return { success: false, error: error.message };
@@ -532,7 +550,7 @@ function register(ipcMain) {
   // Reboot device
   ipcMain.handle('adb:reboot', async (event, { deviceId }) => {
     try {
-      spawn('adb', ['-s', deviceId, 'reboot'], {
+      spawnAdb(['-s', deviceId, 'reboot'], {
         detached: true,
         stdio: 'ignore'
       }).unref();
@@ -545,7 +563,7 @@ function register(ipcMain) {
   // Reboot to loader mode
   ipcMain.handle('adb:rebootLoader', async (event, { deviceId }) => {
     try {
-      spawn('adb', ['-s', deviceId, 'reboot', 'loader'], {
+      spawnAdb(['-s', deviceId, 'reboot', 'loader'], {
         detached: true,
         stdio: 'ignore'
       }).unref();
@@ -592,7 +610,7 @@ function register(ipcMain) {
   // Adb root
   ipcMain.handle('adb:root', async (event, { deviceId }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} root`);
+      const output = await runAdbText(['-s', deviceId, 'root']);
       if (output.includes('restarting') || output.includes('running as root')) {
         return { success: true, message: output || 'Root 权限获取成功' };
       } else {
@@ -606,7 +624,7 @@ function register(ipcMain) {
   // Adb remount
   ipcMain.handle('adb:remount', async (event, { deviceId }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} remount`);
+      const output = await runAdbText(['-s', deviceId, 'remount']);
       if (output.includes('remount') || output.includes('succeeded') || output.includes('success')) {
         return { success: true, message: output || 'Remount 成功' };
       } else {
@@ -620,7 +638,7 @@ function register(ipcMain) {
   // Wi-Fi Connection
   ipcMain.handle('adb:connect', async (event, ipAddress) => {
     try {
-      const output = await runCommand(`adb connect ${ipAddress}`);
+      const output = await runAdbText(['connect', ipAddress], { queueGlobal: true });
       if (output.includes('connected to') && !output.includes('already connected')) {
         return { success: true, message: output };
       } else if (output.includes('already connected')) {
@@ -636,7 +654,7 @@ function register(ipcMain) {
   // Install APK
   ipcMain.handle('adb:install', async (event, { deviceId, apkPath }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} install -r -d "${apkPath}"`);
+      const output = await runAdbText(['-s', deviceId, 'install', '-r', '-d', apkPath], { timeoutMs: 120000 });
       if (output.includes('Success')) {
         return { success: true, message: '安装成功' };
       } else {
@@ -650,7 +668,7 @@ function register(ipcMain) {
   // Push APK to device
   ipcMain.handle('adb:push', async (event, { deviceId, localPath, remotePath }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} push "${localPath}" "${remotePath}"`);
+      const output = await runAdbText(['-s', deviceId, 'push', localPath, remotePath], { timeoutMs: 120000 });
       if (output.includes('pushed') || output.includes('pushing')) {
         return { success: true, message: '推送成功' };
       } else {
@@ -664,7 +682,7 @@ function register(ipcMain) {
   // Pull file from device
   ipcMain.handle('adb:pull', async (event, { deviceId, remotePath, localPath }) => {
     try {
-      const output = await runCommand(`adb -s ${deviceId} pull "${remotePath}" "${localPath}"`);
+      const output = await runAdbText(['-s', deviceId, 'pull', remotePath, localPath], { timeoutMs: 120000 });
       if (output.includes('pulled') || output.includes('pulling')) {
         return { success: true, message: `拉取成功！\n设备: ${remotePath}\n本地: ${localPath}` };
       } else if (output.includes('does not exist')) {
@@ -694,7 +712,8 @@ function register(ipcMain) {
         return parts.length === 0 ? '/' : '/' + parts.join('/');
       };
 
-      const output = await runCommand(`adb -s ${deviceId} shell ls -la "${path}"`);
+      const safePath = cleanPath(path);
+      const output = await runAdbText(['-s', deviceId, 'shell', 'ls', '-la', safePath]);
       const lines = output.trim().split('\n').filter(line => line.length > 0);
       const items = [];
 
@@ -713,11 +732,11 @@ function register(ipcMain) {
 
         let itemPath;
         if (name === '.') {
-          itemPath = path;
+          itemPath = safePath;
         } else if (name === '..') {
-          itemPath = getParentPath(path);
+          itemPath = getParentPath(safePath);
         } else {
-          itemPath = path === '/' ? `/${name}` : `${path}/${name}`;
+          itemPath = safePath === '/' ? `/${name}` : `${safePath}/${name}`;
         }
 
         items.push({
@@ -729,7 +748,7 @@ function register(ipcMain) {
         });
       }
 
-      return { success: true, items, currentPath: path };
+      return { success: true, items, currentPath: safePath };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -738,7 +757,7 @@ function register(ipcMain) {
   // Disconnect Device
   ipcMain.handle('adb:disconnect', async (event, deviceId) => {
     try {
-      const output = await runCommand(`adb disconnect ${deviceId}`);
+      const output = await runAdbText(['disconnect', deviceId], { queueGlobal: true });
       return { success: true, message: output };
     } catch (error) {
       return { success: false, error: error.message };

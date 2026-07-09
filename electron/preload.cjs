@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeWindow: () => ipcRenderer.invoke('window:close'),
   saveCustomThemes: (customThemes) => ipcRenderer.invoke('themes:saveCustomThemes', customThemes),
   loadCustomThemes: () => ipcRenderer.invoke('themes:loadCustomThemes'),
+  loadAllSettings: () => ipcRenderer.invoke('settings:loadAll'),
+  saveSettingsPatch: (patch) => ipcRenderer.invoke('settings:savePatch', patch),
   // 截图保存路径设置
   saveScreenshotPath: (path) => ipcRenderer.invoke('settings:saveScreenshotPath', path),
   loadScreenshotPath: () => ipcRenderer.invoke('settings:loadScreenshotPath'),

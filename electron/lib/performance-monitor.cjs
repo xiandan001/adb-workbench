@@ -2,15 +2,14 @@
 
 const { app } = require('electron');
 const { Worker } = require('worker_threads');
-const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
+const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 // 默认 3 秒采样，减少性能面板数值延后感；1 秒高频仍由会员权限控制。
 const DEFAULT_INTERVAL_MS = 3000;
 const VIP_MIN_INTERVAL_MS = 1000;
@@ -869,27 +868,7 @@ function cleanup() {
 }
 
 function runAdb(args, timeoutMs = COMMAND_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    const adbCommand = getAdbCommand();
-    const adbArgs = Array.isArray(args) ? args : [];
-    const proc = execFile(adbCommand, adbArgs, { windowsHide: true, timeout: timeoutMs }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({ ok: false, stdout: stdout || '', stderr: stderr || '', error: stderr || error.message });
-      } else {
-        resolve({ ok: true, stdout: stdout || '', stderr: stderr || '' });
-      }
-    });
-    proc.stdin?.end?.();
-  });
-}
-
-function getAdbCommand() {
-  const candidates = [
-    BUNDLED_ADB_PATH,
-    process.resourcesPath ? path.join(process.resourcesPath, '..', 'scrcpy-win64', 'adb.exe') : '',
-    process.execPath ? path.join(path.dirname(process.execPath), 'scrcpy-win64', 'adb.exe') : ''
-  ].filter(Boolean);
-  return candidates.find(candidate => fs.existsSync(candidate)) || 'adb';
+  return runRuntimeAdb(args, { timeoutMs });
 }
 
 function readThresholds() {

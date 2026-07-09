@@ -1,7 +1,6 @@
 // One-click troubleshooting wizard backend.
 
 const { app, shell } = require('electron');
-const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,8 +10,8 @@ const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { getAppVersion } = require('./version.cjs');
+const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
-const BUNDLED_ADB_PATH = path.join(__dirname, '../../scrcpy-win64/adb.exe');
 const COMMAND_TIMEOUT_MS = 15000;
 const LOG_TIMEOUT_MS = 30000;
 
@@ -675,16 +674,29 @@ async function createOutputDir(task) {
 
 function runAdb(task, args, timeoutMs) {
   ensureNotCancelled(task);
-  return new Promise((resolve) => {
-    const proc = execFile(getAdbCommand(), args, { windowsHide: true, timeout: timeoutMs || COMMAND_TIMEOUT_MS }, (error, stdout, stderr) => {
-      if (task.currentProc === proc) task.currentProc = null;
-      if (error) {
-        resolve({ ok: false, error: error.message, stdout: stdout || '', stderr: stderr || '' });
-        return;
-      }
-      resolve({ ok: true, stdout: stdout || '', stderr: stderr || '' });
-    });
-    task.currentProc = proc;
+  let currentProc = null;
+  return runRuntimeAdb(args, {
+    timeoutMs: timeoutMs || COMMAND_TIMEOUT_MS,
+    isCancelled: () => task.cancelled,
+    onProcess: (proc) => {
+      currentProc = proc;
+      task.currentProc = proc;
+    }
+  }).then((res) => {
+    if (task.currentProc === currentProc) task.currentProc = null;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: task.cancelled
+          ? '用户取消'
+          : res.timedOut
+            ? `命令超时（${Math.round((timeoutMs || COMMAND_TIMEOUT_MS) / 1000)} 秒）`
+            : (res.error || 'ADB command failed'),
+        stdout: res.stdout || '',
+        stderr: res.stderr || ''
+      };
+    }
+    return { ok: true, stdout: res.stdout || '', stderr: res.stderr || '' };
   });
 }
 
@@ -699,10 +711,6 @@ async function writeText(filePath, content) {
 
 async function writeJson(filePath, value) {
   await writeText(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function getAdbCommand() {
-  return fs.existsSync(BUNDLED_ADB_PATH) ? BUNDLED_ADB_PATH : 'adb';
 }
 
 function normalizeDeviceId(value) {

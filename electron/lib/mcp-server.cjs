@@ -4,8 +4,6 @@
 
 const http = require('http');
 const { randomUUID } = require('crypto');
-const { execFile } = require('child_process');
-const { spawn } = require('child_process');
 const readline = require('readline');
 const https = require('https');
 
@@ -17,6 +15,7 @@ const performanceMonitor = require('./performance-monitor.cjs');
 const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
 const { getAppVersion } = require('./version.cjs');
+const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const {
   AGNES_API_URL,
   AGNES_API_KEY,
@@ -275,9 +274,9 @@ async function callMcpTool(name, args) {
 
   if (name === 'device_list') {
     const devices = await new Promise((resolve) => {
-      execFile('adb', ['devices', '-l'], { windowsHide: true }, (err, stdout) => {
-        if (err) return resolve([]);
-        const lines = stdout.toString().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
+        if (!res.ok) return resolve([]);
+        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
         const out = [];
         for (const line of lines.slice(1)) {
           const match = line.match(/^(\S+)\s+device\b(.*)$/);
@@ -299,9 +298,9 @@ async function callMcpTool(name, args) {
       return mcpText({ ok: false, message: '当前已在抓取中，请先停止当前抓取' });
     }
     const devices = await new Promise((resolve) => {
-      execFile('adb', ['devices', '-l'], { windowsHide: true }, (err, stdout) => {
-        if (err) return resolve([]);
-        const lines = stdout.toString().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
+        if (!res.ok) return resolve([]);
+        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
         const out = [];
         for (const line of lines.slice(1)) {
           const match = line.match(/^(\S+)\s+device\b/);
@@ -316,9 +315,9 @@ async function callMcpTool(name, args) {
     const deviceId = args.deviceId || undefined;
     logAnalyzer.setCurrentLogSource('realtime');
     logAnalyzer.resetLogStoreRealtime();
-    execFile('adb', ['logcat', '-c'], { windowsHide: true, timeout: 5000 });
+    runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
     ctx.broadcastToAllWindows('log:reset', { source: 'realtime', entries: [] });
-    logAnalyzer.getStartPidPackageResolver()('adb', deviceId);
+    logAnalyzer.getStartPidPackageResolver()(deviceId);
 
     const adbArgs = [];
     if (deviceId) adbArgs.push('-s', deviceId);
@@ -331,7 +330,7 @@ async function callMcpTool(name, args) {
     if (wantedBuffers.length > 0) {
       wantedBuffers.forEach(b => adbArgs.push('-b', b));
     }
-    const p = spawn('adb', adbArgs, { windowsHide: true });
+    const p = spawnAdb(adbArgs);
     logAnalyzer.setLogcatProc(p);
 
     const parseLogLine = logAnalyzer.getParseLogLine();
@@ -417,7 +416,7 @@ async function callMcpTool(name, args) {
   if (name === 'log_clear') {
     const source = args.source ?? 'realtime';
     if (!source || source === 'realtime') {
-      execFile('adb', ['logcat', '-c'], { windowsHide: true, timeout: 5000 });
+      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
     }
     logAnalyzer.clearLogStoreBySource(source);
     ctx.broadcastToAllWindows('log:reset', { source: source ?? logAnalyzer.getCurrentLogSource(), entries: [] });

@@ -7,13 +7,12 @@
 //   - 被 mcp-server 通过 getter 读取 logStore / currentLogSource / logcatProc 等
 
 const { dialog } = require('electron');
-const { execFile } = require('child_process');
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
 const ctx = require('./app-context.cjs');
+const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const { isDev } = ctx;
 
 let logcatProc = null;
@@ -162,15 +161,18 @@ function parseLogLine(source, line) {
   return { id: cryptoRandomId(), source, ts: Date.now(), raw: trimmed, message: trimmed };
 }
 
-function startPidPackageResolver(adbPath, deviceId) {
+function startPidPackageResolver(adbPathOrDeviceId, maybeDeviceId) {
+  const deviceId = maybeDeviceId !== undefined
+    ? maybeDeviceId
+    : (adbPathOrDeviceId && adbPathOrDeviceId !== 'adb' ? adbPathOrDeviceId : '');
   stopPidPackageResolver();
   function refresh() {
     const args = [];
     if (deviceId) args.push('-s', deviceId);
     args.push('shell', 'ps -A -o PID=,NAME= 2>/dev/null || ps -o PID=,NAME=');
-    execFile(adbPath, args, { windowsHide: true, timeout: 10000 }, (err, stdout) => {
-      if (err) return;
-      const lines = stdout.toString().split(/\r?\n/).filter(Boolean);
+    runAdb(args, { timeoutMs: 10000 }).then((res) => {
+      if (!res.ok) return;
+      const lines = String(res.stdout || '').split(/\r?\n/).filter(Boolean);
       const newMap = new Map();
       for (const line of lines) {
         const m = line.match(/^\s*(\d+)\s+(.+)$/);
@@ -259,9 +261,9 @@ function register(ipcMain) {
   // ADB 设备列表（Log Analyzer 专用）
   ipcMain.handle('adb:listDevices', async () => {
     return new Promise((resolve) => {
-      execFile('adb', ['devices', '-l'], { windowsHide: true }, (err, stdout) => {
-        if (err) return resolve([]);
-        const lines = stdout.toString().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
+        if (!res.ok) return resolve([]);
+        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
         const out = [];
         for (const line of lines.slice(1)) {
           const match = line.match(/^(\S+)\s+device\b(.*)$/);
@@ -292,10 +294,10 @@ function register(ipcMain) {
       currentLogSource = 'realtime';
       clearLogBatchState();
       resetLogStoreSource('realtime');
-      execFile('adb', ['logcat', '-c'], { windowsHide: true, timeout: 5000 });
+      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
       ctx.broadcastToAllWindows('log:reset', { source: 'realtime', entries: [] });
 
-      startPidPackageResolver('adb', args?.deviceId);
+      startPidPackageResolver(args?.deviceId);
 
       const adbArgs = [];
       if (args?.deviceId) adbArgs.push('-s', args.deviceId);
@@ -313,7 +315,7 @@ function register(ipcMain) {
       // 兼容旧 extraArgs 参数（追加在 -b 之后）
       if (args?.extraArgs?.length) adbArgs.push(...args.extraArgs);
 
-      const p = spawn('adb', adbArgs, { windowsHide: true });
+      const p = spawnAdb(adbArgs);
       logcatProc = p;
 
       const rl = readline.createInterface({ input: p.stdout });
@@ -371,7 +373,7 @@ function register(ipcMain) {
     const autoDiagnose = require('./auto-diagnose.cjs');
     const s = args?.source ?? currentLogSource;
     if (!s || s === 'realtime') {
-      execFile('adb', ['logcat', '-c'], { windowsHide: true, timeout: 5000 });
+      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
       clearLogBatchState();
     }
     if (!s || s === 'realtime') resetLogStoreSource('realtime');

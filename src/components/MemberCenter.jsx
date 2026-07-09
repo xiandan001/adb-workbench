@@ -55,6 +55,37 @@ const FEATURE_GROUPS = [
   }
 ];
 
+const BENEFIT_SUMMARIES = [
+  {
+    title: '设备管理',
+    icon: Smartphone,
+    desc: '解除设备数量限制，保留完整连接历史。',
+    free: '1 台设备',
+    vip: '不限设备'
+  },
+  {
+    title: '质量自动化',
+    icon: ClipboardCheck,
+    desc: '开放巡检证据包、任务产物和回归报告。',
+    free: '基础执行',
+    vip: '完整产物'
+  },
+  {
+    title: '日志与 AI',
+    icon: Brain,
+    desc: '启用深度分析、自然语言搜索和规则管理。',
+    free: '内置规则',
+    vip: '深度分析'
+  },
+  {
+    title: '会员记录',
+    icon: History,
+    desc: '记录激活、机器码复制和重签线索。',
+    free: '可用',
+    vip: '可追踪'
+  }
+];
+
 // 支付预留：套餐与支付方式数据结构（常量化，便于未来接入在线支付）
 // 未来接入在线支付时，只需修改 PAYMENT_METHODS 中的 handler，UI 无需改动
 const PLANS = [
@@ -203,21 +234,34 @@ export default function MemberCenter({ theme, vipStatus, onActivated, showToast 
     showToast?.('机器码已解锁，请复制发送给开发者获取激活码');
   };
 
+  const cardClass = `rounded-xl border shadow-sm ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
+  const mutedTextClass = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
+  const softPanelClass = isDark ? 'bg-[#2D2F33]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200';
+  const statusTitle = isVip ? '会员版' : '基础版';
+  const statusDesc = isVip
+    ? vipStatus.type === 'lifetime' ? '永久有效，感谢您的支持' : `有效期至 ${new Date((vipStatus.expiresAt || 0) * 1000).toLocaleDateString('zh-CN')}`
+    : '升级会员后解锁多设备、完整产物和深度分析能力';
+  const statusBadge = isVip
+    ? vipStatus.type === 'lifetime' ? '终身授权' : '订阅授权'
+    : '未开通';
+
   // loading 骨架屏：状态加载中不显示具体套餐，避免先闪基础版再切会员版
   if (isLoading) {
     return (
-      <div className="space-y-6 max-w-4xl">
-        <div className={`p-6 rounded-xl border shadow-sm animate-pulse ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-          <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-2xl ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
-            <div className="flex-1 space-y-2">
-              <div className={`h-5 w-24 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
-              <div className={`h-3 w-40 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
+      <div className="w-full space-y-5">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+          <div className={`p-6 rounded-xl border shadow-sm animate-pulse ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-2xl ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
+              <div className="flex-1 space-y-2">
+                <div className={`h-5 w-24 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
+                <div className={`h-3 w-56 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
+              </div>
             </div>
           </div>
-          <div className={`mt-5 pt-5 border-t ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-            <div className={`h-3 w-20 rounded mb-2 ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
-            <div className={`h-8 w-full rounded-lg ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
+          <div className={`p-6 rounded-xl border shadow-sm animate-pulse ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+            <div className={`h-4 w-24 rounded mb-4 ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
+            <div className={`h-10 w-full rounded-lg ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
           </div>
         </div>
         <div className={`flex items-center justify-center py-8 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
@@ -229,47 +273,88 @@ export default function MemberCenter({ theme, vipStatus, onActivated, showToast 
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      {/* 状态卡片 */}
-      <div className={`p-6 rounded-xl border shadow-sm ${isVip ? 'border-amber-300/50 bg-gradient-to-br from-amber-50 to-yellow-50' : isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isVip ? 'bg-gradient-to-br from-amber-400 to-yellow-500 shadow-lg shadow-amber-500/30' : isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
-              {isVip ? <Crown size={28} className="text-white" /> : <Lock size={26} className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'} />}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className={`text-xl font-bold ${isVip ? 'text-amber-700' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                  {isVip ? '会员版' : '基础版'}
-                </h3>
-                {isVip && (
-                  <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-700 border border-amber-400/30">
-                    {vipStatus.type === 'lifetime' ? '终身' : '订阅'}
-                  </span>
-                )}
+    <div className="w-full space-y-5">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <section className={`relative overflow-hidden p-6 rounded-xl border shadow-sm ${isVip ? 'border-amber-300/60 bg-gradient-to-br from-amber-50 via-white to-yellow-50' : isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-4 min-w-0">
+              <div className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 ${isVip ? 'bg-gradient-to-br from-amber-400 to-yellow-500 shadow-lg shadow-amber-500/25' : isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`}>
+                {isVip ? <Crown size={28} className="text-white" /> : <Lock size={26} className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'} />}
               </div>
-              <p className={`text-sm mt-1 ${isVip ? 'text-amber-600' : isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                {isVip
-                  ? vipStatus.type === 'lifetime' ? '永久有效，感谢您的支持' : `有效期至 ${new Date((vipStatus.expiresAt || 0) * 1000).toLocaleDateString('zh-CN')}`
-                  : '升级会员解锁全部功能'}
-              </p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className={`text-2xl font-bold ${isVip ? 'text-amber-700' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                    {statusTitle}
+                  </h3>
+                  <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${isVip ? 'bg-amber-500/15 text-amber-700 border-amber-500/30' : isDark ? 'bg-[#3E4145] text-[#BDC1C6] border-[#5F6368]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                    {statusBadge}
+                  </span>
+                </div>
+                <p className={`text-sm mt-2 ${isVip ? 'text-amber-700/80' : mutedTextClass}`}>
+                  {statusDesc}
+                </p>
+              </div>
             </div>
+
+            {!isVip && (
+              <button
+                onClick={openPayWizard}
+                className="shrink-0 px-5 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 transition-all active:scale-95 shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+              >
+                <Crown size={18} />
+                立即开通
+              </button>
+            )}
           </div>
 
-          {!isVip && (
-            <button
-              onClick={openPayWizard}
-              className="shrink-0 px-5 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 transition-all active:scale-95 shadow-lg shadow-amber-500/20 flex items-center gap-2"
-            >
-              <Crown size={18} />
-              立即开通
-            </button>
-          )}
-        </div>
+          <div className={`mt-6 grid gap-3 sm:grid-cols-3`}>
+            {[
+              ['设备额度', isVip ? '不限' : '1 台'],
+              ['连接历史', isVip ? '不限' : '最近 5 条'],
+              ['高阶能力', isVip ? '已解锁' : '待开通']
+            ].map(([label, value]) => (
+              <div key={label} className={`rounded-lg border px-3 py-3 ${isVip ? 'bg-white/70 border-amber-200/70' : softPanelClass}`}>
+                <div className={`text-xs ${isVip ? 'text-amber-700/70' : mutedTextClass}`}>{label}</div>
+                <div className={`text-base font-semibold mt-1 ${isVip ? 'text-amber-700' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{value}</div>
+              </div>
+            ))}
+          </div>
 
-        {/* 机器码 */}
-        <div className={`mt-5 pt-5 border-t ${isVip ? 'border-amber-200' : isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-          <div className={`text-xs mb-1.5 ${isDark ? 'text-[#80868B]' : 'text-slate-500'}`}>本机机器码</div>
+          <div className={`mt-5 rounded-xl border p-4 ${isVip ? 'bg-white/70 border-amber-200/70' : softPanelClass}`}>
+            <div className={`text-xs font-medium ${isVip ? 'text-amber-700/75' : mutedTextClass}`}>
+              开通后可用能力
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {['不限设备', '完整产物', '深度分析', '规则管理'].map((item) => (
+                <div key={item} className={`flex items-center gap-2 text-sm ${isVip ? 'text-amber-700' : isDark ? 'text-[#BDC1C6]' : 'text-slate-700'}`}>
+                  <Check size={14} className={isVip ? 'text-amber-500' : 'text-emerald-500'} />
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className={`p-5 ${cardClass}`}>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>激活与机器码</h3>
+              <p className={`text-xs mt-1 ${mutedTextClass}`}>
+                {isVip ? '用于重签、迁移设备和售后核对。' : '支付后复制机器码，获取激活码后在此激活。'}
+              </p>
+            </div>
+            {!isVip && (
+              <button
+                onClick={openPayWizard}
+                className={`shrink-0 px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors ${isDark ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+              >
+                <Crown size={14} />
+                开通
+              </button>
+            )}
+          </div>
+
+          <div className={`text-xs mb-1.5 ${mutedTextClass}`}>本机机器码</div>
           {machineIdUnlocked ? (
             <div className="flex items-center gap-2">
               <code className={`flex-1 px-3 py-2 rounded-lg font-mono text-xs break-all ${isDark ? 'bg-[#3E4145]/60 text-[#E8EAED]' : 'bg-slate-50 text-slate-700'}`}>
@@ -293,90 +378,138 @@ export default function MemberCenter({ theme, vipStatus, onActivated, showToast 
               <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>完成支付后解锁机器码</span>
             </button>
           )}
-        </div>
-      </div>
 
-      {/* 激活区（仅非会员） */}
-      {!isVip && (
-        <div className={`p-6 rounded-xl border shadow-sm ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-          <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>激活会员</h3>
-          <p className={`text-sm mb-4 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-            已有激活码？复制上方机器码发送给开发者，获取激活码后粘贴到下方激活。
-          </p>
-          <textarea
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            placeholder="在此粘贴激活码…"
-            rows={3}
-            className={`w-full px-3 py-2.5 border rounded-lg text-sm font-mono resize-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-          />
-          {activateError && (
-            <div className="mt-2 px-3 py-2 rounded-lg text-xs bg-red-500/10 text-red-500 border border-red-500/20">
-              {activateError}
+          {!isVip && (
+            <div className={`mt-4 pt-4 border-t ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+              <label className={`block text-xs font-medium mb-2 ${mutedTextClass}`}>激活码</label>
+              <textarea
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="在此粘贴激活码…"
+                rows={3}
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm font-mono resize-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+              />
+              {activateError && (
+                <div className="mt-2 px-3 py-2 rounded-lg text-xs bg-red-500/10 text-red-500 border border-red-500/20">
+                  {activateError}
+                </div>
+              )}
+              <button
+                onClick={handleActivate}
+                disabled={activating || !tokenInput.trim()}
+                className="mt-3 w-full px-4 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50 transition-all active:scale-95 shadow-sm"
+              >
+                {activating ? <span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />激活中…</span> : '立即激活'}
+              </button>
             </div>
           )}
-          <button
-            onClick={handleActivate}
-            disabled={activating || !tokenInput.trim()}
-            className="mt-3 w-full sm:w-auto px-6 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50 transition-all active:scale-95 shadow-sm"
-          >
-            {activating ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" />激活中…</span> : '立即激活'}
-          </button>
-        </div>
-      )}
+        </section>
+      </div>
 
-      {/* 激活记录、备注、复制历史与重签说明 */}
-      <ActivationRecordsPanel
-        theme={t}
-        showToast={showToast}
-        refreshKey={`${vipStatus.activated}-${vipStatus.issuedAt || ''}-${vipStatus.expiresAt || ''}-${activationRecordsRefreshKey}`}
-        recordData={activationRecordData}
-      />
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {BENEFIT_SUMMARIES.map((benefit) => {
+          const Icon = benefit.icon;
+          return (
+            <div key={benefit.title} className={`rounded-xl border p-4 shadow-sm ${isVip ? 'border-amber-200 bg-amber-50/70' : isDark ? 'bg-slate-800/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isVip ? 'bg-amber-500/15 text-amber-600' : isDark ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-600'}`}>
+                  <Icon size={20} />
+                </div>
+                <span className={`text-xs font-medium ${isVip ? 'text-amber-700' : mutedTextClass}`}>{isVip ? benefit.vip : benefit.free}</span>
+              </div>
+              <h4 className={`text-sm font-semibold mt-3 ${isVip ? 'text-amber-800' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{benefit.title}</h4>
+              <p className={`text-xs leading-5 mt-1 ${isVip ? 'text-amber-700/75' : mutedTextClass}`}>{benefit.desc}</p>
+            </div>
+          );
+        })}
+      </section>
 
       {/* 功能对比 */}
-      <div className={`p-6 rounded-xl border shadow-sm ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+      <section className={`p-5 ${cardClass}`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>功能对比</h3>
-            <p className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>按常用场景整理基础版与会员版差异</p>
+            <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>权益对比</h3>
+            <p className={`text-xs mt-1 ${mutedTextClass}`}>按常用场景整理基础版与会员版差异</p>
           </div>
-          <div className={`hidden sm:grid grid-cols-2 w-72 text-xs font-medium ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+        </div>
+
+        <div className={`hidden md:block overflow-hidden rounded-xl border ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
+          <div className={`grid grid-cols-[minmax(260px,1fr)_150px_150px] px-4 py-3 text-xs font-semibold ${isDark ? 'bg-[#2D2F33] text-[#9AA0A6]' : 'bg-slate-50 text-slate-500'}`}>
+            <div>功能场景</div>
             <div className="flex items-center justify-center gap-1">
-              <Lock size={14} />
+              <Lock size={13} />
               基础版
             </div>
             <div className="flex items-center justify-center gap-1 text-amber-500">
-              <Crown size={14} />
+              <Crown size={13} />
               会员版
             </div>
           </div>
-        </div>
 
-        <div className={`divide-y ${isDark ? 'divide-[#3E4145]/70' : 'divide-slate-100'}`}>
           {FEATURE_GROUPS.map((group) => {
             const Icon = group.icon;
             return (
-              <section key={group.title} className="py-4 first:pt-0 last:pb-0">
-                <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
-                  <div className="flex items-center gap-2">
-                    <Icon size={17} className="text-amber-500" />
-                    <span className={`text-sm font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{group.title}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {group.items.map((item) => (
-                      <div key={item.name} className="grid gap-2 sm:grid-cols-[minmax(160px,1fr)_140px_140px] sm:items-center">
-                        <div className={`text-sm ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>{item.name}</div>
-                        <FeatureValue value={item.free} tone="free" isDark={isDark} />
-                        <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
-                      </div>
-                    ))}
-                  </div>
+              <div key={group.title}>
+                <div className={`flex items-center gap-2 px-4 py-3 border-t text-sm font-semibold ${isDark ? 'bg-[#202124]/35 border-[#3E4145] text-[#E8EAED]' : 'bg-white border-slate-100 text-slate-800'}`}>
+                  <Icon size={16} className="text-amber-500" />
+                  {group.title}
                 </div>
-              </section>
+                {group.items.map((item) => (
+                  <div key={item.name} className={`grid grid-cols-[minmax(260px,1fr)_150px_150px] items-center px-4 py-3 border-t ${isDark ? 'border-[#3E4145]/70' : 'border-slate-100'}`}>
+                    <div className={`text-sm ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>{item.name}</div>
+                    <FeatureValue value={item.free} tone="free" isDark={isDark} />
+                    <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
+                  </div>
+                ))}
+              </div>
             );
           })}
         </div>
-      </div>
+
+        <div className={`md:hidden divide-y rounded-xl border ${isDark ? 'divide-[#3E4145] border-[#3E4145]' : 'divide-slate-100 border-slate-200'}`}>
+          {FEATURE_GROUPS.map((group) => {
+            const Icon = group.icon;
+            return (
+              <div key={group.title} className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon size={16} className="text-amber-500" />
+                  <span className={`text-sm font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{group.title}</span>
+                </div>
+                <div className="space-y-3">
+                  {group.items.map((item) => (
+                    <div key={item.name} className={`rounded-lg border p-3 ${softPanelClass}`}>
+                      <div className={`text-sm mb-2 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-700'}`}>{item.name}</div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <div className={mutedTextClass}>基础版</div>
+                          <FeatureValue value={item.free} tone="free" isDark={isDark} />
+                        </div>
+                        <div>
+                          <div className="text-amber-500">会员版</div>
+                          <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>记录与售后</h3>
+          <p className={`text-xs mt-1 ${mutedTextClass}`}>集中查看激活记录、备注、复制历史和重签说明。</p>
+        </div>
+        <ActivationRecordsPanel
+          theme={t}
+          showToast={showToast}
+          refreshKey={`${vipStatus.activated}-${vipStatus.issuedAt || ''}-${vipStatus.expiresAt || ''}-${activationRecordsRefreshKey}`}
+          recordData={activationRecordData}
+        />
+      </section>
 
       {/* 支付向导模态框 */}
       {payWizardOpen && (

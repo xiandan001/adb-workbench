@@ -1,106 +1,114 @@
 # 卓控台
 
-> 基于 Electron + React 19 + TailwindCSS 构建的跨平台 Android 设备全生命周期管理桌面应用，底层封装 `adb` 与 `scrcpy`，并集成 AI 智能日志分析与 MCP（Model Context Protocol）服务。
+> 基于 Electron + React 19 + TailwindCSS 构建的 Android 设备全生命周期管理桌面工具，封装 `adb`、`scrcpy`、日志分析、性能监控、质量自动化、产物管理、会员授权与 OTA 更新能力。
 
-![主界面 — 设备管理与控制](docs/企业微信截图_1781684609967.png)
+![设备管理与 APK 管理](docs/readme-device-management.png)
 
-## 功能特点
+## 核心能力
 
-### 1. 设备管理与控制
-自动检测 USB / Wi-Fi 连接的 Android 设备，每个设备卡片提供开始投屏、截图、录屏、音量调节、Root 切换、Remount、重启、Loader、APK 管理、终端等快捷操作，将原本需要记忆大量参数的命令行操作简化为一次点击。
+### 设备管理与 APK 管理
 
-- 🚀 **设备管理**：自动检测通过 USB 或 Wi-Fi (ADB) 连接的 Android 设备
-- 📱 **一键投屏**：快速启动 `scrcpy` 进行低延迟、高画质的屏幕镜像
-- 🎮 **快捷控制**：
-  - 📸 截取屏幕并保存到本地
-  - 🎥 屏幕录制（支持保存到本地）
-  - 🔊 调节音量 (+ / -)
-  - ⏻ 模拟电源键控制息屏/亮屏
-  - 🔓 Root 切换 / Remount / 重启 / Loader
-  - 📦 APK 拖拽安装 / 批量管理
-  - 💻 内置 ADB 终端
+自动识别 USB / Wi-Fi ADB 设备，并为每台设备提供投屏、截图、录屏、音量、Root、Remount、重启、Loader、Unlock、终端、巡检和 APK 管理入口。
 
-### 2. Log 分析服务
-独立的日志分析窗口，支持实时 logcat 抓取（realtime / file 两种数据源）、本地 `.log` 文件加载、多维度过滤（关键字、排除、包名、Tag、PID、级别），以及导出 / 复制等能力。双击日志行即可复制，悬停查看完整消息。
+- USB / Wi-Fi 设备列表、连接历史和一键重连
+- `scrcpy` 投屏参数统一配置，支持截图与录屏保存路径设置
+- APK 安装、推送、包名搜索、系统应用筛选、批量选择、应用详情和快照
+- APK 应用列表支持隐藏/显示搜索区，并持久化用户偏好
+- 设备文件浏览、拉取、推送和常用目录快捷入口
 
-![Log 分析服务](docs/image-1.png)
+### 性能监控、质量与产物
 
-- 📋 **多缓冲区抓取**：支持 main / system / radio / events / crash / kernel 多缓冲区选择
-- 🔍 **智能搜索**：自然语言搜索 + 本地关键字匹配 + AI 语义扩展
-- 🚨 **自动诊断**：自动识别 Crash / ANR / OOM 等异常，彩色标签分类展示
-- 💾 **导入导出**：支持加载 `.log` 文件、导出过滤结果
+![性能监控](docs/readme-performance.png)
 
-### 3. AI 智能日志分析 + MCP 服务
-- **AI 智能分析**：基于 `agnes-2.0-flash` 模型，以流式输出方式实时返回分析结果，支持 Markdown 渲染（标题、代码块、表格、列表等）、多轮对话追问、结果导出为 `.md` 文件。
-- **MCP 服务**：开启后（默认 `http://127.0.0.1:49321/mcp`），外部 AI 工具（Claude CLI、Cursor、Trae 等）可通过自然语言指令直接控制日志抓取、应用包查询、性能采样、设备巡检与 AI 分析，提供 `device_list`、`package_list`、`perf_snapshot`、`inspection_run`、`ai_analyze` 等 16 个工具。
+- 实时采样 CPU、内存、存储、温度、前台 FPS 和合成 FPS
+- 支持采样间隔、阈值、导出、AI 分析报告和产物目录打开
+- 质量中心提供回归基线、验收任务、设备巡检和证据包能力
+- 任务中心支持复现脚本、多设备批量执行和运行历史
+- 产物中心统一查看问题排查、巡检、性能和任务报告
 
-![AI 智能日志分析](docs/image.png)
-![MCP 服务](docs/企业微信截图_17817763877431.png)
+### AI 日志助手与 MCP 服务
 
-### 4. 其他特性
-- 🎨 **现代化 UI**：基于 Tailwind CSS 打造的美观、流畅的用户界面，支持多主题切换（简约默认、可爱甜心、科技未来、清新海洋、自然森林、落日余晖）
-- 🔄 **OTA 自动更新**：支持差分增量更新，无需重复下载完整安装包
-- 📝 **连接历史**：自动保存无线连接历史，一键重连
-- 🖥️ **终端全屏模式**：Ctrl+滚轮缩放字体，结构化输出排版
+![AI 日志助手与 MCP 服务](docs/readme-ai-log-mcp.png)
+
+- 独立日志分析窗口支持实时 logcat、文件加载、多维过滤和导出
+- 内置 Crash / ANR / OOM / Native Crash 自动诊断和规则库
+- AI 深度分析支持流式输出、Markdown 渲染、多轮追问和报告导出
+- MCP 服务默认运行在 `http://127.0.0.1:49321/mcp`
+- 外部 AI 工具可调用设备列表、包列表、性能采样、巡检和日志分析等工具
+
+### 偏好设置与 OTA 更新
+
+![偏好设置](docs/readme-settings.png)
+
+- 偏好设置按快捷命令、投屏、保存路径、外观、更新和高危操作分组
+- 固定分组导航支持阴影分层和页内快速跳转
+- 支持截图、录屏、巡检、性能、任务中心和质量中心保存路径配置
+- 内置自动更新检查、下载进度、安装重启和更新说明弹窗
+- 高危操作确认支持记忆选择和统一重置
+
+### 会员中心
+
+![会员中心](docs/readme-member-center.png)
+
+- 基础版/会员版权益对比按使用场景分组展示
+- 会员版开放不限设备、完整连接历史、完整产物、规则管理和深度分析
+- 支持本机机器码复制、激活码录入、激活记录和复制历史
 
 ## 环境要求
 
-在使用本软件前，请确保您的系统已安装以下依赖，并已将其添加至系统环境变量 (`PATH`)：
-1. [Node.js](https://nodejs.org/)（用于编译和运行项目）
+使用前请确保系统已安装以下依赖，并已加入 `PATH`：
+
+1. [Node.js](https://nodejs.org/)
 2. [ADB (Android Debug Bridge)](https://developer.android.com/studio/releases/platform-tools)
 3. [scrcpy](https://github.com/Genymobile/scrcpy)
 
-> Windows 用户建议直接下载 `scrcpy` 官方自带 adb 的 release 压缩包，并将其解压路径添加至系统环境变量。
+Windows 用户可直接使用项目内置的 `scrcpy-win64` 目录，或安装官方 scrcpy 并配置环境变量。
 
 ## 安装与运行
 
-### 方式一：下载安装包（推荐普通用户）
+### 下载安装包
+
 从 [GitHub Releases](https://github.com/xiandan001/adb-workbench/releases) 下载最新版安装包，双击安装即可使用。
 
-### 方式二：源码运行（推荐开发者）
+### 源码运行
+
 ```bash
-# 1. 安装依赖
 npm install
-
-# 2. 启动开发模式
 npm run electron:dev
+```
 
-# 3. 构建打包（生产环境）
+### 构建安装包
+
+```bash
 npm run electron:build
 ```
 
-## 使用前准备
-
-- 请确保 Android 设备已在开发者选项中开启 **USB 调试** 并在连接电脑时授权
-- WiFi 调试需先通过 USB 连接设备，在设备卡片中点击"连接 WiFi"按钮即可一键切换无线调试
-- 使用 AI 智能分析功能时，需保持网络畅通
+构建完成后，安装包、`.blockmap` 和 `latest.yml` 会输出到 `release/` 目录，用于桌面安装与 OTA 更新。
 
 ## 技术栈
 
 | 类别 | 技术 |
-|------|------|
+| --- | --- |
 | 框架 | Electron + React 19 |
-| 构建工具 | Vite + electron-builder |
+| 构建 | Vite + electron-builder |
 | 样式 | TailwindCSS 4 |
-| 核心依赖 | adb、scrcpy、electron-updater |
-| AI 模型 | agnes-2.0-flash（流式输出） |
+| 设备能力 | adb、scrcpy |
+| 更新 | electron-updater |
 | 协议 | MCP（Model Context Protocol） |
 
 ## 项目结构
 
-```
+```text
 adb-workbench/
-├── electron/                # Electron 主进程
-│   ├── main.cjs             # 主进程入口（IPC、自动更新、MCP 服务）
-│   └── preload.cjs          # 预加载脚本（IPC 桥接）
-├── src/                     # 渲染进程
-│   ├── App.jsx              # 主应用组件
-│   ├── components/
-│   │   └── LogAnalyzer.jsx  # 日志分析组件
-│   └── shared/              # 共享工具（过滤、解析、日志类型）
-├── scrcpy-win64/            # 内置 scrcpy + adb（Windows）
-├── docs/                    # 文档与截图
-└── electron-builder.json    # 打包配置
+├── electron/              # Electron 主进程、IPC、自动更新、ADB 能力
+├── src/                   # React 渲染进程
+│   ├── App.jsx            # 主窗口
+│   ├── components/        # 设备、日志、性能、质量、任务、会员等模块
+│   ├── data/              # 主题、命令、更新日志
+│   └── shared/            # 共享工具
+├── docs/                  # README 截图与文档资产
+├── scrcpy-win64/          # Windows 内置 scrcpy + adb
+└── electron-builder.json  # 打包配置
 ```
 
 ## License

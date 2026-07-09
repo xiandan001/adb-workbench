@@ -65,6 +65,13 @@ function PackageManagerPanel({
   const [batchLoading, setBatchLoading] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [packageSearchVisible, setPackageSearchVisible] = useState(() => {
+    try {
+      return localStorage.getItem('packageSearchVisible') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const showToastRef = useRef(showToast);
 
   const isLoading = (key) => operationLoading?.[key];
@@ -83,6 +90,14 @@ function PackageManagerPanel({
   useEffect(() => {
     showToastRef.current = showToast;
   }, [showToast]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('packageSearchVisible', packageSearchVisible ? 'true' : 'false');
+    } catch {
+      // localStorage can be unavailable in constrained webviews; keep the runtime state.
+    }
+  }, [packageSearchVisible]);
 
   useEffect(() => {
     setSelectedPackageNames(prev => {
@@ -342,6 +357,15 @@ function PackageManagerPanel({
           </span>
           <button
             type="button"
+            onClick={() => setPackageSearchVisible(prev => !prev)}
+            className={`px-3 py-2 rounded-lg border text-xs transition-colors flex items-center gap-1.5 ${packageSearchVisible ? t.button.secondary : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'}`}
+            title={packageSearchVisible ? '隐藏应用列表和包名搜索' : '显示应用列表和包名搜索'}
+          >
+            {packageSearchVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+            {packageSearchVisible ? '隐藏列表' : '显示列表'}
+          </button>
+          <button
+            type="button"
             onClick={exportSnapshot}
             disabled={loadingPackages || packages.length === 0}
             className={`px-3 py-2 rounded-lg border text-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 ${t.button.secondary}`}
@@ -504,7 +528,8 @@ function PackageManagerPanel({
           </div>
         </div>
 
-        <div className={`rounded-lg border overflow-hidden ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+        {packageSearchVisible && (
+          <div className={`rounded-lg border overflow-hidden ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
           <div className={`p-3 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
@@ -677,7 +702,8 @@ function PackageManagerPanel({
               )}
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </div>
     </div>
     </>

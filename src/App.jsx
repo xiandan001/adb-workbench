@@ -22,6 +22,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('devices');
+  const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [wifiIp, setWifiIp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [scrcpySettings, setScrcpySettings] = useState({
@@ -354,79 +355,67 @@ function App() {
 
   useEffect(() => {
     fetchDevices();
-    const loadCustomThemes = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadCustomThemes();
-        if (result.success && result.data.length > 0) {
-          setCustomThemes(result.data);
+    const markSettingsLoaded = () => {
+      inspectionPathLoadedRef.current = true;
+      performancePathLoadedRef.current = true;
+      taskCenterPathLoadedRef.current = true;
+      qualityCenterPathLoadedRef.current = true;
+    };
+    const applySettings = (settings = {}) => {
+      if (settings.screenshotPath) setScreenshotPath(settings.screenshotPath);
+      if (settings.screenRecordPath) setScreenRecordPath(settings.screenRecordPath);
+      if (settings.inspectionPath) setInspectionPath(settings.inspectionPath);
+      if (settings.performancePath) setPerformancePath(settings.performancePath);
+      if (settings.taskCenterPath) setTaskCenterPath(settings.taskCenterPath);
+      if (settings.qualityCenterPath) setQualityCenterPath(settings.qualityCenterPath);
+      if (Array.isArray(settings.pushRemotePathHistory)) setPushRemotePathHistory(settings.pushRemotePathHistory);
+      markSettingsLoaded();
+    };
+    const loadSettingsFallback = async () => {
+      if (!window.electronAPI) return;
+      const [
+        themesResult,
+        screenshotResult,
+        screenRecordResult,
+        inspectionResult,
+        performanceResult,
+        taskCenterResult,
+        qualityCenterResult,
+        pushHistoryResult
+      ] = await Promise.all([
+        window.electronAPI.loadCustomThemes?.(),
+        window.electronAPI.loadScreenshotPath?.(),
+        window.electronAPI.loadScreenRecordPath?.(),
+        window.electronAPI.loadInspectionPath?.(),
+        window.electronAPI.loadPerformancePath?.(),
+        window.electronAPI.loadTaskCenterPath?.(),
+        window.electronAPI.loadQualityCenterPath?.(),
+        window.electronAPI.loadPushRemotePathHistory?.()
+      ]);
+      if (themesResult?.success && themesResult.data?.length > 0) setCustomThemes(themesResult.data);
+      applySettings({
+        screenshotPath: screenshotResult?.data,
+        screenRecordPath: screenRecordResult?.data,
+        inspectionPath: inspectionResult?.data,
+        performancePath: performanceResult?.data,
+        taskCenterPath: taskCenterResult?.data,
+        qualityCenterPath: qualityCenterResult?.data,
+        pushRemotePathHistory: pushHistoryResult?.data
+      });
+    };
+    const loadInitialSettings = async () => {
+      if (!window.electronAPI) return;
+      if (window.electronAPI.loadAllSettings) {
+        const result = await window.electronAPI.loadAllSettings();
+        if (result?.success) {
+          if (result.data?.customThemes?.length > 0) setCustomThemes(result.data.customThemes);
+          applySettings(result.data?.settings || {});
+          return;
         }
       }
+      await loadSettingsFallback();
     };
-    loadCustomThemes();
-    // 加载截图保存路径
-    const loadScreenshotPath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadScreenshotPath();
-        if (result.success && result.data) {
-          setScreenshotPath(result.data);
-        }
-      }
-    };
-    loadScreenshotPath();
-    // 加载录屏保存路径
-    const loadScreenRecordPath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadScreenRecordPath();
-        if (result.success && result.data) {
-          setScreenRecordPath(result.data);
-        }
-      }
-    };
-    loadScreenRecordPath();
-    // 加载巡检保存路径
-    const loadInspectionPath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadInspectionPath();
-        if (result.success && result.data) {
-          setInspectionPath(result.data);
-        }
-        inspectionPathLoadedRef.current = true;
-      }
-    };
-    loadInspectionPath();
-    // 加载性能导出保存路径
-    const loadPerformancePath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadPerformancePath();
-        if (result.success && result.data) {
-          setPerformancePath(result.data);
-        }
-        performancePathLoadedRef.current = true;
-      }
-    };
-    loadPerformancePath();
-    // 加载任务中心保存路径
-    const loadTaskCenterPath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadTaskCenterPath();
-        if (result.success && result.data) {
-          setTaskCenterPath(result.data);
-        }
-        taskCenterPathLoadedRef.current = true;
-      }
-    };
-    loadTaskCenterPath();
-    // 加载质量中心保存路径
-    const loadQualityCenterPath = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadQualityCenterPath();
-        if (result.success && result.data) {
-          setQualityCenterPath(result.data);
-        }
-        qualityCenterPathLoadedRef.current = true;
-      }
-    };
-    loadQualityCenterPath();
+    loadInitialSettings();
     // 加载连接历史记录
     const loadConnectionHistory = async () => {
       if (window.electronAPI) {
@@ -447,19 +436,9 @@ function App() {
       }
     };
     loadTerminalCmdHistory();
-    // 加载推送远程路径历史记录
-    const loadPushHistory = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadPushRemotePathHistory();
-        if (result.success && result.data) {
-          setPushRemotePathHistory(result.data);
-        }
-      }
-    };
-    loadPushHistory();
     // 初始化 VIP 状态
     refreshVipStatus();
-  }, [autoUpdateEnabled, refreshVipStatus]);
+  }, [refreshVipStatus]);
 
   useEffect(() => {
     const saveThemes = async () => {
@@ -1255,6 +1234,70 @@ function App() {
   };
 
   const t = theme || themes.default;
+  const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
+  const settingsNavShellClass = t.primary === 'tech'
+    ? 'bg-[#202124] border-[#3E4145]/80'
+    : 'bg-slate-50 border-slate-200/80';
+  const settingsNavPanelClass = t.primary === 'tech'
+    ? 'bg-[#2D2F33] border-[#3E4145] shadow-[0_18px_36px_rgba(0,0,0,0.36)]'
+    : 'bg-white border-slate-200 shadow-[0_18px_36px_rgba(15,23,42,0.14)]';
+  const settingsNavItemClass = t.primary === 'tech'
+    ? 'border-[#4A4D52] text-[#BDC1C6] hover:bg-[#3E4145] hover:text-[#E8EAED]'
+    : 'border-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800';
+  const settingsNavActiveItemClass = t.primary === 'tech'
+    ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-300 shadow-sm'
+    : 'border-emerald-500/35 bg-emerald-50 text-emerald-700 shadow-sm';
+  const scrollToSettingsSection = (sectionId) => {
+    setActiveSettingsSection(sectionId);
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const settingsSections = useMemo(() => [
+    { id: 'settings-commands', label: '快捷命令', icon: ClipboardList },
+    { id: 'settings-cast', label: '投屏', icon: Smartphone },
+    { id: 'settings-paths', label: '保存路径', icon: Folder },
+    { id: 'settings-appearance', label: '外观', icon: Palette },
+    { id: 'settings-update', label: '更新', icon: Package },
+    { id: 'settings-danger', label: '高危操作', icon: RotateCcw }
+  ], []);
+
+  useEffect(() => {
+    if (activeTab !== 'settings') return undefined;
+
+    const scrollContainer = document.querySelector('main');
+    const sectionElements = settingsSections
+      .map((item) => document.getElementById(item.id))
+      .filter(Boolean);
+
+    if (!scrollContainer || sectionElements.length === 0) return undefined;
+
+    let frameId = null;
+    const updateActiveSection = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        const navShell = scrollContainer.querySelector('[data-settings-nav="true"]');
+        const targetY = (navShell?.getBoundingClientRect().bottom ?? scrollContainer.getBoundingClientRect().top) + 16;
+        let currentSectionId = sectionElements[0].id;
+
+        sectionElements.forEach((sectionElement) => {
+          if (sectionElement.getBoundingClientRect().top <= targetY) {
+            currentSectionId = sectionElement.id;
+          }
+        });
+
+        setActiveSettingsSection((prev) => (prev === currentSectionId ? prev : currentSectionId));
+      });
+    };
+
+    updateActiveSection();
+    scrollContainer.addEventListener('scroll', updateActiveSection, { passive: true });
+    window.addEventListener('resize', updateActiveSection);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      scrollContainer.removeEventListener('scroll', updateActiveSection);
+      window.removeEventListener('resize', updateActiveSection);
+    };
+  }, [activeTab, settingsSections]);
 
   return (
     <div className={`flex h-screen select-none ${t.primary === 'tech' ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
@@ -1305,11 +1348,11 @@ function App() {
                 };
                 const cfg = typeConfig[item.type] || typeConfig.improve;
                 return (
-                  <div key={idx} className="flex items-start gap-3">
-                    <span className={`shrink-0 px-2 py-0.5 text-[10px] font-semibold rounded border ${cfg.color}`}>
+                  <div key={idx} className="flex items-center gap-3">
+                    <span className={`inline-flex h-6 min-w-11 shrink-0 items-center justify-center px-2 text-[10px] leading-none font-semibold rounded border ${cfg.color}`}>
                       {cfg.label}
                     </span>
-                    <span className={`text-sm leading-relaxed ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                    <span className={`text-sm leading-6 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                       {item.text}
                     </span>
                   </div>
@@ -1453,13 +1496,13 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className={`w-72 flex flex-col pt-8 bg-[#202124] text-[#E8EAED]`}>
-        <div className={`px-6 mb-8 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
+      <div className="w-60 lg:w-64 shrink-0 flex flex-col pt-6 lg:pt-8 bg-[#202124] text-[#E8EAED]">
+        <div className={`px-4 lg:px-5 mb-6 lg:mb-8 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
           <h1 className="text-xl font-bold tracking-wide">卓控台</h1>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2">
+        <nav className="flex-1 px-3 lg:px-4 space-y-2">
           <button
             onClick={() => setActiveTab('devices')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'devices' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
@@ -1477,12 +1520,12 @@ function App() {
             <span className="font-medium">问题排查</span>
           </button>
           <button
-            onClick={() => setActiveTab('artifacts')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'artifacts' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
+            onClick={() => setActiveTab('performance')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'performance' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
-            <FolderOpen size={20} />
-            <span className="font-medium">产物中心</span>
+            <Gauge size={20} />
+            <span className="font-medium">性能监控</span>
           </button>
           <button
             onClick={() => setActiveTab('quality')}
@@ -1500,14 +1543,13 @@ function App() {
             <ClipboardList size={20} />
             <span className="font-medium">任务中心</span>
           </button>
-          {/* 性能监控主入口 */}
           <button
-            onClick={() => setActiveTab('performance')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'performance' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
+            onClick={() => setActiveTab('artifacts')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'artifacts' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
-            <Gauge size={20} />
-            <span className="font-medium">性能监控</span>
+            <FolderOpen size={20} />
+            <span className="font-medium">产物中心</span>
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -1569,10 +1611,10 @@ function App() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col pt-8 h-screen overflow-hidden">
+      <div className="min-w-0 flex-1 flex flex-col pt-6 lg:pt-8 h-screen overflow-hidden">
         {/* Header */}
-        <header className={`px-8 pb-6 border-b flex justify-between items-center sticky top-0 z-10 ${t.primary === 'tech' ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-          <div>
+        <header className={`px-4 lg:px-6 xl:px-8 pb-4 lg:pb-6 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${t.primary === 'tech' ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-2xl font-bold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? '已连接设备' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
@@ -1605,7 +1647,7 @@ function App() {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
           {error && (
             <div className={`p-4 rounded-lg mb-6 border ${t.primary === 'tech' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {error}
@@ -1615,10 +1657,10 @@ function App() {
           {activeTab === 'devices' && (
             <>
               {/* Wi-Fi Connect Section */}
-              <div className={`mb-8 p-5 rounded-xl border shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-                <div className="w-full sm:w-auto">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                    <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+              <div className={`mb-6 lg:mb-8 p-4 lg:p-5 rounded-xl border shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+                <div className="min-w-0 w-full xl:w-auto">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className={`text-base lg:text-lg font-semibold flex items-center gap-2 whitespace-nowrap ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                       <Wifi size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
                       Wi-Fi 无线连接
                     </h3>
@@ -1637,13 +1679,13 @@ function App() {
                   </div>
                   <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>输入设备的 IP 地址和端口 (例如: 192.168.1.100:5555)</p>
                 </div>
-                <form onSubmit={handleWifiConnect} className="flex w-full sm:w-auto gap-2">
+                <form onSubmit={handleWifiConnect} className="flex w-full xl:w-auto gap-2">
                   <input
                     type="text"
                     value={wifiIp}
                     onChange={(e) => setWifiIp(e.target.value)}
                     placeholder="IP 地址:端口"
-                    className={`flex-1 sm:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
+                    className={`min-w-0 flex-1 xl:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
                   />
                   <button
                     type="submit"
@@ -1934,13 +1976,39 @@ function App() {
           )}
 
           {activeTab === 'settings' && (
-            <div className={`w-full p-6 rounded-xl border shadow-sm ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+            <div className="space-y-4">
+              <div data-settings-nav="true" className={`sticky -top-4 z-[8] -mx-4 -mt-4 px-4 pt-2 pb-2 border-b lg:-top-6 lg:-mx-6 lg:-mt-6 lg:px-6 lg:pt-3 xl:-top-8 xl:-mx-8 xl:-mt-8 xl:px-8 xl:pt-3 ${settingsNavShellClass}`}>
+                <div className={`rounded-xl border p-1.5 ${settingsNavPanelClass}`}>
+                  <div className="flex gap-2 overflow-x-auto pb-0.5">
+                    {settingsSections.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeSettingsSection === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-current={isActive ? 'true' : undefined}
+                          onClick={() => scrollToSettingsSection(item.id)}
+                          className={`min-w-[128px] shrink-0 xl:min-w-0 xl:flex-1 px-3 py-2 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 transition-all ${isActive ? settingsNavActiveItemClass : settingsNavItemClass}`}
+                        >
+                          <Icon size={15} className="shrink-0" />
+                          <span className="whitespace-nowrap">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <section id="settings-commands" className={settingsSectionClass}>
               <GlobalCommandSettings
                 settings={globalCommandSettings}
                 theme={theme}
                 onChange={setGlobalCommandSettings}
               />
+              </section>
 
+              <section id="settings-cast" className={settingsSectionClass}>
               <h3 className={`text-lg font-semibold mb-4 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>Scrcpy 投屏设置</h3>
               <p className={`text-sm mb-6 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>这些设置将在启动新的投屏会话时应用。</p>
 
@@ -2012,7 +2080,15 @@ function App() {
                     <option value="720">720</option>
                   </select>
                 </div>
+              </div>
+              </section>
 
+              <section id="settings-paths" className={settingsSectionClass}>
+                <div className="mb-5">
+                  <h3 className={`text-lg font-semibold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>保存路径</h3>
+                  <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>集中管理截图、录屏、巡检、性能、任务和质量产物目录。</p>
+                </div>
+                <div className="space-y-4">
                 {/* 截图保存路径设置 */}
                 <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
@@ -2327,7 +2403,10 @@ function App() {
                     回归基线、回归报告和设备守护报告将保存到此目录，默认为 %APPDATA%/adb-workbench/quality-center/
                   </p>
                 </div>
+                </div>
+              </section>
 
+              <section id="settings-appearance" className={settingsSectionClass}>
                 {/* Theme Selection */}
                 <div className="py-3">
                   <div className="flex items-center justify-between mb-3">
@@ -2411,7 +2490,9 @@ function App() {
                     })}
                   </div>
                 </div>
+              </section>
 
+              <section id="settings-update" className={settingsSectionClass}>
                 {/* 关于与更新 */}
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">
@@ -2573,9 +2654,11 @@ function App() {
                     </div>
                   </div>
                 </div>
+              </section>
 
+              <section id="settings-danger" className={settingsSectionClass}>
                 {/* 重置所有设置（放在最后） */}
-                <div className="py-4 border-t mt-4">
+                <div className="py-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <RotateCcw size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
@@ -2632,6 +2715,7 @@ function App() {
                     </button>
                   </div>
                 </div>
+              </section>
 
                 {/* Custom Theme Editor Modal */}
                 {showThemeEditor && (
@@ -2801,7 +2885,6 @@ function App() {
                   </div>
                 )}
               </div>
-            </div>
           )}
         </main>
       </div>
