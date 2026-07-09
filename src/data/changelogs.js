@@ -2,6 +2,15 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.1': {
+    title: 'v4.1.1',
+    date: '2026-07-09',
+    items: [
+      { type: 'feature', text: '产物中心新增单个删除、多选删除和一键清理' },
+      { type: 'improve', text: '产物删除改为移入系统回收站' },
+      { type: 'improve', text: '优化产物列表删除按钮布局' }
+    ]
+  },
   '4.1.0': {
     title: 'v4.1.0',
     date: '2026-07-09',

@@ -296,6 +296,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 报告/产物中心
   artifactsList: () => ipcRenderer.invoke('artifacts:list'),
   artifactOpenPath: (targetPath) => ipcRenderer.invoke('artifacts:openPath', targetPath),
+  artifactsDelete: (args) => ipcRenderer.invoke('artifacts:delete', args),
   // Quality center: regression baselines and difference reports
   regressionListBaselines: () => ipcRenderer.invoke('regression:listBaselines'),
   regressionCaptureBaseline: (args) => ipcRenderer.invoke('regression:captureBaseline', args),

@@ -1800,6 +1800,7 @@ function App() {
             <ArtifactCenter
               theme={theme}
               showToast={showToast}
+              showConfirm={showConfirm}
             />
           )}
 

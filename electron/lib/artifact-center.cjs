@@ -23,6 +23,15 @@ function register(ipcMain) {
     const error = await shell.openPath(targetPath);
     return error ? { ok: false, error } : { ok: true };
   });
+
+  ipcMain.handle('artifacts:delete', async (event, args) => {
+    try {
+      const result = await deleteArtifacts(args);
+      return { ok: true, ...result, items: await listArtifacts() };
+    } catch (error) {
+      return { ok: false, error: error.message, deleted: [], failed: [] };
+    }
+  });
 }
 
 async function listArtifacts() {
@@ -70,6 +79,7 @@ async function scanTroubleshooting(baseDir) {
       createdAt: summary.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: summary.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,
+      deletePath: dir,
       reportPath: exists(reportPath) ? reportPath : '',
       summaryPath: exists(summaryPath) ? summaryPath : '',
       artifactCount: Array.isArray(summary.artifacts) ? summary.artifacts.length : countFilesShallow(dir)
@@ -100,6 +110,7 @@ async function scanInspection(baseDirs) {
       createdAt: summary.startedAt || metadata.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: summary.endedAt || metadata.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,
+      deletePath: dir,
       reportPath: exists(reportPath) ? reportPath : '',
       summaryPath: exists(summaryPath) ? summaryPath : '',
       artifactCount: Array.isArray(summary.artifacts) ? summary.artifacts.length : countFilesShallow(dir)
@@ -127,6 +138,7 @@ async function scanPerformance(baseDirs) {
         createdAt: stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
         updatedAt: stat?.mtime?.toISOString(),
         rootPath: path.dirname(file),
+        deletePath: file,
         reportPath: isReport ? file : '',
         summaryPath: isReport ? '' : file,
         artifactCount: 1
@@ -156,6 +168,7 @@ async function scanTaskCenter(baseDirs) {
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: result.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,
+      deletePath: dir,
       reportPath: exists(reportPath) ? reportPath : '',
       summaryPath: exists(resultPath) ? resultPath : '',
       artifactCount: countFilesShallow(dir)
@@ -184,6 +197,7 @@ async function scanRegression(baseDirs) {
       createdAt: result.comparedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: result.comparedAt || stat?.mtime?.toISOString(),
       rootPath: dir,
+      deletePath: dir,
       reportPath: exists(reportPath) ? reportPath : '',
       summaryPath: exists(resultPath) ? resultPath : '',
       artifactCount: countFilesShallow(dir)
@@ -211,6 +225,7 @@ async function scanDeviceGuard(baseDirs) {
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: result.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,
+      deletePath: dir,
       reportPath: exists(reportPath) ? reportPath : '',
       summaryPath: exists(resultPath) ? resultPath : '',
       artifactCount: countFilesShallow(dir)
@@ -229,6 +244,51 @@ async function recentDirectories(baseDir, limit) {
     dirs.push({ path: fullPath, time: stat?.mtime?.getTime() || 0 });
   }
   return dirs.sort((a, b) => b.time - a.time).slice(0, limit).map(item => item.path);
+}
+
+async function deleteArtifacts(args) {
+  const ids = normalizeIds(args?.ids || args?.id);
+  if (ids.length === 0) throw new Error('请选择要删除的产物');
+
+  const items = await listArtifacts();
+  const itemById = new Map(items.map(item => [item.id, item]));
+  const targetByPath = new Map();
+  const failed = [];
+
+  for (const id of ids) {
+    const item = itemById.get(id);
+    if (!item) {
+      failed.push({ id, error: '产物不存在或已不在当前列表中' });
+      continue;
+    }
+    const deletePath = String(item.deletePath || '').trim();
+    if (!deletePath) {
+      failed.push({ id, title: item.title, error: '产物缺少可删除路径' });
+      continue;
+    }
+    const resolvedPath = path.resolve(deletePath);
+    if (!exists(resolvedPath)) {
+      failed.push({ id, title: item.title, path: resolvedPath, error: '文件或目录不存在' });
+      continue;
+    }
+    if (!targetByPath.has(resolvedPath)) {
+      targetByPath.set(resolvedPath, { ids: [id], title: item.title, path: resolvedPath });
+    } else {
+      targetByPath.get(resolvedPath).ids.push(id);
+    }
+  }
+
+  const deleted = [];
+  for (const target of targetByPath.values()) {
+    try {
+      await shell.trashItem(target.path);
+      deleted.push(target);
+    } catch (error) {
+      failed.push({ ids: target.ids, title: target.title, path: target.path, error: error.message || '移入回收站失败' });
+    }
+  }
+
+  return { deleted, failed };
 }
 
 async function recentFiles(baseDir, limit) {
@@ -275,6 +335,11 @@ async function safeStat(targetPath) {
 
 function exists(targetPath) {
   return !!targetPath && fs.existsSync(targetPath);
+}
+
+function normalizeIds(value) {
+  const list = Array.isArray(value) ? value : [value];
+  return Array.from(new Set(list.map(item => String(item || '').trim()).filter(Boolean)));
 }
 
 function uniquePaths(values) {

@@ -1,7 +1,8 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   Activity,
   AlertCircle,
+  CheckSquare,
   ClipboardCheck,
   FileDiff,
   FileJson,
@@ -11,6 +12,8 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Square,
+  Trash2,
   Wrench
 } from 'lucide-react';
 
@@ -33,12 +36,14 @@ const TYPE_META = {
   task: { icon: FileJson, color: 'text-amber-400', bg: 'bg-amber-500/15' }
 };
 
-function ArtifactCenter({ theme, showToast }) {
+function ArtifactCenter({ theme, showToast, showConfirm }) {
   const isDark = theme.primary === 'tech';
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [error, setError] = useState('');
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
@@ -47,20 +52,21 @@ function ArtifactCenter({ theme, showToast }) {
   const soft = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
   const input = isDark ? 'bg-[#202124] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-700';
 
-  useEffect(() => {
-    let disposed = false;
-    window.electronAPI?.artifactsList?.().then(res => {
-      if (disposed) return;
-      if (res?.ok) {
-        setItems(res.items || []);
-        setError('');
-      } else {
-        setError(res?.error || '产物列表加载失败');
-      }
-      setLoading(false);
-    });
-    return () => { disposed = true; };
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const res = await window.electronAPI?.artifactsList?.();
+    if (res?.ok) {
+      setItems(res.items || []);
+    } else {
+      setError(res?.error || '产物列表加载失败');
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -79,22 +85,90 @@ function ArtifactCenter({ theme, showToast }) {
       });
   }, [items, query, typeFilter]);
 
-  const refresh = async () => {
-    setLoading(true);
-    setError('');
-    const res = await window.electronAPI?.artifactsList?.();
-    if (res?.ok) {
-      setItems(res.items || []);
-    } else {
-      setError(res?.error || '产物列表加载失败');
-    }
-    setLoading(false);
-  };
+  const selectedItems = useMemo(() => items.filter(item => selectedIds.has(item.id)), [items, selectedIds]);
+  const filteredIds = useMemo(() => filteredItems.map(item => item.id), [filteredItems]);
+  const selectedCount = selectedIds.size;
+  const filteredSelected = filteredIds.filter(id => selectedIds.has(id)).length;
+  const allFilteredSelected = filteredIds.length > 0 && filteredSelected === filteredIds.length;
+  const hasFilter = typeFilter !== 'all' || query.trim().length > 0;
+
+  useEffect(() => {
+    const liveIds = new Set(items.map(item => item.id));
+    setSelectedIds(prev => {
+      const next = new Set(Array.from(prev).filter(id => liveIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
 
   const openPath = async (targetPath) => {
     if (!targetPath) return;
     const res = await window.electronAPI?.artifactOpenPath?.(targetPath);
     if (res && !res.ok) showToast?.(`打开失败：${res.error || '未知错误'}`);
+  };
+
+  const toggleItem = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleFilteredSelection = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) filteredIds.forEach(id => next.delete(id));
+      else filteredIds.forEach(id => next.add(id));
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const deleteArtifacts = async (ids, title) => {
+    const targetIds = Array.from(new Set(ids)).filter(Boolean);
+    if (targetIds.length === 0 || deleting) return;
+    const targetItems = items.filter(item => targetIds.includes(item.id));
+    const runDelete = async () => {
+      setDeleting(true);
+      try {
+        const res = await window.electronAPI?.artifactsDelete?.({ ids: targetIds });
+        if (res?.ok) {
+          setItems(res.items || []);
+          setSelectedIds(prev => {
+            const next = new Set(prev);
+            targetIds.forEach(id => next.delete(id));
+            return next;
+          });
+          const failedCount = Array.isArray(res.failed) ? res.failed.length : 0;
+          const deletedCount = Array.isArray(res.deleted) ? res.deleted.length : 0;
+          if (failedCount > 0) showToast?.(`已删除 ${deletedCount} 项，${failedCount} 项失败`);
+          else showToast?.(`已将 ${deletedCount} 项产物移入回收站`);
+        } else {
+          showToast?.(`删除失败：${res?.error || '未知错误'}`);
+        }
+      } finally {
+        setDeleting(false);
+      }
+    };
+
+    const bullets = targetItems.slice(0, 5).map(item => `${item.typeLabel}：${item.title}`);
+    if (targetItems.length > 5) bullets.push(`还有 ${targetItems.length - 5} 项...`);
+    const confirmOptions = {
+      title: title || '删除产物',
+      message: `确定将 ${targetItems.length} 项产物移入回收站吗？`,
+      detail: '目录型产物会删除对应产物目录；性能报告/数据只删除对应文件。',
+      bullets,
+      confirmLabel: targetItems.length > 1 ? '删除产物' : '删除',
+      tone: 'danger',
+      onConfirm: runDelete
+    };
+    if (showConfirm) {
+      showConfirm(confirmOptions);
+      return;
+    }
+    if (window.confirm(confirmOptions.message)) await runDelete();
   };
 
   return (
@@ -105,14 +179,24 @@ function ArtifactCenter({ theme, showToast }) {
             <h3 className={`text-lg font-semibold ${text}`}>报告/产物中心</h3>
             <p className={`text-xs mt-1 ${muted}`}>统一查看问题排查、巡检、性能和任务中心产物</p>
           </div>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-60 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145] text-[#E8EAED]' : 'border-slate-200 hover:bg-slate-100 text-slate-700'}`}
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            刷新
-          </button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              onClick={() => deleteArtifacts(filteredIds, hasFilter ? '删除筛选结果' : '清空全部产物')}
+              disabled={loading || deleting || filteredItems.length === 0}
+              className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
+            >
+              <Trash2 size={15} />
+              {hasFilter ? '删除筛选结果' : '清空全部'}
+            </button>
+            <button
+              onClick={refresh}
+              disabled={loading || deleting}
+              className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-60 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145] text-[#E8EAED]' : 'border-slate-200 hover:bg-slate-100 text-slate-700'}`}
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              刷新
+            </button>
+          </div>
         </div>
 
         <div className="p-5 space-y-4">
@@ -152,6 +236,41 @@ function ArtifactCenter({ theme, showToast }) {
             <Stat label="任务/性能" value={items.filter(item => item.type === 'task' || item.type === 'performance').length} isDark={isDark} />
           </div>
 
+          <div className={`rounded-lg border px-3 py-2 flex flex-wrap items-center justify-between gap-3 ${soft}`}>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={toggleFilteredSelection}
+                disabled={filteredItems.length === 0 || deleting}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}
+              >
+                {allFilteredSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+                {allFilteredSelected ? '取消当前选择' : '选择当前结果'}
+              </button>
+              <span className={`text-xs ${muted}`}>
+                当前 {filteredItems.length} 项，已选 {selectedCount} 项
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedCount > 0 && (
+                <button
+                  onClick={clearSelection}
+                  disabled={deleting}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#BDC1C6] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-600 hover:bg-white'}`}
+                >
+                  取消选择
+                </button>
+              )}
+              <button
+                onClick={() => deleteArtifacts(selectedItems.map(item => item.id), '删除所选产物')}
+                disabled={selectedCount === 0 || deleting}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
+              >
+                <Trash2 size={14} />
+                删除所选
+              </button>
+            </div>
+          </div>
+
           {error && (
             <div className="rounded-lg border border-red-500/25 bg-red-500/10 text-red-400 px-4 py-3 text-sm flex items-start gap-2">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -172,7 +291,18 @@ function ArtifactCenter({ theme, showToast }) {
           ) : (
             <div className="space-y-3">
               {filteredItems.map(item => (
-                <ArtifactRow key={item.id} item={item} isDark={isDark} text={text} muted={muted} onOpenPath={openPath} />
+                <ArtifactRow
+                  key={item.id}
+                  item={item}
+                  isDark={isDark}
+                  text={text}
+                  muted={muted}
+                  selected={selectedIds.has(item.id)}
+                  disabled={deleting}
+                  onToggleSelect={toggleItem}
+                  onDelete={(target) => deleteArtifacts([target.id], '删除产物')}
+                  onOpenPath={openPath}
+                />
               ))}
             </div>
           )}
@@ -182,13 +312,22 @@ function ArtifactCenter({ theme, showToast }) {
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, onOpenPath }) {
+function ArtifactRow({ item, isDark, text, muted, selected, disabled, onToggleSelect, onDelete, onOpenPath }) {
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
   return (
-    <div className={`rounded-xl border p-4 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+    <div className={`rounded-xl border p-4 transition-colors ${selected ? (isDark ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-emerald-50 border-emerald-200') : (isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200')}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 gap-3">
+          <button
+            type="button"
+            onClick={() => onToggleSelect(item.id)}
+            disabled={disabled}
+            className={`mt-2 rounded-md p-1 transition-colors disabled:opacity-50 ${selected ? 'text-emerald-500' : muted} ${isDark ? 'hover:bg-[#3E4145]' : 'hover:bg-slate-100'}`}
+            title={selected ? '取消选择' : '选择产物'}
+          >
+            {selected ? <CheckSquare size={18} /> : <Square size={18} />}
+          </button>
           <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${meta.bg}`}>
             <Icon size={20} className={meta.color} />
           </div>
@@ -224,6 +363,15 @@ function ArtifactRow({ item, isDark, text, muted, onOpenPath }) {
               <FolderOpen size={14} />打开目录
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onDelete(item)}
+            disabled={disabled}
+            className={`px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
+            title="删除产物"
+          >
+            <Trash2 size={14} />删除
+          </button>
         </div>
       </div>
     </div>
@@ -243,6 +391,12 @@ function buttonClass(isDark) {
   return `px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 ${
     isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'
   }`;
+}
+
+function dangerButtonClass(isDark) {
+  return isDark
+    ? 'border-red-500/35 text-red-300 hover:bg-red-500/10'
+    : 'border-red-200 text-red-600 hover:bg-red-50';
 }
 
 function formatDate(value) {
