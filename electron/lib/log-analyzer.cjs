@@ -246,8 +246,10 @@ function createLogAnalyzerWindow() {
     // 清空日志存储（释放大量内存）
     resetLogStoreSource('realtime');
     resetLogStoreSource('file');
-    // 中止正在进行的 AI 分析
-    require('./ai-analyze.cjs').abortAiRequest();
+    // 中止正在进行的 AI 分析并清空对话上下文
+    const aiModule = require('./ai-analyze.cjs');
+    aiModule.abortAiRequest();
+    aiModule.clearAiConversation();
     ctx.setLogAnalyzerWindow(null);
   });
 

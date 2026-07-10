@@ -98,12 +98,22 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiContent, setAiContent] = useState('');
   const [aiError, setAiError] = useState('');
+  const [aiReasoning, setAiReasoning] = useState(''); // 当前轮思考内容（用于流式追加）
+  const [aiReasoningExpanded, setAiReasoningExpanded] = useState(true); // 当前轮思考面板展开/折叠
+  const [aiTurns, setAiTurns] = useState([]); // 对话轮次数组: [{ header, reasoning, content, reasoningExpanded }]
+  const [aiThinkingMode, setAiThinkingMode] = useState(false); // 思考模式开关（默认快速模式）
+  const [mapReduceProgress, setMapReduceProgress] = useState(null); // { phase, current, total, lineRange }
+  const [contextUsage, setContextUsage] = useState(null); // { usedTokens, maxTokens, percent, messageCount }
   const [aiCustomPrompt, setAiCustomPrompt] = useState('');
   const [aiFullscreen, setAiFullscreen] = useState(false);
   const [aiPanelHeight, setAiPanelHeight] = useState(440);
   const aiListenersRef = useRef([]);
   const aiContentRef = useRef('');
+  const aiReasoningRef = useRef('');
+  const aiTurnsRef = useRef([]); // 对话轮次 ref
   const aiResizingRef = useRef(false);
+  // 记录上次发送给 AI 的日志指纹（用于判断追问时日志是否变化）
+  const aiLastLogHashRef = useRef('');
   // AI 自动诊断状态
   const [autoDiagnoseEnabled, setAutoDiagnoseEnabled] = useState(true);
   const [autoDiagnoseAlert, setAutoDiagnoseAlert] = useState(null); // { issues, summary, timestamp }
@@ -404,19 +414,47 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       if (window.electronAPI && window.electronAPI.onAiStreamStart) {
         const offStart = window.electronAPI.onAiStreamStart(() => {
           setAiAnalyzing(true);
+          setAiError('');
+          // 重置思考内容（新一轮分析）
+          aiReasoningRef.current = '';
+          setAiReasoning('');
+          setAiReasoningExpanded(true);
         });
         listeners.push(offStart);
       }
       if (window.electronAPI && window.electronAPI.onAiStreamChunk) {
-        // 节流：累积到 ref，每 300ms 才 flush 到 React state，避免高频重渲染卡死 UI
+        // 高频节流 + requestAnimationFrame：60ms 间隔刷新，配合 rAF 保证浏览器渲染帧对齐
         let aiFlushTimer = null;
+        let aiRafPending = false;
         const offChunk = window.electronAPI.onAiStreamChunk((payload) => {
-          aiContentRef.current += payload.text;
+          // 收到首个 chunk 说明压缩/分块已完成，清除进度状态
+          setMapReduceProgress(null);
+          if (payload.type === 'reasoning') {
+            aiReasoningRef.current += payload.text;
+          } else {
+            aiContentRef.current += payload.text;
+          }
           if (!aiFlushTimer) {
             aiFlushTimer = setTimeout(() => {
               aiFlushTimer = null;
-              setAiContent(aiContentRef.current);
-            }, 300);
+              if (!aiRafPending) {
+                aiRafPending = true;
+                requestAnimationFrame(() => {
+                  aiRafPending = false;
+                  // 更新当前轮的 reasoning/content
+                  const turns = [...aiTurnsRef.current];
+                  const last = turns[turns.length - 1];
+                  if (last) {
+                    last.reasoning = aiReasoningRef.current;
+                    last.content = aiContentRef.current;
+                  }
+                  aiTurnsRef.current = turns;
+                  setAiTurns(turns);
+                  setAiContent(aiContentRef.current);
+                  setAiReasoning(aiReasoningRef.current);
+                });
+              }
+            }, 60);
           }
         });
         listeners.push(() => {
@@ -426,9 +464,23 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       }
       if (window.electronAPI && window.electronAPI.onAiStreamEnd) {
         const offEnd = window.electronAPI.onAiStreamEnd(() => {
-          // 流结束时立即 flush 最终内容（不等节流定时器）
+          // 流结束时 flush 最终内容到当前轮
+          const turns = [...aiTurnsRef.current];
+          const last = turns[turns.length - 1];
+          if (last) {
+            last.reasoning = aiReasoningRef.current;
+            last.content = aiContentRef.current;
+            // 有思考内容则自动折叠
+            if (aiReasoningRef.current) last.reasoningExpanded = false;
+          }
+          aiTurnsRef.current = turns;
+          setAiTurns(turns);
           setAiContent(aiContentRef.current);
+          setAiReasoning(aiReasoningRef.current);
           setAiAnalyzing(false);
+          setMapReduceProgress(null);
+          if (aiReasoningRef.current) setAiReasoningExpanded(false);
+          refreshContextUsage();
         });
         listeners.push(offEnd);
       }
@@ -436,8 +488,15 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         const offErr = window.electronAPI.onAiStreamError((payload) => {
           setAiError(payload.error || '分析失败');
           setAiAnalyzing(false);
+          setMapReduceProgress(null);
         });
         listeners.push(offErr);
+      }
+      if (window.electronAPI && window.electronAPI.onAiMapReduceProgress) {
+        const offMr = window.electronAPI.onAiMapReduceProgress((payload) => {
+          setMapReduceProgress(payload);
+        });
+        listeners.push(offMr);
       }
       aiListenersRef.current = listeners;
     }
@@ -819,32 +878,39 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setAiPanelOpen(true);
     setAiAnalyzing(true);
     setAiError('');
+    setMapReduceProgress(null);
 
-    // 多轮对话：在已有内容后添加分隔和时间戳
-    // 先检测是否有未闭合的代码块，如有则先闭合
-    if (aiContentRef.current) {
-      const codeBlockCount = (aiContentRef.current.match(/```/g) || []).length;
-      if (codeBlockCount % 2 !== 0) {
-        aiContentRef.current += '\n```\n';
-      }
-    }
-
-    const turnHeader = `\n\n---\n\n**[${new Date().toLocaleTimeString('zh-CN')}] ${aiCustomPrompt.trim() ? '追问' : '分析'}**${aiCustomPrompt.trim() ? `：${aiCustomPrompt.trim()}` : ''}\n\n`;
-    if (aiContentRef.current) {
-      aiContentRef.current += turnHeader;
-    } else {
-      aiContentRef.current = turnHeader.startsWith('\n\n') ? turnHeader.slice(2) : turnHeader;
-    }
-    setAiContent(aiContentRef.current);
+    // 创建本轮对话 turn
+    const turnHeader = `[${new Date().toLocaleTimeString('zh-CN')}] ${aiCustomPrompt.trim() ? '追问' : '分析'}${aiCustomPrompt.trim() ? `：${aiCustomPrompt.trim()}` : ''}`;
+    const currentTurn = {
+      header: turnHeader,
+      reasoning: '',
+      content: '',
+      reasoningExpanded: true
+    };
+    aiTurnsRef.current = [...aiTurnsRef.current, currentTurn];
+    aiContentRef.current = ''; // 当前轮 content
+    aiReasoningRef.current = ''; // 当前轮 reasoning
+    setAiTurns([...aiTurnsRef.current]);
+    setAiContent('');
+    setAiReasoning('');
+    setAiReasoningExpanded(true);
 
     const lines = filtered.map((e) => formatEntry(e));
     const filterContext = { ...deferredFilter };
+
+    // 计算日志指纹：用行数 + 前 100 行 + 后 100 行的 hash 判断日志是否变化
+    const logFingerprint = `${lines.length}:${lines.slice(0, 100).join('').length}:${lines.slice(-100).join('').length}`;
+    const logChanged = aiLastLogHashRef.current !== logFingerprint;
+    aiLastLogHashRef.current = logFingerprint;
 
     try {
       const res = await window.electronAPI.aiAnalyzeLog({
         lines,
         filterContext,
-        customPrompt: aiCustomPrompt.trim() || undefined
+        customPrompt: aiCustomPrompt.trim() || undefined,
+        logChanged,
+        thinkingMode: aiThinkingMode
       });
       if (!res.ok) {
         setAiError(res.error || '启动分析失败');
@@ -861,26 +927,44 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       await window.electronAPI.aiStopAnalyze();
     }
     setAiAnalyzing(false);
+    setMapReduceProgress(null);
   }
 
   async function onAiClear() {
     aiContentRef.current = '';
+    aiReasoningRef.current = '';
+    aiTurnsRef.current = [];
     setAiContent('');
+    setAiReasoning('');
+    setAiTurns([]);
     setAiError('');
+    aiLastLogHashRef.current = '';
     // 清空主进程对话上下文
     if (window.electronAPI && window.electronAPI.aiClearConversation) {
       await window.electronAPI.aiClearConversation();
     }
+    refreshContextUsage();
+  }
+
+  async function refreshContextUsage() {
+    if (window.electronAPI && window.electronAPI.aiGetContextUsage) {
+      try {
+        const res = await window.electronAPI.aiGetContextUsage();
+        if (res?.ok) setContextUsage(res);
+      } catch {}
+    }
   }
 
   async function onAiExport() {
-    if (!aiContent) return;
+    if (aiTurns.length === 0) return;
     if (window.electronAPI && window.electronAPI.aiExportResult) {
       const now = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      // 拼接所有轮次的内容
+      const fullContent = aiTurns.map(t => `## ${t.header}\n\n${t.content || ''}`).join('\n\n---\n\n');
       const res = await window.electronAPI.aiExportResult({
-        content: `# AI 日志助手分析报告\n\n生成时间：${now.toLocaleString('zh-CN')}\n\n---\n\n${aiContent}`,
+        content: `# AI 日志助手分析报告\n\n生成时间：${now.toLocaleString('zh-CN')}\n\n---\n\n${fullContent}`,
         defaultName: `ai_analysis_${dateStr}.md`
       });
       if (res.ok) {
@@ -1880,21 +1964,62 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
             {/* AI Panel Header */}
             <div className={`flex items-center justify-between px-4 py-2 border-b ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
-              <div className="flex items-center gap-2">
-                <Sparkles size={16} className={isDark ? 'text-purple-400' : 'text-purple-500'} />
-                <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>AI 日志助手</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <Sparkles size={16} className={`shrink-0 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
+                <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>AI 日志助手</span>
                 {aiAnalyzing && (
-                  <span className="flex items-center gap-1 text-xs text-purple-400">
+                  <span className="flex items-center gap-1 text-xs text-purple-400 shrink-0">
                     <Loader2 size={12} className="animate-spin" />
-                    分析中…
+                    {mapReduceProgress
+                      ? mapReduceProgress.phase === 'map'
+                        ? `分块分析 ${mapReduceProgress.current}/${mapReduceProgress.total}${mapReduceProgress.lineRange ? `（第 ${mapReduceProgress.lineRange} 行）` : ''}`
+                        : mapReduceProgress.phase === 'compress'
+                          ? '正在压缩上下文…'
+                          : '汇总分析中…'
+                      : '分析中…'}
                   </span>
                 )}
-                <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
+                <span className={`text-xs shrink-0 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
                   ({filtered.length.toLocaleString()} 条日志)
                 </span>
+                {(() => {
+                  const usage = contextUsage || { usedTokens: 0, maxTokens: 524288, percent: 0, messageCount: 0 };
+                  const pct = usage.percent;
+                  const ringColor = pct >= 90 ? '#EF4444' : pct >= 70 ? '#F59E0B' : '#3B82F6';
+                  const size = 22;
+                  const r = 8;
+                  const c = 2 * Math.PI * r;
+                  const offset = c - (pct / 100) * c;
+                  const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+                  return (
+                    <div className="relative group/ctx flex items-center justify-center shrink-0 w-[22px] h-[22px]" title="上下文使用量">
+                      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+                        <circle cx="11" cy="11" r={r} fill="none" strokeWidth="2.5"
+                          className={isDark ? 'stroke-[#3E4145]' : 'stroke-slate-200'} />
+                        <circle cx="11" cy="11" r={r} fill="none" strokeWidth="2.5"
+                          stroke={ringColor} strokeDasharray={c} strokeDashoffset={offset}
+                          strokeLinecap="round" transform="rotate(-90 11 11)"
+                          className="transition-all duration-500" />
+                      </svg>
+                      <span className={`absolute inset-0 flex items-center justify-center text-[8px] font-bold leading-none ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                        {pct}
+                      </span>
+                      {/* Tooltip */}
+                      <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover/ctx:opacity-100 transition-opacity pointer-events-none z-50 ${isDark ? 'bg-[#2A2C2F] border border-[#3E4145] text-[#E8EAED]' : 'bg-white border border-slate-200 text-slate-700 shadow-lg'}`}>
+                        <div className="font-bold mb-0.5">{pct}% 已用（剩余 {100 - pct}%）</div>
+                        <div className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}>
+                          已用 {fmt(usage.usedTokens)} / {fmt(usage.maxTokens)} tokens
+                        </div>
+                        <div className={`text-[10px] mt-0.5 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
+                          {usage.messageCount} 条对话消息
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-              <div className="flex items-center gap-1">
-                {aiContent && !aiAnalyzing && (
+              <div className="flex items-center gap-1 shrink-0">
+                {aiTurns.length > 0 && !aiAnalyzing && (
                   <>
                     <button
                       onClick={onAiExport}
@@ -1934,12 +2059,63 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 <div className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
                   <span className="font-bold">错误：</span>{aiError}
                 </div>
-              ) : aiContent ? (
-                <div className={`text-sm leading-relaxed ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
-                  <AiMarkdownRender content={aiContent} isDark={isDark} />
-                  {aiAnalyzing && (
-                    <span className="inline-block w-2 h-4 ml-0.5 bg-purple-400 animate-pulse align-middle" />
-                  )}
+              ) : aiTurns.length > 0 ? (
+                <div className="space-y-4">
+                  {aiTurns.map((turn, idx) => {
+                    const isLastTurn = idx === aiTurns.length - 1;
+                    const showThinking = isLastTurn ? aiAnalyzing : false;
+                    return (
+                      <div key={idx}>
+                        {/* 轮次标题 */}
+                        <div className={`text-xs font-bold mb-2 ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
+                          {turn.header}
+                        </div>
+                        {/* 本轮思考面板 */}
+                        {turn.reasoning && (
+                          <div className={`mb-2 rounded-lg border overflow-hidden ${isDark ? 'border-[#3E4145] bg-[#1A1B1D]' : 'border-slate-200 bg-slate-50'}`}>
+                            <button
+                              onClick={() => {
+                                const turns = [...aiTurns];
+                                turns[idx].reasoningExpanded = !turns[idx].reasoningExpanded;
+                                setAiTurns(turns);
+                              }}
+                              className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs font-medium transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-[#E8EAED]' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                              {showThinking ? (
+                                <Loader2 size={12} className="animate-spin text-purple-400" />
+                              ) : (
+                                <span className="text-purple-400">&#128294;</span>
+                              )}
+                              <span>{showThinking ? '思考中…' : '已完成思考'}</span>
+                              <span className={`ml-auto transition-transform ${turn.reasoningExpanded ? 'rotate-180' : ''}`}>
+                                <ChevronDown size={12} />
+                              </span>
+                            </button>
+                            {turn.reasoningExpanded && (
+                              <div className={`px-3 pb-2 text-xs leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+                                {turn.reasoning}
+                                {showThinking && <span className="inline-block w-1.5 h-3 ml-0.5 bg-purple-400/60 animate-pulse align-middle" />}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* 本轮回答内容 */}
+                        {turn.content ? (
+                          <div className={`text-sm leading-relaxed ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                            <AiMarkdownRender content={turn.content} isDark={isDark} />
+                            {showThinking && (
+                              <span className="inline-block w-2 h-4 ml-0.5 bg-purple-400 animate-pulse align-middle" />
+                            )}
+                          </div>
+                        ) : showThinking && !turn.reasoning ? (
+                          <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
+                            <Loader2 size={14} className="animate-spin text-purple-400" />
+                            AI 正在分析日志…
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : aiAnalyzing ? (
                 <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
@@ -1958,6 +2134,20 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
             {/* AI Input Bar */}
             <div className={`flex items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
+              {/* 快速/思考模式切换 */}
+              <button
+                onClick={() => setAiThinkingMode(!aiThinkingMode)}
+                disabled={aiAnalyzing}
+                className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-lg border transition-all disabled:opacity-50 ${
+                  aiThinkingMode
+                    ? (isDark ? 'border-purple-500/40 bg-purple-500/15 text-purple-400' : 'border-purple-300 bg-purple-50 text-purple-600')
+                    : (isDark ? 'border-[#5F6368] bg-[#3E4145] text-[#9AA0A6]' : 'border-slate-200 bg-white text-slate-500')
+                }`}
+                title={aiThinkingMode ? '思考模式：AI 会先进行推理再回答' : '快速模式：AI 直接回答，速度更快'}
+              >
+                {aiThinkingMode ? <Brain size={13} /> : <Zap size={13} />}
+                {aiThinkingMode ? '思考' : '快速'}
+              </button>
               <input
                 type="text"
                 value={aiCustomPrompt}

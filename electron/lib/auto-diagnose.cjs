@@ -514,8 +514,10 @@ function register(ipcMain) {
           { role: 'user', content: userContent }
         ];
       } else {
+        // 压缩历史上下文，防止累积超限
+        const compressedHistory = aiAnalyze.compressConversationContext(aiAnalyze.getAiConversationMessages());
         messages = [
-          ...aiAnalyze.getAiConversationMessages(),
+          ...compressedHistory,
           { role: 'user', content: userContent }
         ];
       }

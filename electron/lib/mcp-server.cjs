@@ -21,6 +21,8 @@ const {
   AGNES_API_KEY,
   AGNES_MODEL,
   AI_MAX_LOG_LINES,
+  AI_MAPREDUCE_THRESHOLD_BYTES,
+  AI_CHUNK_LINES,
 } = aiAnalyze.aiKeys;
 
 const MCP_SERVER_NAME = 'Android Log Analyzer MCP';
@@ -502,12 +504,27 @@ async function callMcpTool(name, args) {
     });
 
     const truncated = lines.length > AI_MAX_LOG_LINES;
-    const logContent = truncated ? lines.slice(lines.length - AI_MAX_LOG_LINES).join('\n') : lines.join('\n');
+    const effectiveLines = truncated ? lines.slice(lines.length - AI_MAX_LOG_LINES) : lines;
 
-    const systemPrompt = aiAnalyze.buildAiSystemPrompt(filter);
-    const userContent = customPrompt
-      ? `${customPrompt}\n\n--- 日志内容 ---\n${logContent}`
-      : `请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n${logContent}`;
+    // 判断是否需要 Map-Reduce
+    const logBytes = Buffer.byteLength(effectiveLines.join('\n'), 'utf8');
+    const needMapReduce = logBytes > AI_MAPREDUCE_THRESHOLD_BYTES && effectiveLines.length > AI_CHUNK_LINES;
+
+    let systemPrompt, userContent;
+
+    if (needMapReduce) {
+      // Map-Reduce 路径：分块分析后合并（sender=null，MCP 无前端进度）
+      const mrResult = await aiAnalyze.mapReduceAnalyze(effectiveLines, filter, customPrompt, null);
+      systemPrompt = mrResult.systemPrompt;
+      userContent = mrResult.userContent;
+    } else {
+      // 常规路径：直接发送完整日志
+      const logContent = effectiveLines.join('\n');
+      systemPrompt = aiAnalyze.buildAiSystemPrompt(filter);
+      userContent = customPrompt
+        ? `${customPrompt}\n\n--- 日志内容 ---\n${logContent}`
+        : `请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n${logContent}`;
+    }
 
     // 构建消息（MCP 调用不使用多轮上下文，独立分析）
     const messages = [

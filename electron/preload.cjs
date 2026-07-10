@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiAnalyzeLog: (args) => ipcRenderer.invoke('ai:analyzeLog', args),
   aiStopAnalyze: () => ipcRenderer.invoke('ai:stopAnalyze'),
   aiClearConversation: () => ipcRenderer.invoke('ai:clearConversation'),
+  aiGetContextUsage: () => ipcRenderer.invoke('ai:getContextUsage'),
   aiExportResult: (args) => ipcRenderer.invoke('ai:exportResult', args),
   onAiStreamStart: (callback) => {
     const listener = safeListener(callback);
@@ -147,6 +148,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = safeListener(callback);
     ipcRenderer.on('ai:streamError', listener);
     return () => ipcRenderer.off('ai:streamError', listener);
+  },
+  onAiMapReduceProgress: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('ai:mapReduceProgress', listener);
+    return () => ipcRenderer.off('ai:mapReduceProgress', listener);
   },
   // AI 自动诊断：实时检测崩溃/ANR/OOM 并提示用户
   autoDiagnoseAnalyze: (args) => ipcRenderer.invoke('auto-diagnose:analyze', args),

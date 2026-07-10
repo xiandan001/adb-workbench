@@ -19,6 +19,13 @@ const {
   AI_MAX_LOG_LINES,
   AI_MAX_CONTEXT_MESSAGES,
   AI_MAX_CONTEXT_BYTES,
+  AI_BYTES_PER_TOKEN,
+  AI_CHUNK_LINES,
+  AI_MAPREDUCE_THRESHOLD_BYTES,
+  AI_MAPREDUCE_MAX_CHUNKS,
+  AI_CONTEXT_COMPRESS_THRESHOLD,
+  AI_COMPRESSED_MSG_MAX_BYTES,
+  AI_MODEL_MAX_CONTEXT_TOKENS,
   getAgnesKeyIndex,
   getNextApiKey,
 } = aiKeys;
@@ -28,8 +35,32 @@ let aiConversationBytes = 0;
 let aiAbortController = null;
 // 多轮对话上下文
 let aiConversationMessages = [];
+// 最近一次分析请求中的用户日志内容字节数（用于上下文使用率显示）
+let aiPendingUserContentBytes = 0;
+// 最近一次分析使用的 system prompt 字节数（用于上下文使用率显示）
+let aiSystemPromptBytes = 0;
+// API 返回的真实 prompt_tokens（优先用于上下文使用率显示，比字节估算更准确）
+let aiActualPromptTokens = 0;
 // 最近一次完整的 AI 分析结果（供 MCP 获取）
 let aiLastResult = '';
+
+// 过滤思考内容中的敏感信息（模型名称、API Key、提供商等）
+function filterSensitiveInfo(text) {
+  if (!text) return text;
+  return text
+    // 过滤模型名称相关
+    .replace(/agnes[-_]?2\.0[-_]?flash/gi, 'AI 模型')
+    .replace(/agnes[-_]?ai/gi, 'AI')
+    .replace(/sapiens[-_]?ai/gi, 'AI')
+    .replace(/claw[-_]?eval/gi, 'AI')
+    .replace(/deepseek[-_]?(reasoner|v\d+)/gi, 'AI 模型')
+    .replace(/qwen[-_]?(\w+)/gi, 'AI 模型')
+    // 过滤 API Key 相关
+    .replace(/[a-zA-Z0-9]{32,}/g, '[REDACTED]')
+    // 过滤 URL 中的 API 地址
+    .replace(/https?:\/\/[^\s]+\/v\d+\/(chat|completions|responses)/gi, '[API_ENDPOINT]')
+    ;
+}
 
 // 添加对话消息并限制上下文长度，防止内存无限增长
 function pushAiMessages(userContent, assistantContent) {
@@ -39,6 +70,11 @@ function pushAiMessages(userContent, assistantContent) {
   aiConversationBytes += userBytes + assistantBytes;
   aiConversationMessages.push({ role: 'user', content: userContent });
   aiConversationMessages.push({ role: 'assistant', content: assistantContent });
+  // 用户内容已进入历史上下文，pending 归零避免重复计算
+  // 首次分析后 system prompt 在历史消息中，这里一并清零避免重复计算
+  aiPendingUserContentBytes = 0;
+  aiSystemPromptBytes = 0;
+  aiActualPromptTokens = 0;
   // 保留 system 消息 + 最近 N 条
   if (aiConversationMessages.length > AI_MAX_CONTEXT_MESSAGES) {
     const systemMsgs = aiConversationMessages.filter(m => m.role === 'system');
@@ -100,40 +136,286 @@ function buildAiSystemPrompt(filterContext) {
   return parts.join('\n');
 }
 
+/**
+ * 上下文压缩：当多轮对话消息总量超过阈值时，将较早的大体积 user 消息（含完整日志）压缩为摘要。
+ * 保留 system 消息和 assistant 回复（分析结论体积小，不压缩）。
+ * 返回新数组，不修改原 messages。
+ *
+ * @param {Array} messages - 消息数组
+ * @param {number} [maxBytes] - 可选：强制压缩到此字节数以下（400 重试时传入更小值）
+ */
+function compressConversationContext(messages, maxBytes) {
+  const threshold = maxBytes || AI_CONTEXT_COMPRESS_THRESHOLD;
+  const totalBytes = messages.reduce((sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0);
+  if (totalBytes <= threshold) return messages;
+
+  const compressed = messages.map(m => ({ ...m }));
+
+  // 从最早的非 system 消息开始压缩（通常是包含完整日志的旧 user 消息）
+  for (let i = 0; i < compressed.length; i++) {
+    const msg = compressed[i];
+    if (msg.role === 'system') continue;
+
+    const contentBytes = Buffer.byteLength(msg.content || '', 'utf8');
+    if (contentBytes <= AI_COMPRESSED_MSG_MAX_BYTES) continue;
+
+    // 压缩：保留头部摘要 + 压缩标记（体积从 N KB 降至 ~1 KB）
+    const head = msg.content.slice(0, 800);
+    const lineCount = (msg.content.match(/\n/g) || []).length;
+    compressed[i] = {
+      ...msg,
+      content: `${head}\n\n[... 已压缩：原 ${lineCount} 行内容已省略，AI 之前的分析结论仍然有效 ...]`
+    };
+
+    // 检查是否已降到阈值以下
+    const newTotal = compressed.reduce((sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0);
+    if (newTotal <= threshold) break;
+  }
+
+  return compressed;
+}
+
+/**
+ * 截断 userContent，确保 systemPrompt + history + userContent 的总字节数不超过安全阈值。
+ * 安全阈值取模型 token 上限的 80%，并使用更保守的字节/token 比例（2.5）来确保截断后不超限。
+ *
+ * @param {string} userContent - 原始用户消息
+ * @param {number} systemBytes - system prompt 字节数
+ * @param {number} historyBytes - 历史上下文字节数
+ * @param {string} [reason] - 截断原因（用于日志标记）
+ * @param {number} [safetyRatio] - 安全比例，默认 0.8（即只用 80% 模型上限）
+ * @returns {string} 截断后的 userContent
+ */
+function truncateUserContentToFit(userContent, systemBytes, historyBytes, reason, safetyRatio) {
+  // 安全阈值：模型 token 上限的指定比例，使用 2.5 bytes/token（比估算用的 3 更保守）
+  const ratio = safetyRatio || 0.8;
+  const SAFE_BYTES_PER_TOKEN = 2.5;
+  const maxBytes = Math.floor(AI_MODEL_MAX_CONTEXT_TOKENS * SAFE_BYTES_PER_TOKEN * ratio);
+  const availableBytes = maxBytes - systemBytes - historyBytes;
+  if (availableBytes <= 0) {
+    // 历史上下文已占满，只保留最近的内容
+    return userContent.slice(-2000);
+  }
+
+  const userBytes = Buffer.byteLength(userContent || '', 'utf8');
+  if (userBytes <= availableBytes) return userContent;
+
+  // 截断到 availableBytes 以内
+  const buf = Buffer.from(userContent, 'utf8');
+  if (buf.length <= availableBytes) return userContent;
+
+  const reasonText = reason
+    ? `\n\n[... 已自动截断：${reason}，原始内容过长已省略尾部 ...]`
+    : '\n\n[... 已自动截断：原始内容过长已省略尾部 ...]';
+
+  // 确保截断标记本身不会导致超限
+  const reasonBytes = Buffer.byteLength(reasonText, 'utf8');
+  const cut = Math.max(0, availableBytes - reasonBytes);
+  const cutBuf = buf.subarray(0, cut);
+  let truncatedStr = cutBuf.toString('utf8');
+
+  return truncatedStr + reasonText;
+}
+
+/**
+ * Map-Reduce 分块分析：当日志体积超过 token 预算时，先分块独立分析（Map），再合并为完整报告（Reduce）。
+ * Map 阶段使用非流式请求（generateAiSummary），Reduce 阶段返回合并后的 userContent 供调用方流式输出。
+ *
+ * @param {string[]} lines - 完整日志行数组
+ * @param {object} filterContext - 过滤条件
+ * @param {string} customPrompt - 用户自定义分析要求
+ * @param {object} sender - IPC sender，用于发送进度事件
+ * @returns {Promise<{systemPrompt: string, userContent: string, totalChunks: number}>}
+ */
+async function mapReduceAnalyze(lines, filterContext, customPrompt, sender) {
+  const totalLines = lines.length;
+  // 计算分块大小：行数 / 最大块数 与固定块长取较大值，避免块过多
+  const desiredChunks = Math.min(Math.ceil(totalLines / AI_CHUNK_LINES), AI_MAPREDUCE_MAX_CHUNKS);
+  const chunkSize = Math.ceil(totalLines / desiredChunks);
+  const totalChunks = Math.ceil(totalLines / chunkSize);
+
+  // 通知前端开始 Map 阶段
+  const sendProgress = (phase, current, total, extra = {}) => {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('ai:mapReduceProgress', { phase, current, total, ...extra });
+    }
+  };
+  sendProgress('map', 0, totalChunks);
+
+  // 并行完成的分块计数（用于进度展示）
+  let completedCount = 0;
+
+  // Map：并行分析所有分块，提取关键问题
+  const chunkPromises = [];
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, totalLines);
+    const chunk = lines.slice(start, end);
+    const chunkIndex = i;
+
+    const chunkSystemPrompt = [
+      `你是 Android 日志分析专家。以下是完整日志的第 ${i + 1}/${totalChunks} 块（第 ${start + 1}-${end} 行，共 ${totalLines} 行）。`,
+      '请提取这块日志中的关键问题：',
+      '1. Error/Fatal 级别异常及完整堆栈信息',
+      '2. 重要 Warning（ANR、GC、超时等）',
+      '3. 可疑的重复模式或生命周期异常',
+      '4. 其他值得关注的线索',
+      '',
+      '每个问题请包含：严重程度、简要描述、可能的根因。',
+      '如果本块日志无明显异常，回复"本块未发现明显问题"。',
+      '请使用简洁的 Markdown 格式输出。'
+    ].join('\n');
+
+    chunkPromises.push(
+      generateAiSummary({
+        systemPrompt: chunkSystemPrompt,
+        userContent: chunk.join('\n'),
+        timeoutMs: 90000,
+        temperature: 0.2
+      }).then(result => {
+        // 单块完成后发送进度（并行完成顺序不确定，进度按完成数递增）
+        completedCount++;
+        sendProgress('map', completedCount, totalChunks, { lineRange: `${start + 1}-${end}` });
+        const summary = result.ok ? result.summary : '(本块分析失败，请参考其他块结果)';
+        return { index: chunkIndex, text: `### 日志块 ${chunkIndex + 1}/${totalChunks}（第 ${start + 1}-${end} 行）\n\n${summary}` };
+      })
+    );
+  }
+
+  // 等待所有分块完成，按原始顺序排列结果
+  const settled = await Promise.all(chunkPromises);
+  settled.sort((a, b) => a.index - b.index);
+  const chunkResults = settled.map(s => s.text);
+
+  // Reduce：构建合并分析的 userContent，交由调用方流式输出
+  sendProgress('reduce', totalChunks, totalChunks);
+
+  const systemPrompt = buildAiSystemPrompt(filterContext);
+  const reduceIntro = customPrompt
+    ? `${customPrompt}\n\n以下是对 ${totalLines} 行日志的分块分析结果，请综合所有信息给出完整的分析报告：`
+    : `以下是对 ${totalLines} 行日志的分块分析结果，请综合所有信息给出完整的分析报告。请重点关注各块之间的关联性、根因推测和优先修复建议：`;
+
+  const userContent = `${reduceIntro}\n\n--- 分块分析结果 ---\n\n${chunkResults.join('\n\n---\n\n')}`;
+
+  return { systemPrompt, userContent, totalChunks };
+}
+
 function register(ipcMain) {
   ipcMain.handle('ai:analyzeLog', async (event, args) => {
     try {
-      const { lines, filterContext, customPrompt } = args;
+      const { lines, filterContext, customPrompt, logChanged, thinkingMode } = args;
 
       if (!lines || lines.length === 0) {
         return { ok: false, error: '没有可分析的日志' };
       }
 
-      // 截断过长的日志
-      const truncated = lines.length > AI_MAX_LOG_LINES;
-      const logContent = truncated
-        ? lines.slice(lines.length - AI_MAX_LOG_LINES).join('\n')
-        : lines.join('\n');
+      const sender = event.sender;
 
-      const systemPrompt = buildAiSystemPrompt(filterContext);
-      const userContent = customPrompt
-        ? `${customPrompt}\n\n--- 日志内容 ---\n${logContent}${truncated ? `\n\n(注：日志过长，仅显示最后 ${AI_MAX_LOG_LINES} 行，共 ${lines.length} 行)` : ''}`
-        : `请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n${logContent}${truncated ? `\n\n(注：日志过长，仅显示最后 ${AI_MAX_LOG_LINES} 行，共 ${lines.length} 行)` : ''}`;
+      // 追问且日志未变化时：只发送用户问题，不重发日志（历史上下文中已有）
+      const isFollowUp = aiConversationMessages.length > 0;
+      const skipLogContent = isFollowUp && logChanged === false;
 
-      // 构建多轮对话消息
+      let systemPrompt, userContent;
+      let truncated = false;
+
+      if (skipLogContent) {
+        // 追问 + 日志未变化：只发送用户的问题
+        systemPrompt = buildAiSystemPrompt(filterContext);
+        const question = customPrompt?.trim() || '请基于之前的日志分析，给出进一步的说明。';
+        userContent = `${question}\n\n（注：本次追问基于上次相同的日志，无需重新分析日志内容。）`;
+        if (!sender.isDestroyed()) {
+          sender.send('ai:streamStart', { totalLines: lines.length, followUp: true });
+        }
+      } else {
+        // 首次分析 或 日志已变化：发送完整日志
+        // 截断过长的日志（行数硬上限，避免极端情况内存爆炸）
+        truncated = lines.length > AI_MAX_LOG_LINES;
+        const effectiveLines = truncated ? lines.slice(lines.length - AI_MAX_LOG_LINES) : lines;
+
+        // 判断是否需要 Map-Reduce：日志字节数超过阈值且行数足够分块
+        const logBytes = Buffer.byteLength(effectiveLines.join('\n'), 'utf8');
+        const needMapReduce = logBytes > AI_MAPREDUCE_THRESHOLD_BYTES && effectiveLines.length > AI_CHUNK_LINES;
+
+        if (needMapReduce) {
+          // Map-Reduce 路径：先分块分析，再合并为完整报告
+          const mrResult = await mapReduceAnalyze(effectiveLines, filterContext, customPrompt, sender);
+          systemPrompt = mrResult.systemPrompt;
+          userContent = mrResult.userContent;
+
+          if (!sender.isDestroyed()) {
+            sender.send('ai:streamStart', { totalLines: lines.length, truncated, mapReduce: true });
+          }
+        } else {
+          // 常规路径：直接发送完整日志
+          const logContent = effectiveLines.join('\n');
+          systemPrompt = buildAiSystemPrompt(filterContext);
+          userContent = customPrompt
+            ? `${customPrompt}\n\n--- 日志内容 ---\n${logContent}${truncated ? `\n\n(注：日志过长，仅显示最后 ${AI_MAX_LOG_LINES} 行，共 ${lines.length} 行)` : ''}`
+            : `请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n${logContent}${truncated ? `\n\n(注：日志过长，仅显示最后 ${AI_MAX_LOG_LINES} 行，共 ${lines.length} 行)` : ''}`;
+
+          if (!sender.isDestroyed()) {
+            sender.send('ai:streamStart', { totalLines: lines.length, truncated });
+          }
+        }
+      }
+
+      // 记录本次请求中 system prompt 和用户内容的字节数，用于前端展示上下文使用率
+      aiSystemPromptBytes = Buffer.byteLength(systemPrompt || '', 'utf8');
+      aiPendingUserContentBytes = Buffer.byteLength(userContent || '', 'utf8');
+
+      // 构建多轮对话消息（追问时压缩历史上下文，防止累积超限）
       let messages;
       if (aiConversationMessages.length === 0) {
-        // 第一次分析：带系统提示
         messages = [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent }
         ];
       } else {
-        // 后续追问：保留历史上下文
+        // 压缩判断：使用上次 API 返回的真实 prompt_tokens
+        // 如果上次请求的真实 token 已接近上限，压缩历史上下文
+        const compressTokenThreshold = Math.floor(AI_MODEL_MAX_CONTEXT_TOKENS * 0.8);
+        if (aiActualPromptTokens > compressTokenThreshold && !sender.isDestroyed()) {
+          sender.send('ai:mapReduceProgress', { phase: 'compress', current: 0, total: 0 });
+        }
+        // 压缩历史上下文（compressConversationContext 内部会判断是否需要压缩）
+        const compressedHistory = compressConversationContext(aiConversationMessages);
+        if (compressedHistory !== aiConversationMessages) {
+          aiConversationMessages = compressedHistory;
+          aiConversationBytes = aiConversationMessages.reduce(
+            (sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0
+          );
+        }
         messages = [
           ...aiConversationMessages,
           { role: 'user', content: userContent }
         ];
+      }
+
+      // 安全检查：确保 system + history + userContent 总字节数不超过模型 token 上限
+      // 超限时自动截断 userContent（优先截断日志尾部），防止 400 ContextWindowExceededError
+      {
+        const systemBytes = Buffer.byteLength(systemPrompt || '', 'utf8');
+        const historyBytes = messages.reduce(
+          (sum, m) => m.role === 'user' && m.content === userContent ? sum : sum + Buffer.byteLength(m.content || '', 'utf8'),
+          0
+        );
+        const totalBytes = systemBytes + historyBytes + Buffer.byteLength(userContent || '', 'utf8');
+        // 使用 2.5 bytes/token 预检查（比估算用的 3 更保守，提前触发截断）
+        const maxBytes = Math.floor(AI_MODEL_MAX_CONTEXT_TOKENS * 2.5);
+        if (totalBytes > maxBytes) {
+          // 通知前端正在截断
+          if (!sender.isDestroyed()) {
+            sender.send('ai:mapReduceProgress', { phase: 'compress', current: 0, total: 0 });
+          }
+          userContent = truncateUserContentToFit(userContent, systemBytes, historyBytes, '上下文超限自动截断');
+          // 更新 messages 中的 userContent
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg && lastMsg.role === 'user') {
+            lastMsg.content = userContent;
+          }
+          // 更新 pending bytes
+          aiPendingUserContentBytes = Buffer.byteLength(userContent || '', 'utf8');
+        }
       }
 
       // 取消之前的请求
@@ -141,21 +423,17 @@ function register(ipcMain) {
         aiAbortController.abort();
       }
 
-      const requestBody = JSON.stringify({
+      let requestBody = JSON.stringify({
         model: AGNES_MODEL,
         messages,
         stream: true,
-        temperature: 0.3
+        stream_options: { include_usage: true },
+        temperature: 0.3,
+        // 思考模式仅在 thinkingMode 为 true 时启用
+        ...(thinkingMode ? { chat_template_kwargs: { enable_thinking: true } } : {})
       });
 
       const urlObj = new URL(AGNES_API_URL);
-
-      const sender = event.sender;
-
-      // 立即发送开始信号（UI 可以显示 loading）
-      if (!sender.isDestroyed()) {
-        sender.send('ai:streamStart', { totalLines: lines.length, truncated });
-      }
 
       // 累积完整回复
       let fullResponse = '';
@@ -194,6 +472,66 @@ function register(ipcMain) {
                 doRequest(nextKey);
                 return;
               }
+
+              // 400 ContextWindowExceededError：压缩历史上下文 + 截断 userContent 并重试
+              // 每次重试使用更小的安全比例（0.8 → 0.6 → 0.4），确保截断后不超限
+              if (res.statusCode === 400 && errBody.includes('ContextWindowExceededError') && retryCount < AI_MAX_RETRIES) {
+                retryCount++;
+                const safetyRatios = [0.8, 0.6, 0.4];
+                const safetyRatio = safetyRatios[retryCount - 1] || 0.4;
+                console.log(`[AI] ContextWindowExceededError，压缩上下文后重试（第 ${retryCount} 次，安全比例 ${safetyRatio}）`);
+
+                if (!sender.isDestroyed()) {
+                  sender.send('ai:mapReduceProgress', { phase: 'compress', current: 0, total: 0 });
+                }
+
+                // Step 1: 压缩历史对话上下文（强制压缩到安全阈值以下）
+                if (aiConversationMessages.length > 0) {
+                  // 400 重试时使用更激进的压缩阈值：模型上限 × 2.5 bytes/token × safetyRatio
+                  const compressThreshold = Math.floor(AI_MODEL_MAX_CONTEXT_TOKENS * 2.5 * safetyRatio);
+                  const compressedHistory = compressConversationContext(aiConversationMessages, compressThreshold);
+                  if (compressedHistory !== aiConversationMessages) {
+                    aiConversationMessages = compressedHistory;
+                    aiConversationBytes = aiConversationMessages.reduce(
+                      (sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0
+                    );
+                  }
+                }
+
+                // Step 2: 截断 userContent 到安全范围
+                const systemBytes = Buffer.byteLength(systemPrompt || '', 'utf8');
+                const historyBytes = aiConversationMessages.reduce(
+                  (sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0
+                );
+                userContent = truncateUserContentToFit(userContent, systemBytes, historyBytes, '上下文超限自动截断', safetyRatio);
+
+                // Step 3: 重建 messages（用压缩后的历史 + 截断后的 userContent）
+                if (aiConversationMessages.length === 0) {
+                  messages = [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userContent }
+                  ];
+                } else {
+                  messages = [
+                    ...aiConversationMessages,
+                    { role: 'user', content: userContent }
+                  ];
+                }
+
+                aiPendingUserContentBytes = Buffer.byteLength(userContent || '', 'utf8');
+                // 重新构建 requestBody 并重试
+                requestBody = JSON.stringify({
+                  model: AGNES_MODEL,
+                  messages,
+                  stream: true,
+                  stream_options: { include_usage: true },
+                  temperature: 0.3,
+                  ...(thinkingMode ? { chat_template_kwargs: { enable_thinking: true } } : {})
+                });
+                doRequest(currentKey);
+                return;
+              }
+
               // 重试耗尽或非服务端错误（如 401），直接报错
               if (!sender.isDestroyed()) {
                 sender.send('ai:streamError', { error: `API返回 ${res.statusCode}: ${errBody.slice(0, 500)}` });
@@ -230,10 +568,26 @@ function register(ipcMain) {
 
               try {
                 const json = JSON.parse(data);
-                const delta = json.choices?.[0]?.delta?.content;
-                if (delta && !sender.isDestroyed()) {
-                  fullResponse += delta;
-                  sender.send('ai:streamChunk', { text: delta });
+                // 提取 usage（stream_options.include_usage 时最后一个 chunk 会携带）
+                if (json.usage?.prompt_tokens != null) {
+                  aiActualPromptTokens = json.usage.prompt_tokens;
+                }
+                const delta = json.choices?.[0]?.delta;
+                if (delta) {
+                  // 思考内容（reasoning_content）：过滤敏感信息后发送到前端思考面板
+                  const reasoning = delta.reasoning_content;
+                  if (reasoning && !sender.isDestroyed()) {
+                    const filteredReasoning = filterSensitiveInfo(reasoning);
+                    if (filteredReasoning) {
+                      sender.send('ai:streamChunk', { text: filteredReasoning, type: 'reasoning' });
+                    }
+                  }
+                  // 正式回答内容（content）
+                  const content = delta.content;
+                  if (content && !sender.isDestroyed()) {
+                    fullResponse += content;
+                    sender.send('ai:streamChunk', { text: content, type: 'content' });
+                  }
                 }
               } catch {
                 // 忽略解析错误的行
@@ -251,10 +605,18 @@ function register(ipcMain) {
               if (trimmed.startsWith('data: ') && trimmed.slice(6) !== '[DONE]') {
                 try {
                   const json = JSON.parse(trimmed.slice(6));
-                  const delta = json.choices?.[0]?.delta?.content;
+                  const delta = json.choices?.[0]?.delta;
                   if (delta && !sender.isDestroyed()) {
-                    fullResponse += delta;
-                    sender.send('ai:streamChunk', { text: delta });
+                    if (delta.reasoning_content) {
+                      const filteredReasoning = filterSensitiveInfo(delta.reasoning_content);
+                      if (filteredReasoning) {
+                        sender.send('ai:streamChunk', { text: filteredReasoning, type: 'reasoning' });
+                      }
+                    }
+                    if (delta.content) {
+                      fullResponse += delta.content;
+                      sender.send('ai:streamChunk', { text: delta.content, type: 'content' });
+                    }
                   }
                 } catch {}
               }
@@ -344,8 +706,38 @@ function register(ipcMain) {
   ipcMain.handle('ai:clearConversation', async () => {
     aiConversationMessages = [];
     aiConversationBytes = 0;
+    aiPendingUserContentBytes = 0;
+    aiSystemPromptBytes = 0;
+    aiActualPromptTokens = 0;
     aiLastResult = '';
     return { ok: true };
+  });
+
+  // 获取上下文使用量（优先真实 token，fallback 字节估算）
+  ipcMain.handle('ai:getContextUsage', async () => {
+    const maxTokens = AI_MODEL_MAX_CONTEXT_TOKENS;
+    let usedTokens;
+
+    if (aiActualPromptTokens > 0) {
+      // API 返回了真实 prompt_tokens
+      usedTokens = aiActualPromptTokens;
+    } else {
+      // Fallback：API 不支持 stream_options.include_usage 时，用字节估算
+      const historyBytes = aiConversationMessages.reduce(
+        (sum, m) => sum + Buffer.byteLength(m.content || '', 'utf8'), 0
+      );
+      const totalBytes = historyBytes + aiSystemPromptBytes + aiPendingUserContentBytes;
+      usedTokens = Math.ceil(totalBytes / AI_BYTES_PER_TOKEN);
+    }
+
+    const percent = (usedTokens > 0 && maxTokens > 0) ? Math.min(100, Math.round((usedTokens / maxTokens) * 100)) : 0;
+    return {
+      ok: true,
+      usedTokens,
+      maxTokens,
+      percent,
+      messageCount: aiConversationMessages.length
+    };
   });
 
   // 导出 AI 分析结果为 .md 文件
@@ -415,6 +807,9 @@ function resetAiState() {
   }
   aiConversationMessages = [];
   aiConversationBytes = 0;
+  aiPendingUserContentBytes = 0;
+  aiSystemPromptBytes = 0;
+  aiActualPromptTokens = 0;
   aiLastResult = '';
 }
 
@@ -424,6 +819,9 @@ function setAiLastResult(value) { aiLastResult = value; }
 function clearAiConversation() {
   aiConversationMessages = [];
   aiConversationBytes = 0;
+  aiPendingUserContentBytes = 0;
+  aiSystemPromptBytes = 0;
+  aiActualPromptTokens = 0;
   aiLastResult = '';
 }
 
@@ -520,6 +918,8 @@ module.exports = {
   // 共享给其他模块的工具
   pushAiMessages,
   buildAiSystemPrompt,
+  compressConversationContext,
+  mapReduceAnalyze,
   // 状态 getter
   getAiLastResult,
   getAiConversationMessages,
