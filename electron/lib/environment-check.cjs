@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { getAdbCommand } = require('./adb-runtime.cjs');
+const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
 
 const BUNDLED_DIR = path.join(__dirname, '../../scrcpy-win64');
 const BUNDLED_SCRCPY_PATH = path.join(BUNDLED_DIR, 'scrcpy.exe');
@@ -141,20 +142,7 @@ function pickTargetDevice(devices, selectedDeviceId) {
 }
 
 function parseDevices(text) {
-  return String(text || '')
-    .split(/\r?\n/)
-    .slice(1)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [id, status, ...rest] = line.split(/\s+/);
-      return {
-        id,
-        status,
-        detail: rest.join(' ')
-      };
-    })
-    .filter(device => device.id && device.status);
+  return parseAdbDeviceRows(text);
 }
 
 function parseProps(text) {

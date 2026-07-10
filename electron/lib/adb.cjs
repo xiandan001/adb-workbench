@@ -6,6 +6,7 @@ const path = require('path');
 const { findScrcpyPath } = require('./commands.cjs');
 const { findExecutable } = require('./android-tool-cleanup.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
+const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
 
 // ScreenRecord: Android native screen recording via adb shell screenrecord
 const screenRecordProcs = new Map();
@@ -330,23 +331,14 @@ async function runAdbText(args, options = {}) {
 }
 
 function parseAdbDevices(text) {
-  return String(text || '')
-    .split(/\r?\n/)
-    .slice(1)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [id, status, ...rest] = line.split(/\s+/);
-      if (!id || !status) return null;
-      const detail = rest.join(' ');
-      const model = detail.match(/model:([^\s]+)/)?.[1] || '';
-      return {
-        id,
-        status,
-        model: status === 'device' ? model : 'Unauthorized / Offline'
-      };
-    })
-    .filter(Boolean);
+  return parseAdbDeviceRows(text).map(({ id, status, detail }) => {
+    const model = detail.match(/model:([^\s]+)/)?.[1] || '';
+    return {
+      id,
+      status,
+      model: status === 'device' ? model : 'Unauthorized / Offline'
+    };
+  });
 }
 
 async function fillMissingDeviceModels(devices) {
