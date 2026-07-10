@@ -2,6 +2,18 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.3': {
+    title: 'v4.1.3',
+    date: '2026-07-10',
+    items: [
+      { type: 'feature', text: 'AI 日志助手新增思考模式：支持查看 AI 推理过程，每轮对话独立展示思考面板' },
+      { type: 'feature', text: '新增快速/思考模式切换，快速模式响应更快，思考模式分析更深入' },
+      { type: 'improve', text: '优化流式输出体验：渲染更流畅，文字逐字平滑显示' },
+      { type: 'improve', text: '优化上下文管理：追问时日志未变化不再重复发送，减少 token 消耗' },
+      { type: 'improve', text: '上下文使用量实时显示，自动压缩历史对话防止超限' },
+      { type: 'fix', text: '修复上下文超限时报错的问题，现在会自动截断并重试' }
+    ]
+  },
   '4.1.2': {
     title: 'v4.1.2',
     date: '2026-07-10',
