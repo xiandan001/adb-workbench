@@ -879,7 +879,8 @@ function App() {
             const res = await window.electronAPI.adbReboot(deviceId);
             if (res.success) {
               showToast('设备正在重启...');
-              setTimeout(() => fetchDevices(), 3000);
+              // 延迟多次刷新，确保设备重新上线后列表更新
+              [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
               showToast(`重启失败: ${res.error}`);
             }
@@ -909,7 +910,8 @@ function App() {
             const res = await window.electronAPI.adbRebootLoader(deviceId);
             if (res.success) {
               showToast('设备正在进入loader模式...');
-              setTimeout(() => fetchDevices(), 3000);
+              // 延迟多次刷新，确保设备状态变更后列表更新
+              [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
               showToast(`进入loader模式失败: ${res.error}`);
             }

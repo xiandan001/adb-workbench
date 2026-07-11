@@ -4,7 +4,7 @@ const path = require('path');
 
 const token = process.env.GH_TOKEN;
 const repo = 'xiandan001/adb-workbench';
-const tag = 'v4.1.3';
+const tag = 'v4.1.4';
 
 function apiRequest(method, apiPath, body) {
   return new Promise((resolve, reject) => {

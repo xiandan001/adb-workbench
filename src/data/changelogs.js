@@ -2,6 +2,14 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.4': {
+    title: 'v4.1.4',
+    date: '2026-07-11',
+    items: [
+      { type: 'fix', text: '修复设备重启或进入 Loader 模式后设备列表未自动刷新的问题' },
+      { type: 'improve', text: '优化 OTA 更新检测，修复部分设备无法获取更新信息的问题' }
+    ]
+  },
   '4.1.3': {
     title: 'v4.1.3',
     date: '2026-07-10',
