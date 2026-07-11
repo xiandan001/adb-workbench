@@ -6,7 +6,7 @@ const CHANGELOGS = {
     title: 'v4.1.4',
     date: '2026-07-11',
     items: [
-      { type: 'fix', text: '修复设备重启或进入 Loader 模式后设备列表未自动刷新的问题' },
+      { type: 'fix', text: '修复设备重启、进入 Loader 模式或 Unlock 解锁后设备列表未自动刷新的问题' },
       { type: 'improve', text: '优化 OTA 更新检测，修复部分设备无法获取更新信息的问题' }
     ]
   },

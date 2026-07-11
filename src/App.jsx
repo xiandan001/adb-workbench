@@ -941,7 +941,8 @@ function App() {
             const res = await window.electronAPI.adbUnlock(deviceId);
             if (res.success) {
               showToast(res.message || 'Unlock 命令已执行，设备正在重启...');
-              setTimeout(() => fetchDevices(), 8000);
+              // 延迟多次刷新，确保设备重启完成后列表更新
+              [8000, 12000, 16000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
               showToast(`Unlock 失败: ${res.error}`);
             }
