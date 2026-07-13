@@ -2,6 +2,14 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.5': {
+    title: 'v4.1.5',
+    date: '2026-07-13',
+    items: [
+      { type: 'improve', text: '优化自动化压测：设备重启后自动识别新的设备 ID' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '4.1.4': {
     title: 'v4.1.4',
     date: '2026-07-11',

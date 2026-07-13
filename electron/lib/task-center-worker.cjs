@@ -23,6 +23,22 @@ const MAX_STRESS_FAILURES = 120;
 const DEVICE_TEMP_SCREEN = '/sdcard/task-center-screen.png';
 const STRESS_REPORT_FILE = 'stress-report.md';
 const STRESS_RESULT_FILE = 'stress-result.json';
+const DEVICE_REBIND_TIMEOUT_MS = 45000;
+const DEVICE_REBIND_INTERVAL_MS = 2000;
+const DEVICE_IDENTITY_TIMEOUT_MS = 10000;
+const DEVICE_IDENTITY_COMMAND = [
+  'echo "android_id=$(settings get secure android_id 2>/dev/null)"',
+  'echo "ro_serialno=$(getprop ro.serialno)"',
+  'echo "ro_boot_serialno=$(getprop ro.boot.serialno)"',
+  'echo "ro_product_model=$(getprop ro.product.model)"',
+  'echo "ro_product_device=$(getprop ro.product.device)"',
+  'echo "ro_product_manufacturer=$(getprop ro.product.manufacturer)"',
+  'echo "ro_build_fingerprint=$(getprop ro.build.fingerprint)"',
+  'echo "wifi_mac=$(cat /sys/class/net/wlan0/address 2>/dev/null)"'
+].join('; ');
+const STRONG_IDENTITY_KEYS = ['androidId', 'wifiMac', 'roBootSerialno', 'roSerialno'];
+const WEAK_IDENTITY_KEYS = ['model', 'device', 'manufacturer', 'fingerprint'];
+const ADB_DEVICE_STATES = /^(device|offline|unauthorized|recovery|sideload|bootloader|no permissions)(?:\s+(.*))?$/i;
 
 const activeTasks = new Map();
 let scriptsCache = null;
@@ -92,8 +108,13 @@ function prepareTaskForRun(source) {
   task.currentProc = null;
   task.procs = new Set();
   task.timers = new Set();
+  task.deviceIdentityCache = new Map();
   task.logs = Array.isArray(task.logs) ? task.logs : [];
   task.deviceRuns = Array.isArray(task.deviceRuns) ? task.deviceRuns : [];
+  task.deviceRuns.forEach(run => {
+    run.originalDeviceId = String(run.originalDeviceId || run.deviceId || '').trim();
+    run.previousDeviceIds = Array.isArray(run.previousDeviceIds) ? run.previousDeviceIds : [];
+  });
   return task;
 }
 
@@ -202,7 +223,8 @@ async function runDevice(task, run) {
     broadcastTask(task);
 
     try {
-      const result = await executeStep(task, run.deviceId, step);
+      const activeDeviceId = await resolveRunDeviceId(task, run, step);
+      const result = await executeStep(task, activeDeviceId, step);
       stepRun.status = result.ok ? 'success' : 'failed';
       stepRun.output = trimOutput(result.output || result.stdout || '');
       stepRun.error = result.error || '';
@@ -316,7 +338,8 @@ async function runStressDevice(task, run) {
       broadcastTask(task);
 
       try {
-        const result = await executeStep(task, run.deviceId, step);
+        const activeDeviceId = await resolveRunDeviceId(task, run, step);
+        const result = await executeStep(task, activeDeviceId, step);
         finishStressStep(task, stepRun, result);
         if (!result.ok && shouldStopStressOnFailure(task, step)) stopRound = true;
       } catch (error) {
@@ -334,7 +357,8 @@ async function runStressDevice(task, run) {
       perfStep.startedAt = new Date().toISOString();
       appendStressStep(run, round, perfStep);
       try {
-        const result = await capturePerformance(task, run.deviceId, { timeoutMs: DEFAULT_TIMEOUT_MS });
+        const activeDeviceId = await resolveRunDeviceId(task, run, { type: 'perfSnapshot', timeoutMs: DEFAULT_TIMEOUT_MS });
+        const result = await capturePerformance(task, activeDeviceId, { timeoutMs: DEFAULT_TIMEOUT_MS });
         finishStressStep(task, perfStep, result);
         const warnings = evaluatePerformanceSnapshot(result.snapshot, task.script.acceptance?.thresholds);
         round.warnings.push(...warnings);
@@ -344,8 +368,15 @@ async function runStressDevice(task, run) {
     }
 
     if (!task.cancelled && (task.script.acceptance?.failOnCrash || task.script.acceptance?.failOnAnr)) {
-      const crashResult = await detectCrashAnr(task, run.deviceId, task.script.acceptance);
-      if (crashResult.warnings.length > 0) round.warnings.push(...crashResult.warnings);
+      try {
+        const activeDeviceId = await resolveRunDeviceId(task, run, { type: 'waitLog', timeoutMs: DEFAULT_TIMEOUT_MS });
+        const crashResult = await detectCrashAnr(task, activeDeviceId, task.script.acceptance);
+        if (crashResult.warnings.length > 0) round.warnings.push(...crashResult.warnings);
+      } catch (error) {
+        const message = error.message || '设备重连失败';
+        round.warnings.push({ type: 'deviceRebind', label: '设备重连失败', detail: message, fail: true });
+        appendTaskLog(task, `[${run.deviceId}] 第 ${roundIndex} 轮设备重连失败：${message}`);
+      }
     }
 
     const failed = round.steps.some(step => step.status === 'failed') || round.warnings.some(warning => warning.fail === true);
@@ -1142,6 +1173,231 @@ function paethPredictor(left, up, upLeft) {
   return pb <= pc ? up : upLeft;
 }
 
+async function resolveRunDeviceId(task, run, step = {}) {
+  if (!isDeviceBoundStep(step)) return run.deviceId;
+  run.originalDeviceId = run.originalDeviceId || run.deviceId;
+  await ensureRunDeviceIdentity(task, run).catch(() => null);
+
+  const deadline = Date.now() + getDeviceRebindTimeout(step);
+  let lastReason = '';
+  while (!task.cancelled) {
+    const devices = await listOnlineAdbDevices(task);
+    if (devices.some(device => device.id === run.deviceId)) return run.deviceId;
+
+    const match = await findReboundDevice(task, run, devices);
+    if (match?.id) {
+      rebindRunDevice(task, run, match.id, match.reason);
+      return run.deviceId;
+    }
+    lastReason = match?.reason || describeOnlineDevices(devices);
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleepWithCancel(task, Math.min(DEVICE_REBIND_INTERVAL_MS, remaining));
+  }
+
+  throw new Error(buildDeviceRebindError(run, lastReason));
+}
+
+function isDeviceBoundStep(step) {
+  return String(step?.type || '') !== 'delay';
+}
+
+function getDeviceRebindTimeout(step) {
+  const stepTimeout = Number(step?.timeoutMs);
+  if (Number.isFinite(stepTimeout) && stepTimeout > 0) {
+    return Math.max(15000, Math.min(stepTimeout, DEVICE_REBIND_TIMEOUT_MS));
+  }
+  return DEVICE_REBIND_TIMEOUT_MS;
+}
+
+async function ensureRunDeviceIdentity(task, run) {
+  if (run.deviceIdentity && hasUsefulIdentity(run.deviceIdentity)) return run.deviceIdentity;
+  const identity = await getCachedDeviceIdentity(task, run.deviceId);
+  if (identity && hasUsefulIdentity(identity)) {
+    run.deviceIdentity = identity;
+    return identity;
+  }
+  return null;
+}
+
+async function listOnlineAdbDevices(task) {
+  const res = await runAdb(task, ['devices', '-l'], 10000);
+  if (!res.ok) return [];
+  return parseAdbDeviceRows(res.stdout || res.output || '')
+    .filter(device => device.status === 'device')
+    .map(device => ({
+      id: device.id,
+      detail: device.detail || '',
+      model: device.detail?.match(/model:([^\s]+)/)?.[1] || ''
+    }));
+}
+
+function parseAdbDeviceRows(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const headerIndex = lines.findIndex(line => line.trim() === 'List of devices attached');
+  if (headerIndex < 0) return [];
+
+  return lines.slice(headerIndex + 1)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [id, ...statusParts] = line.split(/\s+/);
+      const match = statusParts.join(' ').match(ADB_DEVICE_STATES);
+      if (!id || !match) return null;
+      return { id, status: match[1].toLowerCase(), detail: match[2] || '' };
+    })
+    .filter(Boolean);
+}
+
+async function findReboundDevice(task, run, devices) {
+  const candidates = devices.filter(device => !isDeviceClaimedByAnotherRun(task, run, device.id));
+  if (candidates.length === 0) return { reason: '当前没有可用的在线设备' };
+
+  const expected = run.deviceIdentity || await ensureRunDeviceIdentity(task, run).catch(() => null);
+  if (expected && hasUsefulIdentity(expected)) {
+    const scored = [];
+    for (const device of candidates) {
+      const identity = await getCachedDeviceIdentity(task, device.id);
+      scored.push({ device, identity, ...scoreDeviceIdentity(expected, identity) });
+    }
+
+    const strong = scored
+      .filter(item => item.strongMatches > 0)
+      .sort((a, b) => b.score - a.score);
+    if (strong.length === 1 || (strong.length > 1 && strong[0].score > strong[1].score)) {
+      return { id: strong[0].device.id, reason: '设备身份匹配' };
+    }
+    if (strong.length > 1 && strong[0].score === strong[1].score) {
+      return { reason: '找到多台身份相近的设备，无法唯一匹配' };
+    }
+
+    const usefulWeakCount = getUsefulKeyCount(expected, WEAK_IDENTITY_KEYS);
+    if (usefulWeakCount > 0) {
+      const weak = scored
+        .filter(item => item.weakMatches >= Math.min(2, usefulWeakCount))
+        .sort((a, b) => b.score - a.score);
+      if ((task.deviceRuns || []).length === 1 && weak.length === 1) {
+        return { id: weak[0].device.id, reason: '单设备型号匹配' };
+      }
+    }
+  }
+
+  if ((task.deviceRuns || []).length === 1 && candidates.length === 1) {
+    return { id: candidates[0].id, reason: '单设备在线匹配' };
+  }
+
+  return { reason: describeOnlineDevices(candidates) };
+}
+
+function isDeviceClaimedByAnotherRun(task, run, deviceId) {
+  return (task.deviceRuns || []).some(item => item !== run && item.deviceId === deviceId);
+}
+
+async function getCachedDeviceIdentity(task, deviceId) {
+  if (!deviceId) return null;
+  if (!task.deviceIdentityCache) task.deviceIdentityCache = new Map();
+  if (task.deviceIdentityCache.has(deviceId)) return task.deviceIdentityCache.get(deviceId);
+  const identity = await readDeviceIdentity(task, deviceId);
+  task.deviceIdentityCache.set(deviceId, identity);
+  return identity;
+}
+
+async function readDeviceIdentity(task, deviceId) {
+  const res = await runAdb(task, ['-s', deviceId, 'shell', DEVICE_IDENTITY_COMMAND], DEVICE_IDENTITY_TIMEOUT_MS);
+  if (!res.ok) return null;
+  const raw = parseIdentityOutput(res.stdout || res.output || '');
+  return {
+    adbId: deviceId,
+    androidId: normalizeIdentityValue('androidId', raw.android_id),
+    roSerialno: normalizeIdentityValue('roSerialno', raw.ro_serialno),
+    roBootSerialno: normalizeIdentityValue('roBootSerialno', raw.ro_boot_serialno),
+    model: normalizeIdentityValue('model', raw.ro_product_model),
+    device: normalizeIdentityValue('device', raw.ro_product_device),
+    manufacturer: normalizeIdentityValue('manufacturer', raw.ro_product_manufacturer),
+    fingerprint: normalizeIdentityValue('fingerprint', raw.ro_build_fingerprint),
+    wifiMac: normalizeIdentityValue('wifiMac', raw.wifi_mac)
+  };
+}
+
+function parseIdentityOutput(output) {
+  const result = {};
+  String(output || '').split(/\r?\n/).forEach(line => {
+    const index = line.indexOf('=');
+    if (index <= 0) return;
+    result[line.slice(0, index).trim()] = line.slice(index + 1).trim();
+  });
+  return result;
+}
+
+function normalizeIdentityValue(key, value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  const lower = normalized.toLowerCase();
+  if (['null', 'unknown', '<unknown>', 'undefined'].includes(lower)) return '';
+  if (key === 'androidId' && lower === '9774d56d682e549c') return '';
+  if (key === 'wifiMac') {
+    if (/^(?:00:){5}00$/.test(lower) || lower === '02:00:00:00:00:00') return '';
+    return lower;
+  }
+  return normalized;
+}
+
+function hasUsefulIdentity(identity) {
+  return Boolean(identity && getUsefulKeyCount(identity, [...STRONG_IDENTITY_KEYS, ...WEAK_IDENTITY_KEYS]) > 0);
+}
+
+function getUsefulKeyCount(identity, keys) {
+  return keys.reduce((count, key) => count + (identity?.[key] ? 1 : 0), 0);
+}
+
+function scoreDeviceIdentity(expected, candidate) {
+  if (!expected || !candidate) return { score: 0, strongMatches: 0, weakMatches: 0 };
+  let score = 0;
+  let strongMatches = 0;
+  let weakMatches = 0;
+
+  for (const key of STRONG_IDENTITY_KEYS) {
+    if (!expected[key] || !candidate[key] || expected[key] !== candidate[key]) continue;
+    score += 100;
+    strongMatches += 1;
+  }
+
+  for (const key of WEAK_IDENTITY_KEYS) {
+    if (!expected[key] || !candidate[key] || expected[key] !== candidate[key]) continue;
+    score += 10;
+    weakMatches += 1;
+  }
+
+  return { score, strongMatches, weakMatches };
+}
+
+function rebindRunDevice(task, run, nextDeviceId, reason) {
+  const previousDeviceId = run.deviceId;
+  if (!nextDeviceId || previousDeviceId === nextDeviceId) return;
+  run.previousDeviceIds = Array.isArray(run.previousDeviceIds) ? run.previousDeviceIds : [];
+  if (previousDeviceId && !run.previousDeviceIds.includes(previousDeviceId)) {
+    run.previousDeviceIds.push(previousDeviceId);
+  }
+  run.deviceId = nextDeviceId;
+  appendTaskLog(task, `[${previousDeviceId}] 设备重启后已重新识别为 ${nextDeviceId}${reason ? `（${reason}）` : ''}`);
+  broadcastTask(task);
+}
+
+function describeOnlineDevices(devices) {
+  if (!devices || devices.length === 0) return '当前没有在线设备';
+  return `当前在线设备：${devices.map(device => device.id).join(', ')}`;
+}
+
+function buildDeviceRebindError(run, reason) {
+  const original = run.originalDeviceId || run.deviceId;
+  const current = run.deviceId || original;
+  const prefix = original === current
+    ? `设备 ${original} 重启后未找到`
+    : `设备 ${original} 已切换到 ${current}，但当前不可用`;
+  return `${prefix}，无法继续执行${reason ? `：${reason}` : ''}`;
+}
+
 function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
   return runProcess(task, getAdbCommand(), args, timeoutMs);
 }
@@ -1297,6 +1553,8 @@ function createTask(script, deviceIds, sender, args) {
     logs: [],
     deviceRuns: deviceIds.map(deviceId => ({
       deviceId,
+      originalDeviceId: deviceId,
+      previousDeviceIds: [],
       status: 'queued',
       startedAt: '',
       endedAt: '',
@@ -1345,6 +1603,8 @@ function publicTask(task) {
     logs: (task.logs || []).slice(-80),
     deviceRuns: (task.deviceRuns || []).map(run => ({
       deviceId: run.deviceId,
+      originalDeviceId: run.originalDeviceId || run.deviceId,
+      previousDeviceIds: Array.isArray(run.previousDeviceIds) ? run.previousDeviceIds.slice(-5) : [],
       status: run.status,
       startedAt: run.startedAt,
       endedAt: run.endedAt,
@@ -1607,7 +1867,7 @@ function collectStressFailures(runs) {
             deviceId: run.deviceId,
             round: round.index,
             step: warning.label,
-            error: warning.limit ? `${warning.value} > ${warning.limit}` : warning.label
+            error: warning.detail || (warning.limit ? `${warning.value} > ${warning.limit}` : warning.label)
           });
         }
       }
