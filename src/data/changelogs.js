@@ -2,6 +2,13 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.6': {
+    title: 'v4.1.6',
+    date: '2026-07-20',
+    items: [
+      { type: 'feature', text: '设备 Unlock 解锁新增 RK/MTK 芯片平台兼容，适配 RK 双重启流程' }
+    ]
+  },
   '4.1.5': {
     title: 'v4.1.5',
     date: '2026-07-13',

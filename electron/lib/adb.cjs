@@ -17,6 +17,7 @@ const shellProcs = new Map();
 // 交互式命令（su/sh/top 等）不会自然退出，设置兜底超时强制结束
 const SHELL_TIMEOUT_MS = 30000;
 const UNLOCK_ADB_REBOOT_TIMEOUT_MS = 15000;
+const UNLOCK_PLATFORM_PROBE_TIMEOUT_MS = 5000;
 const UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS = 300000;
 const SCRCPY_STARTUP_WATCH_MS = 10000;
 const SCRCPY_READY_GRACE_MS = 800;
@@ -330,6 +331,33 @@ async function runAdbText(args, options = {}) {
   return output;
 }
 
+function selectUnlockPlan(platformOutput) {
+  const normalized = String(platformOutput || '').toLowerCase();
+  const isRockchip = /rockchip|(?:^|[\s._-])rk\d+/.test(normalized);
+  return {
+    unlockArgs: isRockchip ? ['oem', 'at-unlock-vboot'] : ['flashing', 'unlock'],
+    rebootCount: isRockchip ? 2 : 1
+  };
+}
+
+async function resolveUnlockPlan(deviceId) {
+  try {
+    const platformOutput = await runAdbText([
+      '-s',
+      deviceId,
+      'shell',
+      'getprop ro.hardware; getprop ro.board.platform; getprop ro.boot.hardware'
+    ], { timeoutMs: UNLOCK_PLATFORM_PROBE_TIMEOUT_MS });
+    return selectUnlockPlan(platformOutput);
+  } catch (error) {
+    console.warn(`[Unlock] 芯片平台检测失败，按 MTK 指令继续：${error.message}`);
+    return {
+      unlockArgs: ['flashing', 'unlock'],
+      rebootCount: 1
+    };
+  }
+}
+
 function parseAdbDevices(text) {
   return parseAdbDeviceRows(text).map(({ id, status, detail }) => {
     const model = detail.match(/model:([^\s]+)/)?.[1] || '';
@@ -569,12 +597,13 @@ function register(ipcMain) {
     try {
       const adbCommand = getAndroidToolCommand('adb.exe');
       const fastbootCommand = getAndroidToolCommand('fastboot.exe');
+      const unlockPlan = await resolveUnlockPlan(deviceId);
       const reboot = await runTool(adbCommand, ['-s', deviceId, 'reboot', 'bootloader'], UNLOCK_ADB_REBOOT_TIMEOUT_MS);
       if (!reboot.success) {
         return { success: false, error: `进入 bootloader 失败：${reboot.error}` };
       }
 
-      const unlock = await runTool(fastbootCommand, ['flashing', 'unlock'], UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS);
+      const unlock = await runTool(fastbootCommand, unlockPlan.unlockArgs, UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS);
       if (!unlock.success) {
         return { success: false, error: `Unlock 失败：${unlock.error}` };
       }
@@ -582,12 +611,15 @@ function register(ipcMain) {
         return { success: false, error: `Unlock 未检测到 Finished 标识：${unlock.output || '无输出'}` };
       }
 
-      const fastbootReboot = await runTool(fastbootCommand, ['reboot'], 30000);
-      if (!fastbootReboot.success) {
-        return { success: false, error: `Unlock 已执行，但重启失败：${fastbootReboot.error}` };
-      }
-      if (!hasFastbootFinished(fastbootReboot.output)) {
-        return { success: false, error: `Unlock 已执行，但重启未检测到 Finished 标识：${fastbootReboot.output || '无输出'}` };
+      for (let rebootIndex = 1; rebootIndex <= unlockPlan.rebootCount; rebootIndex += 1) {
+        const fastbootReboot = await runTool(fastbootCommand, ['reboot'], 30000);
+        const rebootLabel = unlockPlan.rebootCount > 1 ? `第 ${rebootIndex} 次` : '';
+        if (!fastbootReboot.success) {
+          return { success: false, error: `Unlock 已执行，但${rebootLabel}重启失败：${fastbootReboot.error}` };
+        }
+        if (!hasFastbootFinished(fastbootReboot.output)) {
+          return { success: false, error: `Unlock 已执行，但${rebootLabel}重启未检测到 Finished 标识：${fastbootReboot.output || '无输出'}` };
+        }
       }
 
       return {
