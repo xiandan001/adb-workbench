@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  CheckCircle2,
   CheckSquare,
   ChevronRight,
   Copy,
@@ -22,10 +23,31 @@ import {
   Search,
   ShieldCheck,
   Trash2,
-  Upload
+  Upload,
+  XCircle
 } from 'lucide-react';
 import DangerConfirmModal from './DangerConfirmModal';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
+
+function OperationResult({ isDark, loading, loadingText, result }) {
+  const status = loading ? 'loading' : result?.status;
+  const message = loading ? loadingText : result?.message;
+  if (!status || !message) return null;
+
+  const styles = {
+    loading: isDark ? 'border-blue-400/30 bg-blue-400/10 text-blue-300' : 'border-blue-200 bg-blue-50 text-blue-700',
+    success: isDark ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    error: isDark ? 'border-red-400/30 bg-red-400/10 text-red-300' : 'border-red-200 bg-red-50 text-red-700'
+  };
+  const Icon = status === 'loading' ? RefreshCw : status === 'success' ? CheckCircle2 : XCircle;
+
+  return (
+    <div role="status" aria-live="polite" className={`mt-2 flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${styles[status]}`}>
+      <Icon size={15} className={`mt-0.5 shrink-0 ${status === 'loading' ? 'animate-spin' : ''}`} />
+      <span className="min-w-0 break-words">{message}</span>
+    </div>
+  );
+}
 
 function PackageManagerPanel({
   device,
@@ -42,6 +64,8 @@ function PackageManagerPanel({
   onPushPathChange,
   apkInstallPath,
   apkPushPath,
+  apkInstallResult,
+  apkPushResult,
   apkPushRemotePath,
   pushRemotePathHistory,
   apkBrowserPath,
@@ -412,6 +436,12 @@ function PackageManagerPanel({
                     安装
                   </button>
                 </div>
+                <OperationResult
+                  isDark={isDark}
+                  loading={isLoading(`install_${device.id}`)}
+                  loadingText="APK 安装中"
+                  result={apkInstallResult}
+                />
               </div>
 
               <div>
@@ -441,6 +471,12 @@ function PackageManagerPanel({
                     推送
                   </button>
                 </div>
+                <OperationResult
+                  isDark={isDark}
+                  loading={isLoading(`push_${device.id}`)}
+                  loadingText="文件推送中"
+                  result={apkPushResult}
+                />
               </div>
             </div>
           </div>

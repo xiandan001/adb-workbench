@@ -9,7 +9,7 @@ import PackageManagerPanel from './PackageManagerPanel';
 // 通用危险确认弹窗（用于 su 不支持等提醒）
 import DangerConfirmModal from './DangerConfirmModal';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter }) {
   const isOnline = device.status === 'device';
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(deviceName || '');
@@ -471,6 +471,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             onPushPathChange={onPushPathChange}
             apkInstallPath={apkInstallPath}
             apkPushPath={apkPushPath}
+            apkInstallResult={apkInstallResult}
+            apkPushResult={apkPushResult}
             apkPushRemotePath={apkPushRemotePath}
             pushRemotePathHistory={pushRemotePathHistory}
             apkBrowserPath={apkBrowserPath}

@@ -17,6 +17,14 @@ import DangerConfirmModal from './components/DangerConfirmModal';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 
+const getOperationErrorMessage = (error) => {
+  const lines = String(error || '未知错误')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  return lines[lines.length - 1] || '未知错误';
+};
+
 function App() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -104,6 +112,8 @@ function App() {
   const [expandedDeviceIds, setExpandedDeviceIds] = useState(new Set());
   const [apkInstallPaths, setApkInstallPaths] = useState({});
   const [apkPushPaths, setApkPushPaths] = useState({});
+  const [apkInstallResults, setApkInstallResults] = useState({});
+  const [apkPushResults, setApkPushResults] = useState({});
   const [apkPushRemotePaths, setApkPushRemotePaths] = useState({});
   const [apkBrowserPaths, setApkBrowserPaths] = useState({});
   const [apkBrowserItemsMap, setApkBrowserItemsMap] = useState({});
@@ -1038,22 +1048,28 @@ function App() {
     const apkPath = apkInstallPaths[deviceId];
     if (!apkPath) {
       showToast('请先选择一个 APK 文件');
+      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '安装失败：请先选择一个 APK 文件' } }));
       return;
     }
+    setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
     setOperationLoading(prev => ({ ...prev, [`install_${deviceId}`]: true }));
     try {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbInstall(deviceId, apkPath);
         if (res.success) {
           showToast(`安装成功！文件: ${apkPath}`);
+          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: '安装成功' } }));
         } else {
           showToast(`安装失败: ${res.error}`);
+          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `安装失败：${getOperationErrorMessage(res.error)}` } }));
         }
       } else {
         showToast('安装功能需要 Electron 环境');
+        setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '安装失败：当前环境不支持安装功能' } }));
       }
     } catch (err) {
       showToast(`安装失败: ${err.message}`);
+      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `安装失败：${getOperationErrorMessage(err.message)}` } }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`install_${deviceId}`]: false }));
     }
@@ -1064,22 +1080,26 @@ function App() {
     const remotePath = apkPushRemotePaths[deviceId] !== undefined ? apkPushRemotePaths[deviceId] : '/sdcard/';
     if (!localPath) {
       showToast('请先选择一个文件');
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：请先选择一个文件' } }));
       return;
     }
     if (!remotePath) {
       showToast('请输入远程路径');
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：请输入远程路径' } }));
       return;
     }
     await runPushFile(deviceId, localPath, remotePath);
   };
 
   const runPushFile = async (deviceId, localPath, remotePath) => {
+    setApkPushResults(prev => ({ ...prev, [deviceId]: null }));
     setOperationLoading(prev => ({ ...prev, [`push_${deviceId}`]: true }));
     try {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbPush(deviceId, localPath, remotePath);
         if (res.success) {
           showToast(`推送成功！文件: ${localPath} 目标: ${remotePath}`);
+          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: '推送成功' } }));
           // 推送成功后将远程路径加入历史记录
           setPushRemotePathHistory(prev => {
             const filtered = prev.filter(p => p !== remotePath);
@@ -1087,12 +1107,15 @@ function App() {
           });
         } else {
           showToast(`推送失败: ${res.error}`);
+          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `推送失败：${getOperationErrorMessage(res.error)}` } }));
         }
       } else {
         showToast('推送功能需要 Electron 环境');
+        setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：当前环境不支持推送功能' } }));
       }
     } catch (err) {
       showToast(`推送失败: ${err.message}`);
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `推送失败：${getOperationErrorMessage(err.message)}` } }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`push_${deviceId}`]: false }));
     }
@@ -1756,6 +1779,8 @@ function App() {
                       showToast={showToast}
                       apkInstallPath={apkInstallPaths[device.id] ?? ''}
                       apkPushPath={apkPushPaths[device.id] ?? ''}
+                      apkInstallResult={apkInstallResults[device.id] ?? null}
+                      apkPushResult={apkPushResults[device.id] ?? null}
                       apkPushRemotePath={apkPushRemotePaths[device.id] !== undefined ? apkPushRemotePaths[device.id] : '/sdcard/'}
                       pushRemotePathHistory={pushRemotePathHistory}
                       apkBrowserPath={apkBrowserPaths[device.id] ?? '/sdcard'}
