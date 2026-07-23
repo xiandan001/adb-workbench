@@ -128,6 +128,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
   const [editorMode, setEditorMode] = useState('simple');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [externalImportDialog, setExternalImportDialog] = useState(null);
+  const [externalImportLoading, setExternalImportLoading] = useState(false);
   const recorderMountedRef = useRef(true);
   const recorderRefreshTimerRef = useRef(null);
   const recorderActionInFlightRef = useRef(false);
@@ -327,25 +329,46 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
     });
   };
 
+  const completeStressScriptImport = async (filePath, scriptArgs = '') => {
+    const res = await window.electronAPI?.taskStressImport?.({ filePath, scriptArgs });
+    if (res?.ok) {
+      setScripts(res.scripts || []);
+      setSelectedScriptId(res.script.id);
+      setDraft(cloneScript(res.script));
+      showToast?.('脚本已导入');
+      return true;
+    }
+    showToast?.(`导入失败：${res?.error || '未知错误'}`);
+    return false;
+  };
+
   const importStressScript = async () => {
     const dialog = await window.electronAPI?.showOpenDialog?.({
-      title: '导入自动化压测脚本',
+      title: '导入任务或外部脚本',
       properties: ['openFile'],
       filters: [
-        { name: '压测脚本', extensions: ['json', 'yaml', 'yml'] },
+        { name: '任务及外部脚本', extensions: ['json', 'yaml', 'yml', 'py', 'sh'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     });
     const filePath = dialog?.filePaths?.[0];
     if (!filePath) return;
-    const res = await window.electronAPI?.taskStressImport?.({ filePath });
-    if (res?.ok) {
-      setScripts(res.scripts || []);
-      setSelectedScriptId(res.script.id);
-      setDraft(cloneScript(res.script));
-      showToast?.('压测脚本已导入');
-    } else {
-      showToast?.(`导入失败：${res?.error || '未知错误'}`);
+    const extension = filePath.match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase() || '';
+    if (extension === 'py' || extension === 'sh') {
+      setExternalImportDialog({ filePath, args: '' });
+      return;
+    }
+    await completeStressScriptImport(filePath);
+  };
+
+  const confirmExternalScriptImport = async () => {
+    if (!externalImportDialog || externalImportLoading) return;
+    setExternalImportLoading(true);
+    try {
+      const imported = await completeStressScriptImport(externalImportDialog.filePath, externalImportDialog.args);
+      if (imported) setExternalImportDialog(null);
+    } finally {
+      setExternalImportLoading(false);
     }
   };
 
@@ -872,6 +895,16 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
         onCancel={() => setConfirmDialog(null)}
         onConfirm={runConfirmDialog}
       />
+      <ExternalScriptImportDialog
+        dialog={externalImportDialog}
+        theme={t}
+        loading={externalImportLoading}
+        onChange={(args) => {
+          setExternalImportDialog(prev => prev ? { ...prev, args } : prev);
+        }}
+        onCancel={() => setExternalImportDialog(null)}
+        onConfirm={confirmExternalScriptImport}
+      />
     </div>
   );
 }
@@ -1186,6 +1219,94 @@ function ConfirmDialog({ dialog, theme, loading, onRememberChoiceChange, onCance
           </div>
         </div>
       </div>
+    </div>,
+    document.body
+  );
+}
+
+function ExternalScriptImportDialog({ dialog, theme, loading, onChange, onCancel, onConfirm }) {
+  useEffect(() => {
+    if (!dialog) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !loading) onCancel();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [dialog, loading, onCancel]);
+
+  if (!dialog || typeof document === 'undefined') return null;
+
+  const isDark = theme.primary === 'tech';
+  const fileName = String(dialog.filePath || '').split(/[\\/]/).pop() || '外部脚本';
+  const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
+  const titleClass = isDark ? 'text-[#E8EAED]' : 'text-slate-900';
+  const textClass = isDark ? 'text-[#BDC1C6]' : 'text-slate-600';
+  const pathClass = isDark ? 'bg-[#2D2F33] border-[#3E4145] text-[#9AA0A6]' : 'bg-slate-50 border-slate-200 text-slate-500';
+  const cancelClass = isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50';
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[145] flex items-center justify-center bg-black/55 px-4 py-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !loading) onCancel();
+      }}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="external-script-import-title"
+        className={`w-full max-w-lg rounded-xl border p-5 shadow-2xl ${panelClass}`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!loading) onConfirm();
+        }}
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
+            <Terminal size={22} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 id="external-script-import-title" className={`text-base font-semibold ${titleClass}`}>导入外部脚本</h3>
+            <p className={`mt-2 text-sm ${textClass}`}>{fileName}</p>
+            <div className={`mt-3 break-all rounded-lg border px-3 py-2 text-xs leading-5 ${pathClass}`}>
+              {dialog.filePath}
+            </div>
+          </div>
+        </div>
+        <label className="mt-5 block">
+          <span className={`block text-xs font-medium ${textClass}`}>脚本参数（可选）</span>
+          <input
+            autoFocus
+            value={dialog.args || ''}
+            disabled={loading}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="-s {deviceId} -n 20"
+            className={`${fieldClass(isDark, 'font-mono')} mt-2 disabled:opacity-60`}
+          />
+          <span className={`mt-2 block text-xs leading-5 ${textClass}`}>
+            可留空。如脚本需要指定设备，请按脚本规范填写参数，可使用 {'{deviceId}'} 等占位符。
+          </span>
+        </label>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onCancel}
+            className={`px-4 py-2 text-sm rounded-lg border transition-colors disabled:opacity-60 ${cancelClass}`}
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            {loading ? '导入中...' : '导入脚本'}
+          </button>
+        </div>
+      </form>
     </div>,
     document.body
   );
@@ -1894,6 +2015,7 @@ function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, 
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const selectedType = STEP_TYPES.find(type => type.value === step.type) || STEP_TYPES[0];
   const Icon = selectedType.icon;
+  const unlimitedScriptTimeout = hasUnlimitedExternalScriptTimeout(step);
 
   return (
     <div className={`rounded-lg border p-4 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
@@ -1924,10 +2046,25 @@ function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, 
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {renderStepFields(step, onChange, isDark)}
-        <NumberField label="超时(ms)" value={step.timeoutMs} onChange={(value) => onChange({ timeoutMs: value })} isDark={isDark} />
+        {unlimitedScriptTimeout ? (
+          <div>
+            <FieldLabel label="执行超时" isDark={isDark} />
+            <div className={`w-full rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-[#5F6368] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+              不限制（可手动取消）
+            </div>
+          </div>
+        ) : (
+          <NumberField label="超时(ms)" value={step.timeoutMs} onChange={(value) => onChange({ timeoutMs: value })} isDark={isDark} />
+        )}
       </div>
     </div>
   );
+}
+
+function hasUnlimitedExternalScriptTimeout(step) {
+  if (step?.type !== 'externalScript') return false;
+  const extension = String(step.scriptPath || '').trim().match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase() || '';
+  return extension === 'py' || extension === 'sh';
 }
 
 function renderStepFields(step, onChange, isDark) {
@@ -2455,7 +2592,7 @@ function createStep(type) {
     threshold: 98,
     adapter: type === 'externalScript' ? 'custom' : '',
     scriptPath: '',
-    args: type === 'externalScript' ? '{deviceId}' : '',
+    args: '',
     workingDir: '',
     critical: false,
     outputBaseDir: '',

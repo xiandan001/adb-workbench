@@ -89,7 +89,7 @@ function register(ipcMain) {
 
   ipcMain.handle('task-center:stress:import', async (event, args) => {
     try {
-      const script = importStressScript(args?.filePath);
+      const script = importStressScript(args?.filePath, args?.scriptArgs);
       const scripts = readScripts();
       const now = new Date().toISOString();
       const nextScript = {
@@ -1596,7 +1596,8 @@ async function runExternalScriptStep(task, deviceId, step) {
     : (scriptPath ? path.dirname(scriptPath) : undefined);
   const finalCommand = replaceStepPlaceholders(command, { ...context, scriptPath });
   const finalArgs = args.map(arg => replaceStepPlaceholders(arg, { ...context, scriptPath }));
-  const result = await runProcess(task, finalCommand, finalArgs, step.timeoutMs || LONG_TIMEOUT_MS, workingDir);
+  const timeoutMs = hasUnlimitedExternalScriptTimeout(scriptPath) ? 0 : (step.timeoutMs || LONG_TIMEOUT_MS);
+  const result = await runProcess(task, finalCommand, finalArgs, timeoutMs, workingDir);
   const logPath = path.join(artifactDir, `external-${sanitizeName(deviceId)}-${formatStamp(new Date())}.log`);
   await fs.promises.writeFile(logPath, [
     `adapter=${adapter || 'custom'}`,
@@ -1613,10 +1614,16 @@ async function runExternalScriptStep(task, deviceId, step) {
   };
 }
 
+function hasUnlimitedExternalScriptTimeout(scriptPath) {
+  const ext = path.extname(String(scriptPath || '')).toLowerCase();
+  return ext === '.py' || ext === '.sh';
+}
+
 function inferScriptCommand(scriptPath) {
   const ext = path.extname(String(scriptPath || '')).toLowerCase();
   if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return { command: 'node', includeScriptPath: true };
   if (ext === '.py') return { command: 'python', includeScriptPath: true };
+  if (ext === '.sh') return { command: 'sh', includeScriptPath: true };
   if (ext === '.bat' || ext === '.cmd') return { command: 'cmd.exe', includeScriptPath: false, prefixArgs: ['/c', scriptPath] };
   if (ext === '.ps1') return { command: 'powershell.exe', includeScriptPath: false, prefixArgs: ['-ExecutionPolicy', 'Bypass', '-File', scriptPath] };
   return { command: scriptPath, includeScriptPath: false };
@@ -2134,12 +2141,30 @@ async function buildStressAiSummary(result) {
   });
 }
 
-function importStressScript(filePath) {
+function importStressScript(filePath, scriptArgs = '') {
   const target = String(filePath || '').trim();
   if (!target) throw new Error('file_required');
   if (!fs.existsSync(target)) throw new Error('脚本文件不存在');
-  const content = fs.readFileSync(target, 'utf8');
   const ext = path.extname(target).toLowerCase();
+  if (ext === '.py' || ext === '.sh') {
+    const fileName = path.basename(target);
+    return normalizeScript({
+      mode: 'stress',
+      name: path.basename(target, ext),
+      description: `导入自 ${fileName}`,
+      steps: [{
+        type: 'externalScript',
+        label: `执行 ${fileName}`,
+        adapter: 'custom',
+        scriptPath: path.resolve(target),
+        args: String(scriptArgs ?? '')
+      }]
+    });
+  }
+  if (!['.json', '.yaml', '.yml'].includes(ext)) {
+    throw new Error(`不支持的脚本格式：${ext || '无扩展名'}`);
+  }
+  const content = fs.readFileSync(target, 'utf8');
   const parsed = ext === '.yaml' || ext === '.yml' ? parseSimpleYaml(content) : JSON.parse(content);
   return normalizeScript({
     ...parsed,

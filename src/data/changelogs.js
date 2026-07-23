@@ -2,6 +2,14 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.8': {
+    title: 'v4.1.8',
+    date: '2026-07-23',
+    items: [
+      { type: 'feature', text: '任务中心支持直接导入 Python 和 Shell 外部脚本，并可按脚本要求填写执行参数' },
+      { type: 'improve', text: 'Python 和 Shell 外部脚本执行不受任务超时限制，可随时手动取消' }
+    ]
+  },
   '4.1.7': {
     title: 'v4.1.7',
     date: '2026-07-21',

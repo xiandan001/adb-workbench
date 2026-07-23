@@ -1453,7 +1453,8 @@ async function runExternalScriptStep(task, deviceId, step) {
     : (scriptPath ? path.dirname(scriptPath) : undefined);
   const finalCommand = replaceStepPlaceholders(command, { ...context, scriptPath });
   const finalArgs = args.map(arg => replaceStepPlaceholders(arg, { ...context, scriptPath }));
-  const result = await runProcess(task, finalCommand, finalArgs, step.timeoutMs || LONG_TIMEOUT_MS, workingDir);
+  const timeoutMs = hasUnlimitedExternalScriptTimeout(scriptPath) ? 0 : (step.timeoutMs || LONG_TIMEOUT_MS);
+  const result = await runProcess(task, finalCommand, finalArgs, timeoutMs, workingDir);
   const logPath = path.join(artifactDir, `external-${sanitizeName(deviceId)}-${formatStamp(new Date())}.log`);
   await fs.promises.writeFile(logPath, [
     `adapter=${adapter || 'custom'}`,
@@ -1470,10 +1471,16 @@ async function runExternalScriptStep(task, deviceId, step) {
   };
 }
 
+function hasUnlimitedExternalScriptTimeout(scriptPath) {
+  const ext = path.extname(String(scriptPath || '')).toLowerCase();
+  return ext === '.py' || ext === '.sh';
+}
+
 function inferScriptCommand(scriptPath) {
   const ext = path.extname(String(scriptPath || '')).toLowerCase();
   if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return { command: 'node', includeScriptPath: true };
   if (ext === '.py') return { command: 'python', includeScriptPath: true };
+  if (ext === '.sh') return { command: 'sh', includeScriptPath: true };
   if (ext === '.bat' || ext === '.cmd') return { command: 'cmd.exe', includeScriptPath: false, prefixArgs: ['/c', scriptPath] };
   if (ext === '.ps1') return { command: 'powershell.exe', includeScriptPath: false, prefixArgs: ['-ExecutionPolicy', 'Bypass', '-File', scriptPath] };
   return { command: scriptPath, includeScriptPath: false };
