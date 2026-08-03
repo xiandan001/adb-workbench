@@ -1646,7 +1646,7 @@ function App() {
               {activeTab === 'devices' ? '已连接设备' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
             <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
-              {activeTab === 'devices' ? '管理并投屏您的 Android 设备' : activeTab === 'troubleshoot' ? '按问题场景自动采集诊断证据' : activeTab === 'artifacts' ? '集中查看报告、数据和证据目录' : activeTab === 'quality' ? '生成回归差异报告、验收证据和设备守护记录' : activeTab === 'history' ? '查看无线连接历史记录' : activeTab === 'tasks' ? '编排复现脚本并批量运行到多台设备' : activeTab === 'performance' ? '观察设备资源与进程状态' : activeTab === 'member' ? '管理您的会员权益与激活' : '配置 Scrcpy 及 ADB 相关偏好'}
+              {activeTab === 'devices' ? '管理并投屏您的 Android 设备' : activeTab === 'troubleshoot' ? '按问题场景自动采集诊断证据' : activeTab === 'artifacts' ? '集中查看报告、数据和证据目录' : activeTab === 'quality' ? '生成回归差异报告、验收证据和设备守护记录' : activeTab === 'history' ? '查看无线连接历史记录' : activeTab === 'tasks' ? '快速完成设备测试和操作录制' : activeTab === 'performance' ? '观察设备资源与进程状态' : activeTab === 'member' ? '管理您的会员权益与激活' : '配置 Scrcpy 及 ADB 相关偏好'}
             </p>
           </div>
 
@@ -1979,6 +1979,7 @@ function App() {
               theme={theme}
               taskCenterPath={taskCenterPath}
               showToast={showToast}
+              onRefreshDevices={fetchDevices}
             />
           )}
 
@@ -2731,6 +2732,7 @@ function App() {
                             await window.electronAPI.savePerformancePath('');
                             await window.electronAPI.saveTaskCenterPath('');
                             await window.electronAPI.saveQualityCenterPath('');
+                            await window.electronAPI.saveSettingsPatch?.({ taskCenterOnboarding: null });
                           }
                           clearConfirmSuppressionMemory();
                           showToast('所有设置已重置为默认值');

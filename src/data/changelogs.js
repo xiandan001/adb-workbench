@@ -2,6 +2,15 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.1.9': {
+    title: 'v4.1.9',
+    date: '2026-08-03',
+    items: [
+      { type: 'feature', text: '任务中心新增点击式新手教程，引导选择设备、读取真实界面、录制点击并完成一次回放' },
+      { type: 'improve', text: '任务中心首页简化为“录制操作”和“导入脚本”两个主要入口' },
+      { type: 'improve', text: '录制操作新增简化页面，复杂设置收纳到更多录制方式和高级编排' }
+    ]
+  },
   '4.1.8': {
     title: 'v4.1.8',
     date: '2026-07-23',

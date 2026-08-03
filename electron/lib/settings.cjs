@@ -4,6 +4,7 @@
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const CUSTOM_THEMES_FILE = 'customThemes.json';
@@ -16,7 +17,8 @@ const SETTING_KEYS = {
   performancePath: { fallback: null },
   taskCenterPath: { fallback: null },
   qualityCenterPath: { fallback: null },
-  pushRemotePathHistory: { fallback: [] }
+  pushRemotePathHistory: { fallback: [] },
+  taskCenterOnboarding: { fallback: null, sanitize: normalizeOnboardingState }
 };
 
 function register(ipcMain) {
@@ -98,7 +100,11 @@ function registerSettingHandlers(ipcMain, channelSuffix, key) {
 }
 
 async function readSettings() {
-  return readJson(getSettingsPath(), {});
+  const settings = await readJson(getSettingsPath(), {});
+  return {
+    ...settings,
+    taskCenterOnboarding: normalizeOnboardingState(settings.taskCenterOnboarding)
+  };
 }
 
 async function writeSettingsPatch(patch) {
@@ -112,7 +118,12 @@ async function writeSettingsPatchNow(patch) {
   const next = { ...current };
   for (const [key, value] of Object.entries(patch || {})) {
     if (!Object.prototype.hasOwnProperty.call(SETTING_KEYS, key)) continue;
-    next[key] = value;
+    const config = SETTING_KEYS[key];
+    const sanitized = typeof config.sanitize === 'function' ? config.sanitize(value) : value;
+    if (key === 'taskCenterOnboarding' && value !== null && sanitized === null) {
+      throw new Error('invalid_task_center_onboarding');
+    }
+    next[key] = sanitized;
   }
   await writeJson(getSettingsPath(), next);
   return next;

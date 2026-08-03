@@ -4,7 +4,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import {
+  advanceOnboardingStage,
+  createSingleReplayScript,
+  findOnboardingTask,
+  isTerminalTask,
+  ONBOARDING_EVENTS,
+  ONBOARDING_STAGES
+} from '../shared/taskCenterOnboarding';
+import TaskCenterOnboarding from './TaskCenterOnboarding';
+import TaskCenterQuickStart from './TaskCenterQuickStart';
+import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
+import {
   AlertCircle,
+  ArrowLeft,
   Camera,
   Check,
   CheckCircle2,
@@ -14,6 +26,7 @@ import {
   Download,
   FolderOpen,
   Gauge,
+  HelpCircle,
   Loader2,
   Maximize2,
   Package,
@@ -112,7 +125,7 @@ const QUICK_TEMPLATES = [
   }
 ];
 
-function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
+function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices }) {
   const t = theme;
   const isDark = t.primary === 'tech';
   const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
@@ -126,6 +139,13 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
   const [saving, setSaving] = useState(false);
   const [recorder, setRecorder] = useState(createRecorderState());
   const [editorMode, setEditorMode] = useState('simple');
+  const [workspaceView, setWorkspaceView] = useState('home');
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingLoaded, setOnboardingLoaded] = useState(false);
+  const [onboardingLoadError, setOnboardingLoadError] = useState('');
+  const [onboardingStatus, setOnboardingStatus] = useState(null);
+  const [onboardingStage, setOnboardingStage] = useState(ONBOARDING_STAGES.WELCOME);
+  const [recordingTaskId, setRecordingTaskId] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [externalImportDialog, setExternalImportDialog] = useState(null);
@@ -139,6 +159,9 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
   const softClass = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
+  const onboardingInteractionActive = onboardingOpen
+    && onboardingStage !== ONBOARDING_STAGES.WELCOME
+    && onboardingStage !== ONBOARDING_STAGES.RESULT;
 
   const clearScheduledRecorderRefresh = ({ clearVisual = false } = {}) => {
     if (!recorderRefreshTimerRef.current) return;
@@ -150,6 +173,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
   };
 
   useEffect(() => {
+    recorderMountedRef.current = true;
     return () => {
       recorderMountedRef.current = false;
       clearScheduledRecorderRefresh();
@@ -161,9 +185,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
     async function loadState() {
       setLoading(true);
       try {
-        const [scriptRes, stateRes] = await Promise.all([
+        const [scriptRes, stateRes, settingsRes] = await Promise.all([
           window.electronAPI?.taskScriptsList?.(),
-          window.electronAPI?.taskState?.()
+          window.electronAPI?.taskState?.(),
+          window.electronAPI?.loadAllSettings?.()
         ]);
         if (!alive) return;
         const nextScripts = scriptRes?.scripts || [];
@@ -173,6 +198,19 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
         setDraft(cloneScript(first));
         setActiveTasks(stateRes?.activeTasks || []);
         setHistory(stateRes?.history || []);
+        const onboardingState = settingsRes?.success
+          ? settingsRes.data?.settings?.taskCenterOnboarding
+          : null;
+        setOnboardingStatus(onboardingState?.status || null);
+        setOnboardingLoadError(settingsRes?.success ? '' : (settingsRes?.error || '教程状态读取失败'));
+        setOnboardingOpen(!onboardingState);
+        setOnboardingLoaded(true);
+      } catch (error) {
+        if (!alive) return;
+        setOnboardingStatus(null);
+        setOnboardingLoadError(error.message || '教程状态读取失败');
+        setOnboardingOpen(true);
+        setOnboardingLoaded(true);
       } finally {
         if (alive) setLoading(false);
       }
@@ -200,6 +238,41 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
 
   const activeCount = activeTasks.filter(task => task.status === 'running' || task.status === 'queued').length;
   const selectedScript = scripts.find(script => script.id === selectedScriptId);
+  const recordingTask = useMemo(
+    () => findOnboardingTask(recordingTaskId, activeTasks, history),
+    [recordingTaskId, activeTasks, history]
+  );
+  const recordingTaskView = recordingTaskId === 'pending'
+    ? { id: 'pending', status: 'queued', totalSteps: draft.steps?.length || 0 }
+    : recordingTask;
+
+  useEffect(() => {
+    if (!onboardingOpen
+      || onboardingStage !== ONBOARDING_STAGES.REPLAY
+      || !recordingTaskId
+      || !isTerminalTask(recordingTask)) return;
+    setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.TASK_FINISHED));
+  }, [onboardingOpen, onboardingStage, recordingTaskId, recordingTask]);
+
+  useEffect(() => {
+    if (!onboardingInteractionActive || !recorder.deviceId || recordingTaskId) return;
+    if (onlineDevices.some(device => device.id === recorder.deviceId)) return;
+    clearScheduledRecorderRefresh();
+    setRecorder(prev => ({
+      ...prev,
+      deviceId: '',
+      nodes: [],
+      selectedNodeIndex: '',
+      screenshotDataUrl: '',
+      screenshotWidth: 0,
+      screenshotHeight: 0,
+      loading: false,
+      recording: false,
+      backgroundLoading: false
+    }));
+    setSelectedDeviceIds([]);
+    setOnboardingStage(ONBOARDING_STAGES.DEVICE_SELECT);
+  }, [onboardingInteractionActive, onlineDevices, recorder.deviceId, recordingTaskId]);
 
   const runConfirmDialog = async () => {
     if (!confirmDialog?.onConfirm) return;
@@ -234,10 +307,82 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
     setConfirmDialog(next);
   };
 
+  const persistOnboardingStatus = async (status) => {
+    const result = await window.electronAPI?.saveSettingsPatch?.({
+      taskCenterOnboarding: {
+        schemaVersion: 1,
+        status,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    if (!result?.success) {
+      showToast?.(`教程状态保存失败：${result?.error || '未知错误'}`);
+      return false;
+    }
+    setOnboardingLoadError('');
+    setOnboardingStatus(status);
+    setOnboardingOpen(false);
+    setOnboardingStage(ONBOARDING_STAGES.WELCOME);
+    setWorkspaceView('home');
+    return true;
+  };
+
+  const retryOnboardingStateLoad = async () => {
+    try {
+      const result = await window.electronAPI?.loadAllSettings?.();
+      if (!result?.success) {
+        setOnboardingLoadError(result?.error || '教程状态读取失败');
+        return false;
+      }
+      const nextState = result.data?.settings?.taskCenterOnboarding || null;
+      setOnboardingStatus(nextState?.status || null);
+      setOnboardingLoadError('');
+      setOnboardingOpen(!nextState);
+      return true;
+    } catch (error) {
+      setOnboardingLoadError(error.message || '教程状态读取失败');
+      return false;
+    }
+  };
+
+  const requestSkipOnboarding = () => {
+    openConfirmDialog({
+      title: '跳过新手教程',
+      message: '确定跳过教程吗？之后仍可通过任务中心右上角的“新手教程”重新打开。',
+      confirmLabel: '确认跳过',
+      icon: HelpCircle,
+      onConfirm: () => persistOnboardingStatus('skipped')
+    });
+  };
+
+  const openOnboarding = () => {
+    setOnboardingStage(ONBOARDING_STAGES.WELCOME);
+    setRecordingTaskId('');
+    setOnboardingOpen(true);
+  };
+
+  const startOnboarding = () => {
+    clearScheduledRecorderRefresh();
+    setWorkspaceView('home');
+    setSelectedDeviceIds([]);
+    setRecorder(createRecorderState());
+    setRecordingTaskId('');
+    setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.START));
+  };
+
   useEffect(() => {
     if (onlineDevices.length === 0) {
       clearScheduledRecorderRefresh();
       setRecorder(prev => prev.deviceId ? { ...prev, deviceId: '', loading: false, recording: false, backgroundLoading: false } : prev);
+      return;
+    }
+    if (onboardingInteractionActive && (
+      onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY
+      || onboardingStage === ONBOARDING_STAGES.DEVICE_SELECT
+    )) {
+      setRecorder(prev => onlineDevices.some(device => device.id === prev.deviceId)
+        ? prev
+        : { ...prev, deviceId: '', loading: false, recording: false, backgroundLoading: false });
       return;
     }
     const preferred = selectedDeviceIds[0] || onlineDevices[0].id;
@@ -248,7 +393,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
       recording: false,
       backgroundLoading: false
     });
-  }, [onlineDevices, selectedDeviceIds]);
+  }, [onlineDevices, selectedDeviceIds, onboardingInteractionActive, onboardingStage]);
 
   const updateRecorder = (patch) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'deviceId')) clearScheduledRecorderRefresh();
@@ -283,6 +428,28 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
     if (templateId === 'crash-capture') showToast?.('已创建崩溃复现采集模板，请填写目标应用包名');
     if (templateId === 'smoke') showToast?.('已创建基础冒烟检查模板，可直接选择设备运行');
     if (templateId === 'performance-watch') showToast?.('已创建性能观察模板，请填写目标应用包名');
+  };
+
+  const openScriptEditor = (script) => {
+    selectScript(script);
+    setEditorMode('simple');
+    setWorkspaceView('editor');
+  };
+
+  const startRecording = () => {
+    applyQuickTemplate('record');
+    setRecordingTaskId('');
+    if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY) {
+      setSelectedDeviceIds([]);
+      setRecorder(createRecorderState());
+      setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.OPEN_RECORDING));
+    }
+    setWorkspaceView('recording');
+  };
+
+  const openAdvancedEditor = () => {
+    setEditorMode('advanced');
+    setWorkspaceView('editor');
   };
 
   const saveScript = async () => {
@@ -335,6 +502,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
       setScripts(res.scripts || []);
       setSelectedScriptId(res.script.id);
       setDraft(cloneScript(res.script));
+      setWorkspaceView('editor');
       showToast?.('脚本已导入');
       return true;
     }
@@ -424,6 +592,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
       const res = await window.electronAPI?.taskStressUiSnapshot?.({ deviceId });
       if (!recorderMountedRef.current) return false;
       if (res?.ok) {
+        const screenshotDataUrl = res.screenshotDataUrl || recorder.screenshotDataUrl;
+        const screenshotWidth = res.screenshotWidth || recorder.screenshotWidth;
+        const screenshotHeight = res.screenshotHeight || recorder.screenshotHeight;
+        const hasValidScreenshot = Boolean(screenshotDataUrl && screenshotWidth && screenshotHeight);
         setRecorder(prev => prev.deviceId === deviceId ? ({
           ...prev,
           nodes: res.nodes || [],
@@ -432,10 +604,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
           screenshotWidth: res.screenshotWidth || prev.screenshotWidth,
           screenshotHeight: res.screenshotHeight || prev.screenshotHeight,
           ...(background ? { backgroundLoading: false } : { loading: false }),
-          error: background ? prev.error : (res.error || res.screenshotError || '')
+          error: background ? prev.error : (res.error || res.screenshotError || (hasValidScreenshot ? '' : '未获取到有效设备画面'))
         }) : prev);
         if (!silent) showToast?.(`已读取 ${res.nodes?.length || 0} 个界面控件`);
-        return true;
+        return hasValidScreenshot;
       } else {
         const message = res?.error || '未知错误';
         setRecorder(prev => prev.deviceId === deviceId ? {
@@ -479,25 +651,26 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
     }, RECORDER_BACKGROUND_REFRESH_DELAY_MS);
   };
 
-  const appendRecordedStep = (step) => {
+  const appendRecordedStep = (step, mode = 'stress') => {
     setDraft(prev => ({
       ...prev,
-      mode: 'stress',
+      mode,
       steps: [...(prev.steps || []), { ...step, id: `step-${Date.now()}-${Math.random().toString(16).slice(2)}` }]
     }));
   };
 
-  const recordAction = async (action, extra = {}) => {
+  const recordAction = async (action, extra = {}, options = {}) => {
     if (!recorder.deviceId) {
       showToast?.('请选择录制设备');
-      return;
+      return null;
     }
-    if (recorder.loading || recorder.recording || recorder.backgroundLoading) return;
+    if (recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
     clearScheduledRecorderRefresh({ clearVisual: true });
     const deviceId = recorder.deviceId;
     const selectedNode = recorder.nodes.find(item => String(item.index) === String(recorder.selectedNodeIndex));
     const node = Object.prototype.hasOwnProperty.call(extra, 'node') ? extra.node : selectedNode;
     let shouldRefreshSnapshot = false;
+    let recordedStep = null;
     recorderActionInFlightRef.current = true;
     setRecorder(prev => ({ ...prev, recording: true, error: '' }));
     try {
@@ -508,8 +681,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
         ...extra
       });
       if (res?.ok && res.step) {
-        appendRecordedStep(res.step);
-        if (RECORD_ACTIONS_REFRESH_SNAPSHOT.has(action)) {
+        const recordingMode = workspaceView === 'recording' ? 'replay' : 'stress';
+        appendRecordedStep(res.step, recordingMode);
+        recordedStep = res.step;
+        if (RECORD_ACTIONS_REFRESH_SNAPSHOT.has(action) && !options.skipRefresh) {
           shouldRefreshSnapshot = true;
           showToast?.('已执行并记录步骤，设备画面将在空闲时刷新');
         } else {
@@ -525,6 +700,106 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
       if (recorderMountedRef.current) setRecorder(prev => ({ ...prev, recording: false }));
     }
     if (shouldRefreshSnapshot) scheduleRecorderSnapshotRefresh(deviceId);
+    return recordedStep;
+  };
+
+  const changeRecordingDevice = (patch) => {
+    updateRecorder(patch);
+    if (!Object.prototype.hasOwnProperty.call(patch, 'deviceId')) return;
+    setSelectedDeviceIds(patch.deviceId ? [patch.deviceId] : []);
+    setRecordingTaskId('');
+    if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.DEVICE_SELECT && patch.deviceId) {
+      setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.SELECT_DEVICE));
+    }
+  };
+
+  const refreshRecordingSnapshot = async () => {
+    const refreshed = await refreshRecorderSnapshot();
+    if (refreshed && onboardingOpen && onboardingStage === ONBOARDING_STAGES.SNAPSHOT) {
+      setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.SNAPSHOT_READY));
+    }
+    return refreshed;
+  };
+
+  const recordFromRecordingWorkspace = async (action, extra = {}) => {
+    const step = await recordAction(action, extra, { skipRefresh: true });
+    if (step && action === 'tap' && onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORD_TAP) {
+      setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.TAP_RECORDED));
+    }
+    return step;
+  };
+
+  const runRecordingReplay = async ({ tutorial = false } = {}) => {
+    const deviceId = recorder.deviceId;
+    if (!deviceId || !onlineDevices.some(device => device.id === deviceId)) {
+      showToast?.('请选择一台在线设备');
+      return false;
+    }
+    if (!draft.steps?.length) {
+      showToast?.('请先录制至少一个步骤');
+      return false;
+    }
+    const replayScript = createSingleReplayScript(draft);
+    setDraft(replayScript);
+    setSelectedDeviceIds([deviceId]);
+    setRecordingTaskId('pending');
+    try {
+      const res = await window.electronAPI?.taskRun?.({
+        script: replayScript,
+        deviceIds: [deviceId],
+        outputBaseDir: taskCenterPath,
+        continueOnError: false,
+        concurrency: 1
+      });
+      if (!res?.ok || !res.task?.id) {
+        setRecordingTaskId('');
+        showToast?.(`启动失败：${res?.error || '未知错误'}`);
+        return false;
+      }
+      setRecordingTaskId(res.task.id);
+      setActiveTasks(prev => prev.some(task => task.id === res.task.id)
+        ? prev
+        : [res.task, ...prev]);
+      if (tutorial || (onboardingOpen && onboardingStage === ONBOARDING_STAGES.REPLAY)) {
+        setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.REPLAY_STARTED));
+      }
+      showToast?.('回放任务已开始');
+      return true;
+    } catch (error) {
+      setRecordingTaskId('');
+      showToast?.(`启动失败：${error.message || '未知错误'}`);
+      return false;
+    }
+  };
+
+  const cancelRecordingReplay = async () => {
+    if (!recordingTaskId || recordingTaskId === 'pending') return;
+    await cancelTask(recordingTaskId);
+  };
+
+  const restartOnboardingRecording = () => {
+    clearScheduledRecorderRefresh();
+    setRecordingTaskId('');
+    setDraft(prev => ({ ...createSingleReplayScript(prev), steps: [] }));
+    setRecorder(prev => ({
+      ...prev,
+      nodes: [],
+      selectedNodeIndex: '',
+      screenshotDataUrl: '',
+      screenshotWidth: 0,
+      screenshotHeight: 0,
+      loading: false,
+      recording: false,
+      backgroundLoading: false,
+      error: ''
+    }));
+    setOnboardingStage(ONBOARDING_STAGES.SNAPSHOT);
+    setWorkspaceView('recording');
+  };
+
+  const replayOnboardingRecording = () => {
+    setOnboardingStage(ONBOARDING_STAGES.REPLAY);
+    runRecordingReplay({ tutorial: true });
   };
 
   const clearRecordedSteps = () => {
@@ -627,24 +902,46 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
               <ClipboardList size={20} className="text-emerald-500" />
               任务中心
             </h3>
-            <p className={`text-sm mt-1 ${muted}`}>默认按场景录制和运行，高级编排保留完整脚本能力。</p>
+            <p className={`text-sm mt-1 ${muted}`}>先选择目标，复杂设置会在需要时再显示。</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto xl:items-center">
-            <div className={`inline-flex rounded-lg border p-1 ${isDark ? 'border-[#3E4145] bg-[#2D2F33]' : 'border-slate-200 bg-slate-50'}`}>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setEditorMode('simple')}
-                className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'simple' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
+                onClick={openOnboarding}
+                className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${t.button.secondary}`}
               >
-                普通模式
+                <HelpCircle size={15} />
+                新手教程
               </button>
-              <button
-                type="button"
-                onClick={() => setEditorMode('advanced')}
-                className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'advanced' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
-              >
-                高级编排
-              </button>
+              {workspaceView === 'editor' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setWorkspaceView('home')}
+                    className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${t.button.secondary}`}
+                  >
+                    <ArrowLeft size={15} />
+                    返回快速入口
+                  </button>
+                  <div className={`inline-flex rounded-lg border p-1 ${isDark ? 'border-[#3E4145] bg-[#2D2F33]' : 'border-slate-200 bg-slate-50'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode('simple')}
+                      className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'simple' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
+                    >
+                      普通模式
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode('advanced')}
+                      className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'advanced' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
+                    >
+                      高级编排
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-3 w-full sm:min-w-[420px]">
               <StatCard label="在线设备" value={onlineDevices.length} theme={t} />
@@ -655,7 +952,47 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[240px_minmax(0,1fr)] min-[1920px]:grid-cols-[240px_minmax(760px,1fr)_340px] items-start">
+      {workspaceView === 'home' ? (
+        <TaskCenterQuickStart
+          theme={t}
+          scripts={scripts}
+          activeTasks={activeTasks}
+          history={history}
+          onRecord={startRecording}
+          onImport={importStressScript}
+          onOpenScript={openScriptEditor}
+          onOpenAdvanced={openAdvancedEditor}
+        />
+      ) : workspaceView === 'recording' ? (
+        <TaskCenterRecordingWorkspace
+          theme={t}
+          draft={draft}
+          saving={saving}
+          task={recordingTaskView}
+          onBack={() => setWorkspaceView('home')}
+          onSave={saveScript}
+          onReplay={runRecordingReplay}
+          onCancel={cancelRecordingReplay}
+          onClearSteps={clearRecordedSteps}
+          onOpenAdvanced={openAdvancedEditor}
+          recorderPanel={(
+            <StressRecorder
+              recorder={recorder}
+              onlineDevices={onlineDevices}
+              isDark={isDark}
+              softClass={softClass}
+              focusedMode
+              tapOnly
+              onChange={changeRecordingDevice}
+              onRefresh={refreshRecordingSnapshot}
+              onRefreshDevices={onRefreshDevices}
+              onRecord={recordFromRecordingWorkspace}
+              onClearSteps={clearRecordedSteps}
+            />
+          )}
+        />
+      ) : (
+        <div className="grid gap-5 xl:grid-cols-[240px_minmax(0,1fr)] min-[1920px]:grid-cols-[240px_minmax(760px,1fr)_340px] items-start">
         <section className={`rounded-xl border shadow-sm overflow-hidden min-w-0 ${panelClass}`}>
           <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
             <div className={`font-semibold ${text}`}>复现脚本</div>
@@ -884,7 +1221,27 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast }) {
             onOpenPath={(targetPath) => window.electronAPI?.openFolder?.(targetPath)}
           />
         </section>
-      </div>
+        </div>
+      )}
+      {onboardingLoaded && (
+        <TaskCenterOnboarding
+          open={onboardingOpen}
+          stage={onboardingStage}
+          taskId={recordingTaskId}
+          task={recordingTaskView}
+          theme={t}
+          onStart={startOnboarding}
+          onPersistStatus={persistOnboardingStatus}
+          onRequestSkip={onboardingStatus ? () => setOnboardingOpen(false) : requestSkipOnboarding}
+          onTemporaryClose={() => setOnboardingOpen(false)}
+          onReplay={replayOnboardingRecording}
+          onRestartRecording={restartOnboardingRecording}
+          onCancelTask={cancelRecordingReplay}
+          onRetryStateLoad={retryOnboardingStateLoad}
+          dismissLabel={onboardingStatus ? '关闭' : '跳过'}
+          initialError={onboardingLoadError}
+        />
+      )}
       <ConfirmDialog
         dialog={confirmDialog}
         theme={t}
@@ -1361,7 +1718,7 @@ function CheckOption({ label, checked, onChange, isDark }) {
   );
 }
 
-function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode = false, onChange, onRefresh, onRecord, onClearSteps }) {
+function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode = false, focusedMode = false, tapOnly = false, onChange, onRefresh, onRefreshDevices, onRecord, onClearSteps }) {
   const selectedNode = recorder.nodes.find(node => String(node.index) === String(recorder.selectedNodeIndex));
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -1460,6 +1817,10 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
       const node = findNodeAtPoint(recorder.nodes, end);
       const durationMs = Math.max(300, Math.min(10000, Date.now() - start.startedAt || recorder.longPress.durationMs || 800));
       if (node) onChange({ selectedNodeIndex: node.index });
+      if (tapOnly) {
+        onRecord('tap', { node: null, x: end.x, y: end.y });
+        return;
+      }
       if (durationMs >= LONG_PRESS_RECORD_THRESHOLD_MS) {
         onChange({ longPress: { ...recorder.longPress, x: end.x, y: end.y, durationMs } });
         onRecord('longPress', { node: null, x: end.x, y: end.y, durationMs });
@@ -1468,6 +1829,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
       onRecord('tap', { node: null, x: end.x, y: end.y });
       return;
     }
+    if (tapOnly) return;
     const durationMs = Math.max(80, Math.min(10000, Date.now() - start.startedAt || recorder.swipe.durationMs || 300));
     onChange({ swipe: { ...recorder.swipe, x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs, points } });
     onRecord('swipe', { x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs, points, curve: points.length > 2 });
@@ -1515,34 +1877,52 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className={`font-semibold ${text}`}>录制回放</div>
-          <div className={`text-xs mt-1 ${muted}`}>{simpleMode ? '读取界面后，直接点击、长按或拖拽设备画面生成步骤。' : '读取设备 UI 层级，执行一次操作并追加为可回放步骤。'}</div>
+          <div className={`text-xs mt-1 ${muted}`}>
+            {focusedMode
+              ? '选择设备并读取界面后，点击一个安全位置即可录制。'
+              : simpleMode
+                ? '读取界面后，直接点击、长按或拖拽设备画面生成步骤。'
+                : '读取设备 UI 层级，执行一次操作并追加为可回放步骤。'}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {onlineDevices.map(device => {
-            const selected = recorder.deviceId === device.id;
-            return (
-              <button
-                key={device.id}
-                disabled={recorderBusy}
-                onClick={() => {
-                  closeDetachedPreview();
-                  onChange({ deviceId: device.id, nodes: [], selectedNodeIndex: '', screenshotDataUrl: '', screenshotWidth: 0, screenshotHeight: 0, loading: false, recording: false, backgroundLoading: false, error: '' });
-                }}
-                className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}
-              >
-                <Smartphone size={13} />
-                <span className="max-w-[180px] truncate">{device.model || device.name || device.id}</span>
-              </button>
-            );
-          })}
-          <button onClick={onRefresh} disabled={!recorder.deviceId || recorderBusy || recorder.backgroundLoading} className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+          <div data-task-center-guide={focusedMode ? 'device-select' : undefined} className="flex flex-wrap items-center gap-2">
+            {focusedMode && onlineDevices.length === 0 && (
+              <>
+                <span className={`text-xs ${muted}`}>暂无在线设备，请检查 USB 调试和授权。</span>
+                <button type="button" onClick={onRefreshDevices} className={`rounded-lg border px-3 py-2 text-xs ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+                  重新检测
+                </button>
+              </>
+            )}
+            {onlineDevices.map(device => {
+              const selected = recorder.deviceId === device.id;
+              return (
+                <button
+                  key={device.id}
+                  disabled={recorderBusy}
+                  onClick={() => {
+                    closeDetachedPreview();
+                    onChange({ deviceId: device.id, nodes: [], selectedNodeIndex: '', screenshotDataUrl: '', screenshotWidth: 0, screenshotHeight: 0, loading: false, recording: false, backgroundLoading: false, error: '' });
+                  }}
+                  className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}
+                >
+                  <Smartphone size={13} />
+                  <span className="max-w-[180px] truncate">{device.model || device.name || device.id}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button data-task-center-guide={focusedMode ? 'snapshot' : undefined} onClick={onRefresh} disabled={!recorder.deviceId || recorderBusy || recorder.backgroundLoading} className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
             <RefreshCw size={13} className={recorderRefreshBusy ? 'animate-spin' : ''} />
             读取界面
           </button>
-          <button onClick={onClearSteps} className="px-3 py-2 rounded-lg border border-red-500/30 text-xs text-red-400 hover:bg-red-500/10 inline-flex items-center gap-1.5">
-            <Trash2 size={13} />
-            清空步骤
-          </button>
+          {!focusedMode && (
+            <button onClick={onClearSteps} className="px-3 py-2 rounded-lg border border-red-500/30 text-xs text-red-400 hover:bg-red-500/10 inline-flex items-center gap-1.5">
+              <Trash2 size={13} />
+              清空步骤
+            </button>
+          )}
         </div>
       </div>
 
@@ -1552,7 +1932,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
         </div>
       )}
 
-      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(300px,0.9fr)_minmax(380px,1.1fr)]">
+      <div className={`mt-4 grid gap-4 ${focusedMode ? 'grid-cols-1' : '2xl:grid-cols-[minmax(300px,0.9fr)_minmax(380px,1.1fr)]'}`}>
         <div className={`rounded-lg border overflow-hidden min-w-0 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
           <div className={`px-3 py-2 border-b flex flex-wrap items-center justify-between gap-3 text-xs ${isDark ? 'border-[#3E4145] text-[#9AA0A6]' : 'border-slate-100 text-slate-500'}`}>
             <div className="flex items-center gap-2">
@@ -1565,7 +1945,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                 </span>
               )}
             </div>
-            {hasScreenshot && (
+            {hasScreenshot && !focusedMode && (
               <button
                 type="button"
                 onClick={() => setDetachedOpen(true)}
@@ -1586,6 +1966,8 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                 busy={recorderBusy}
                 busyLabel={recorderBusyLabel}
                 isDark={isDark}
+                guideTarget={focusedMode ? 'preview' : undefined}
+                showNodeOverlays={!focusedMode}
                 className={`relative mx-auto max-h-[460px] max-w-full overflow-hidden rounded-lg border touch-none select-none ${recorderBusy ? 'cursor-wait' : 'cursor-crosshair'} ${isDark ? 'border-[#3E4145] bg-black' : 'border-slate-200 bg-slate-100'}`}
                 style={{ aspectRatio: `${recorder.screenshotWidth} / ${recorder.screenshotHeight}` }}
                 onPointerDown={(event) => handlePreviewPointerDown(event, previewRef.current)}
@@ -1600,38 +1982,42 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                     <Loader2 size={16} className="animate-spin" />
                     正在读取设备画面...
                   </span>
-                ) : '点击“读取界面”后，可直接在设备画面上点击、长按或拖拽录制。'}
+                ) : focusedMode ? '点击“读取界面”后，可在真实设备画面上录制一次点击。' : '点击“读取界面”后，可直接在设备画面上点击、长按或拖拽录制。'}
               </div>
             )}
           </div>
 
-          <div className={`border-t px-3 py-2 flex items-center justify-between gap-3 text-xs ${isDark ? 'border-[#3E4145] text-[#9AA0A6]' : 'border-slate-100 text-slate-500'}`}>
-            <span>当前界面控件</span>
-            <span>{recorder.nodes.length > 0 ? `${recorder.nodes.length} 个` : '未读取'}</span>
-          </div>
-          <div className="max-h-[220px] overflow-y-auto p-2 space-y-1.5">
-            {recorder.nodes.length === 0 ? (
-              <div className={`py-8 text-center text-sm ${muted}`}>控件列表为空</div>
-            ) : recorder.nodes.map(node => (
-              <button
-                key={node.index}
-                onClick={() => onChange({ selectedNodeIndex: node.index })}
-                className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${String(recorder.selectedNodeIndex) === String(node.index) ? 'border-emerald-500/40 bg-emerald-500/10' : isDark ? 'border-transparent hover:bg-[#2D2F33]' : 'border-transparent hover:bg-slate-50'}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className={`text-sm font-semibold truncate ${text}`}>{node.label}</div>
-                    <div className={`text-[11px] mt-1 truncate ${muted}`}>{node.resourceId || node.contentDesc || node.className || node.xpath || '无标识'}</div>
-                  </div>
-                  <div className={`text-[10px] shrink-0 ${muted}`}>#{node.index}</div>
-                </div>
-                <div className={`mt-1 text-[11px] truncate ${muted}`}>{node.bounds}</div>
-              </button>
-            ))}
-          </div>
+          {!focusedMode && (
+            <>
+              <div className={`border-t px-3 py-2 flex items-center justify-between gap-3 text-xs ${isDark ? 'border-[#3E4145] text-[#9AA0A6]' : 'border-slate-100 text-slate-500'}`}>
+                <span>当前界面控件</span>
+                <span>{recorder.nodes.length > 0 ? `${recorder.nodes.length} 个` : '未读取'}</span>
+              </div>
+              <div className="max-h-[220px] overflow-y-auto p-2 space-y-1.5">
+                {recorder.nodes.length === 0 ? (
+                  <div className={`py-8 text-center text-sm ${muted}`}>控件列表为空</div>
+                ) : recorder.nodes.map(node => (
+                  <button
+                    key={node.index}
+                    onClick={() => onChange({ selectedNodeIndex: node.index })}
+                    className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${String(recorder.selectedNodeIndex) === String(node.index) ? 'border-emerald-500/40 bg-emerald-500/10' : isDark ? 'border-transparent hover:bg-[#2D2F33]' : 'border-transparent hover:bg-slate-50'}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className={`text-sm font-semibold truncate ${text}`}>{node.label}</div>
+                        <div className={`text-[11px] mt-1 truncate ${muted}`}>{node.resourceId || node.contentDesc || node.className || node.xpath || '无标识'}</div>
+                      </div>
+                      <div className={`text-[10px] shrink-0 ${muted}`}>#{node.index}</div>
+                    </div>
+                    <div className={`mt-1 text-[11px] truncate ${muted}`}>{node.bounds}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="space-y-3 min-w-0">
+        {!focusedMode && <div className="space-y-3 min-w-0">
           <div className={`rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
             <div className={`text-xs mb-2 ${muted}`}>选中控件</div>
             <div className={`text-base font-semibold break-words ${text}`}>{selectedNode?.label || '未选择控件'}</div>
@@ -1682,10 +2068,10 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
               </div>
             )}
           </div>
-        </div>
+        </div>}
       </div>
 
-      <div className={`mt-4 rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
+      {!focusedMode && <div className={`mt-4 rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className={`text-sm font-semibold ${text}`}>手势与等待</div>
@@ -1725,7 +2111,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             </div>
           </details>
         )}
-      </div>
+      </div>}
       {detachedPreview}
     </div>
   );
@@ -1735,12 +2121,13 @@ function recorderButtonClass(isDark, full = false) {
   return `${full ? 'w-full ' : ''}inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`;
 }
 
-function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, busyLabel = '正在读取设备画面...', isDark = false, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
+function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, busyLabel = '正在读取设备画面...', isDark = false, guideTarget, showNodeOverlays = true, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
   return (
     <div
       ref={previewRef}
       role="button"
       tabIndex={0}
+      data-task-center-guide={guideTarget}
       aria-busy={busy}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1757,7 +2144,7 @@ function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, b
         className="h-full w-full object-contain"
       />
       <div className="pointer-events-none absolute inset-0">
-        {recorder.nodes.map(node => node.rect && (
+        {showNodeOverlays && recorder.nodes.map(node => node.rect && (
           <div
             key={node.index}
             className={`absolute rounded-sm border ${String(recorder.selectedNodeIndex) === String(node.index) ? 'border-emerald-400 bg-emerald-400/15' : 'border-emerald-300/40 bg-emerald-300/5'}`}
@@ -2465,6 +2852,11 @@ function createTemplateScript(templateId) {
     ...script,
     name: '录制操作流程',
     description: '读取设备界面后点击或拖拽录制，自动生成可回放步骤。',
+    mode: 'replay',
+    continueOnError: false,
+    loop: { count: 1, durationMs: 0, intervalMs: 0, continueOnError: false },
+    acceptance: { minSuccessRate: 0, failOnCrash: false, failOnAnr: false, thresholds: {} },
+    report: { includeAiSummary: false, includePerformance: false },
     steps: []
   };
 }
