@@ -1,7 +1,7 @@
 {
   "name": "adb-workbench",
   "private": true,
-  "version": "4.1.9",
+  "version": "4.2.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

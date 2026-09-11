@@ -2,6 +2,14 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.2.0': {
+    title: 'v4.2.0',
+    date: '2026-09-11',
+    items: [
+      { type: 'feature', text: '设备卡片新增回到桌面、打开侧边栏、打开系统设置、打开白板四个快捷按钮' },
+      { type: 'improve', text: '设备操作按导航、常用工具和设备维护分组，统一按钮布局并适配不同卡片宽度' }
+    ]
+  },
   '4.1.9': {
     title: 'v4.1.9',
     date: '2026-08-03',

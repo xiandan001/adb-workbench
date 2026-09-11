@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
+import DeviceNavigationControls from './DeviceNavigationControls';
+import './DeviceCard.css';
 // 设备巡检面板：采集逻辑在主进程 inspection 模块中
 import InspectionPanel from './InspectionPanel';
 // App 包管理增强面板
@@ -259,8 +261,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
   const scrcpyLoading = isLoading(`scrcpy_${device.id}`);
 
   return (
-    <div className={`${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col`}>
-      <div className={`p-5 border-b flex justify-between items-start ${t.header.replace('border-b', 'border-b')}`}>
+    <div data-accent={t.primary} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col`}>
+      <div className={`device-card-header p-5 border-b flex justify-between items-start ${t.header.replace('border-b', 'border-b')}`}>
         <div className="flex items-center space-x-4">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isOnline ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}` : 'bg-slate-100 text-slate-400'}`}>
             <Smartphone size={24} />
@@ -317,7 +319,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           <button
             onClick={onStart}
             disabled={!isOnline || scrcpyLoading}
-            className={`${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors`}
+            className={`${t.button.primary} disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors`}
           >
             {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
             <span>{scrcpyLoading ? '启动中...' : '开始投屏'}</span>
@@ -325,132 +327,143 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
         </div>
       </div>
 
-      <div className={`px-5 py-4 flex flex-wrap gap-2 ${t.primary === 'tech' ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-        <ControlButton
-          icon={<Camera size={16} />}
-          label={isLoading(`screenshot_${device.id}`) ? '截图中...' : '截图'}
-          onClick={onScreenshot}
-          disabled={!isOnline || isLoading(`screenshot_${device.id}`)}
-          loading={isLoading(`screenshot_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={isRecording ? <div className="w-4 h-4 rounded-full bg-red-700 shadow-sm shadow-red-900/30" /> : <Video size={16} />}
-          label={isSavingRecord ? '保存中...' : isRecording ? '停止录屏' : '录屏'}
-          onClick={async () => {
-            if (isRecording) {
-              setIsSavingRecord(true);
-              const res = await onScreenRecordStop(device.id);
-              setIsSavingRecord(false);
-              if (res.success) {
-                setIsRecording(false);
-                showToast(`录屏已保存: ${res.path}`);
-              } else {
-                showToast(`录屏停止失败: ${res.error}`);
-              }
-            } else {
-              const res = await onScreenRecordStart(device.id);
-              if (res.success) {
-                setIsRecording(true);
-                showToast('录屏已开始');
-              } else {
-                showToast(`录屏启动失败: ${res.error}`);
-              }
-            }
-          }}
-          disabled={!isOnline || isSavingRecord}
-          theme={t}
-          isOnline={isOnline}
-          isRecording={isRecording}
-          isSaving={isSavingRecord}
-        />
-        <ControlButton
-          icon={<Volume2 size={16} />}
-          label="音量+"
-          onClick={() => onCommand('input keyevent 24')}
-          disabled={!isOnline}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<VolumeX size={16} />}
-          label="音量-"
-          onClick={() => onCommand('input keyevent 25')}
-          disabled={!isOnline}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Shield size={16} />}
-          label={isLoading(`root_${device.id}`) ? 'Root中...' : 'Root'}
-          onClick={onRoot}
-          disabled={!isOnline || isLoading(`root_${device.id}`)}
-          loading={isLoading(`root_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Save size={16} />}
-          label={isLoading(`remount_${device.id}`) ? 'Remount中...' : 'Remount'}
-          onClick={onRemount}
-          disabled={!isOnline || isLoading(`remount_${device.id}`)}
-          loading={isLoading(`remount_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<RotateCcw size={16} />}
-          label={isLoading(`reboot_${device.id}`) ? '重启中...' : '重启'}
-          onClick={onReboot}
-          disabled={!isOnline || isLoading(`reboot_${device.id}`)}
-          loading={isLoading(`reboot_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Loader size={16} />}
-          label={isLoading(`loader_${device.id}`) ? 'Loader中...' : 'Loader'}
-          onClick={onRebootLoader}
-          disabled={!isOnline || isLoading(`loader_${device.id}`)}
-          loading={isLoading(`loader_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Unlock size={16} />}
-          label={isLoading(`unlock_${device.id}`) ? 'Unlock中...' : 'Unlock'}
-          onClick={onUnlock}
-          disabled={!isOnline || isLoading(`unlock_${device.id}`)}
-          loading={isLoading(`unlock_${device.id}`)}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Package size={16} />}
-          label="APK管理"
-          onClick={onApkManager}
-          disabled={!isOnline}
-          theme={t}
-          isOnline={isOnline}
-        />
-        <ControlButton
-          icon={<Terminal size={16} />}
-          label="终端"
-          onClick={() => setShowTerminal(true)}
-          disabled={!isOnline}
-          theme={t}
-          isOnline={isOnline}
-        />
-        {/* 设备巡检报告与证据包导出入口 */}
-        <ControlButton
-          icon={<ClipboardCheck size={16} />}
-          label="巡检"
-          onClick={() => setShowInspection(true)}
-          disabled={!isOnline}
-          theme={t}
-          isOnline={isOnline}
-        />
+      <div className={`device-card-actions ${t.text}`}>
+        <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} />
+        <section className="device-control-section" aria-label="常用工具">
+          <h4 className={`device-control-heading ${t.textMuted}`}>常用工具</h4>
+          <div className="device-tool-grid">
+            <ControlButton
+              icon={<Camera size={16} />}
+              label={isLoading(`screenshot_${device.id}`) ? '截图中...' : '截图'}
+              onClick={onScreenshot}
+              disabled={!isOnline || isLoading(`screenshot_${device.id}`)}
+              loading={isLoading(`screenshot_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={isRecording ? <div className="w-4 h-4 rounded-full bg-red-700 shadow-sm shadow-red-900/30" /> : <Video size={16} />}
+              label={isSavingRecord ? '保存中...' : isRecording ? '停止录屏' : '录屏'}
+              onClick={async () => {
+                if (isRecording) {
+                  setIsSavingRecord(true);
+                  const res = await onScreenRecordStop(device.id);
+                  setIsSavingRecord(false);
+                  if (res.success) {
+                    setIsRecording(false);
+                    showToast(`录屏已保存: ${res.path}`);
+                  } else {
+                    showToast(`录屏停止失败: ${res.error}`);
+                  }
+                } else {
+                  const res = await onScreenRecordStart(device.id);
+                  if (res.success) {
+                    setIsRecording(true);
+                    showToast('录屏已开始');
+                  } else {
+                    showToast(`录屏启动失败: ${res.error}`);
+                  }
+                }
+              }}
+              disabled={!isOnline || isSavingRecord}
+              theme={t}
+              isOnline={isOnline}
+              isRecording={isRecording}
+              isSaving={isSavingRecord}
+            />
+            <ControlButton
+              icon={<Volume2 size={16} />}
+              label="音量+"
+              onClick={() => onCommand('input keyevent 24')}
+              disabled={!isOnline}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<VolumeX size={16} />}
+              label="音量-"
+              onClick={() => onCommand('input keyevent 25')}
+              disabled={!isOnline}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<Package size={16} />}
+              label="APK管理"
+              onClick={onApkManager}
+              disabled={!isOnline}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<Terminal size={16} />}
+              label="终端"
+              onClick={() => setShowTerminal(true)}
+              disabled={!isOnline}
+              theme={t}
+              isOnline={isOnline}
+            />
+            {/* 设备巡检报告与证据包导出入口 */}
+            <ControlButton
+              icon={<ClipboardCheck size={16} />}
+              label="巡检"
+              onClick={() => setShowInspection(true)}
+              disabled={!isOnline}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<RotateCcw size={16} />}
+              label={isLoading(`reboot_${device.id}`) ? '重启中...' : '重启'}
+              onClick={onReboot}
+              disabled={!isOnline || isLoading(`reboot_${device.id}`)}
+              loading={isLoading(`reboot_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+          </div>
+        </section>
+        <section className="device-control-section" aria-label="设备维护">
+          <h4 className={`device-control-heading ${t.textMuted}`}>设备维护</h4>
+          <div className="device-tool-grid device-maintenance-grid">
+            <ControlButton
+              icon={<Shield size={16} />}
+              label={isLoading(`root_${device.id}`) ? 'Root中...' : 'Root'}
+              onClick={onRoot}
+              disabled={!isOnline || isLoading(`root_${device.id}`)}
+              loading={isLoading(`root_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<Save size={16} />}
+              label={isLoading(`remount_${device.id}`) ? 'Remount中...' : 'Remount'}
+              onClick={onRemount}
+              disabled={!isOnline || isLoading(`remount_${device.id}`)}
+              loading={isLoading(`remount_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<Loader size={16} />}
+              label={isLoading(`loader_${device.id}`) ? 'Loader中...' : 'Loader'}
+              onClick={onRebootLoader}
+              disabled={!isOnline || isLoading(`loader_${device.id}`)}
+              loading={isLoading(`loader_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+            <ControlButton
+              icon={<Unlock size={16} />}
+              label={isLoading(`unlock_${device.id}`) ? 'Unlock中...' : 'Unlock'}
+              onClick={onUnlock}
+              disabled={!isOnline || isLoading(`unlock_${device.id}`)}
+              loading={isLoading(`unlock_${device.id}`)}
+              theme={t}
+              isOnline={isOnline}
+            />
+          </div>
+        </section>
       </div>
 
       {/* App 包管理增强：使用独立面板承载安装、推送、文件浏览、应用列表与会员操作 */}
