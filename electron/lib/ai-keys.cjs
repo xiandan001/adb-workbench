@@ -42,7 +42,7 @@ function getNextApiKey() {
   return AGNES_API_KEYS[agnesKeyIndex];
 }
 
-const AGNES_MODEL = 'agnes-2.0-flash';
+const AGNES_MODEL = 'agnes-3.0-flash';
 
 // 模型上下文窗口上限（tokens），用于前端展示上下文使用率
 const AI_MODEL_MAX_CONTEXT_TOKENS = 524288;
