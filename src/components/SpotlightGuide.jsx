@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle, X } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
 
 const TARGET_PADDING = 8;
 const TOOLTIP_GAP = 14;
@@ -8,7 +9,7 @@ const TOOLTIP_GAP = 14;
 function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
   const [targetRect, setTargetRect] = useState(null);
   const [revision, setRevision] = useState(0);
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
 
   useEffect(() => {
     if (!guide?.selector || typeof document === 'undefined') return undefined;

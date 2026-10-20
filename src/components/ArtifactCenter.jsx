@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   Activity,
   AlertCircle,
+  Archive,
   CheckSquare,
   ClipboardCheck,
   FileDiff,
@@ -16,6 +17,7 @@ import {
   Trash2,
   Wrench
 } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
 
 const TYPE_FILTERS = [
   { id: 'all', label: '全部' },
@@ -37,10 +39,12 @@ const TYPE_META = {
 };
 
 function ArtifactCenter({ theme, showToast, showConfirm }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState('');
+  const [exportResult, setExportResult] = useState(null);
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -106,6 +110,22 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
     if (res && !res.ok) showToast?.(`打开失败：${res.error || '未知错误'}`);
   };
 
+  const exportEvidence = async (item) => {
+    if (exporting || deleting) return;
+    setExporting(item.id);
+    setExportResult(null);
+    try {
+      const result = await window.electronAPI?.artifactExport?.(item.id);
+      if (result?.cancelled) return;
+      if (!result?.ok) throw new Error(result?.error || '当前环境不支持导出证据包');
+      setExportResult({ ok: true, message: `「${item.title}」证据包已保存`, path: result.path });
+    } catch (error) {
+      setExportResult({ ok: false, message: `导出失败：${error.message}` });
+    } finally {
+      setExporting('');
+    }
+  };
+
   const toggleItem = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -128,7 +148,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
 
   const deleteArtifacts = async (ids, title) => {
     const targetIds = Array.from(new Set(ids)).filter(Boolean);
-    if (targetIds.length === 0 || deleting) return;
+    if (targetIds.length === 0 || deleting || exporting) return;
     const targetItems = items.filter(item => targetIds.includes(item.id));
     const runDelete = async () => {
       setDeleting(true);
@@ -182,7 +202,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
           <div className="flex flex-wrap justify-end gap-2">
             <button
               onClick={() => deleteArtifacts(filteredIds, hasFilter ? '删除筛选结果' : '清空全部产物')}
-              disabled={loading || deleting || filteredItems.length === 0}
+              disabled={loading || deleting || Boolean(exporting) || filteredItems.length === 0}
               className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
             >
               <Trash2 size={15} />
@@ -200,6 +220,12 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
         </div>
 
         <div className="p-5 space-y-4">
+          {exportResult && (
+            <div role="status" className={`rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-3 ${exportResult.ok ? (isDark ? 'border-emerald-500/40 text-emerald-300' : 'border-emerald-200 text-emerald-700') : (isDark ? 'border-red-500/40 text-red-300' : 'border-red-200 text-red-700')}`}>
+              <span>{exportResult.message}</span>
+              {exportResult.path && <button type="button" onClick={() => openPath(exportResult.path)} className="underline underline-offset-2">打开证据包</button>}
+            </div>
+          )}
           <div className="grid lg:grid-cols-[1fr_auto] gap-3">
             <div className="relative">
               <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${muted}`} />
@@ -254,7 +280,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
               {selectedCount > 0 && (
                 <button
                   onClick={clearSelection}
-                  disabled={deleting}
+                  disabled={deleting || Boolean(exporting)}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#BDC1C6] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-600 hover:bg-white'}`}
                 >
                   取消选择
@@ -298,7 +324,9 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
                   text={text}
                   muted={muted}
                   selected={selectedIds.has(item.id)}
-                  disabled={deleting}
+                  disabled={deleting || Boolean(exporting)}
+                  exporting={exporting === item.id}
+                  onExport={exportEvidence}
                   onToggleSelect={toggleItem}
                   onDelete={(target) => deleteArtifacts([target.id], '删除产物')}
                   onOpenPath={openPath}
@@ -312,7 +340,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, selected, disabled, onToggleSelect, onDelete, onOpenPath }) {
+function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath }) {
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
   return (
@@ -348,6 +376,10 @@ function ArtifactRow({ item, isDark, text, muted, selected, disabled, onToggleSe
           {item.deviceId ? `设备：${item.deviceId}` : '未记录设备'} · {item.artifactCount || 0} 项
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => onExport(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}>
+            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            {exporting ? '正在打包…' : '导出证据包'}
+          </button>
           {item.reportPath && (
             <button onClick={() => onOpenPath(item.reportPath)} className={buttonClass(isDark)}>
               <FileText size={14} />打开报告

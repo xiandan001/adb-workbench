@@ -1,4 +1,5 @@
 // Task center: replay scripts, multi-device task queue, and execution history.
+const { writeRunManifest } = require('./task-run-manifest.cjs');
 
 const { app } = require('electron');
 const { Worker } = require('worker_threads');
@@ -302,6 +303,7 @@ async function finishWorkerTask(snapshot) {
   if (!taskId) return;
   const task = applyWorkerTaskUpdate(snapshot);
   const record = sanitizePublicTask(task?.publicSnapshot || snapshot);
+  ensureRunManifest(record);
   activeTasks.delete(taskId);
   cancelBridgeInspectionTasks(taskId);
   const history = [record, ...readHistory().filter(item => item.id !== taskId)].slice(0, MAX_HISTORY);
@@ -345,6 +347,7 @@ function handleTaskWorkerFailure(error) {
       record.endedAt = now;
     }
     failedRecords.push(record);
+    ensureRunManifest(record);
     cancelBridgeInspectionTasks(taskId);
   }
   activeTasks.clear();
@@ -476,6 +479,15 @@ function toWorkerTask(task) {
 
 function sanitizePublicTask(task) {
   return JSON.parse(JSON.stringify(task || {}));
+}
+
+function ensureRunManifest(record) {
+  if (record.runResultPath) return;
+  try {
+    writeRunManifest(record);
+  } catch (error) {
+    record.error = [record.error, `运行清单保存失败：${error.message}`].filter(Boolean).join('\n');
+  }
 }
 
 async function runTask(task) {

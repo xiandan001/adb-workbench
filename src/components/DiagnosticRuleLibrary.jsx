@@ -1,3 +1,4 @@
+import { isDarkTheme } from '../shared/theme';
 // 日志诊断规则库面板：管理内置规则与会员自定义规则。
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -19,7 +20,7 @@ const EMPTY_RULE = {
 
 function DiagnosticRuleLibrary({ theme, open, onClose, isVip, onVipRequired }) {
   const t = theme || { primary: 'tech' };
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editingRule, setEditingRule] = useState(null);

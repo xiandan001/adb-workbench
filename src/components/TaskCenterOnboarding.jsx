@@ -16,6 +16,7 @@ import {
   ONBOARDING_STAGES
 } from '../shared/taskCenterOnboarding';
 import SpotlightGuide from './SpotlightGuide';
+import { isDarkTheme } from '../shared/theme';
 
 function TaskCenterOnboarding({
   open,
@@ -37,7 +38,7 @@ function TaskCenterOnboarding({
   const [savingStatus, setSavingStatus] = useState(false);
   const [refreshingState, setRefreshingState] = useState(false);
   const [error, setError] = useState(initialError);
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const panelClass = isDark
     ? 'border-[#3E4145] bg-[#202124] text-[#E8EAED]'
     : 'border-slate-200 bg-white text-slate-800';

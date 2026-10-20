@@ -1,3 +1,4 @@
+import { isDarkTheme } from '../shared/theme';
 // src/components/MemberCenter.jsx
 // 会员中心：状态卡 + 开通支付向导 + 激活区 + 分组功能对比
 
@@ -147,7 +148,7 @@ const ERROR_TEXT = {
 
 export default function MemberCenter({ theme, vipStatus, onActivated, showToast }) {
   const t = theme || { primary: 'tech' };
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const isVip = vipStatus.activated;
   const isLoading = vipStatus.reason === 'loading';
   const [tokenInput, setTokenInput] = useState('');

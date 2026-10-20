@@ -3,16 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, Cpu, Database, Download, FileText, FolderOpen, Gauge, Lock, Play, RefreshCw, Save, Smartphone, Square, Thermometer, Zap } from 'lucide-react';
-
-const METRICS = [
-  { key: 'cpu', label: 'CPU', color: '#22c55e' },
-  { key: 'memory', label: '内存', color: '#38bdf8' },
-  { key: 'data', label: '存储空间', color: '#f59e0b' },
-  { key: 'temp', label: '温度', color: '#ef4444' },
-  // FPS 趋势：前台应用渲染帧率与 SurfaceFlinger 合成帧率。
-  { key: 'foregroundFps', label: '前台FPS', color: '#a78bfa', max: 120 },
-  { key: 'surfaceFps', label: '合成FPS', color: '#14b8a6', max: 120 }
-];
+import { isDarkTheme } from '../shared/theme';
+import PerformanceTrendChart from './PerformanceTrendChart';
 
 const INTERVAL_OPTIONS = [
   { value: 1000, label: '1 秒', description: '高频采样' },
@@ -21,19 +13,23 @@ const INTERVAL_OPTIONS = [
   { value: 10000, label: '10 秒', description: '低负载' }
 ];
 
-function PerformanceDashboard({ devices, theme, vipStatus, performancePath, showToast, onOpenMemberCenter, onRefreshVipStatus }) {
+function PerformanceDashboard({ devices, theme, vipStatus, performancePath, showToast, onOpenMemberCenter, onRefreshVipStatus, activeDeviceId, onActiveDeviceChange }) {
   const t = theme;
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const hasVipAccess = vipStatus?.activated === true;
   const isVipLoading = vipStatus?.reason === 'loading';
   const isVip = hasVipAccess || isVipLoading;
-  const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState('');
-  const [running, setRunning] = useState(false);
+  const [localDeviceId, setLocalDeviceId] = useState(() => activeDeviceId ?? devices.find(device => device.status === 'device')?.id ?? '');
+  const selectedDeviceId = activeDeviceId ?? localDeviceId;
+  const [monitorRunning, setRunning] = useState(false);
+  const [dataDeviceId, setDataDeviceId] = useState('');
+  const running = dataDeviceId === selectedDeviceId && monitorRunning;
   // 默认 3 秒采样，让面板数值变化更及时。
   const [intervalMs, setIntervalMs] = useState(3000);
-  const [snapshot, setSnapshot] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [storedSnapshot, setSnapshot] = useState(null);
+  const [storedHistory, setHistory] = useState([]);
+  const snapshot = dataDeviceId === selectedDeviceId ? storedSnapshot : null;
+  const history = useMemo(() => dataDeviceId === selectedDeviceId ? storedHistory : [], [dataDeviceId, selectedDeviceId, storedHistory]);
   const [thresholds, setThresholds] = useState({ cpu: 85, memory: 85, batteryTemp: 45, dataUsed: 90 });
   const [loading, setLoading] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
@@ -50,18 +46,20 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const pendingUpdateRef = useRef(null);
   const uiUpdateTimerRef = useRef(null);
 
-  const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
+  const selectedDevice = devices.find(device => device.id === selectedDeviceId);
+  const selectedDeviceOnline = selectedDevice?.status === 'device';
   const deviceOptions = useMemo(() => {
-    if (onlineDevices.length === 0) {
-      return [{ value: '', label: '暂无在线设备', description: '请先连接设备', disabled: true, icon: Smartphone }];
-    }
-    return onlineDevices.map(device => ({
+    const options = devices.map(device => ({
       value: device.id,
       label: device.name || device.id,
-      description: device.name && device.name !== device.id ? device.id : '在线设备',
+      description: device.status === 'device' ? device.id : `${device.id} · ${device.status === 'unauthorized' ? '未授权' : '离线'}`,
+      disabled: device.status !== 'device',
       icon: Smartphone
     }));
-  }, [onlineDevices]);
+    if (selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)) options.unshift({ value: selectedDeviceId, label: selectedDeviceId, description: '离线 · 保留所选设备，不自动切换', disabled: true, icon: Smartphone });
+    if (!selectedDeviceId) options.unshift({ value: '', label: '请选择设备', description: '只操作明确选中的在线设备', disabled: true, icon: Smartphone });
+    return options;
+  }, [devices, selectedDeviceId]);
   const intervalOptions = useMemo(() => INTERVAL_OPTIONS.map(option => ({
     ...option,
     description: option.value < 5000 && !isVip ? `${option.description} · 会员` : option.description
@@ -82,13 +80,15 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const surfaceFlingerFps = snapshot?.fps?.surfaceFlinger;
 
   const applyPerformanceSnapshot = useCallback((nextSnapshot) => {
+    setDataDeviceId(selectedDeviceId);
     setSnapshot(nextSnapshot);
-    setHistory(prev => [...prev, nextSnapshot].slice(-720));
-  }, []);
+    setHistory(prev => [...(dataDeviceId === selectedDeviceId ? prev : []), nextSnapshot].slice(-720));
+  }, [dataDeviceId, selectedDeviceId]);
 
   const applyPerformanceState = useCallback((deviceId, res, options = {}) => {
     if (!res?.ok) return;
     const nextHistory = res.history || [];
+    setDataDeviceId(deviceId);
     const monitorRunning = res.monitor?.running === true;
     setRunning(monitorRunning);
     runningDeviceRef.current = monitorRunning ? deviceId : '';
@@ -112,17 +112,6 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   }, [selectedDeviceId]);
 
   useEffect(() => {
-    if (!selectedDeviceId && onlineDevices.length > 0) setSelectedDeviceId(onlineDevices[0].id);
-    if (selectedDeviceId && !onlineDevices.some(device => device.id === selectedDeviceId)) {
-      stateRequestSeqRef.current += 1;
-      setSelectedDeviceId(onlineDevices[0]?.id || '');
-      setRunning(false);
-      setSnapshot(null);
-      setHistory([]);
-    }
-  }, [onlineDevices, selectedDeviceId]);
-
-  useEffect(() => {
     window.electronAPI?.perfGetThresholds?.().then(res => {
       if (res.ok) setThresholds(res.thresholds);
     });
@@ -134,7 +123,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   useEffect(() => {
     if (!window.electronAPI?.onPerformanceUpdate) return undefined;
-    return window.electronAPI.onPerformanceUpdate((event) => {
+    const unsubscribe = window.electronAPI.onPerformanceUpdate((event) => {
       if (event.deviceId !== selectedDeviceId || !event.ok) return;
       const now = Date.now();
       const elapsed = now - lastUiUpdateRef.current;
@@ -154,6 +143,12 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         }, 900 - elapsed);
       }
     });
+    return () => {
+      unsubscribe?.();
+      if (uiUpdateTimerRef.current) clearTimeout(uiUpdateTimerRef.current);
+      uiUpdateTimerRef.current = null;
+      pendingUpdateRef.current = null;
+    };
   }, [applyPerformanceSnapshot, selectedDeviceId]);
 
   useEffect(() => {
@@ -208,7 +203,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const startMonitor = async () => {
     const targetDeviceId = selectedDeviceId;
-    if (!targetDeviceId) return;
+    if (!targetDeviceId || !selectedDeviceOnline) return;
     if (intervalMs < 5000 && !hasVipAccess) {
       if (isVipLoading) {
         showToast?.('正在加载会员状态，请稍后再试');
@@ -271,20 +266,21 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   // 切换设备只切换当前视图，已启动的采样任务继续留在后台运行。
   const switchDevice = async (nextDeviceId) => {
     stateRequestSeqRef.current += 1;
-    setSelectedDeviceId(nextDeviceId);
+    if (onActiveDeviceChange) onActiveDeviceChange(nextDeviceId);
+    else setLocalDeviceId(nextDeviceId);
     setSnapshot(null);
     setHistory([]);
     setRunning(false);
   };
 
   const takeSnapshot = async () => {
-    if (!selectedDeviceId) return;
+    if (!selectedDeviceId || !selectedDeviceOnline) return;
     setLoading(true);
     try {
       const res = await window.electronAPI.perfSnapshot({ deviceId: selectedDeviceId });
+      if (selectedDeviceIdRef.current !== selectedDeviceId) return;
       if (res.ok) {
-        setSnapshot(res.snapshot);
-        setHistory(prev => [...prev, res.snapshot].slice(-720));
+        applyPerformanceSnapshot(res.snapshot);
       } else {
         showToast?.(`采样失败：${res.error || '未知错误'}`);
       }
@@ -361,7 +357,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
               </div>
               <div className="min-w-0">
                 <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>性能监控</h3>
-                <div className={`text-sm mt-1 truncate ${muted}`}>{selectedDevice?.name || selectedDevice?.id || '未选择设备'}</div>
+                <div className={`text-sm mt-1 truncate ${muted}`}>{selectedDevice?.name || selectedDeviceId || '未选择设备'}</div>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[minmax(220px,1fr)_140px_auto] gap-2 w-full 2xl:w-auto 2xl:min-w-[620px]">
@@ -391,7 +387,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                   停止
                 </button>
               ) : (
-                <button onClick={startMonitor} disabled={!selectedDeviceId || loading} className="px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
+                <button onClick={startMonitor} disabled={!selectedDeviceOnline || loading} className="px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
                   {loading ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
                   开始
                 </button>
@@ -399,6 +395,9 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             </div>
           </div>
 
+          {selectedDeviceId && !selectedDeviceOnline && <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-500">
+            所选设备 {selectedDeviceId} {selectedDevice?.status === 'unauthorized' ? '未授权' : '已离线'}。保留当前设备和已有结果，不会自动切换到其他设备。
+          </div>}
           <div className={`rounded-lg border p-3 flex flex-col xl:flex-row xl:items-center gap-3 ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
             <label className={`inline-flex items-center gap-2 w-fit rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'} ${muted}`}>
               <input
@@ -411,7 +410,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             </label>
             <div className={`min-w-0 flex-1 truncate text-xs ${muted}`}>保存目录：{performancePath || '默认 %APPDATA%/adb-workbench/performance-monitor/'}</div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={takeSnapshot} disabled={!selectedDeviceId || loading} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+              <button onClick={takeSnapshot} disabled={!selectedDeviceOnline || loading} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
                 <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
                 采样
               </button>
@@ -432,7 +431,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         </div>
       </div>
 
-      {onlineDevices.length === 0 ? (
+      {!selectedDeviceId ? (
         <div className={`py-20 rounded-xl border border-dashed text-center ${isDark ? 'border-[#3E4145] text-[#80868B]' : 'border-slate-300 text-slate-400'}`}>
           <Smartphone size={44} className="mx-auto mb-3 opacity-50" />
           <div>暂无在线设备</div>
@@ -484,11 +483,8 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>趋势</h3>
-                <div className="flex items-center gap-3 text-xs">
-                  {METRICS.map(metric => <span key={metric.key} className={muted}><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: metric.color }} />{metric.label}</span>)}
-                </div>
               </div>
-              <PerformanceChart points={chartPoints} isDark={isDark} />
+              <PerformanceTrendChart points={chartPoints} isDark={isDark} />
             </div>
 
             <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
@@ -551,7 +547,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 }
 
 function MetricCard({ icon, label, value, sub, color, theme }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const colorClass = {
     emerald: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
     sky: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
@@ -738,50 +734,6 @@ function findEnabledIndex(options, currentIndex, direction) {
   return currentIndex;
 }
 
-function PerformanceChart({ points, isDark }) {
-  const width = 720;
-  const height = 260;
-  const pad = 42;
-  // FPS 最高按 120 归一化，避免 60/90/120Hz 设备曲线被错误压扁或截断。
-  const chartMax = Math.max(100, ...METRICS.map(metric => metric.max || 100));
-  const series = METRICS.map(metric => ({
-    ...metric,
-    path: makePath(points.map(item => item[metric.key]), width, height, pad, chartMax)
-  }));
-  const yTicks = [0, 30, 60, 90, 120].filter(value => value <= chartMax);
-  const xTickIndexes = uniqueIndexes([0, Math.floor((points.length - 1) / 2), points.length - 1], points.length);
-  return (
-    <div className={`h-[300px] rounded-lg border ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-      {points.length < 2 ? (
-        <div className={`h-full flex items-center justify-center text-sm ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>暂无趋势数据</div>
-      ) : (
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full">
-          <line x1={pad} x2={pad} y1={pad} y2={height - pad} stroke={isDark ? '#475569' : '#cbd5e1'} />
-          <line x1={pad} x2={width - pad} y1={height - pad} y2={height - pad} stroke={isDark ? '#475569' : '#cbd5e1'} />
-          {yTicks.map(value => {
-            const y = pad + (chartMax - value) / chartMax * (height - pad * 2);
-            return (
-              <g key={value}>
-                <line x1={pad} x2={width - pad} y1={y} y2={y} stroke={isDark ? '#334155' : '#e2e8f0'} strokeDasharray="4 6" />
-                <text x={pad - 8} y={y + 4} textAnchor="end" fontSize="11" fill={isDark ? '#94a3b8' : '#64748b'}>{value}</text>
-              </g>
-            );
-          })}
-          {xTickIndexes.map(index => {
-            const x = pad + (index / Math.max(points.length - 1, 1)) * (width - pad * 2);
-            return (
-              <text key={index} x={x} y={height - 12} textAnchor={index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle'} fontSize="11" fill={isDark ? '#94a3b8' : '#64748b'}>
-                {formatChartTime(points[index]?.timestamp)}
-              </text>
-            );
-          })}
-          {series.map(item => <path key={item.key} d={item.path} fill="none" stroke={item.color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />)}
-        </svg>
-      )}
-    </div>
-  );
-}
-
 function ThresholdInput({ label, value, suffix, onChange, isDark }) {
   return (
     <label className="block">
@@ -792,29 +744,6 @@ function ThresholdInput({ label, value, suffix, onChange, isDark }) {
       <input type="range" min="1" max="100" value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-emerald-500" />
     </label>
   );
-}
-
-function makePath(values, width, height, pad, maxValue = 100) {
-  const usableW = width - pad * 2;
-  const usableH = height - pad * 2;
-  const clean = values.map(value => Number.isFinite(value) ? Math.max(0, Math.min(maxValue, value)) : null);
-  if (clean.filter(value => value != null).length < 2) return '';
-  return clean.map((value, index) => {
-    const x = pad + (index / Math.max(clean.length - 1, 1)) * usableW;
-    const y = pad + (maxValue - (value ?? 0)) / maxValue * usableH;
-    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(' ');
-}
-
-function uniqueIndexes(indexes, length) {
-  return Array.from(new Set(indexes.filter(index => Number.isInteger(index) && index >= 0 && index < length)));
-}
-
-function formatChartTime(timestamp) {
-  if (!timestamp) return '--:--:--';
-  const date = new Date(timestamp);
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function formatPercent(value) {

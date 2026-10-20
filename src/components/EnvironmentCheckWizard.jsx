@@ -11,16 +11,17 @@ import {
   Terminal,
   XCircle
 } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
+import { deviceStatusLabel } from '../shared/deviceWorkflow';
 
-function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices }) {
-  const isDark = theme.primary === 'tech';
-  const [deviceId, setDeviceId] = useState('');
+function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange }) {
+  const isDark = isDarkTheme(theme);
   const [running, setRunning] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  const selectedDeviceId = devices.some(device => device.id === deviceId) ? deviceId : devices[0]?.id || '';
+  const selectedDeviceId = activeDeviceId || '';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const panel = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200';
@@ -40,25 +41,34 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices })
     }
     setRunning(true);
     setError('');
-    const res = await window.electronAPI.envCheckRun({ deviceId: selectedDeviceId });
-    setRunning(false);
-    if (res.ok) {
+    try {
+      const res = await window.electronAPI.envCheckRun({ deviceId: selectedDeviceId });
       setResult(res);
+      if (!res.ok) throw new Error(res.error || '环境自检失败');
       showToast?.('环境自检完成');
-    } else {
-      setError(res.error || '环境自检失败');
-      setResult(res);
-      showToast?.(`环境自检失败：${res.error || '未知错误'}`);
+    } catch (error) {
+      setError(error.message);
+      showToast?.(`环境自检失败：${error.message}`);
+    } finally {
+      setRunning(false);
     }
   };
 
   const restartAdb = async () => {
     if (!window.electronAPI?.envCheckRestartAdb) return;
     setRestarting(true);
-    const res = await window.electronAPI.envCheckRestartAdb();
-    setRestarting(false);
-    showToast?.(res?.message || (res?.ok ? 'ADB 服务已重启' : 'ADB 服务重启失败'));
-    onRefreshDevices?.();
+    setError('');
+    try {
+      const res = await window.electronAPI.envCheckRestartAdb();
+      if (!res?.ok) throw new Error(res?.error || res?.message || 'ADB 服务重启失败');
+      showToast?.(res.message || 'ADB 服务已重启');
+      onRefreshDevices?.();
+    } catch (error) {
+      setError(error.message);
+      showToast?.(`ADB 服务重启失败：${error.message}`);
+    } finally {
+      setRestarting(false);
+    }
   };
 
   return (
@@ -95,15 +105,13 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices })
               <FieldLabel label="目标设备" isDark={isDark} />
               <select
                 value={selectedDeviceId}
-                onChange={(event) => setDeviceId(event.target.value)}
+                onChange={(event) => onActiveDeviceChange?.(event.target.value)}
                 disabled={running}
                 className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500 ${input}`}
               >
-                {devices.length === 0 ? (
-                  <option value="">未发现设备</option>
-                ) : devices.map(device => (
-                  <option key={device.id} value={device.id}>{device.model || device.id} · {device.status}</option>
-                ))}
+                {!selectedDeviceId && <option value="">未发现设备</option>}
+                {selectedDeviceId && !devices.some(device => device.id === selectedDeviceId) && <option value={selectedDeviceId}>{selectedDeviceId} · 已断开</option>}
+                {devices.map(device => <option key={device.id} value={device.id}>{device.model || device.id} · {deviceStatusLabel(device.status)}</option>)}
               </select>
             </div>
 

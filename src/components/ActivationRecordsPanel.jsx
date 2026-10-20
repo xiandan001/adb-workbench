@@ -1,3 +1,4 @@
+import { isDarkTheme } from '../shared/theme';
 // 激活记录增强面板：激活记录、备注、复制历史、到期时间与重签说明。
 
 import { useCallback, useEffect, useState } from 'react';
@@ -5,7 +6,7 @@ import { Check, ClipboardCopy, Clock, FileText, History, RefreshCw, Save, Trash2
 
 function ActivationRecordsPanel({ theme, showToast, refreshKey, recordData }) {
   const t = theme || { primary: 'tech' };
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const [records, setRecords] = useState([]);
   const [copyHistory, setCopyHistory] = useState([]);
   const [notes, setNotes] = useState({});

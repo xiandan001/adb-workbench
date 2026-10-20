@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   CheckSquare,
+  ClipboardCheck,
   ChevronRight,
   Copy,
   Database,
@@ -16,6 +17,7 @@ import {
   FolderOpen,
   Info,
   Lock,
+  FileText,
   Package,
   Play,
   Power,
@@ -28,6 +30,8 @@ import {
 } from 'lucide-react';
 import DangerConfirmModal from './DangerConfirmModal';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
+import { isDarkTheme } from '../shared/theme';
+import { executePersistedPackageBatch, readPackageBatchResult, storePackageBatchResult, PACKAGE_BATCH_RESULT_EVENT } from '../shared/packageBatchStore';
 
 function OperationResult({ isDark, loading, loadingText, result }) {
   const status = loading ? 'loading' : result?.status;
@@ -55,6 +59,8 @@ function PackageManagerPanel({
   vipStatus,
   showToast,
   onOpenMemberCenter,
+  onInspectApplication,
+  onViewApplicationLogs,
   onSelectApkForInstall,
   onSelectApkForPush,
   onInstallApk,
@@ -74,8 +80,9 @@ function PackageManagerPanel({
   operationLoading
 }) {
   const t = theme;
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const isVip = vipStatus?.activated === true;
+  const isOnline = device.status === 'device';
   const [packages, setPackages] = useState([]);
   const [query, setQuery] = useState('');
   const [showSystem, setShowSystem] = useState(false);
@@ -87,6 +94,8 @@ function PackageManagerPanel({
   const [actionLoading, setActionLoading] = useState('');
   const [selectedPackageNames, setSelectedPackageNames] = useState(new Set());
   const [batchLoading, setBatchLoading] = useState('');
+  const [operationError, setOperationError] = useState('');
+  const [batchResult, setBatchResult] = useState(() => readPackageBatchResult(device.id));
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [packageSearchVisible, setPackageSearchVisible] = useState(() => {
@@ -97,6 +106,32 @@ function PackageManagerPanel({
     }
   });
   const showToastRef = useRef(showToast);
+  const detailRequestRef = useRef(0);
+  const onlineRef = useRef(isOnline);
+  const mountedRef = useRef(true);
+
+  const reportFailure = useCallback((message) => {
+    setOperationError(message);
+    showToastRef.current?.(message);
+  }, []);
+
+  useEffect(() => {
+    onlineRef.current = isOnline;
+  }, [isOnline]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const onBatchResult = (event) => {
+      if (event.detail?.deviceId !== device.id) return;
+      setBatchResult(event.detail.result);
+      if (event.detail.storageError) reportFailure(event.detail.storageError);
+    };
+    window.addEventListener(PACKAGE_BATCH_RESULT_EVENT, onBatchResult);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener(PACKAGE_BATCH_RESULT_EVENT, onBatchResult);
+    };
+  }, [device.id, reportFailure]);
 
   const isLoading = (key) => operationLoading?.[key];
   const packageCount = packages.length;
@@ -126,27 +161,28 @@ function PackageManagerPanel({
   useEffect(() => {
     setSelectedPackageNames(prev => {
       const valid = new Set(packages.map(item => item.packageName));
+      batchResult?.failures?.forEach(item => valid.add(item.packageName));
       const next = new Set(Array.from(prev).filter(name => valid.has(name)));
       return next.size === prev.size ? prev : next;
     });
-  }, [packages]);
+  }, [packages, batchResult]);
 
   const loadPackages = useCallback(async () => {
-    if (!window.electronAPI?.packageList) return;
+    if (!window.electronAPI?.packageList || !isOnline) return;
     setLoadingPackages(true);
     try {
       const res = await window.electronAPI.packageList({ deviceId: device.id });
       if (res.ok) {
         setPackages(res.packages || []);
       } else {
-        showToastRef.current?.(`应用列表加载失败：${res.error || '未知错误'}`);
+        reportFailure(`应用列表加载失败：${res.error || '未知错误'}`);
       }
     } catch (error) {
-      showToastRef.current?.(`应用列表加载异常：${error.message}`);
+      reportFailure(`应用列表加载异常：${error.message}`);
     } finally {
       setLoadingPackages(false);
     }
-  }, [device.id]);
+  }, [device.id, isOnline, reportFailure]);
 
   useEffect(() => {
     loadPackages();
@@ -155,16 +191,19 @@ function PackageManagerPanel({
   const selectPackage = async (pkg) => {
     setSelectedPackage(pkg);
     setPermissions([]);
-    if (!window.electronAPI?.packageDetail) return;
+    setDetail(null);
+    const requestId = ++detailRequestRef.current;
+    if (!window.electronAPI?.packageDetail || !isOnline) return;
     setDetailLoading(true);
     try {
       const res = await window.electronAPI.packageDetail({ deviceId: device.id, packageName: pkg.packageName });
+      if (requestId !== detailRequestRef.current) return;
       if (res.ok) setDetail(res.detail);
-      else showToast?.(`应用详情加载失败：${res.error || '未知错误'}`);
+      else reportFailure(`应用详情加载失败：${res.error || '未知错误'}`);
     } catch (error) {
-      showToast?.(`应用详情加载异常：${error.message}`);
+      if (requestId === detailRequestRef.current) reportFailure(`应用详情加载异常：${error.message}`);
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestRef.current) setDetailLoading(false);
     }
   };
 
@@ -176,7 +215,7 @@ function PackageManagerPanel({
   };
 
   const runPackageAction = async (key, label, action, refresh = true) => {
-    if (!selectedPackage || !requireVip()) return;
+    if (!selectedPackage || !onlineRef.current || !requireVip()) return;
     setActionLoading(key);
     try {
       const res = await action(selectedPackage.packageName);
@@ -185,10 +224,10 @@ function PackageManagerPanel({
         if (refresh) await loadPackages();
         if (selectedPackage) await selectPackage(selectedPackage);
       } else {
-        showToast?.(`${label}失败：${res.error || '未知错误'}`);
+        reportFailure(`${label}失败：${res.error || '未知错误'}`);
       }
     } catch (error) {
-      showToast?.(`${label}异常：${error.message}`);
+      reportFailure(`${label}异常：${error.message}`);
     } finally {
       setActionLoading('');
     }
@@ -227,7 +266,7 @@ function PackageManagerPanel({
   };
 
   const exportApk = async () => {
-    if (!selectedPackage || !requireVip()) return;
+    if (!selectedPackage || !isOnline || !requireVip()) return;
     const result = await window.electronAPI.showSaveDialog({
       title: '导出 APK',
       defaultPath: `${selectedPackage.packageName}.apk`,
@@ -242,28 +281,28 @@ function PackageManagerPanel({
   };
 
   const loadPermissions = async () => {
-    if (!selectedPackage || !requireVip()) return;
+    if (!selectedPackage || !isOnline || !requireVip()) return;
     setActionLoading('permissions');
     try {
       const res = await window.electronAPI.packagePermissions({ deviceId: device.id, packageName: selectedPackage.packageName });
       if (res.ok) setPermissions(res.permissions || []);
-      else showToast?.(`权限读取失败：${res.error || '未知错误'}`);
+      else reportFailure(`权限读取失败：${res.error || '未知错误'}`);
     } catch (error) {
-      showToast?.(`权限读取异常：${error.message}`);
+      reportFailure(`权限读取异常：${error.message}`);
     } finally {
       setActionLoading('');
     }
   };
 
   const launchPackage = async () => {
-    if (!selectedPackage) return;
+    if (!selectedPackage || !isOnline) return;
     setActionLoading('launch');
     try {
       const res = await window.electronAPI.packageLaunch({ deviceId: device.id, packageName: selectedPackage.packageName });
       if (res.ok) showToast?.('启动完成');
-      else showToast?.(`启动失败：${res.error || '未知错误'}`);
+      else reportFailure(`启动失败：${res.error || '未知错误'}`);
     } catch (error) {
-      showToast?.(`启动异常：${error.message}`);
+      reportFailure(`启动异常：${error.message}`);
     } finally {
       setActionLoading('');
     }
@@ -294,21 +333,32 @@ function PackageManagerPanel({
   };
 
   const runBatchAction = async (action, label, confirmOptions) => {
-    if (selectedCount === 0 || !requireVip()) return;
+    if (selectedCount === 0 || batchLoading || !isOnline || !requireVip()) return;
     const selectedNames = Array.from(selectedPackageNames);
+    const targetDeviceId = device.id;
     const execute = async () => {
+      if (!onlineRef.current) {
+        reportFailure('设备已离线，批量操作未执行。恢复连接后请重新确认。');
+        return false;
+      }
       setBatchLoading(action);
       try {
-        const res = await window.electronAPI.packageBatch({
-          deviceId: device.id,
-          action,
-          packageNames: selectedNames
+        const { result: summary, requestError } = await executePersistedPackageBatch({
+          deviceId: targetDeviceId,
+          action, label, packageNames: selectedNames,
+          request: (args) => window.electronAPI.packageBatch(args)
         });
-        if (res.ok) showToast?.(`${label}完成：${res.successCount}/${selectedCount}`);
-        else showToast?.(`${label}完成：成功 ${res.successCount || 0}，失败 ${res.failedCount || 0}`);
+        if (!mountedRef.current) return true;
+        setBatchResult(summary);
+        setSelectedPackageNames(new Set(summary.failures.map(item => item.packageName)));
+        if (requestError) {
+          reportFailure(`${label}异常：${requestError}；执行结果已保留，请先核实设备状态`);
+          return true;
+        }
+        showToast?.(`${label}完成：成功 ${summary.successCount}，失败 ${summary.failures.length}`);
         await loadPackages();
-        setSelectedPackageNames(new Set());
-        if (action === 'uninstall' && selectedPackage && selectedNames.includes(selectedPackage.packageName)) {
+        if (!mountedRef.current) return true;
+        if (action === 'uninstall' && selectedPackage && summary.items.some(item => item.packageName === selectedPackage.packageName && item.ok)) {
           setSelectedPackage(null);
           setDetail(null);
           setPermissions([]);
@@ -316,9 +366,10 @@ function PackageManagerPanel({
           await selectPackage(selectedPackage);
         }
       } catch (error) {
-        showToast?.(`${label}异常：${error.message}`);
+        // Post-operation UI refresh must not replace the persisted execution result.
+        if (mountedRef.current) reportFailure(`${label}结果刷新异常：${error.message}`);
       } finally {
-        setBatchLoading('');
+        if (mountedRef.current) setBatchLoading('');
       }
     };
     if (confirmOptions) {
@@ -339,7 +390,7 @@ function PackageManagerPanel({
       <button
         type="button"
         onClick={onClick}
-        disabled={!selectedPackage || actionLoading === key}
+        disabled={!selectedPackage || !isOnline || Boolean(actionLoading) || Boolean(batchLoading)}
         className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 ${toneClass}`}
       >
         {actionLoading === key ? <RefreshCw size={13} className="animate-spin" /> : icon}
@@ -370,6 +421,40 @@ function PackageManagerPanel({
       onConfirm={runConfirmDialog}
     />
     <div className={`border-t p-4 ${isDark ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
+      {operationError && (
+        <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          <span className="min-w-0 flex-1 break-words">{operationError}</span>
+          <button type="button" onClick={() => setOperationError('')} className="shrink-0 underline">收起</button>
+        </div>
+      )}
+      {!isOnline && <p role="status" className="mb-3 text-xs text-amber-500">设备不可用，已保留应用列表与操作结果。恢复连接后才能执行操作。</p>}
+      {batchResult && (
+        <div role="status" className={`mb-3 rounded-lg border p-3 ${batchResult.failures.length ? 'border-amber-500/30 bg-amber-500/10' : 'border-emerald-500/30 bg-emerald-500/10'}`}>
+          <div className={`flex flex-wrap items-center gap-2 text-xs ${t.text}`}>
+            <span className="flex-1">{batchResult.label}：成功 {batchResult.successCount}，失败 {batchResult.failures.length}</span>
+            {batchResult.failures.length > 0 && <button type="button" onClick={() => {
+              setSelectedPackageNames(new Set(batchResult.failures.map(item => item.packageName)));
+              setPackageSearchVisible(true);
+            }} className="underline underline-offset-2">仅选择失败项</button>}
+            <button type="button" onClick={() => {
+              const error = storePackageBatchResult(device.id, null);
+              if (!error) setBatchResult(null);
+              else reportFailure(error);
+            }} className={t.textMuted}>关闭结果</button>
+          </div>
+          {batchResult.failures.length > 0 && (
+            <>
+              <p className={`mt-2 text-xs ${t.textMuted}`}>失败项已保留；不会自动重试。请核实原因后再手动操作。</p>
+              <ul className="mt-2 max-h-44 overflow-y-auto space-y-2">
+                {batchResult.failures.map(item => <li key={item.packageName} className="text-xs">
+                  <div className={`font-mono break-all ${t.text}`}>{item.packageName}</div>
+                  <div className="mt-0.5 break-words text-amber-600">{item.error || item.message || '操作失败，未返回原因'}</div>
+                </li>)}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <h4 className={`text-sm font-semibold flex items-center gap-2 ${t.text}`}>
           <Package size={16} />
@@ -391,7 +476,7 @@ function PackageManagerPanel({
           <button
             type="button"
             onClick={exportSnapshot}
-            disabled={loadingPackages || packages.length === 0}
+            disabled={!isOnline || loadingPackages || packages.length === 0}
             className={`px-3 py-2 rounded-lg border text-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 ${t.button.secondary}`}
             title="导出包快照"
           >
@@ -401,7 +486,7 @@ function PackageManagerPanel({
           <button
             type="button"
             onClick={loadPackages}
-            disabled={loadingPackages}
+            disabled={!isOnline || loadingPackages}
             className={`p-2 rounded-lg border transition-colors ${t.button.secondary} disabled:opacity-50`}
             title="刷新应用列表"
           >
@@ -431,7 +516,7 @@ function PackageManagerPanel({
                     <FolderOpen size={14} />
                     选择
                   </button>
-                  <button onClick={onInstallApk} disabled={!apkInstallPath || isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
+                  <button onClick={onInstallApk} disabled={!isOnline || !apkInstallPath || isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
                     {isLoading(`install_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
                     安装
                   </button>
@@ -466,7 +551,7 @@ function PackageManagerPanel({
                   <datalist id={`push-remote-path-history-${device.id}`}>
                     {(pushRemotePathHistory || []).map((item, idx) => <option key={idx} value={item} />)}
                   </datalist>
-                  <button onClick={onPushApk} disabled={!apkPushPath || isLoading(`push_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
+                  <button onClick={onPushApk} disabled={!isOnline || !apkPushPath || isLoading(`push_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
                     {isLoading(`push_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
                     推送
                   </button>
@@ -500,7 +585,7 @@ function PackageManagerPanel({
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {['/', '/system/app', '/system_ext/app', '/data/app'].map(item => (
-                <button key={item} onClick={() => onBrowsePath?.(item)} className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}>
+                <button key={item} disabled={!isOnline} onClick={() => onBrowsePath?.(item)} className={`px-3 py-2 text-sm border rounded-lg transition-colors disabled:opacity-50 ${t.button.secondary}`}>
                   {item === '/' ? '/ 根目录' : item}
                 </button>
               ))}
@@ -516,7 +601,7 @@ function PackageManagerPanel({
                     <div
                       key={index}
                       className={`px-3 py-2 flex items-center justify-between cursor-pointer group ${isDark ? 'hover:bg-[#3E4145]' : 'hover:bg-slate-50'}`}
-                      onClick={() => item.isDirectory && item.name !== '.' && onBrowsePath?.(item.path)}
+                      onClick={() => isOnline && item.isDirectory && item.name !== '.' && onBrowsePath?.(item.path)}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         {item.name === '.' ? <ArrowLeft size={14} className="text-slate-400" /> : item.name === '..' ? <ArrowLeft size={14} className="text-blue-400" /> : item.isDirectory ? <Folder size={14} className="text-amber-500" /> : <File size={14} className="text-slate-400" />}
@@ -544,7 +629,7 @@ function PackageManagerPanel({
                               e.stopPropagation();
                               onPullFile?.(item.path);
                             }}
-                            disabled={isLoading(`pull_${device.id}_${item.path}`)}
+                            disabled={!isOnline || isLoading(`pull_${device.id}_${item.path}`)}
                             className={`px-2 py-1 text-xs border rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ${t.button.secondary} disabled:opacity-50`}
                           >
                             {isLoading(`pull_${device.id}_${item.path}`) ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
@@ -598,14 +683,14 @@ function PackageManagerPanel({
             {selectedCount > 0 && (
               <div className={`mt-3 rounded-lg border px-3 py-2 flex flex-wrap items-center gap-2 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className={`text-xs mr-auto ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>已选 {selectedCount} 个应用</span>
-                <button type="button" onClick={() => runBatchAction('forceStop', '批量停止')} disabled={!!batchLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}停止</button>
+                <button type="button" onClick={() => runBatchAction('forceStop', '批量停止')} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}停止</button>
                 <button type="button" onClick={() => runBatchAction('clearData', '批量清数据', {
                   title: '批量清除应用数据',
                   message: `确定清除 ${selectedCount} 个应用的数据吗？`,
                   detail: '清数据会删除应用本地账号、缓存和配置，无法从本工具直接恢复。',
                   confirmLabel: '清除数据',
                   rememberKey: 'package.batchClearData'
-                })} disabled={!!batchLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}清数据</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}清数据</button>
                 <button type="button" onClick={() => runBatchAction('disable', '批量停用', {
                   title: '批量停用应用',
                   message: `确定停用 ${selectedCount} 个应用吗？`,
@@ -613,15 +698,15 @@ function PackageManagerPanel({
                   confirmLabel: '停用应用',
                   rememberKey: 'package.batchDisable',
                   tone: 'warning'
-                })} disabled={!!batchLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}停用</button>
-                <button type="button" onClick={() => runBatchAction('enable', '批量启用')} disabled={!!batchLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}启用</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}停用</button>
+                <button type="button" onClick={() => runBatchAction('enable', '批量启用')} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}启用</button>
                 <button type="button" onClick={() => runBatchAction('uninstall', '批量卸载', {
                   title: '批量卸载应用',
                   message: `确定卸载 ${selectedCount} 个应用吗？`,
                   detail: '卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。',
                   confirmLabel: '卸载应用',
                   rememberKey: 'package.batchUninstall'
-                })} disabled={!!batchLoading} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}卸载</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}卸载</button>
               </div>
             )}
           </div>
@@ -701,6 +786,16 @@ function PackageManagerPanel({
                   )}
 
                   <div className="flex flex-wrap gap-2">
+                    {onViewApplicationLogs && <button
+                      type="button"
+                      onClick={() => onViewApplicationLogs({ deviceId: device.id, packageName: selectedPackage.packageName })}
+                      className={`px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 ${t.button.secondary}`}
+                    ><FileText size={13} />查看日志</button>}
+                    {onInspectApplication && <button
+                      type="button"
+                      onClick={() => onInspectApplication({ deviceId: device.id, packageName: selectedPackage.packageName })}
+                      className={`px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 ${t.button.secondary}`}
+                    ><ClipboardCheck size={13} />排查此应用</button>}
                     {packageActionButton('launch', '启动', <Play size={13} />, launchPackage, 'normal', false)}
                     {packageActionButton('permissions', '权限', <ShieldCheck size={13} />, loadPermissions)}
                     {packageActionButton('export', '导出', <Download size={13} />, exportApk)}

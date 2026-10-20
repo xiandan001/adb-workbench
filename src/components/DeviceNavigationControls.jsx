@@ -22,6 +22,7 @@ const actions = [
 
 function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
   const [pending, setPending] = useState('');
+  const [error, setError] = useState('');
   const busyRef = useRef(false);
 
   const runAction = async (action) => {
@@ -32,6 +33,7 @@ function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
       return;
     }
     busyRef.current = true;
+    setError('');
     setPending(action.id);
     try {
       if (action.packageName) {
@@ -49,6 +51,7 @@ function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
       }
       showToast(`已发送${action.label}指令`);
     } catch (error) {
+      setError(`${action.label}失败：${error.message}`);
       showToast(`${action.label}失败：${error.message}`);
     } finally {
       busyRef.current = false;
@@ -57,6 +60,7 @@ function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
   };
 
   return (
+    <>
     <div className="device-navigation-grid" role="group" aria-label="设备快捷操作">
       {actions.map(action => (
         <button
@@ -75,6 +79,8 @@ function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
         </button>
       ))}
     </div>
+    {error && <div role="alert" className="mt-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</div>}
+    </>
   );
 }
 

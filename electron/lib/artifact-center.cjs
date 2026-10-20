@@ -1,8 +1,9 @@
 // Report and artifact center: read-only index over generated local outputs.
 
-const { app, shell } = require('electron');
+const { app, shell, dialog, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { exportArtifact } = require('./artifact-export.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
@@ -30,6 +31,24 @@ function register(ipcMain) {
       return { ok: true, ...result, items: await listArtifacts() };
     } catch (error) {
       return { ok: false, error: error.message, deleted: [], failed: [] };
+    }
+  });
+
+  ipcMain.handle('artifacts:export', async (event, { id } = {}) => {
+    try {
+      const item = (await listArtifacts()).find(entry => entry.id === id);
+      if (!item) return { ok: false, error: '产物已不存在，请刷新列表后重试' };
+      const name = String(item.title || 'evidence').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').slice(0, 70);
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        title: '导出证据包', defaultPath: path.join(app.getPath('downloads'), `${name}-evidence.zip`),
+        filters: [{ name: 'ZIP 证据包', extensions: ['zip'] }]
+      };
+      const result = await (owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options));
+      if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
+      return { ok: true, ...await exportArtifact(item, result.filePath) };
+    } catch (error) {
+      return { ok: false, error: error.message || '证据包导出失败' };
     }
   });
 }
@@ -153,9 +172,11 @@ async function scanTaskCenter(baseDirs) {
   for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
   return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'stress-report.md');
-    const resultPath = path.join(dir, 'stress-result.json');
+    const replayPath = path.join(dir, 'run-result.json');
+    const resultPath = exists(replayPath) ? replayPath : path.join(dir, 'stress-result.json');
     if (!exists(reportPath) && !exists(resultPath)) return null;
     const result = readJson(resultPath) || {};
+    const deviceRuns = Array.isArray(result.devices) ? result.devices : Array.isArray(result.deviceRuns) ? result.deviceRuns : [];
     const stat = await safeStat(dir);
     return {
       id: `task:${dir}`,
@@ -164,7 +185,7 @@ async function scanTaskCenter(baseDirs) {
       title: result.scriptName || path.basename(dir),
       subtitle: result.status ? `状态：${result.status}` : '任务产物',
       status: result.status || 'done',
-      deviceId: Array.isArray(result.devices) ? result.devices.map(item => item.deviceId).filter(Boolean).join(', ') : '',
+      deviceId: deviceRuns.map(item => typeof item === 'string' ? item : item?.deviceId).filter(Boolean).join(', '),
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
       updatedAt: result.endedAt || stat?.mtime?.toISOString(),
       rootPath: dir,

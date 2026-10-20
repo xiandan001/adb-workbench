@@ -4,6 +4,7 @@ import {
   Smartphone,
   Upload
 } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
 
 function TaskCenterQuickStart({
   theme,
@@ -13,9 +14,10 @@ function TaskCenterQuickStart({
   onRecord,
   onImport,
   onOpenScript,
-  onOpenAdvanced
+  onOpenAdvanced,
+  onOpenTask
 }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
   const cardClass = isDark
     ? 'border-[#3E4145] bg-[#2D2F33] hover:border-emerald-500/60 hover:bg-[#34373B]'
@@ -91,10 +93,10 @@ function TaskCenterQuickStart({
           <h4 className={'font-semibold ' + textClass}>正在运行</h4>
           <div className="mt-3 space-y-2">
             {runningTasks.map(task => (
-              <div key={task.id} className={'flex justify-between rounded-lg border p-3 text-sm ' + cardClass}>
+              <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full justify-between rounded-lg border p-3 text-left text-sm ' + cardClass}>
                 <span>{task.scriptName || task.id}</span>
                 <span className="text-emerald-500">{statusLabel(task.status)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -126,7 +128,7 @@ function TaskCenterQuickStart({
             {recentHistory.length === 0 ? (
               <p className={'py-6 text-center text-sm ' + mutedClass}>暂无运行记录</p>
             ) : recentHistory.map(task => (
-              <div key={task.id} className={'flex items-center justify-between gap-3 rounded-lg border p-3 text-sm ' + cardClass}>
+              <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm ' + cardClass}>
                 <div className="min-w-0">
                   <div className={'truncate font-medium ' + textClass}>{task.scriptName || task.id}</div>
                   <div className={'mt-1 flex items-center gap-1 text-xs ' + mutedClass}>
@@ -135,7 +137,7 @@ function TaskCenterQuickStart({
                   </div>
                 </div>
                 <span className={statusColor(task.status)}>{statusLabel(task.status)}</span>
-              </div>
+              </button>
             ))}
           </div>
         </section>

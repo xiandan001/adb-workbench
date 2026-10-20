@@ -14,6 +14,10 @@
   --device-divider: #475569;
   --device-surface: #273449;
 }
+.device-card[data-dark="true"] {
+  --device-divider: #3e4145;
+  --device-surface: #202124;
+}
 
 .device-card-actions { padding: 18px 20px 20px; }
 .device-navigation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
@@ -53,6 +57,7 @@
   font-weight: 500;
 }
 .device-control-heading::after { content: ''; flex: 1; height: 1px; background: var(--device-divider); }
+.device-maintenance-toggle { width: 100%; min-height: 32px; cursor: pointer; text-align: left; }
 .device-tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .device-tool-grid > button {
   min-width: 0;

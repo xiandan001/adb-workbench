@@ -16,6 +16,8 @@ import GlobalCommandPalette, { GlobalCommandSettings } from './components/Global
 import DangerConfirmModal from './components/DangerConfirmModal';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
+import { isDarkTheme } from './shared/theme';
+import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -27,8 +29,11 @@ const getOperationErrorMessage = (error) => {
 
 function App() {
   const [devices, setDevices] = useState([]);
+  const [activeDeviceId, setActiveDeviceId] = useState(() => localStorage.getItem('activeDeviceId') || '');
+  const [navigationContext, setNavigationContext] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [activeTab, setActiveTab] = useState('devices');
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [wifiIp, setWifiIp] = useState('');
@@ -54,6 +59,10 @@ function App() {
       toastTimerRef.current = null;
     }, duration);
   }, []);
+  const showDeviceFailure = (deviceId, message) => {
+    setDeviceOperationErrors(previous => ({ ...previous, [deviceId]: message }));
+    showToast(message);
+  };
   // Confirm 确认框状态
   const [confirmModal, setConfirmModal] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
@@ -293,36 +302,66 @@ function App() {
     setShowThemeEditor(true);
   };
 
-  const fetchDevices = async () => {
-    setLoading(true);
-    setError('');
+  const fetchDevices = useMemo(() => singleFlight(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
-      if (window.electronAPI) {
-        let timeoutId = null;
-        try {
-          const timeoutPromise = new Promise((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error('获取设备列表超时，请检查 ADB 是否正常运行')), 10000);
-          });
-          const devs = await Promise.race([
-            window.electronAPI.getDevices(),
-            timeoutPromise
-          ]);
-          setDevices(devs);
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-        }
-      } else {
-        // Mock data for browser testing
-        setDevices([
+      const nextDevices = window.electronAPI
+        ? await window.electronAPI.getDevices()
+        : [
           { id: 'emulator-5554', status: 'device', model: 'Pixel 6 Pro' },
-          { id: '192.168.1.100:5555', status: 'offline', model: 'Unknown' },
-        ]);
-      }
+          { id: '192.168.1.100:5555', status: 'offline', model: 'Unknown' }
+        ];
+      setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
+      setActiveDeviceId(previous => resolveActiveDeviceId(previous, nextDevices));
+      setError('');
     } catch (err) {
-      setError(err.message || '获取设备列表失败');
-      setDevices([]);
+      setError(`设备状态刷新失败：${err.message || '请检查 ADB 环境'}。已保留设备选择，请运行环境自检。`);
+      setDevices(previous => previous.map(device => ({ ...device, status: 'offline' })));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  }), []);
+
+  useEffect(() => {
+    localStorage.setItem('activeDeviceId', activeDeviceId);
+  }, [activeDeviceId]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer;
+    let generation = 0;
+    const poll = async (currentGeneration = generation) => {
+      clearTimeout(timer);
+      if (document.visibilityState !== 'hidden') await fetchDevices({ silent: true });
+      if (!stopped && currentGeneration === generation) timer = setTimeout(() => poll(currentGeneration), 5000);
+    };
+    const onVisibilityChange = () => {
+      generation += 1;
+      clearTimeout(timer);
+      if (document.visibilityState !== 'hidden') void poll();
+    };
+    timer = setTimeout(poll, 5000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [fetchDevices]);
+
+  const inspectApplication = ({ deviceId, packageName }) => {
+    setActiveDeviceId(deviceId);
+    setNavigationContext({ deviceId, packageName, requestId: crypto.randomUUID() });
+    setActiveTab('troubleshoot');
+  };
+
+  const viewApplicationLogs = async ({ deviceId, packageName } = {}) => {
+    if (deviceId) setActiveDeviceId(deviceId);
+    try {
+      const result = await window.electronAPI?.logAnalyzerOpen?.({ deviceId: deviceId || activeDeviceId, packageName });
+      if (result?.success === false || result?.ok === false) throw new Error(result.error || '日志窗口打开失败');
+    } catch (err) {
+      showToast(`日志窗口打开失败：${err.message}`);
     }
   };
 
@@ -354,7 +393,7 @@ function App() {
       return;
     }
     if (action === 'logAnalyzer') {
-      window.electronAPI?.logAnalyzerOpen?.();
+      void viewApplicationLogs();
       return;
     }
     if (action === 'refreshDevices') {
@@ -448,7 +487,7 @@ function App() {
     loadTerminalCmdHistory();
     // 初始化 VIP 状态
     refreshVipStatus();
-  }, [refreshVipStatus]);
+  }, [fetchDevices, refreshVipStatus]);
 
   useEffect(() => {
     const saveThemes = async () => {
@@ -529,15 +568,15 @@ function App() {
     };
     const setTask = (key, task, autoHide = false) => {
       setBackgroundTasks(prev => ({ ...prev, [key]: task || null }));
-      if (autoHide && task) hideLater(key, task);
+      if (autoHide && task?.status === 'success') hideLater(key, task);
     };
     window.electronAPI?.inspectionState?.({}).then(res => {
       const task = res?.task;
-      if (task && isBackgroundTaskActive(task)) setTask('inspection', task);
+      if (task && (isBackgroundTaskActive(task) || task.status === 'failed')) setTask('inspection', task);
     });
     window.electronAPI?.perfReportState?.({}).then(res => {
       const task = res?.task;
-      if (task && isBackgroundTaskActive(task)) setTask('performanceReport', task);
+      if (task && (isBackgroundTaskActive(task) || task.status === 'failed')) setTask('performanceReport', task);
     });
     const offInspectionProgress = window.electronAPI?.onInspectionProgress?.((progress) => {
       setTask('inspection', {
@@ -558,6 +597,9 @@ function App() {
         result
       };
       setTask('inspection', task, true);
+      if (!result.ok && !result.cancelled && result.deviceId) {
+        setDeviceOperationErrors(previous => ({ ...previous, [result.deviceId]: `设备巡检失败：${result.error || '请打开巡检查看结果'}` }));
+      }
     });
     const offReportProgress = window.electronAPI?.onPerfReportProgress?.((task) => {
       setTask('performanceReport', task);
@@ -766,7 +808,7 @@ function App() {
         showToast(`开始投屏 ${deviceId}`);
       }
     } catch (err) {
-      showToast(`启动失败: ${err.message}`);
+      showDeviceFailure(deviceId, `投屏启动失败: ${err.message}`);
     } finally {
       setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: false }));
     }
@@ -777,13 +819,13 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbShell(deviceId, command);
         if (!res.success) {
-          showToast(`命令执行失败: ${res.error}`);
+          showDeviceFailure(deviceId, `命令执行失败: ${res.error}`);
         }
       } else {
         console.log(`发送命令到 ${deviceId}: adb shell ${command}`);
       }
     } catch (err) {
-      showToast(`命令执行错误: ${err.message}`);
+      showDeviceFailure(deviceId, `命令执行错误: ${err.message}`);
     }
   };
 
@@ -860,16 +902,16 @@ function App() {
           if (pullRes.success) {
             showToast(`截图已保存: ${localPath}`);
           } else {
-            showToast(`截图保存失败: ${pullRes.error}`);
+            showDeviceFailure(deviceId, `截图保存失败: ${pullRes.error}`);
           }
         } else {
-          showToast(`截图命令失败: ${res.error}`);
+          showDeviceFailure(deviceId, `截图命令失败: ${res.error}`);
         }
       } else {
         showToast('截图功能需要 Electron 环境');
       }
     } catch (err) {
-      showToast(`截图错误: ${err.message}`);
+      showDeviceFailure(deviceId, `截图错误: ${err.message}`);
     } finally {
       setOperationLoading(prev => ({ ...prev, [`screenshot_${deviceId}`]: false }));
     }
@@ -892,13 +934,13 @@ function App() {
               // 延迟多次刷新，确保设备重新上线后列表更新
               [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showToast(`重启失败: ${res.error}`);
+              showDeviceFailure(deviceId, `重启失败: ${res.error}`);
             }
           } else {
             showToast('重启功能需要 Electron 环境');
           }
         } catch (err) {
-          showToast(`重启失败: ${err.message}`);
+          showDeviceFailure(deviceId, `重启失败: ${err.message}`);
         } finally {
           setOperationLoading(prev => ({ ...prev, [`reboot_${deviceId}`]: false }));
         }
@@ -923,13 +965,13 @@ function App() {
               // 延迟多次刷新，确保设备状态变更后列表更新
               [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showToast(`进入loader模式失败: ${res.error}`);
+              showDeviceFailure(deviceId, `进入loader模式失败: ${res.error}`);
             }
           } else {
             showToast('Loader模式需要 Electron 环境');
           }
         } catch (err) {
-          showToast(`进入loader模式失败: ${err.message}`);
+          showDeviceFailure(deviceId, `进入loader模式失败: ${err.message}`);
         } finally {
           setOperationLoading(prev => ({ ...prev, [`loader_${deviceId}`]: false }));
         }
@@ -954,13 +996,13 @@ function App() {
               // 延迟多次刷新，确保设备重启完成后列表更新
               [8000, 12000, 16000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showToast(`Unlock 失败: ${res.error}`);
+              showDeviceFailure(deviceId, `Unlock 失败: ${res.error}`);
             }
           } else {
             showToast('Unlock 功能需要 Electron 环境');
           }
         } catch (err) {
-          showToast(`Unlock 执行失败: ${err.message}`);
+          showDeviceFailure(deviceId, `Unlock 执行失败: ${err.message}`);
         } finally {
           setOperationLoading(prev => ({ ...prev, [`unlock_${deviceId}`]: false }));
         }
@@ -976,13 +1018,13 @@ function App() {
         if (res.success) {
           showToast(`Root 成功！${res.message}`);
         } else {
-          showToast(`Root 失败: ${res.error}`);
+          showDeviceFailure(deviceId, `Root 失败: ${res.error}`);
         }
       } else {
         showToast('Root 功能需要 Electron 环境');
       }
     } catch (err) {
-      showToast(`Root 执行失败: ${err.message}`);
+      showDeviceFailure(deviceId, `Root 执行失败: ${err.message}`);
     } finally {
       setOperationLoading(prev => ({ ...prev, [`root_${deviceId}`]: false }));
     }
@@ -996,13 +1038,13 @@ function App() {
         if (res.success) {
           showToast(`Remount 成功！${res.message}`);
         } else {
-          showToast(`Remount 失败: ${res.error}`);
+          showDeviceFailure(deviceId, `Remount 失败: ${res.error}`);
         }
       } else {
         showToast('Remount 功能需要 Electron 环境');
       }
     } catch (err) {
-      showToast(`Remount 执行失败: ${err.message}`);
+      showDeviceFailure(deviceId, `Remount 执行失败: ${err.message}`);
     } finally {
       setOperationLoading(prev => ({ ...prev, [`remount_${deviceId}`]: false }));
     }
@@ -1260,17 +1302,19 @@ function App() {
   };
 
   const t = theme || themes.default;
-  const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
-  const settingsNavShellClass = t.primary === 'tech'
+  const isDark = isDarkTheme(t);
+  const activeDevice = devices.find(device => device.id === activeDeviceId);
+  const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
+  const settingsNavShellClass = isDarkTheme(t)
     ? 'bg-[#202124] border-[#3E4145]/80'
     : 'bg-slate-50 border-slate-200/80';
-  const settingsNavPanelClass = t.primary === 'tech'
+  const settingsNavPanelClass = isDarkTheme(t)
     ? 'bg-[#2D2F33] border-[#3E4145] shadow-[0_18px_36px_rgba(0,0,0,0.36)]'
     : 'bg-white border-slate-200 shadow-[0_18px_36px_rgba(15,23,42,0.14)]';
-  const settingsNavItemClass = t.primary === 'tech'
+  const settingsNavItemClass = isDarkTheme(t)
     ? 'border-[#4A4D52] text-[#BDC1C6] hover:bg-[#3E4145] hover:text-[#E8EAED]'
     : 'border-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800';
-  const settingsNavActiveItemClass = t.primary === 'tech'
+  const settingsNavActiveItemClass = isDarkTheme(t)
     ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-300 shadow-sm'
     : 'border-emerald-500/35 bg-emerald-50 text-emerald-700 shadow-sm';
   const scrollToSettingsSection = (sectionId) => {
@@ -1326,7 +1370,7 @@ function App() {
   }, [activeTab, settingsSections]);
 
   return (
-    <div className={`flex h-screen select-none ${t.primary === 'tech' ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       {/* Toast 提示 */}
       {toast && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-[#2D2F33] text-white rounded-lg shadow-lg text-sm">
@@ -1343,23 +1387,23 @@ function App() {
       {/* 更新说明弹窗（版本升级后首次打开时显示，放在顶层确保任何页面都能弹出） */}
       {showChangelog && changelogContent && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className={`w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden ${t.primary === 'tech' ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+          <div className={`w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden ${isDarkTheme(t) ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
             <div className="relative px-6 py-5 bg-gradient-to-br from-cyan-500/20 via-purple-500/20 to-emerald-500/20 border-b border-[#3E4145]/50">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 flex items-center justify-center shadow-lg">
                   <DownloadCloud size={24} className="text-white" />
                 </div>
                 <div className="flex-1">
-                  <h3 className={`text-lg font-bold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                  <h3 className={`text-lg font-bold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                     {changelogContent.title}
                   </h3>
-                  <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
+                  <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
                     发布日期：{changelogContent.date}
                   </p>
                 </div>
                 <button
                   onClick={() => setShowChangelog(false)}
-                  className={`p-1.5 rounded-lg transition-colors ${t.primary === 'tech' ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:bg-slate-100 hover:text-slate-600'}`}
+                  className={`p-1.5 rounded-lg transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:bg-slate-100 hover:text-slate-600'}`}
                 >
                   <X size={20} />
                 </button>
@@ -1368,9 +1412,9 @@ function App() {
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2.5">
               {changelogContent.items.map((item, idx) => {
                 const typeConfig = {
-                  feature: { label: '新增', color: t.primary === 'tech' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                  fix: { label: '修复', color: t.primary === 'tech' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200' },
-                  improve: { label: '优化', color: t.primary === 'tech' ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-cyan-50 text-cyan-600 border-cyan-200' }
+                  feature: { label: '新增', color: isDarkTheme(t) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                  fix: { label: '修复', color: isDarkTheme(t) ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200' },
+                  improve: { label: '优化', color: isDarkTheme(t) ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-cyan-50 text-cyan-600 border-cyan-200' }
                 };
                 const cfg = typeConfig[item.type] || typeConfig.improve;
                 return (
@@ -1378,21 +1422,21 @@ function App() {
                     <span className={`inline-flex h-6 min-w-11 shrink-0 items-center justify-center px-2 text-[10px] leading-none font-semibold rounded border ${cfg.color}`}>
                       {cfg.label}
                     </span>
-                    <span className={`text-sm leading-6 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                    <span className={`text-sm leading-6 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                       {item.text}
                     </span>
                   </div>
                 );
               })}
             </div>
-            <div className={`px-6 py-4 border-t flex items-center justify-between ${t.primary === 'tech' ? 'border-[#3E4145] bg-[#202124]/50' : 'border-slate-100 bg-slate-50'}`}>
-              <span className={`text-xs ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+            <div className={`px-6 py-4 border-t flex items-center justify-between ${isDarkTheme(t) ? 'border-[#3E4145] bg-[#202124]/50' : 'border-slate-100 bg-slate-50'}`}>
+              <span className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                 感谢使用，如有问题请反馈
               </span>
               <button
                 onClick={() => setShowChangelog(false)}
                 className={`px-5 py-2 text-sm font-medium rounded-lg transition-all active:scale-95 shadow-sm ${
-                  t.primary === 'tech'
+                  isDarkTheme(t)
                     ? 'bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-600 hover:to-emerald-600 text-white'
                     : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white'
                 }`}
@@ -1426,29 +1470,29 @@ function App() {
       {/* 更新安装确认对话框（带加载条） */}
       {updateInstallModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className={`p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4 ${t.primary === 'tech' ? 'bg-[#2D2F33]' : 'bg-white'}`}>
+          <div className={`p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4 ${isDarkTheme(t) ? 'bg-[#2D2F33]' : 'bg-white'}`}>
             {!updateInstalling ? (
               <>
                 <div className="flex items-center gap-3 mb-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.primary === 'tech' ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDarkTheme(t) ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
                     <DownloadCloud size={20} className="text-emerald-500" />
                   </div>
                   <div>
-                    <h3 className={`text-base font-semibold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                    <h3 className={`text-base font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                       安装更新并重启
                     </h3>
-                    <p className={`text-xs ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+                    <p className={`text-xs ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
                       新版本 v{updaterState.info?.version || '未知'} 已准备就绪
                     </p>
                   </div>
                 </div>
-                <p className={`mb-5 text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>
+                <p className={`mb-5 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>
                   安装过程中应用将自动关闭并重启，请确保已保存所有操作。是否立即安装？
                 </p>
                 <div className="flex justify-end gap-2">
                   <button
                     onClick={() => setUpdateInstallModal(false)}
-                    className={`px-4 py-2 text-sm rounded-lg transition-colors ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                    className={`px-4 py-2 text-sm rounded-lg transition-colors ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                   >
                     稍后
                   </button>
@@ -1472,10 +1516,10 @@ function App() {
                 <div className="flex items-center justify-center mb-4">
                   <Loader2 size={32} className="animate-spin text-emerald-500" />
                 </div>
-                <p className={`text-center text-sm mb-4 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                   正在安装更新，应用即将重启…
                 </p>
-                <div className={`h-1.5 rounded-full overflow-hidden ${t.primary === 'tech' ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
+                <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
                   <div className="h-full bg-emerald-500 rounded-full animate-[loading_1.2s_ease-in-out_infinite]" style={{ width: '100%' }} />
                 </div>
               </div>
@@ -1489,22 +1533,22 @@ function App() {
           onClick={() => setEnvironmentCheckModalOpen(false)}
         >
           <div
-            className={`flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border shadow-2xl ${t.primary === 'tech' ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}
+            className={`flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border shadow-2xl ${isDarkTheme(t) ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className={`flex items-center justify-between gap-4 border-b px-6 py-4 ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-200'}`}>
+            <div className={`flex items-center justify-between gap-4 border-b px-6 py-4 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div>
-                <h3 className={`text-lg font-semibold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                   环境自检
                 </h3>
-                <p className={`mt-1 text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
+                <p className={`mt-1 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
                   检查 ADB、scrcpy 和设备授权状态
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setEnvironmentCheckModalOpen(false)}
-                className={`rounded-lg p-2 transition-colors ${t.primary === 'tech' ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
+                className={`rounded-lg p-2 transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
                 aria-label="关闭环境自检"
               >
                 <X size={18} />
@@ -1513,6 +1557,8 @@ function App() {
             <div className="flex-1 overflow-y-auto p-5">
               <EnvironmentCheckWizard
                 devices={devices}
+                activeDeviceId={activeDeviceId}
+                onActiveDeviceChange={setActiveDeviceId}
                 theme={theme}
                 showToast={showToast}
                 onRefreshDevices={fetchDevices}
@@ -1522,13 +1568,14 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className="w-60 lg:w-64 shrink-0 flex flex-col pt-6 lg:pt-8 bg-[#202124] text-[#E8EAED]">
-        <div className={`px-4 lg:px-5 mb-6 lg:mb-8 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
+      <div className="w-56 lg:w-60 shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]">
+        <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
           <h1 className="text-xl font-bold tracking-wide">卓控台</h1>
         </div>
 
-        <nav className="flex-1 px-3 lg:px-4 space-y-2">
+        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1">
+          <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">设备与诊断</div>
           <button
             onClick={() => setActiveTab('devices')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'devices' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
@@ -1553,6 +1600,7 @@ function App() {
             <Gauge size={20} />
             <span className="font-medium">性能监控</span>
           </button>
+          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">测试与证据</div>
           <button
             onClick={() => setActiveTab('quality')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'quality' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
@@ -1577,6 +1625,7 @@ function App() {
             <FolderOpen size={20} />
             <span className="font-medium">产物中心</span>
           </button>
+          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">工具与设置</div>
           <button
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
@@ -1586,11 +1635,7 @@ function App() {
             <span className="font-medium">偏好设置</span>
           </button>
           <button
-            onClick={() => {
-              if (window.electronAPI && window.electronAPI.logAnalyzerOpen) {
-                window.electronAPI.logAnalyzerOpen();
-              }
-            }}
+            onClick={() => viewApplicationLogs()}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors hover:bg-[#2D2F33]"
             style={{ WebkitAppRegion: 'no-drag' }}
           >
@@ -1612,7 +1657,10 @@ function App() {
 
         <BackgroundTaskStack
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
-          onOpen={(tab) => setActiveTab(tab)}
+          onOpen={(tab, deviceId) => {
+            if (deviceId) setActiveDeviceId(deviceId);
+            setActiveTab(tab);
+          }}
         />
 
         {/* 左下角更新安装入口（已下载完成时显示） */}
@@ -1637,17 +1685,15 @@ function App() {
       </div>
 
       {/* Main Content */}
-      <div className="min-w-0 flex-1 flex flex-col pt-6 lg:pt-8 h-screen overflow-hidden">
+      <div className="min-w-0 flex-1 flex flex-col pt-5 h-screen overflow-hidden">
         {/* Header */}
-        <header className={`px-4 lg:px-6 xl:px-8 pb-4 lg:pb-6 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${t.primary === 'tech' ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
+        <header className={`px-4 lg:px-6 xl:px-8 pb-3 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${isDark ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
           <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
-            <h2 className={`text-2xl font-bold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+            <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? '已连接设备' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
-            <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
-              {activeTab === 'devices' ? '管理并投屏您的 Android 设备' : activeTab === 'troubleshoot' ? '按问题场景自动采集诊断证据' : activeTab === 'artifacts' ? '集中查看报告、数据和证据目录' : activeTab === 'quality' ? '生成回归差异报告、验收证据和设备守护记录' : activeTab === 'history' ? '查看无线连接历史记录' : activeTab === 'tasks' ? '快速完成设备测试和操作录制' : activeTab === 'performance' ? '观察设备资源与进程状态' : activeTab === 'member' ? '管理您的会员权益与激活' : '配置 Scrcpy 及 ADB 相关偏好'}
-            </p>
+            {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>设备连接状态每 5 秒自动更新</p>}
           </div>
 
           {activeTab === 'devices' && (
@@ -1655,7 +1701,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => setEnvironmentCheckModalOpen(true)}
-                className={`flex items-center space-x-2 rounded-lg border px-4 py-2 font-medium transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                className={`flex items-center space-x-2 rounded-lg border px-4 py-2 font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
               >
                 <ClipboardCheck size={18} />
                 <span>环境自检</span>
@@ -1674,8 +1720,30 @@ function App() {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
+          {['devices', 'troubleshoot', 'quality', 'tasks', 'performance'].includes(activeTab) && (
+            <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}>
+              <label htmlFor="active-device" className="text-xs font-medium">当前设备</label>
+              <select
+                id="active-device"
+                value={activeDeviceId}
+                onChange={event => setActiveDeviceId(event.target.value)}
+                className={`min-w-0 max-w-full flex-1 rounded border px-2 py-1.5 text-sm ${t.input}`}
+              >
+                {!activeDeviceId && <option value="">尚未发现设备</option>}
+                {activeDeviceId && !activeDevice && <option value={activeDeviceId}>{activeDeviceId} · 已断开</option>}
+                {devices.map(device => <option key={device.id} value={device.id}>{deviceNames[device.id] || device.model || device.id} · {device.id} · {deviceStatusLabel(device.status)}</option>)}
+              </select>
+              {activeDeviceId && activeDevice?.status !== 'device' && (
+                <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
+                  <AlertCircle size={14} />
+                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice?.status || 'disconnected')}，已保留选择，不会自动切换。{deviceConnectionHint(activeDevice?.status)}</span>
+                  <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">环境自检</button>
+                </div>
+              )}
+            </div>
+          )}
           {error && (
-            <div className={`p-4 rounded-lg mb-6 border ${t.primary === 'tech' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
+            <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {error}
             </div>
           )}
@@ -1683,10 +1751,10 @@ function App() {
           {activeTab === 'devices' && (
             <>
               {/* Wi-Fi Connect Section */}
-              <div className={`mb-6 lg:mb-8 p-4 lg:p-5 rounded-xl border shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+              <div className={`mb-6 lg:mb-8 p-4 lg:p-5 rounded-xl border shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                 <div className="min-w-0 w-full xl:w-auto">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h3 className={`text-base lg:text-lg font-semibold flex items-center gap-2 whitespace-nowrap ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                    <h3 className={`text-base lg:text-lg font-semibold flex items-center gap-2 whitespace-nowrap ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                       <Wifi size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
                       Wi-Fi 无线连接
                     </h3>
@@ -1694,16 +1762,16 @@ function App() {
                       type="button"
                       onClick={() => setActiveTab('history')}
                       title="查看无线连接历史"
-                      className={`inline-flex w-fit items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                      className={`inline-flex w-fit items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                     >
                       <History size={16} />
                       <span>连接历史</span>
-                      <span className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-500'}`}>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-500'}`}>
                         {connectionHistory.length}
                       </span>
                     </button>
                   </div>
-                  <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>输入设备的 IP 地址和端口 (例如: 192.168.1.100:5555)</p>
+                  <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>输入设备的 IP 地址和端口 (例如: 192.168.1.100:5555)</p>
                 </div>
                 <form onSubmit={handleWifiConnect} className="flex w-full xl:w-auto gap-2">
                   <input
@@ -1711,7 +1779,7 @@ function App() {
                     value={wifiIp}
                     onChange={(e) => setWifiIp(e.target.value)}
                     placeholder="IP 地址:端口"
-                    className={`min-w-0 flex-1 xl:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
+                    className={`min-w-0 flex-1 xl:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
                   />
                   <button
                     type="submit"
@@ -1725,7 +1793,7 @@ function App() {
 
               <div className="grid gap-6 grid-cols-1 xl:grid-cols-2">
                 {devices.length === 0 && !loading && !error ? (
-                  <div className={`col-span-full flex flex-col items-center justify-center py-20 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
+                  <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
                     <Smartphone size={48} className={`mb-4 opacity-50 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
                     <p className="text-lg">未发现设备</p>
                     <p className="text-sm">请确保已开启 USB 调试并连接设备</p>
@@ -1742,6 +1810,16 @@ function App() {
                     <DeviceCard
                       key={device.id}
                       device={device}
+                      isActive={device.id === activeDeviceId}
+                      onSelectDevice={() => setActiveDeviceId(device.id)}
+                      onEnvironmentCheck={() => {
+                        setActiveDeviceId(device.id);
+                        setEnvironmentCheckModalOpen(true);
+                      }}
+                      onInspectApplication={inspectApplication}
+                      onViewApplicationLogs={viewApplicationLogs}
+                      operationError={deviceOperationErrors[device.id]}
+                      onDismissOperationError={() => setDeviceOperationErrors(previous => ({ ...previous, [device.id]: '' }))}
                       deviceName={deviceNames[device.id]}
                       onNameChange={handleDeviceNameChange}
                       onStart={() => handleStartScrcpy(device.id)}
@@ -1799,9 +1877,9 @@ function App() {
                     />
                   ))}
                   {lockedCount > 0 && (
-                    <div className={`col-span-full flex items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed ${t.primary === 'tech' ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
+                    <div className={`col-span-full flex items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                       <Lock size={20} className="text-amber-400" />
-                      <span className={`text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
                         还有 {lockedCount} 台设备已连接，<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">开通会员</button>解锁全部
                       </span>
                     </div>
@@ -1817,6 +1895,9 @@ function App() {
           {activeTab === 'troubleshoot' && (
             <TroubleshootingWizard
               devices={devices}
+              activeDeviceId={activeDeviceId}
+              onActiveDeviceChange={setActiveDeviceId}
+              navigationContext={navigationContext}
               theme={theme}
               vipStatus={vipStatus}
               showToast={showToast}
@@ -1835,6 +1916,8 @@ function App() {
           {activeTab === 'quality' && (
             <QualityCenter
               devices={devices}
+              activeDeviceId={activeDeviceId}
+              onActiveDeviceChange={setActiveDeviceId}
               deviceLoading={loading}
               onRefreshDevices={fetchDevices}
               theme={theme}
@@ -1845,21 +1928,21 @@ function App() {
           {activeTab === 'history' && (
             <div className="space-y-6">
               {/* 连接历史记录页面 */}
-              <div className={`p-6 rounded-xl border shadow-sm ${t.primary === 'tech' ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+              <div className={`p-6 rounded-xl border shadow-sm ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                     <button
                       type="button"
                       onClick={() => setActiveTab('devices')}
-                      className={`inline-flex w-fit items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                      className={`inline-flex w-fit items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                     >
                       <ArrowLeft size={16} />
                       返回设备列表
                     </button>
-                    <h3 className={`text-lg font-semibold flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                    <h3 className={`text-lg font-semibold flex items-center gap-2 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                       <History size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
                       连接历史
-                      <span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
+                      <span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
                         {connectionHistory.length} 条
                       </span>
                     </h3>
@@ -1881,7 +1964,7 @@ function App() {
                           }
                         });
                       }}
-                      className={`text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${t.primary === 'tech' ? 'text-[#9AA0A6] hover:text-red-400 hover:bg-red-900/30' : 'text-[#80868B] hover:text-red-600 hover:bg-red-50'}`}
+                      className={`text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-red-400 hover:bg-red-900/30' : 'text-[#80868B] hover:text-red-600 hover:bg-red-50'}`}
                     >
                       <RotateCcw size={14} />
                       一键清除
@@ -1891,8 +1974,8 @@ function App() {
                 {connectionHistory.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16">
                     <History size={48} className={`mb-4 opacity-30 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
-                    <p className={`text-lg ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>暂无连接历史</p>
-                    <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-slate-600' : 'text-[#9AA0A6]'}`}>通过 Wi-Fi 连接设备后会显示在这里</p>
+                    <p className={`text-lg ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>暂无连接历史</p>
+                    <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-slate-600' : 'text-[#9AA0A6]'}`}>通过 Wi-Fi 连接设备后会显示在这里</p>
                   </div>
                 ) : (
                   <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -1906,43 +1989,43 @@ function App() {
                           {visibleHistory.map((item) => (
                       <div
                         key={item.id}
-                        className={`p-4 rounded-xl border transition-all hover:shadow-md group ${t.primary === 'tech' ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
+                        className={`p-4 rounded-xl border transition-all hover:shadow-md group ${isDarkTheme(t) ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.primary === 'tech' ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkTheme(t) ? 'bg-slate-600' : 'bg-slate-200'}`}>
                                 {item.type === 'wifi' ? (
                                   <Wifi size={16} className="text-emerald-500" />
                                 ) : (
                                   <Smartphone size={16} className="text-slate-500" />
                                 )}
                               </div>
-                              <span className={`font-semibold truncate ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                              <span className={`font-semibold truncate ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                                 {item.deviceName}
                               </span>
                             </div>
                             {item.ip && (
                               <div className="flex items-center gap-2 mb-2">
-                                <code className={`text-sm px-2 py-1 rounded ${t.primary === 'tech' ? 'bg-slate-600 text-[#E8EAED]' : 'bg-slate-200 text-slate-600'}`}>{item.ip}</code>
+                                <code className={`text-sm px-2 py-1 rounded ${isDarkTheme(t) ? 'bg-slate-600 text-[#E8EAED]' : 'bg-slate-200 text-slate-600'}`}>{item.ip}</code>
                                 <button
                                   onClick={() => {
                                     navigator.clipboard.writeText(item.ip);
                                     showToast('IP 已复制');
                                   }}
-                                  className={`p-1.5 rounded-lg transition-colors ${t.primary === 'tech' ? 'hover:bg-slate-600 text-[#9AA0A6] hover:text-[#E8EAED]' : 'hover:bg-slate-200 text-[#9AA0A6] hover:text-slate-600'}`}
+                                  className={`p-1.5 rounded-lg transition-colors ${isDarkTheme(t) ? 'hover:bg-slate-600 text-[#9AA0A6] hover:text-[#E8EAED]' : 'hover:bg-slate-200 text-[#9AA0A6] hover:text-slate-600'}`}
                                   title="复制 IP"
                                 >
                                   <Copy size={14} />
                                 </button>
                               </div>
                             )}
-                            <div className={`text-xs ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                            <div className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                               {new Date(item.timestamp).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </div>
                           </div>
                         </div>
-                        <div className={`mt-3 pt-3 border-t flex gap-2 ${t.primary === 'tech' ? 'border-[#5F6368]' : 'border-slate-200'}`}>
+                        <div className={`mt-3 pt-3 border-t flex gap-2 ${isDarkTheme(t) ? 'border-[#5F6368]' : 'border-slate-200'}`}>
                           <button
                             onClick={() => {
                               setWifiIp(item.ip || item.deviceId);
@@ -1957,9 +2040,9 @@ function App() {
                       </div>
                     ))}
                     {lockedHistoryCount > 0 && (
-                      <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${t.primary === 'tech' ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
+                      <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                         <Lock size={18} className="text-amber-400" />
-                        <span className={`text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
+                        <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
                           还有 {lockedHistoryCount} 条历史记录，<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">开通会员</button>查看全部
                         </span>
                       </div>
@@ -1976,6 +2059,8 @@ function App() {
           {activeTab === 'tasks' && (
             <TaskCenter
               devices={devices}
+              activeDeviceId={activeDeviceId}
+              onActiveDeviceChange={setActiveDeviceId}
               theme={theme}
               taskCenterPath={taskCenterPath}
               showToast={showToast}
@@ -1987,6 +2072,8 @@ function App() {
           {activeTab === 'performance' && (
             <PerformanceDashboard
               devices={devices}
+              activeDeviceId={activeDeviceId}
+              onActiveDeviceChange={setActiveDeviceId}
               theme={theme}
               vipStatus={vipStatus}
               performancePath={performancePath}
@@ -2039,14 +2126,14 @@ function App() {
               </section>
 
               <section id="settings-cast" className={settingsSectionClass}>
-              <h3 className={`text-lg font-semibold mb-4 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>Scrcpy 投屏设置</h3>
-              <p className={`text-sm mb-6 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>这些设置将在启动新的投屏会话时应用。</p>
+              <h3 className={`text-lg font-semibold mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>Scrcpy 投屏设置</h3>
+              <p className={`text-sm mb-6 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>这些设置将在启动新的投屏会话时应用。</p>
 
               <div className="space-y-4">
-                <div className={`flex items-center justify-between py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>投屏时关闭设备屏幕</span>
-                    <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--turn-screen-off</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>投屏时关闭设备屏幕</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--turn-screen-off</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -2059,10 +2146,10 @@ function App() {
                   </label>
                 </div>
 
-                <div className={`flex items-center justify-between py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>保持唤醒</span>
-                    <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>设备在投屏期间保持唤醒状态</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>保持唤醒</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>设备在投屏期间保持唤醒状态</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -2075,15 +2162,15 @@ function App() {
                   </label>
                 </div>
 
-                <div className={`flex items-center justify-between py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>视频比特率</span>
-                    <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--video-bit-rate</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>视频比特率</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--video-bit-rate</p>
                   </div>
                   <select
                     value={scrcpySettings.bitrate}
                     onChange={(e) => setScrcpySettings(prev => ({ ...prev, bitrate: e.target.value }))}
-                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                   >
                     <option value="2 Mbps">2 Mbps</option>
                     <option value="4 Mbps">4 Mbps</option>
@@ -2093,15 +2180,15 @@ function App() {
                   </select>
                 </div>
 
-                <div className={`flex items-center justify-between py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>最大分辨率</span>
-                    <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--max-size，0 表示不限制</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>最大分辨率</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--max-size，0 表示不限制</p>
                   </div>
                   <select
                     value={scrcpySettings.maxSize}
                     onChange={(e) => setScrcpySettings(prev => ({ ...prev, maxSize: e.target.value }))}
-                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                   >
                     <option value="0">不限制</option>
                     <option value="1920">1920</option>
@@ -2115,15 +2202,15 @@ function App() {
 
               <section id="settings-paths" className={settingsSectionClass}>
                 <div className="mb-5">
-                  <h3 className={`text-lg font-semibold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>保存路径</h3>
-                  <p className={`text-sm mt-1 ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>集中管理截图、录屏、巡检、性能、任务和质量产物目录。</p>
+                  <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>保存路径</h3>
+                  <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>集中管理截图、录屏、巡检、性能、任务和质量产物目录。</p>
                 </div>
                 <div className="space-y-4">
                 {/* 截图保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <Camera size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>截图保存路径</span>
+                    <Camera size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>截图保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2131,7 +2218,7 @@ function App() {
                       value={screenshotPath}
                       onChange={(e) => setScreenshotPath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/screenshot/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2142,7 +2229,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2160,22 +2247,22 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     截图将保存到此目录，默认为 %APPDATA%/adb-workbench/screenshot/
                   </p>
                 </div>
 
                 {/* 录屏保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <Video size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>录屏保存路径</span>
+                    <Video size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>录屏保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2183,7 +2270,7 @@ function App() {
                       value={screenRecordPath}
                       onChange={(e) => setScreenRecordPath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/screenrecord/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2194,7 +2281,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2212,22 +2299,22 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     录屏文件将保存到此目录，默认为 %APPDATA%/adb-workbench/screenrecord/
                   </p>
                 </div>
 
                 {/* 巡检保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <ClipboardCheck size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>巡检保存路径</span>
+                    <ClipboardCheck size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>巡检保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2235,7 +2322,7 @@ function App() {
                       value={inspectionPath}
                       onChange={(e) => setInspectionPath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/inspection/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2246,7 +2333,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2264,22 +2351,22 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     巡检报告和证据包将保存到此目录，默认为 %APPDATA%/adb-workbench/inspection/
                   </p>
                 </div>
 
                 {/* 性能导出保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <Gauge size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>性能导出保存路径</span>
+                    <Gauge size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>性能导出保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2287,7 +2374,7 @@ function App() {
                       value={performancePath}
                       onChange={(e) => setPerformancePath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/performance-monitor/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2298,7 +2385,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2317,22 +2404,22 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     性能数据和分析报告将保存到此目录，默认为 %APPDATA%/adb-workbench/performance-monitor/
                   </p>
                 </div>
 
                 {/* 任务中心保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <ClipboardList size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>任务中心保存路径</span>
+                    <ClipboardList size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>任务中心保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2340,7 +2427,7 @@ function App() {
                       value={taskCenterPath}
                       onChange={(e) => setTaskCenterPath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/task-center-artifacts/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2351,7 +2438,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2370,22 +2457,22 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     每次任务执行完成后，会在此目录下生成“脚本名-执行完成时间”的独立文件夹。
                   </p>
                 </div>
 
                 {/* 质量中心保存路径设置 */}
-                <div className={`py-3 border-b ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+                <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <ShieldCheck size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>质量中心保存路径</span>
+                    <ShieldCheck size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>质量中心保存路径</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2393,7 +2480,7 @@ function App() {
                       value={qualityCenterPath}
                       onChange={(e) => setQualityCenterPath(e.target.value)}
                       placeholder="默认: %APPDATA%/adb-workbench/quality-center/"
-                      className={`flex-1 border text-sm rounded-lg p-2.5 ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                      className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
                       onClick={async () => {
@@ -2404,7 +2491,7 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <FolderOpen size={16} />
                       浏览
@@ -2423,13 +2510,13 @@ function App() {
                           }
                         }
                       }}
-                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${t.primary === 'tech' ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
+                      className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
                       <Folder size={16} />
                       打开
                     </button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
                     回归基线、回归报告和设备守护报告将保存到此目录，默认为 %APPDATA%/adb-workbench/quality-center/
                   </p>
                 </div>
@@ -2441,8 +2528,8 @@ function App() {
                 <div className="py-3">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <Palette size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                      <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>界面主题</span>
+                      <Palette size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                      <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>界面主题</span>
                     </div>
                     <button
                       onClick={() => {
@@ -2526,22 +2613,22 @@ function App() {
                 {/* 关于与更新 */}
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">
-                    <Package size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>关于与更新</span>
+                    <Package size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>关于与更新</span>
                   </div>
 
                   <div className="space-y-3">
                     {/* 版本号显示 */}
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg ${t.primary === 'tech' ? 'bg-[#3E4145]/50' : 'bg-slate-50'}`}>
-                      <span className={`text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>当前版本</span>
-                      <span className={`text-sm font-mono font-semibold ${t.primary === 'tech' ? 'text-cyan-400' : 'text-cyan-600'}`}>v{appVersion || '2.0.0'}</span>
+                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg ${isDarkTheme(t) ? 'bg-[#3E4145]/50' : 'bg-slate-50'}`}>
+                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>当前版本</span>
+                      <span className={`text-sm font-mono font-semibold ${isDarkTheme(t) ? 'text-cyan-400' : 'text-cyan-600'}`}>v{appVersion || '2.0.0'}</span>
                     </div>
 
                     {/* 自动更新开关 */}
-                    <div className={`flex items-center justify-between py-2 ${t.primary === 'tech' ? 'border-[#3E4145]' : 'border-slate-100'} border-b`}>
+                    <div className={`flex items-center justify-between py-2 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'} border-b`}>
                       <div>
-                        <span className={`font-medium text-sm ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>启动时自动检查更新</span>
-                        <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>应用启动 3 秒后自动检测新版本</p>
+                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>启动时自动检查更新</span>
+                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>应用启动 3 秒后自动检测新版本</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
@@ -2558,7 +2645,7 @@ function App() {
                     <div className="space-y-2">
                       {/* 错误提示 */}
                       {updaterState.error && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'}`}>
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'}`}>
                           <AlertCircle size={14} />
                           <span className="flex-1">{updaterState.error}</span>
                         </div>
@@ -2566,7 +2653,7 @@ function App() {
 
                       {/* 检查中 */}
                       {updaterState.checking && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
                           <Loader2 size={14} className="animate-spin" />
                           <span>正在检查更新…</span>
                         </div>
@@ -2574,7 +2661,7 @@ function App() {
 
                       {/* 已是最新版本 */}
                       {updaterState.notAvailable && !updaterState.checking && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-slate-500/10 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-slate-500/10 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
                           <CheckCircle2 size={14} />
                           <span>当前已是最新版本</span>
                         </div>
@@ -2582,7 +2669,7 @@ function App() {
 
                       {/* 发现新版本 */}
                       {updaterState.available && !updaterState.downloaded && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
                           <DownloadCloud size={14} />
                           <span className="font-semibold">发现新版本 v{updaterState.info?.version || '未知'}</span>
                         </div>
@@ -2590,7 +2677,7 @@ function App() {
 
                       {/* 下载进度 */}
                       {updaterState.downloading && updaterState.progress && (
-                        <div className={`px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-700'}`}>
+                        <div className={`px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-700'}`}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1.5">
                               <Loader2 size={12} className="animate-spin" />
@@ -2598,7 +2685,7 @@ function App() {
                             </span>
                             <span className="font-mono">{updaterState.progress.percent.toFixed(1)}%</span>
                           </div>
-                          <div className={`h-1.5 rounded-full overflow-hidden ${t.primary === 'tech' ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
+                          <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
                             <div
                               className="h-full bg-cyan-500 transition-all"
                               style={{ width: `${updaterState.progress.percent}%` }}
@@ -2613,7 +2700,7 @@ function App() {
 
                       {/* 下载完成 */}
                       {updaterState.downloaded && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.primary === 'tech' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
                           <CheckCircle2 size={14} />
                           <span className="flex-1">更新已下载完成，点击"立即安装"重启应用</span>
                         </div>
@@ -2641,7 +2728,7 @@ function App() {
                           }}
                           disabled={updaterState.checking || updaterState.downloading}
                           className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                            t.primary === 'tech'
+                            isDarkTheme(t)
                               ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145] active:scale-95 shadow-sm'
                               : 'border-slate-300 text-slate-700 hover:bg-slate-100 active:scale-95 shadow-sm'
                           }`}
@@ -2656,7 +2743,7 @@ function App() {
                           <button
                             onClick={() => window.electronAPI?.downloadUpdate?.()}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
-                              t.primary === 'tech'
+                              isDarkTheme(t)
                                 ? 'bg-cyan-500 hover:bg-cyan-600 text-white'
                                 : 'bg-cyan-600 hover:bg-cyan-700 text-white'
                             }`}
@@ -2671,7 +2758,7 @@ function App() {
                           <button
                             onClick={() => window.electronAPI?.installUpdate?.()}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
-                              t.primary === 'tech'
+                              isDarkTheme(t)
                                 ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
                                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                             }`}
@@ -2691,10 +2778,10 @@ function App() {
                 <div className="py-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <RotateCcw size={16} className={t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
+                      <RotateCcw size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
                       <div>
-                        <span className={`font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>重置所有设置</span>
-                        <p className={`text-xs mt-0.5 ${t.primary === 'tech' ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>清除所有自定义配置，恢复默认状态</p>
+                        <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>重置所有设置</span>
+                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>清除所有自定义配置，恢复默认状态</p>
                       </div>
                     </div>
                     <button
@@ -2739,7 +2826,7 @@ function App() {
                           }
                         });
                       }}
-                      className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${t.primary === 'tech' ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30' : 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'}`}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${isDarkTheme(t) ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30' : 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'}`}
                     >
                       <RotateCcw size={16} />
                       重置
@@ -2751,30 +2838,30 @@ function App() {
                 {/* Custom Theme Editor Modal */}
                 {showThemeEditor && (
                   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-                    <div className={`w-full max-w-xl my-4 mx-2 sm:mx-auto p-4 sm:p-6 rounded-xl border shadow-xl ${t.primary === 'tech' ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+                    <div className={`w-full max-w-xl my-4 mx-2 sm:mx-auto p-4 sm:p-6 rounded-xl border shadow-xl ${isDarkTheme(t) ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className={`text-lg font-semibold ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                        <h4 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                           {editingTheme ? '编辑自定义主题' : '创建自定义主题'}
                         </h4>
-                        <button onClick={() => setShowThemeEditor(false)} className={`p-1 ${t.primary === 'tech' ? 'text-[#9AA0A6] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:text-slate-600'}`}>
+                        <button onClick={() => setShowThemeEditor(false)} className={`p-1 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:text-slate-600'}`}>
                           <X size={20} />
                         </button>
                       </div>
 
                       <div className="space-y-4 overflow-y-auto">
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主题名称</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主题名称</label>
                           <input
                             type="text"
                             value={newThemeName}
                             onChange={(e) => setNewThemeName(e.target.value)}
                             placeholder="输入主题名称..."
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-white border-slate-200 text-slate-700'}`}
+                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-white border-slate-200 text-slate-700'}`}
                           />
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-2 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主色调</label>
+                          <label className={`block text-sm font-medium mb-2 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主色调</label>
                           <div className="flex flex-wrap gap-2">
                             {[
                               { name: 'emerald', color: '#10b981' },
@@ -2799,7 +2886,7 @@ function App() {
                         </div>
 
                         <div className="flex items-center justify-between">
-                          <span className={`text-sm font-medium ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>按钮渐变</span>
+                          <span className={`text-sm font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>按钮渐变</span>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
                               type="checkbox"
@@ -2814,12 +2901,12 @@ function App() {
 
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变起点</label>
+                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变起点</label>
                             <select
                               value={themeColors.primaryFrom}
                               onChange={(e) => setThemeColors(prev => ({ ...prev, primaryFrom: e.target.value }))}
                               disabled={!themeColors.useGradient}
-                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
+                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
                             >
                               {[
                                 { value: 'from-emerald-400', label: '翠绿' },
@@ -2838,12 +2925,12 @@ function App() {
                             </select>
                           </div>
                           <div>
-                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变终点</label>
+                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变终点</label>
                             <select
                               value={themeColors.primaryTo}
                               onChange={(e) => setThemeColors(prev => ({ ...prev, primaryTo: e.target.value }))}
                               disabled={!themeColors.useGradient}
-                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
+                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
                             >
                               {[
                                 { value: 'to-emerald-500', label: '翠绿' },
@@ -2864,11 +2951,11 @@ function App() {
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>卡片背景</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>卡片背景</label>
                           <select
                             value={themeColors.card}
                             onChange={(e) => setThemeColors(prev => ({ ...prev, card: e.target.value }))}
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                           >
                             <option value="bg-white">白色</option>
                             <option value="bg-slate-800/80">深灰半透明</option>
@@ -2881,11 +2968,11 @@ function App() {
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${t.primary === 'tech' ? 'text-[#E8EAED]' : 'text-slate-700'}`}>终端背景</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>终端背景</label>
                           <select
                             value={themeColors.terminalBg}
                             onChange={(e) => setThemeColors(prev => ({ ...prev, terminalBg: e.target.value }))}
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${t.primary === 'tech' ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                           >
                             <option value="bg-[#202124]">深灰 (#202124)</option>
                             <option value="bg-[#202124]">深灰 (slate-900)</option>
@@ -2901,7 +2988,7 @@ function App() {
                       <div className="flex justify-end gap-3 mt-6">
                         <button
                           onClick={() => setShowThemeEditor(false)}
-                          className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${t.primary === 'tech' ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                          className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                         >
                           取消
                         </button>
@@ -2935,9 +3022,9 @@ function BackgroundTaskStack({ tasks, onOpen }) {
           <button
             key={task.key}
             type="button"
-            onClick={() => onOpen?.(task.tab)}
+            onClick={() => onOpen?.(task.tab, task.deviceId)}
             className="w-full rounded-lg border border-[#3E4145] bg-[#2D2F33]/80 px-3 py-2.5 text-left hover:bg-[#3E4145] transition-colors"
-            title={task.title}
+            title={`${task.title}\n${task.deviceId || ''}\n${task.message}`}
           >
             <div className="flex items-center gap-2">
               <Icon size={16} className={task.status === 'failed' ? 'text-red-400' : 'text-emerald-400'} />
@@ -2975,20 +3062,22 @@ function toSidebarTask(key, task) {
     return {
       key,
       tab: 'devices',
+      deviceId: task.deviceId,
       icon: ClipboardCheck,
       status: task.status || 'running',
       title: running ? '设备巡检运行中' : cancelled ? '设备巡检已取消' : failed ? '设备巡检失败' : '设备巡检完成',
-      message: task.progress?.stepLabel || task.progress?.message || task.result?.error || task.deviceId || '等待巡检进度',
+      message: (failed && task.result?.error) || task.progress?.stepLabel || task.progress?.message || task.deviceId || '等待巡检进度',
       percent
     };
   }
   return {
     key,
     tab: 'performance',
+    deviceId: task.deviceId,
     icon: Gauge,
     status: task.status || 'running',
     title: running ? '性能报告生成中' : failed ? '性能报告失败' : '性能报告完成',
-    message: task.progress?.message || task.result?.error || task.deviceId || '等待报告进度',
+    message: (failed && task.result?.error) || task.progress?.message || task.deviceId || '等待报告进度',
     percent
   };
 }

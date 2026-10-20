@@ -8,6 +8,7 @@ import {
   Square,
   Trash2
 } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
 
 function TaskCenterRecordingWorkspace({
   theme,
@@ -22,7 +23,7 @@ function TaskCenterRecordingWorkspace({
   onClearSteps,
   onOpenAdvanced
 }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const panelClass = isDark ? 'border-[#3E4145] bg-slate-800/80' : 'border-slate-200 bg-white';
   const softClass = isDark ? 'border-[#3E4145] bg-[#2D2F33]' : 'border-slate-200 bg-slate-50';
   const textClass = isDark ? 'text-[#E8EAED]' : 'text-slate-800';

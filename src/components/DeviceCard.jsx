@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
+import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
 import DeviceNavigationControls from './DeviceNavigationControls';
@@ -10,9 +10,12 @@ import InspectionPanel from './InspectionPanel';
 import PackageManagerPanel from './PackageManagerPanel';
 // 通用危险确认弹窗（用于 su 不支持等提醒）
 import DangerConfirmModal from './DangerConfirmModal';
+import { isDarkTheme } from '../shared/theme';
+import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError }) {
   const isOnline = device.status === 'device';
+  const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(deviceName || '');
   const [showTerminal, setShowTerminal] = useState(false);
@@ -261,7 +264,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
   const scrcpyLoading = isLoading(`scrcpy_${device.id}`);
 
   return (
-    <div data-accent={t.primary} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col`}>
+    <div data-accent={t.primary} data-dark={isDarkTheme(t)} onClickCapture={onSelectDevice} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
       <div className={`device-card-header p-5 border-b flex justify-between items-start ${t.header.replace('border-b', 'border-b')}`}>
         <div className="flex items-center space-x-4">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isOnline ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}` : 'bg-slate-100 text-slate-400'}`}>
@@ -302,13 +305,16 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               <span className={`w-2 h-2 rounded-full ${isOnline ? (t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-500' : t.primary === 'pink' ? 'bg-pink-500' : t.primary === 'green' ? 'bg-green-500' : t.primary === 'orange' ? 'bg-orange-500' : 'bg-emerald-500') : 'bg-slate-300'}`}></span>
               <span className={`text-sm font-mono ${t.textMuted}`}>{device.id}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full ${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'} capitalize`}>
-                {device.status === 'device' ? '在线' : device.status}
+                {deviceStatusLabel(device.status)}
               </span>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <button type="button" onClick={onSelectDevice} aria-pressed={isActive} className={`px-2 py-1 text-xs rounded border ${isActive ? 'text-emerald-500 border-emerald-500/40' : t.button.secondary}`}>
+            {isActive ? '当前设备' : '选用'}
+          </button>
           <button
             onClick={onDisconnect}
             title="断开设备"
@@ -328,6 +334,18 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
       </div>
 
       <div className={`device-card-actions ${t.text}`}>
+        {operationError && (
+          <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <span className="min-w-0 flex-1 break-words">{operationError}</span>
+            <button type="button" onClick={onDismissOperationError} className="shrink-0 underline">收起</button>
+          </div>
+        )}
+        {!isOnline && (
+          <div role="status" className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+            <p>{deviceConnectionHint(device.status)}</p>
+            <button type="button" onClick={onEnvironmentCheck} className="mt-1 underline underline-offset-2">打开环境自检</button>
+          </div>
+        )}
         <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} />
         <section className="device-control-section" aria-label="常用工具">
           <h4 className={`device-control-heading ${t.textMuted}`}>常用工具</h4>
@@ -424,8 +442,20 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           </div>
         </section>
         <section className="device-control-section" aria-label="设备维护">
-          <h4 className={`device-control-heading ${t.textMuted}`}>设备维护</h4>
-          <div className="device-tool-grid device-maintenance-grid">
+          <button
+            type="button"
+            aria-expanded={maintenanceOpen}
+            onClick={() => {
+              const next = !maintenanceOpen;
+              setMaintenanceOpen(next);
+              localStorage.setItem(`deviceMaintenance:${device.id}`, String(next));
+            }}
+            className={`device-control-heading device-maintenance-toggle ${t.textMuted}`}
+          >
+            <ChevronDown size={14} className={maintenanceOpen ? '' : '-rotate-90'} />
+            设备维护
+          </button>
+          {maintenanceOpen && <div className="device-tool-grid device-maintenance-grid">
             <ControlButton
               icon={<Shield size={16} />}
               label={isLoading(`root_${device.id}`) ? 'Root中...' : 'Root'}
@@ -462,7 +492,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               theme={t}
               isOnline={isOnline}
             />
-          </div>
+          </div>}
         </section>
       </div>
 
@@ -475,6 +505,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             vipStatus={vipStatus}
             showToast={showToast}
             onOpenMemberCenter={onOpenMemberCenter}
+            onInspectApplication={onInspectApplication}
+            onViewApplicationLogs={onViewApplicationLogs}
             onSelectApkForInstall={onSelectApkForInstall}
             onSelectApkForPush={onSelectApkForPush}
             onInstallApk={onInstallApk}
@@ -498,7 +530,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
 
       {/* APK Manager Section */}
       {showLegacyApkManager && showApkManager && (
-        <div style={{ order: getPanelOrder('apk') }} className={`border-t p-4 ${t.primary === 'tech' ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
+        <div style={{ order: getPanelOrder('apk') }} className={`border-t p-4 ${isDarkTheme(t) ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
           <h4 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${t.text}`}>
             <Package size={16} />
             APK 管理
@@ -600,7 +632,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               <Folder size={14} className="text-purple-500" />
               <span className={`text-sm font-medium ${t.text}`}>浏览设备文件</span>
               <div className="flex items-center gap-1 ml-auto">
-                <span className={`text-xs font-mono px-2 py-1 rounded select-all ${t.primary === 'tech' ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{apkBrowserPath}</span>
+                <span className={`text-xs font-mono px-2 py-1 rounded select-all ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{apkBrowserPath}</span>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -608,7 +640,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                     navigator.clipboard.writeText(apkBrowserPath);
                     showToast(`路径已复制: ${apkBrowserPath}`);
                   }}
-                  className={`p-1 transition-colors ${t.primary === 'tech' ? 'text-[#9AA0A6] hover:text-cyan-400' : 'text-[#9AA0A6] hover:text-emerald-500'}`}
+                  className={`p-1 transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-cyan-400' : 'text-[#9AA0A6] hover:text-emerald-500'}`}
                   title="复制路径"
                 >
                   <Copy size={14} />
@@ -643,17 +675,17 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             </div>
 
             {/* File List */}
-            <div className={`mt-3 border rounded-lg max-h-48 overflow-y-auto ${t.primary === 'tech' ? 'bg-slate-800/50 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+            <div className={`mt-3 border rounded-lg max-h-48 overflow-y-auto ${isDarkTheme(t) ? 'bg-slate-800/50 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
               {apkBrowserLoading ? (
-                <div className={`p-4 text-center text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>加载中...</div>
+                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>加载中...</div>
               ) : apkBrowserItems.length === 0 ? (
-                <div className={`p-4 text-center text-sm ${t.primary === 'tech' ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>暂无文件</div>
+                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>暂无文件</div>
               ) : (
-                <div className={`divide-y ${t.primary === 'tech' ? 'divide-slate-700' : 'divide-slate-100'}`}>
+                <div className={`divide-y ${isDarkTheme(t) ? 'divide-slate-700' : 'divide-slate-100'}`}>
                   {apkBrowserItems.map((item, index) => (
                     <div
                       key={index}
-                      className={`px-3 py-2 flex items-center justify-between cursor-pointer group ${t.primary === 'tech' ? 'hover:bg-[#3E4145]' : 'hover:bg-slate-50'}`}
+                      className={`px-3 py-2 flex items-center justify-between cursor-pointer group ${isDarkTheme(t) ? 'hover:bg-[#3E4145]' : 'hover:bg-slate-50'}`}
                       onClick={() => item.isDirectory && item.name !== '.' && onBrowsePath?.(item.path)}
                     >
                       <div className="flex items-center gap-2">

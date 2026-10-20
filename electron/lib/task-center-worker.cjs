@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { writeRunManifest } = require('./task-run-manifest.cjs');
 
 let adbPath = workerData?.adbPath || 'adb';
 const defaultArtifactBaseDir = workerData?.defaultArtifactBaseDir || '';
@@ -1263,7 +1264,7 @@ async function findReboundDevice(task, run, devices) {
     }
 
     const strong = scored
-      .filter(item => item.strongMatches > 0)
+      .filter(item => item.strongMatches > 0 && item.strongConflicts === 0)
       .sort((a, b) => b.score - a.score);
     if (strong.length === 1 || (strong.length > 1 && strong[0].score > strong[1].score)) {
       return { id: strong[0].device.id, reason: '设备身份匹配' };
@@ -1271,23 +1272,9 @@ async function findReboundDevice(task, run, devices) {
     if (strong.length > 1 && strong[0].score === strong[1].score) {
       return { reason: '找到多台身份相近的设备，无法唯一匹配' };
     }
-
-    const usefulWeakCount = getUsefulKeyCount(expected, WEAK_IDENTITY_KEYS);
-    if (usefulWeakCount > 0) {
-      const weak = scored
-        .filter(item => item.weakMatches >= Math.min(2, usefulWeakCount))
-        .sort((a, b) => b.score - a.score);
-      if ((task.deviceRuns || []).length === 1 && weak.length === 1) {
-        return { id: weak[0].device.id, reason: '单设备型号匹配' };
-      }
-    }
   }
 
-  if ((task.deviceRuns || []).length === 1 && candidates.length === 1) {
-    return { id: candidates[0].id, reason: '单设备在线匹配' };
-  }
-
-  return { reason: describeOnlineDevices(candidates) };
+  return { reason: `无法确认在线设备与原目标为同一台设备；请重新连接原设备，或选择设备后重新运行。${describeOnlineDevices(candidates)}` };
 }
 
 function isDeviceClaimedByAnotherRun(task, run, deviceId) {
@@ -1352,13 +1339,18 @@ function getUsefulKeyCount(identity, keys) {
 }
 
 function scoreDeviceIdentity(expected, candidate) {
-  if (!expected || !candidate) return { score: 0, strongMatches: 0, weakMatches: 0 };
+  if (!expected || !candidate) return { score: 0, strongMatches: 0, strongConflicts: 0, weakMatches: 0 };
   let score = 0;
   let strongMatches = 0;
+  let strongConflicts = 0;
   let weakMatches = 0;
 
   for (const key of STRONG_IDENTITY_KEYS) {
-    if (!expected[key] || !candidate[key] || expected[key] !== candidate[key]) continue;
+    if (!expected[key] || !candidate[key]) continue;
+    if (expected[key] !== candidate[key]) {
+      strongConflicts += 1;
+      continue;
+    }
     score += 100;
     strongMatches += 1;
   }
@@ -1369,7 +1361,7 @@ function scoreDeviceIdentity(expected, candidate) {
     weakMatches += 1;
   }
 
-  return { score, strongMatches, weakMatches };
+  return { score, strongMatches, strongConflicts, weakMatches };
 }
 
 function rebindRunDevice(task, run, nextDeviceId, reason) {
@@ -1583,6 +1575,11 @@ async function finishTask(task) {
   }
   activeTasks.delete(task.id);
   const record = publicTask(task);
+  try {
+    writeRunManifest(record);
+  } catch (error) {
+    record.error = [record.error, `运行清单保存失败：${error.message}`].filter(Boolean).join('\n');
+  }
   cleanupTaskResources(task);
   parentPort.postMessage({ type: 'done', task: record });
 }
@@ -1601,6 +1598,7 @@ function publicTask(task) {
     concurrency: task.concurrency,
     artifactDir: task.artifactDir || '',
     artifactBaseDir: task.artifactBaseDir || '',
+    runResultPath: task.runResultPath || '',
     completedSteps: task.completedSteps,
     failedSteps: task.failedSteps,
     totalSteps: task.totalSteps,

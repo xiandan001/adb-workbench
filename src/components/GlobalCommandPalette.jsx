@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Command, Keyboard, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
 import {
   COMMAND_ACTIONS,
   DEFAULT_COMMAND_SHORTCUT,
@@ -9,7 +10,7 @@ import {
 } from '../data/globalCommands';
 
 function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
@@ -112,7 +113,7 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
 }
 
 export function GlobalCommandSettings({ settings, theme, onChange }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const [draft, setDraft] = useState({ title: '', description: '', action: COMMAND_ACTIONS[0].value });
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-700';

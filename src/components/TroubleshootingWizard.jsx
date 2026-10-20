@@ -19,6 +19,9 @@ import {
   Square,
   Zap
 } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
+import { deviceStatusLabel } from '../shared/deviceWorkflow';
+import { nextTroubleshootingContext } from '../shared/troubleshootingContext';
 
 const ISSUE_OPTIONS = [
   { id: 'crash', label: '应用闪退/崩溃', icon: ShieldAlert },
@@ -47,11 +50,11 @@ function filterProgressSteps(sourceSteps, options) {
   });
 }
 
-function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMemberCenter }) {
+function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMemberCenter, activeDeviceId, onActiveDeviceChange, navigationContext }) {
   const t = theme;
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
-  const [deviceId, setDeviceId] = useState('');
+  const [runningDeviceId, setRunningDeviceId] = useState('');
   const [issueType, setIssueType] = useState('crash');
   const [packageName, setPackageName] = useState('');
   const [packageSearch, setPackageSearch] = useState('');
@@ -66,27 +69,55 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [evidenceDeviceId, setEvidenceDeviceId] = useState(activeDeviceId || '');
+  const [taskStateLoaded, setTaskStateLoaded] = useState(false);
   const packagePickerRef = useRef(null);
+  const appliedContextRef = useRef(null);
+  const contextDeviceRef = useRef(activeDeviceId || '');
+  const packageRequestRef = useRef(0);
 
   const hasVip = vipStatus?.activated === true;
   const isVipLoading = vipStatus?.reason === 'loading';
-  const selectedDeviceId = onlineDevices.some(device => device.id === deviceId) ? deviceId : onlineDevices[0]?.id || '';
+  const selectedDeviceId = running ? runningDeviceId || activeDeviceId : activeDeviceId;
   const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
   const deviceOptions = useMemo(() => {
-    if (onlineDevices.length === 0) {
-      return [{ value: '', label: '暂无在线设备', description: '请连接设备后刷新', disabled: true }];
-    }
-    return onlineDevices.map(device => ({
+    const options = devices.map(device => ({
       value: device.id,
       label: device.model || device.name || device.id,
-      description: `${device.id} · 在线`
+      description: `${device.id} · ${deviceStatusLabel(device.status)}`
     }));
-  }, [onlineDevices]);
+    if (selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)) {
+      options.unshift({ value: selectedDeviceId, label: `${selectedDeviceId} · 已断开`, description: '已保留选择，请重新连接' });
+    }
+    return options.length ? options : [{ value: '', label: '暂无设备', description: '请连接设备后刷新', disabled: true }];
+  }, [devices, selectedDeviceId]);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const panel = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200';
   const soft = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
   const input = isDark ? 'bg-[#202124] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-700';
+
+  useEffect(() => {
+    const next = nextTroubleshootingContext({
+      currentDeviceId: contextDeviceRef.current, activeDeviceId,
+      running: running || !taskStateLoaded, navigationContext, appliedRequestId: appliedContextRef.current
+    });
+    if (!next) return;
+    contextDeviceRef.current = next.deviceId;
+    appliedContextRef.current = next.appliedRequestId;
+    packageRequestRef.current += 1;
+    setPackageName(next.packageName);
+    setPackageSearch(next.packageName);
+    setPackagePickerOpen(false);
+    setPackageItems([]);
+    setPackageDeviceId('');
+    setPackageError('');
+    setPackageLoading(false);
+    setResult(null);
+    setError('');
+    setSteps(DEFAULT_STEPS);
+    setEvidenceDeviceId(next.deviceId);
+  }, [activeDeviceId, navigationContext, running, taskStateLoaded]);
 
   const filteredPackages = useMemo(() => {
     const keyword = packageSearch.trim().toLowerCase();
@@ -100,33 +131,59 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   }, [packageItems, packageSearch]);
 
   useEffect(() => {
-    if (!window.electronAPI?.onTroubleshootingProgress) return undefined;
+    if (!window.electronAPI?.onTroubleshootingProgress) {
+      setTaskStateLoaded(true);
+      return undefined;
+    }
+    let alive = true;
+    let receivedUpdate = false;
     const offProgress = window.electronAPI.onTroubleshootingProgress((event) => {
+      receivedUpdate = true;
       setRunning(event.status === 'running' || event.status === 'cancelling');
+      if (event.deviceId) setRunningDeviceId(event.deviceId);
+      if (event.deviceId) setEvidenceDeviceId(event.deviceId);
       if (typeof event.includeInspection === 'boolean') setIncludeInspection(event.includeInspection);
       if (typeof event.includeAiSummary === 'boolean') setIncludeAiSummary(event.includeAiSummary);
       if (Array.isArray(event.steps)) setSteps(event.steps);
     });
     const offDone = window.electronAPI.onTroubleshootingDone((event) => {
+      receivedUpdate = true;
       setRunning(false);
+      if (event.deviceId) setEvidenceDeviceId(event.deviceId);
       if (typeof event.includeInspection === 'boolean') setIncludeInspection(event.includeInspection);
       if (typeof event.includeAiSummary === 'boolean') setIncludeAiSummary(event.includeAiSummary);
       if (Array.isArray(event.steps)) setSteps(event.steps);
       setResult(event.result || null);
+      if (!event.result?.ok && !event.result?.cancelled) setError(event.result?.error || '排查失败，请查看执行步骤');
       if (event.result?.ok) showToast?.('一键问题排查完成');
       else if (event.result?.cancelled) showToast?.('一键问题排查已取消');
       else showToast?.(`一键问题排查失败：${event.result?.error || '未知错误'}`);
     });
-    window.electronAPI.troubleshootingState?.().then(res => {
+    Promise.resolve(window.electronAPI.troubleshootingState?.()).then(res => {
+      if (!alive || receivedUpdate) return;
       const task = res?.task;
       if (!task) return;
-      setRunning(task.status === 'running' || task.status === 'cancelling');
+      const taskRunning = task.status === 'running' || task.status === 'cancelling';
+      setRunning(taskRunning);
+      if (task.deviceId) setRunningDeviceId(task.deviceId);
+      if (task.deviceId) setEvidenceDeviceId(task.deviceId);
+      if (taskRunning) {
+        contextDeviceRef.current = task.deviceId;
+        setPackageName(task.packageName || '');
+        setPackageSearch(task.packageName || '');
+      }
       if (typeof task.includeInspection === 'boolean') setIncludeInspection(task.includeInspection);
       if (typeof task.includeAiSummary === 'boolean') setIncludeAiSummary(task.includeAiSummary);
       if (Array.isArray(task.steps)) setSteps(task.steps);
       if (task.result) setResult(task.result);
+    }).catch(() => {
+      if (alive) setError('排查状态读取失败，请刷新页面后确认是否有运行中的任务');
+    }).finally(() => {
+      if (alive) setTaskStateLoaded(true);
     });
     return () => {
+      alive = false;
+      packageRequestRef.current += 1;
       offProgress?.();
       offDone?.();
     };
@@ -160,8 +217,10 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       showToast?.('一键问题排查需要 Electron 环境');
       return;
     }
-    if (!selectedDeviceId) {
-      showToast?.('请先连接一台在线设备');
+    if (!taskStateLoaded || running) return;
+    setEvidenceDeviceId(selectedDeviceId);
+    if (!selectedDevice) {
+      setError('当前设备不可用，请重新连接或明确选择另一台在线设备。');
       return;
     }
     setError('');
@@ -169,21 +228,23 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     setSteps(DEFAULT_STEPS);
     setPackagePickerOpen(false);
     setRunning(true);
-    const res = await window.electronAPI.troubleshootingStart({
-      deviceId: selectedDeviceId,
-      deviceLabel: selectedDevice?.model || selectedDevice?.name || selectedDeviceId,
-      issueType,
-      packageName: packageName.trim(),
-      includeInspection: hasVip && includeInspection,
-      includeAiSummary
-    });
-    if (!res.ok) {
+    setRunningDeviceId(selectedDeviceId);
+    try {
+      const res = await window.electronAPI.troubleshootingStart({
+        deviceId: selectedDeviceId,
+        deviceLabel: selectedDevice?.model || selectedDevice?.name || selectedDeviceId,
+        issueType,
+        packageName: packageName.trim(),
+        includeInspection: hasVip && includeInspection,
+        includeAiSummary
+      });
+      if (!res.ok) throw new Error(res.error || '启动失败');
+      if (res.task?.steps) setSteps(res.task.steps);
+    } catch (error) {
       setRunning(false);
-      setError(res.error || '启动失败');
-      showToast?.(`一键问题排查启动失败：${res.error || '未知错误'}`);
-      return;
+      setError(error.message);
+      showToast?.(`一键问题排查启动失败：${error.message}`);
     }
-    if (res.task?.steps) setSteps(res.task.steps);
   };
 
   const cancelTroubleshooting = async () => {
@@ -193,7 +254,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const loadPackages = async () => {
     const targetDeviceId = selectedDeviceId;
     setPackageSearch(packageName.trim());
-    if (!targetDeviceId) {
+    if (!selectedDevice) {
       setPackagePickerOpen(false);
       showToast?.('请先选择在线设备');
       return;
@@ -206,9 +267,11 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     setPackagePickerOpen(true);
     setPackageError('');
     if (packageDeviceId === targetDeviceId && packageItems.length > 0) return;
+    const requestId = ++packageRequestRef.current;
     setPackageLoading(true);
     try {
       const res = await window.electronAPI.packageList({ deviceId: targetDeviceId });
+      if (requestId !== packageRequestRef.current) return;
       if (res?.ok) {
         setPackageItems(res.packages || []);
         setPackageDeviceId(targetDeviceId);
@@ -218,11 +281,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         setPackageError(res?.error || '应用列表读取失败');
       }
     } catch (error) {
+      if (requestId !== packageRequestRef.current) return;
       setPackageItems([]);
       setPackageDeviceId('');
       setPackageError(error.message || '应用列表读取失败');
     } finally {
-      setPackageLoading(false);
+      if (requestId === packageRequestRef.current) setPackageLoading(false);
     }
   };
 
@@ -239,8 +303,8 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   };
 
   const visibleSteps = useMemo(
-    () => filterProgressSteps(steps, { includeInspection: hasVip && includeInspection, includeAiSummary }),
-    [steps, hasVip, includeInspection, includeAiSummary]
+    () => filterProgressSteps(evidenceDeviceId === selectedDeviceId ? steps : DEFAULT_STEPS, { includeInspection: hasVip && includeInspection, includeAiSummary }),
+    [steps, evidenceDeviceId, selectedDeviceId, hasVip, includeInspection, includeAiSummary]
   );
   const completedCount = visibleSteps.filter(step => ['success', 'failed', 'skipped'].includes(step.status)).length;
   const progressTotal = visibleSteps.length;
@@ -257,8 +321,8 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                 <ClipboardCheck size={22} className="text-emerald-400" />
               </div>
               <div>
-                <h3 className={`text-lg font-semibold ${text}`}>一键问题排查</h3>
-                <p className={`text-xs mt-0.5 ${muted}`}>自动汇总设备、应用、性能、日志和巡检证据</p>
+                <h3 className={`text-base font-semibold ${text}`}>采集诊断证据</h3>
+                <p className={`text-xs mt-0.5 ${muted}`}>{running ? `正在排查：${runningDeviceId}` : '选择场景后开始；不会因切换页面自动执行'}</p>
               </div>
             </div>
             <div className={`text-xs px-3 py-1.5 rounded-full border ${soft}`}>
@@ -270,18 +334,17 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         <div className="p-5 grid xl:grid-cols-[360px_1fr] gap-5">
           <div className="space-y-4">
             <div>
-              <FieldLabel label="在线设备" isDark={isDark} />
+              <FieldLabel label="目标设备" isDark={isDark} />
               <DeviceSelect
                 value={selectedDeviceId}
                 options={deviceOptions}
                 isDark={isDark}
                 disabled={running}
                 onChange={(value) => {
-                  setDeviceId(value);
-                  setPackagePickerOpen(false);
-                  setPackageError('');
+                  onActiveDeviceChange?.(value);
                 }}
               />
+              {selectedDeviceId && !selectedDevice && <p role="status" className="mt-2 text-xs text-amber-500">当前设备不可用，已保留选择。恢复连接后才能开始排查。</p>}
             </div>
 
             <div>
@@ -330,7 +393,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                   <button
                     type="button"
                     onClick={loadPackages}
-                    disabled={running || packageLoading}
+                    disabled={running || packageLoading || !selectedDevice}
                     className={`shrink-0 px-3 py-2.5 rounded-lg border text-sm flex items-center justify-center gap-1.5 disabled:opacity-60 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                   >
                     {packageLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
@@ -438,7 +501,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                 <button
                   type="button"
                   onClick={startTroubleshooting}
-                  disabled={!selectedDeviceId}
+                  disabled={!selectedDevice || !taskStateLoaded}
                   className="flex-1 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium flex items-center justify-center gap-2"
                 >
                   <Play size={16} />开始排查
@@ -467,14 +530,14 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
               ))}
             </div>
 
-            {error && (
+              {error && evidenceDeviceId === selectedDeviceId && (
               <div className="rounded-lg border border-red-500/25 bg-red-500/10 text-red-400 px-4 py-3 text-sm flex items-start gap-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            {result && (
+            {result && evidenceDeviceId === selectedDeviceId && (
               <ResultPanel result={result} isDark={isDark} text={text} muted={muted} soft={soft} onOpenPath={openPath} />
             )}
           </div>

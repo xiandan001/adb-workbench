@@ -2,6 +2,18 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.2.5': {
+    title: 'v4.2.5',
+    date: '2026-10-20',
+    items: [
+      { type: 'feature', text: '新增日志过滤预设与分析会话保存、恢复，方便继续排查同一问题' },
+      { type: 'feature', text: '产物中心新增证据包导出，集中打包报告、日志和截图' },
+      { type: 'improve', text: '任务中心支持恢复未保存草稿、查看运行详情和定位失败步骤' },
+      { type: 'improve', text: '优化设备连接状态更新与跨页面操作，应用可直接进入日志和问题排查' },
+      { type: 'improve', text: 'AI 分析支持查看关联日志依据，批量应用操作保留失败明细' },
+      { type: 'improve', text: '优化界面布局、深色主题、回归验收流程和性能图表' }
+    ]
+  },
   '4.2.1': {
     title: 'v4.2.1',
     date: '2026-09-12',

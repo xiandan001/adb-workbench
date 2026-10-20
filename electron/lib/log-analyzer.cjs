@@ -18,6 +18,8 @@ const { isDev } = ctx;
 let logcatProc = null;
 let logStore = { realtime: [], file: [] };
 let currentLogSource = 'realtime';
+let currentLogDeviceId = '';
+let navigationContext = null;
 let pkgResolverTimer = null;
 let pidPackageMap = new Map();
 // logStore 字节总量追踪：用于按字节限制内存占用（防止超大日志导致 OOM）
@@ -260,6 +262,19 @@ function createLogAnalyzerWindow() {
 // ============ IPC handlers ============
 
 function register(ipcMain) {
+  require('./log-sessions.cjs').register(ipcMain, {
+    getDirectory: () => path.join(require('electron').app.getPath('userData'), 'log-analysis-sessions'),
+    restore: (session) => {
+      const aiModule = require('./ai-analyze.cjs');
+      if (logcatProc || aiModule.hasActiveAiRequest()) throw new Error('请先停止日志抓取和 AI 分析后再恢复会话');
+      clearLogBatchState();
+      aiModule.clearAiConversation();
+      currentLogSource = session.source;
+      currentLogDeviceId = session.deviceId;
+      logStore[session.source] = session.entries;
+      logStoreBytes[session.source] = session.entries.reduce((sum, entry) => sum + entryBytes(entry), 0);
+    }
+  });
   // ADB 设备列表（Log Analyzer 专用）
   ipcMain.handle('adb:listDevices', async () => {
     return new Promise((resolve) => {
@@ -294,6 +309,7 @@ function register(ipcMain) {
       }
 
       currentLogSource = 'realtime';
+      currentLogDeviceId = args?.deviceId || '';
       clearLogBatchState();
       resetLogStoreSource('realtime');
       runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
@@ -404,6 +420,7 @@ function register(ipcMain) {
     const filePath = res.filePaths[0];
 
     currentLogSource = 'file';
+    currentLogDeviceId = '';
     const entries = [];
 
     // 文件日志加载：限制最大条数 200000，并在 stream error 时显式清理资源
@@ -447,7 +464,7 @@ function register(ipcMain) {
   ipcMain.handle('log:getState', async () => {
     const entries = logStore[currentLogSource] || [];
     const limited = entries.length > 50000 ? entries.slice(entries.length - 50000) : entries;
-    return { source: currentLogSource, entries: limited, truncated: entries.length !== limited.length };
+    return { source: currentLogSource, deviceId: currentLogDeviceId, running: !!logcatProc, entries: limited, truncated: entries.length !== limited.length };
   });
 
   // 导出日志到文件
@@ -475,10 +492,17 @@ function register(ipcMain) {
     return { total: all.length, offset, limit, entries: page };
   });
 
-  ipcMain.handle('logAnalyzer:open', async () => {
-    createLogAnalyzerWindow();
+  ipcMain.handle('logAnalyzer:open', async (_event, context) => {
+    if (context && typeof context.deviceId === 'string') {
+      navigationContext = { deviceId: context.deviceId, packageName: typeof context.packageName === 'string' ? context.packageName : '' };
+    }
+    const window = createLogAnalyzerWindow();
+    if (context && navigationContext && !window.webContents.isLoading()) {
+      window.webContents.send('logAnalyzer:context', navigationContext);
+    }
     return { ok: true };
   });
+  ipcMain.handle('logAnalyzer:getContext', async () => navigationContext);
 
   ipcMain.handle('logAnalyzer:close', async () => {
     const logAnalyzerWindow = ctx.getLogAnalyzerWindow();

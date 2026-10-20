@@ -117,7 +117,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mcpGetInfo: () => ipcRenderer.invoke('mcp:getInfo'),
   mcpStart: () => ipcRenderer.invoke('mcp:start'),
   mcpStop: () => ipcRenderer.invoke('mcp:stop'),
-  logAnalyzerOpen: () => ipcRenderer.invoke('logAnalyzer:open'),
+  logAnalyzerOpen: (context) => ipcRenderer.invoke('logAnalyzer:open', context),
+  logAnalyzerGetContext: () => ipcRenderer.invoke('logAnalyzer:getContext'),
+  logSessionSave: (payload) => ipcRenderer.invoke('logSession:save', payload),
+  logSessionList: () => ipcRenderer.invoke('logSession:list'),
+  logSessionLoad: (args) => ipcRenderer.invoke('logSession:load', args),
+  onLogAnalyzerContext: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('logAnalyzer:context', listener);
+    return () => ipcRenderer.off('logAnalyzer:context', listener);
+  },
   logAnalyzerClose: () => ipcRenderer.invoke('logAnalyzer:close'),
   logAnalyzerIsAlive: () => ipcRenderer.invoke('logAnalyzer:isAlive'),
   // 推送远程路径历史记录
@@ -303,6 +312,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   artifactsList: () => ipcRenderer.invoke('artifacts:list'),
   artifactOpenPath: (targetPath) => ipcRenderer.invoke('artifacts:openPath', targetPath),
   artifactsDelete: (args) => ipcRenderer.invoke('artifacts:delete', args),
+  artifactExport: (id) => ipcRenderer.invoke('artifacts:export', { id }),
   // Quality center: regression baselines and difference reports
   regressionListBaselines: () => ipcRenderer.invoke('regression:listBaselines'),
   regressionCaptureBaseline: (args) => ipcRenderer.invoke('regression:captureBaseline', args),

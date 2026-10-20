@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isDarkTheme } from '../shared/theme';
+import { getMatchingBaseline, getAcceptanceErrors, qualityErrorMessage, getTaskStatusLabel } from '../shared/taskCenterWorkspace';
+import TaskCenterResultDrawer from './TaskCenterResultDrawer';
 import {
   AlertCircle,
   CheckCircle2,
@@ -17,8 +20,8 @@ import {
   Trash2
 } from 'lucide-react';
 
-function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast }) {
-  const isDark = theme.primary === 'tech';
+function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange }) {
+  const isDark = isDarkTheme(theme);
   const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
   const [deviceId, setDeviceId] = useState('');
   const [baselines, setBaselines] = useState([]);
@@ -42,6 +45,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const [guardIntervalMs, setGuardIntervalMs] = useState(15000);
   const [guardState, setGuardState] = useState({ activeGuards: [], history: [] });
   const [lastStoppedGuard, setLastStoppedGuard] = useState(null);
+  const [qualityTab, setQualityTab] = useState('regression');
+  const [showTaskDetails, setShowTaskDetails] = useState(false);
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -71,18 +76,13 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     });
   }, []);
 
-  const selectedDeviceId = onlineDevices.some(device => device.id === deviceId) ? deviceId : onlineDevices[0]?.id || '';
-  const effectiveBaselinePath = selectedBaselinePath && baselines.some(item => item.path === selectedBaselinePath)
-    ? selectedBaselinePath
-    : baselines[0]?.path || '';
+  const selectedDeviceId = activeDeviceId || deviceId || onlineDevices[0]?.id || '';
   const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
-  const selectedBaseline = baselines.find(item => item.path === effectiveBaselinePath);
+  const selectedBaseline = getMatchingBaseline(baselines, selectedDeviceId, selectedBaselinePath);
+  const effectiveBaselinePath = selectedBaseline?.path || '';
   const activeGuard = guardState.activeGuards.find(item => item.deviceId === selectedDeviceId);
-  const matchingBaselines = useMemo(() => {
-    if (!selectedDeviceId) return baselines;
-    const exact = baselines.filter(item => item.deviceId === selectedDeviceId);
-    return exact.length > 0 ? exact : baselines;
-  }, [baselines, selectedDeviceId]);
+  const matchingBaselines = useMemo(() => baselines.filter(item => item.deviceId === selectedDeviceId), [baselines, selectedDeviceId]);
+  const acceptanceErrors = getAcceptanceErrors({ suiteId, apkPath, packageName, baselineImagePath, rounds, launchWaitMs, threshold });
 
   async function loadBaselines() {
     setLoading(true);
@@ -126,7 +126,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   }, []);
 
   async function captureBaseline() {
-    if (!selectedDeviceId) {
+    if (!selectedDevice) {
       showToast?.('请先选择在线设备');
       return;
     }
@@ -149,7 +149,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   }
 
   async function runRegression() {
-    if (!selectedDeviceId) {
+    if (!selectedDevice) {
       showToast?.('请先选择在线设备');
       return;
     }
@@ -210,8 +210,12 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   }
 
   async function runAcceptance() {
-    if (!selectedDeviceId) {
+    if (!selectedDevice) {
       showToast?.('请先选择在线设备');
+      return;
+    }
+    if (Object.keys(acceptanceErrors).length) {
+      setError(Object.values(acceptanceErrors).join('；'));
       return;
     }
     setBusy('acceptance');
@@ -230,13 +234,13 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       setLastAcceptanceTask(res.task);
       showToast?.('验收套餐已提交到任务中心');
     } else {
-      setError(res?.error || '验收套餐启动失败');
+      setError(qualityErrorMessage(res?.error || '验收套餐启动失败'));
     }
     setBusy('');
   }
 
   async function startGuard() {
-    if (!selectedDeviceId) {
+    if (!selectedDevice) {
       showToast?.('请先选择在线设备');
       return;
     }
@@ -296,14 +300,22 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
         </div>
 
         <div className="p-5 space-y-5">
+          <nav className="flex flex-wrap gap-2" aria-label="质量中心功能">
+            {[['regression', '回归对比'], ['acceptance', '一键验收'], ['guard', '设备守护']].map(([id, label]) => (
+              <button key={id} type="button" aria-pressed={qualityTab === id} onClick={() => setQualityTab(id)} className={`rounded-lg border px-4 py-2 text-sm ${qualityTab === id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : isDark ? 'border-[#3E4145] text-[#BDC1C6]' : 'border-slate-200 text-slate-600'}`}>{label}</button>
+            ))}
+          </nav>
+          {selectedDeviceId && !selectedDevice && (
+            <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-600">目标设备 {selectedDeviceId} 已离线或未授权；请重新连接或主动选择另一台设备。</div>
+          )}
           {error && (
             <div className="rounded-lg border border-red-500/25 bg-red-500/10 text-red-400 px-4 py-3 text-sm flex items-start gap-2">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />
-              <span>{error}</span>
+              <span>{qualityErrorMessage(error)}</span>
             </div>
           )}
 
-          <div className="grid xl:grid-cols-[280px_1fr] gap-4">
+          <div className={`grid gap-4 ${qualityTab === 'regression' ? 'xl:grid-cols-[280px_1fr]' : ''}`}>
             <div className={`rounded-lg border p-4 ${soft}`}>
               <div className={`text-sm font-semibold mb-3 ${text}`}>目标设备</div>
               {onlineDevices.length === 0 ? (
@@ -313,7 +325,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                   {onlineDevices.map(device => (
                     <button
                       key={device.id}
-                      onClick={() => setDeviceId(device.id)}
+                      onClick={() => { setDeviceId(device.id); onActiveDeviceChange?.(device.id); }}
                       className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
                         selectedDeviceId === device.id
                           ? 'border-emerald-500 bg-emerald-500/10'
@@ -328,7 +340,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               )}
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-4">
+            {qualityTab === 'regression' && <div className="grid lg:grid-cols-2 gap-4">
               <div className={`rounded-lg border p-4 ${soft}`}>
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div className={`text-sm font-semibold flex items-center gap-2 ${text}`}>
@@ -345,7 +357,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                 />
                 <button
                   onClick={captureBaseline}
-                  disabled={!selectedDeviceId || busy === 'capture'}
+                  disabled={!selectedDevice || Boolean(busy)}
                   className={`mt-3 w-full px-4 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60 ${primary}`}
                 >
                   {busy === 'capture' ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
@@ -366,16 +378,17 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                 />
                 <button
                   onClick={runRegression}
-                  disabled={!selectedDeviceId || !effectiveBaselinePath || busy === 'run'}
+                  disabled={!selectedDevice || !effectiveBaselinePath || Boolean(busy)}
                   className={`mt-3 w-full px-4 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60 ${primary}`}
                 >
                   {busy === 'run' ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
                   对比并生成报告
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
 
+          {qualityTab === 'regression' && <>
           <div className={`rounded-lg border ${soft} overflow-hidden`}>
             <div className={`px-4 py-3 border-b flex items-center justify-between gap-3 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div>
@@ -392,7 +405,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               </div>
             ) : matchingBaselines.length === 0 ? (
               <div className="py-10">
-                <EmptyState icon={Database} text="暂无可用基线" muted={muted} />
+                <EmptyState icon={Database} text="当前设备暂无基线，请先采集；不会自动使用其他设备的基线" muted={muted} />
               </div>
             ) : (
               <div className="divide-y divide-slate-200/10">
@@ -437,7 +450,9 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               </div>
             </div>
           )}
+          </>}
 
+          {qualityTab === 'acceptance' && (
           <div className={`rounded-lg border ${soft} overflow-hidden`}>
             <div className={`px-4 py-3 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div className={`text-sm font-semibold flex items-center gap-2 ${text}`}>
@@ -475,6 +490,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                       placeholder="com.example.app"
                       className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
                     />
+                    <FieldError message={acceptanceErrors.packageName} />
                   </label>
                 )}
 
@@ -493,6 +509,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                         选择
                       </button>
                     </div>
+                    <FieldError message={acceptanceErrors.apkPath} />
                   </label>
                 )}
 
@@ -511,6 +528,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                         选择
                       </button>
                     </div>
+                    <FieldError message={acceptanceErrors.baselineImagePath} />
                   </label>
                 )}
 
@@ -526,6 +544,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                       onChange={(event) => setLaunchWaitMs(Number(event.target.value))}
                       className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
                     />
+                    <FieldError message={acceptanceErrors.launchWaitMs} />
                   </label>
                 )}
 
@@ -540,6 +559,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                       onChange={(event) => setRounds(Number(event.target.value))}
                       className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
                     />
+                    <FieldError message={acceptanceErrors.rounds} />
                   </label>
                 )}
 
@@ -554,17 +574,21 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                       onChange={(event) => setThreshold(Number(event.target.value))}
                       className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
                     />
+                    <FieldError message={acceptanceErrors.threshold} />
                   </label>
                 )}
               </div>
 
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div className={`text-xs ${muted}`}>
-                  {lastAcceptanceTask ? `最近任务：${lastAcceptanceTask.scriptName || lastAcceptanceTask.id} · ${lastAcceptanceTask.status}` : '验收结果会进入任务中心和产物中心'}
+                  {lastAcceptanceTask ? (
+                    <button type="button" onClick={() => setShowTaskDetails(true)} className="text-left text-emerald-500 hover:underline">最近任务：{lastAcceptanceTask.scriptName || lastAcceptanceTask.id} · {getTaskStatusLabel(lastAcceptanceTask.status)} · 查看详情</button>
+                  ) : '验收结果会进入任务中心和产物中心'}
+                  {Object.keys(acceptanceErrors).length > 0 && <p className="mt-2 text-amber-600">请先补齐上方标出的参数</p>}
                 </div>
                 <button
                   onClick={runAcceptance}
-                  disabled={!selectedDeviceId || busy === 'acceptance'}
+                  disabled={!selectedDevice || Boolean(busy) || Object.keys(acceptanceErrors).length > 0}
                   className={`px-4 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60 ${primary}`}
                 >
                   {busy === 'acceptance' ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
@@ -573,7 +597,9 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               </div>
             </div>
           </div>
+          )}
 
+          {qualityTab === 'guard' && (
           <div className={`rounded-lg border ${soft} overflow-hidden`}>
             <div className={`px-4 py-3 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div className={`text-sm font-semibold flex items-center gap-2 ${text}`}>
@@ -610,7 +636,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                   ) : (
                     <button
                       onClick={startGuard}
-                      disabled={!selectedDeviceId || busy === 'guard'}
+                      disabled={!selectedDevice || Boolean(busy)}
                       className={`px-4 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60 ${primary}`}
                     >
                       {busy === 'guard' ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
@@ -664,10 +690,27 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               )}
             </div>
           </div>
+          )}
         </div>
       </section>
+      {showTaskDetails && lastAcceptanceTask && (
+        <TaskCenterResultDrawer
+          task={lastAcceptanceTask}
+          theme={theme}
+          onClose={() => setShowTaskDetails(false)}
+          onOpenPath={openPath}
+          onCancel={async (taskId) => {
+            const res = await window.electronAPI?.taskCancel?.({ taskId });
+            if (!res?.ok) showToast?.(`取消失败：${res?.error || '未知错误'}`);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function FieldError({ message }) {
+  return message ? <span className="block text-xs text-amber-600">{message}</span> : null;
 }
 
 function BaselineRow({ item, selected, isDark, text, muted, busy, onSelect, onDelete }) {

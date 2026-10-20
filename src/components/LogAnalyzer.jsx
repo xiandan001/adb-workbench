@@ -2,6 +2,11 @@
 import { useCallback, useEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
 import { FolderOpen, Play, Square, Trash2, Download, Copy, RefreshCw, Terminal, Filter, BarChart3, HelpCircle, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, AlertTriangle, Zap, ShieldCheck, Search, Brain, CheckCircle, Layers, ChevronDown, Smartphone, Lock } from 'lucide-react';
 import { filterEntries, countByLevel } from '../shared/filter';
+import { isDarkTheme } from '../shared/theme';
+import { captureLogEvidence, fingerprintLogLines, normalizeLogBuffers, normalizeLogFilter } from '../shared/logWorkspace';
+import LogFilterPresets from './LogFilterPresets';
+import LogSessionManager from './LogSessionManager';
+import LogEvidence from './LogEvidence';
 // 日志诊断规则库面板
 import DiagnosticRuleLibrary from './DiagnosticRuleLibrary';
 
@@ -54,6 +59,7 @@ function levelColorDot(v) {
 }
 
 function fmtTs(ts) {
+  if (!Number.isFinite(ts)) return '--';
   const d = new Date(ts);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
@@ -85,7 +91,14 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const runningRef = useRef(false);
   const [source, setSource] = useState('realtime');
   const [entries, setEntries] = useState([]);
+  const loadedEntryCountRef = useRef(0);
   const [truncated, setTruncated] = useState(false);
+  const [sourceLabel, setSourceLabel] = useState('');
+  const [captureDeviceId, setCaptureDeviceId] = useState('');
+  const [evidence, setEvidence] = useState([]);
+  const evidenceByRef = useMemo(() => new Map(evidence.map(entry => [entry.ref, entry])), [evidence]);
+  const [aiHistoryReadOnly, setAiHistoryReadOnly] = useState(false);
+  const [restoredSessionName, setRestoredSessionName] = useState('');
   const [filter, setFilter] = useState(emptyFilter);
   const [note, setNote] = useState(undefined);
   const [noteType, setNoteType] = useState('info');
@@ -96,10 +109,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   // AI 分析状态
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [aiContent, setAiContent] = useState('');
+  const aiAnalyzingRef = useRef(false);
   const [aiError, setAiError] = useState('');
-  const [aiReasoning, setAiReasoning] = useState(''); // 当前轮思考内容（用于流式追加）
-  const [aiReasoningExpanded, setAiReasoningExpanded] = useState(true); // 当前轮思考面板展开/折叠
   const [aiTurns, setAiTurns] = useState([]); // 对话轮次数组: [{ header, reasoning, content, reasoningExpanded }]
   const [aiThinkingMode, setAiThinkingMode] = useState(false); // 思考模式开关（默认快速模式）
   const [mapReduceProgress, setMapReduceProgress] = useState(null); // { phase, current, total, lineRange }
@@ -111,6 +122,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const aiContentRef = useRef('');
   const aiReasoningRef = useRef('');
   const aiTurnsRef = useRef([]); // 对话轮次 ref
+  const aiStreamEpochRef = useRef(0);
+  const aiHistoryReadOnlyRef = useRef(false);
   const aiResizingRef = useRef(false);
   // 记录上次发送给 AI 的日志指纹（用于判断追问时日志是否变化）
   const aiLastLogHashRef = useRef('');
@@ -176,6 +189,64 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [levelDropdownOpen, setLevelDropdownOpen] = useState(false);
   const levelDropdownRef = useRef(null);
 
+  const applyFilterPreset = (preset) => {
+    clearTimeout(filterDebounceRef.current);
+    setFilter(normalizeLogFilter(preset.filter));
+    setFilterTextInput(preset.filter?.text || '');
+    setBuffers(normalizeLogBuffers(preset.buffers));
+  };
+
+  useEffect(() => {
+    const applyContext = (context) => {
+      if (!context?.deviceId) return;
+      if (runningRef.current || aiAnalyzingRef.current) {
+        setNote('日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后再从应用详情打开日志');
+        return;
+      }
+      clearTimeout(filterDebounceRef.current);
+      setDeviceId(context.deviceId);
+      setFilter(context.packageName ? { pkg: context.packageName } : {});
+      setFilterTextInput('');
+      setNote(`已选择 ${context.deviceId}${context.packageName ? ` / ${context.packageName}` : ''}，未自动抓取；现有日志保持不变`);
+    };
+    const unsubscribe = window.electronAPI?.onLogAnalyzerContext?.(applyContext);
+    window.electronAPI?.logAnalyzerGetContext?.().then(applyContext).catch(() => {});
+    return () => unsubscribe?.();
+  }, []);
+
+  const restoreSession = (session) => {
+    aiStreamEpochRef.current += 1;
+    aiHistoryReadOnlyRef.current = true;
+    searchSessionRef.current += 1;
+    setSmartSearchResult(null);
+    setSmartSearchMatchedIds(new Set());
+    setSmartSearchIncremental([]);
+    setSource(session.source);
+    setSourceLabel(session.sourceLabel);
+    setCaptureDeviceId(session.deviceId);
+    setDeviceId(session.deviceId);
+    setEntries(session.entries);
+    loadedEntryCountRef.current = session.entries.length;
+    setTruncated(session.truncated);
+    applyFilterPreset(session);
+    setEvidence(session.evidence);
+    aiTurnsRef.current = session.aiTurns;
+    setAiTurns(session.aiTurns);
+    aiContentRef.current = '';
+    aiReasoningRef.current = '';
+    aiLastLogHashRef.current = '';
+    setAiCustomPrompt('');
+    setAiError('');
+    setContextUsage(null);
+    setAutoDiagnoseAlert(null);
+    lastAutoDiagnoseAlertRef.current = null;
+    setRunning(false);
+    setAiHistoryReadOnly(true);
+    setRestoredSessionName(session.name);
+    setAiPanelOpen(session.aiTurns.length > 0);
+    setNote(`已恢复“${session.name}”，没有启动采集或 AI 请求`);
+  };
+
   // 日志列表列宽可拖拽调整（每列有 min/max 限制）
   // 列顺序：时间 | 级别 | 包名 | Tag | 消息
   const [colWidths, setColWidths] = useState({
@@ -203,6 +274,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   useEffect(() => {
     runningRef.current = running;
   }, [running]);
+
+  useEffect(() => {
+    aiAnalyzingRef.current = aiAnalyzing;
+  }, [aiAnalyzing]);
 
   // 下拉菜单外部点击关闭（buffers 下拉 + device 下拉 + level 下拉）
   useEffect(() => {
@@ -355,7 +430,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         try {
           const s = await window.electronAPI.logGetState();
           setSource(s.source);
+          setCaptureDeviceId(s.deviceId || '');
+          setRunning(s.running === true);
+          runningRef.current = s.running === true;
+          if (s.running && s.deviceId) setDeviceId(s.deviceId);
           setEntries(s.entries || []);
+          loadedEntryCountRef.current = s.entries?.length || 0;
           setTruncated(s.truncated);
           setupLogListeners();
         } catch (e) {
@@ -386,6 +466,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         const offReset = window.electronAPI.onLogReset((payload) => {
           setSource(payload.source);
           setEntries(payload.entries || []);
+          loadedEntryCountRef.current = payload.entries?.length || 0;
           setTruncated(!!payload.truncated);
           setNote(undefined);
           // 日志重置（开始抓取/清空/加载文件）时重置自动滚动标志，
@@ -396,6 +477,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       }
       if (window.electronAPI && window.electronAPI.onLogAppendBatch) {
         const offAppend = window.electronAPI.onLogAppendBatch((batch) => {
+          if (loadedEntryCountRef.current + batch.length > 50000) setTruncated(true);
+          loadedEntryCountRef.current = Math.min(50000, loadedEntryCountRef.current + batch.length);
           setEntries((prev) => {
             const next = prev.length + batch.length > 50000
               ? prev.slice(Math.max(0, prev.length + batch.length - 50000)).concat(batch)
@@ -413,12 +496,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       const listeners = [];
       if (window.electronAPI && window.electronAPI.onAiStreamStart) {
         const offStart = window.electronAPI.onAiStreamStart(() => {
+          if (aiHistoryReadOnlyRef.current) return;
           setAiAnalyzing(true);
           setAiError('');
           // 重置思考内容（新一轮分析）
           aiReasoningRef.current = '';
-          setAiReasoning('');
-          setAiReasoningExpanded(true);
         });
         listeners.push(offStart);
       }
@@ -427,6 +509,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         let aiFlushTimer = null;
         let aiRafPending = false;
         const offChunk = window.electronAPI.onAiStreamChunk((payload) => {
+          if (aiHistoryReadOnlyRef.current) return;
+          const streamEpoch = aiStreamEpochRef.current;
           // 收到首个 chunk 说明压缩/分块已完成，清除进度状态
           setMapReduceProgress(null);
           if (payload.type === 'reasoning') {
@@ -441,6 +525,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 aiRafPending = true;
                 requestAnimationFrame(() => {
                   aiRafPending = false;
+                  if (streamEpoch !== aiStreamEpochRef.current) return;
                   // 更新当前轮的 reasoning/content
                   const turns = [...aiTurnsRef.current];
                   const last = turns[turns.length - 1];
@@ -450,8 +535,6 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   }
                   aiTurnsRef.current = turns;
                   setAiTurns(turns);
-                  setAiContent(aiContentRef.current);
-                  setAiReasoning(aiReasoningRef.current);
                 });
               }
             }, 60);
@@ -464,6 +547,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       }
       if (window.electronAPI && window.electronAPI.onAiStreamEnd) {
         const offEnd = window.electronAPI.onAiStreamEnd(() => {
+          if (aiHistoryReadOnlyRef.current) return;
           // 流结束时 flush 最终内容到当前轮
           const turns = [...aiTurnsRef.current];
           const last = turns[turns.length - 1];
@@ -475,11 +559,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           }
           aiTurnsRef.current = turns;
           setAiTurns(turns);
-          setAiContent(aiContentRef.current);
-          setAiReasoning(aiReasoningRef.current);
           setAiAnalyzing(false);
           setMapReduceProgress(null);
-          if (aiReasoningRef.current) setAiReasoningExpanded(false);
           refreshContextUsage();
         });
         listeners.push(offEnd);
@@ -683,13 +764,18 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, []);
 
   async function onStart() {
+    const targetDeviceId = deviceId || (devices.length === 1 ? devices[0].id : '');
+    if (!targetDeviceId || !devices.some(item => item.id === targetDeviceId)) {
+      setNote('请明确选择一台在线设备；所选设备离线时不会自动切换到其他设备');
+      return;
+    }
     // M13: 加载状态
     setLoading(true);
     setNote('启动中…');
     if (window.electronAPI && window.electronAPI.adbStartLog) {
       try {
         // 传递用户选择的缓冲区（默认 ['main']）
-        const startArgs = { deviceId: deviceId || undefined };
+        const startArgs = { deviceId: targetDeviceId };
         if (buffers && buffers.length > 0) {
           startArgs.buffers = buffers;
         }
@@ -697,6 +783,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         if (res.ok) {
           setRunning(true);
           setSource('realtime');
+          setCaptureDeviceId(targetDeviceId);
+          setSourceLabel(`设备 ${targetDeviceId}`);
+          setRestoredSessionName('');
           setNote(undefined);
           // 开始抓取时重置自动滚动，确保新日志自动跟随到底部
           autoScrollRef.current = true;
@@ -756,6 +845,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         const res = await window.electronAPI.logOpenFile();
         if (res && res.ok) {
           setSource('file');
+          setCaptureDeviceId('');
+          setSourceLabel(res.filePath || '');
+          setRestoredSessionName('');
           setNote(`已加载：${res.shown?.toLocaleString?.() ?? ''}/${res.total?.toLocaleString?.() ?? ''}`);
           // 文件加载完成：切换到"监控中"（主进程会扫描文件，扫描完成后通过
           // scan-complete 事件自动切换到"扫描完成（无异常）"或"检测到问题"）
@@ -783,6 +875,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       await window.electronAPI.logClear({ source });
     }
     setEntries([]);
+    loadedEntryCountRef.current = 0;
+    setTruncated(false);
     // UX1: 操作反馈，3 秒后自动清除
     setNote('已清空日志');
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
@@ -860,7 +954,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }
 
   // AI 日志分析
-  async function onAiAnalyze() {
+  async function onAiAnalyze(promptOverride) {
+    if (!isVip) { showVipBlock('AI 深度分析'); return; }
+    if (aiHistoryReadOnly) {
+      setAiPanelOpen(true);
+      setNote('恢复的 AI 对话为只读；请先选择“开始新的分析”');
+      return;
+    }
     if (filtered.length === 0) {
       setNoteType('error');
       setNote('请先抓取或加载日志，再使用 AI 分析');
@@ -875,32 +975,40 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       setAiAnalyzing(false);
     }
 
+    let captured;
+    try {
+      captured = captureLogEvidence(filtered, evidence, captureDeviceId);
+    } catch (error) {
+      setNoteType('error');
+      setNote(error.message);
+      return;
+    }
+    setEvidence(captured.evidence);
+    const customPrompt = typeof promptOverride === 'string' ? promptOverride : aiCustomPrompt.trim();
+    const lines = filtered.map(entry => `[${captured.references.get(entry.id)}] ${entry.raw}`);
+    const evidenceRefs = [...new Set([...aiTurnsRef.current.flatMap(turn => turn.evidenceRefs || []), ...captured.references.values()])];
     setAiPanelOpen(true);
     setAiAnalyzing(true);
     setAiError('');
     setMapReduceProgress(null);
 
     // 创建本轮对话 turn
-    const turnHeader = `[${new Date().toLocaleTimeString('zh-CN')}] ${aiCustomPrompt.trim() ? '追问' : '分析'}${aiCustomPrompt.trim() ? `：${aiCustomPrompt.trim()}` : ''}`;
+    const turnHeader = `[${new Date().toLocaleTimeString('zh-CN')}] ${customPrompt ? '追问' : '分析'}${customPrompt ? `：${customPrompt}` : ''}`;
     const currentTurn = {
       header: turnHeader,
       reasoning: '',
       content: '',
-      reasoningExpanded: true
+      reasoningExpanded: true,
+      evidenceRefs
     };
     aiTurnsRef.current = [...aiTurnsRef.current, currentTurn];
     aiContentRef.current = ''; // 当前轮 content
     aiReasoningRef.current = ''; // 当前轮 reasoning
     setAiTurns([...aiTurnsRef.current]);
-    setAiContent('');
-    setAiReasoning('');
-    setAiReasoningExpanded(true);
 
-    const lines = filtered.map((e) => formatEntry(e));
     const filterContext = { ...deferredFilter };
 
-    // 计算日志指纹：用行数 + 前 100 行 + 后 100 行的 hash 判断日志是否变化
-    const logFingerprint = `${lines.length}:${lines.slice(0, 100).join('').length}:${lines.slice(-100).join('').length}`;
+    const logFingerprint = fingerprintLogLines(lines);
     const logChanged = aiLastLogHashRef.current !== logFingerprint;
     aiLastLogHashRef.current = logFingerprint;
 
@@ -908,7 +1016,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       const res = await window.electronAPI.aiAnalyzeLog({
         lines,
         filterContext,
-        customPrompt: aiCustomPrompt.trim() || undefined,
+        customPrompt: customPrompt || undefined,
         logChanged,
         thinkingMode: aiThinkingMode
       });
@@ -931,11 +1039,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }
 
   async function onAiClear() {
+    aiStreamEpochRef.current += 1;
+    aiHistoryReadOnlyRef.current = false;
+    setAiHistoryReadOnly(false);
+    setEvidence([]);
     aiContentRef.current = '';
     aiReasoningRef.current = '';
     aiTurnsRef.current = [];
-    setAiContent('');
-    setAiReasoning('');
     setAiTurns([]);
     setAiError('');
     aiLastLogHashRef.current = '';
@@ -951,7 +1061,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       try {
         const res = await window.electronAPI.aiGetContextUsage();
         if (res?.ok) setContextUsage(res);
-      } catch {}
+      } catch { /* Context counters are optional; do not interrupt analysis. */ }
     }
   }
 
@@ -976,40 +1086,38 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   // AI 自动诊断处理
   async function onAutoDiagnoseConfirm() {
     if (!autoDiagnoseAlert) return;
-    // 打开 AI 面板准备接收流式输出
-    setAiPanelOpen(true);
-    setAiAnalyzing(true);
-    setAiError('');
-
-    // 多轮对话分隔
-    if (aiContentRef.current) {
-      const codeBlockCount = (aiContentRef.current.match(/```/g) || []).length;
-      if (codeBlockCount % 2 !== 0) {
-        aiContentRef.current += '\n```\n';
-      }
+    if (!isVip) { showVipBlock('AI 深度分析'); return; }
+    if (aiHistoryReadOnly) {
+      setAiPanelOpen(true);
+      setNote('恢复的 AI 对话为只读；请先选择“开始新的分析”');
+      return;
     }
-    const turnHeader = `\n\n---\n\n**[${new Date().toLocaleTimeString('zh-CN')}] 自动诊断**：检测到 ${autoDiagnoseAlert.summary.total} 个问题\n\n`;
-    if (aiContentRef.current) {
-      aiContentRef.current += turnHeader;
-    } else {
-      aiContentRef.current = turnHeader.startsWith('\n\n') ? turnHeader.slice(2) : turnHeader;
-    }
-    setAiContent(aiContentRef.current);
-
     try {
-      const res = await window.electronAPI.autoDiagnoseAnalyze({
-        issues: autoDiagnoseAlert.issues,
-        summary: autoDiagnoseAlert.summary
-      });
-      if (!res.ok) {
-        setAiError(res.error || '自动诊断分析失败');
-        setAiAnalyzing(false);
-      }
-    } catch (e) {
-      setAiError(e.message);
+      if (aiAnalyzing) await onAiStop();
+      const snippets = autoDiagnoseAlert.issues.flatMap((issue, issueIndex) => String(issue.context || '').split('\n').map((raw, lineIndex) => ({
+        id: `diagnostic:${autoDiagnoseAlert.timestamp}:${issueIndex}:${lineIndex}`, raw, source: 'diagnostic-snapshot'
+      })));
+      const captured = captureLogEvidence(snippets, evidence, captureDeviceId);
+      const issues = autoDiagnoseAlert.issues.map((issue, issueIndex) => ({
+        ...issue,
+        context: String(issue.context || '').split('\n').map((raw, lineIndex) => `[${captured.references.get(`diagnostic:${autoDiagnoseAlert.timestamp}:${issueIndex}:${lineIndex}`)}] ${raw}`).join('\n')
+      }));
+      const evidenceRefs = [...new Set([...aiTurnsRef.current.flatMap(turn => turn.evidenceRefs || []), ...captured.references.values()])];
+      setEvidence(captured.evidence);
+      aiContentRef.current = '';
+      aiReasoningRef.current = '';
+      aiLastLogHashRef.current = '';
+      aiTurnsRef.current = [...aiTurnsRef.current, { header: `[${new Date().toLocaleTimeString('zh-CN')}] 规则诊断：${issues.length} 个问题`, reasoning: '', content: '', reasoningExpanded: true, evidenceRefs }];
+      setAiTurns([...aiTurnsRef.current]);
+      setAiPanelOpen(true);
+      setAiAnalyzing(true);
+      setAiError('');
+      const result = await window.electronAPI.autoDiagnoseAnalyze({ issues, summary: autoDiagnoseAlert.summary });
+      if (!result.ok) throw new Error(result.error || '自动诊断分析失败');
+    } catch (error) {
+      setAiError(error.message);
       setAiAnalyzing(false);
     }
-    // 分析启动后，保持弹窗显示（不关闭，不重置），用户可继续查看问题或点击忽略
   }
 
   function onAutoDiagnoseDismiss() {
@@ -1155,7 +1263,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setAiFullscreen(!aiFullscreen);
   }
 
-  const isDark = t.primary === 'tech' || t.primary === 'cyan' || t.primary === 'blue';
+  const isDark = isDarkTheme(t);
 
   return (
     <div className={`flex flex-col h-full ${isDark ? 'bg-[#202124]' : 'bg-slate-50'}`}>
@@ -1206,7 +1314,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               >
                 <Smartphone size={14} />
                 <span className="max-w-[140px] truncate">
-                  {deviceId ? (devices.find((d) => d.id === deviceId)?.label || '默认设备') : '默认设备'}
+                  {deviceId ? (devices.find((d) => d.id === deviceId)?.label || `${deviceId}（离线）`) : '选择设备'}
                 </span>
                 <ChevronDown size={12} className={deviceDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </button>
@@ -1302,7 +1410,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <button
               onClick={onStart}
               // M13: 加载中禁用
-              disabled={(devices.length === 0 && !running) || loading}
+              disabled={(devices.length === 0 && !running) || (deviceId && !devices.some(item => item.id === deviceId)) || loading}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all disabled:opacity-50 active:scale-95 shadow-sm ${t.button.primary}`}
             >
               <Play size={14} />
@@ -1358,6 +1466,18 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <Trash2 size={14} />
           </button>
 
+          <LogSessionManager
+            isDark={isDark}
+            disabled={running || aiAnalyzing || smartSearching || loading}
+            entryCount={entries.length}
+            truncated={truncated}
+            getSnapshot={() => ({
+              entries, source, sourceLabel, deviceId: captureDeviceId, filter: { ...filter, text: filterTextInput || undefined },
+              buffers, aiTurns: aiTurnsRef.current, evidence, truncated
+            })}
+            onRestore={restoreSession}
+            onMessage={setNote}
+          />
           <div className="flex-1" />
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
@@ -1536,6 +1656,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       </div>
 
       {/* Main Content */}
+      {restoredSessionName && <div className={`border-b px-4 py-2 text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border-[#3E4145]' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+        已恢复：{restoredSessionName} · {entries.length.toLocaleString()} 条原始日志 · {sourceLabel || '已保存来源'} · {aiHistoryReadOnly ? '历史 AI 对话只读，未自动采集或请求 AI' : '当前可手动开始新分析'}
+      </div>}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Filter & Stats */}
         <div className={`w-80 flex flex-col gap-4 p-4 overflow-y-auto border-r ${isDark ? 'bg-[#202124]/50 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
@@ -1562,6 +1685,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               </button>
             </div>
 
+            <LogFilterPresets filter={{ ...filter, text: filterTextInput || undefined }} buffers={buffers} onApply={applyFilterPreset} isDark={isDark} />
             <div className="space-y-3">
               <div>
                 <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>关键字</label>
@@ -2031,6 +2155,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     </button>
                     <button
                       onClick={onAiClear}
+                      disabled={aiAnalyzing}
                       className={`text-xs px-2 py-1 rounded transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-[#E8EAED] hover:bg-[#3E4145]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
                     >
                       清空
@@ -2103,6 +2228,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                         {turn.content ? (
                           <div className={`text-sm leading-relaxed ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                             <AiMarkdownRender content={turn.content} isDark={isDark} />
+                            <LogEvidence content={turn.content} allowedRefs={turn.evidenceRefs} evidence={evidenceByRef} isDark={isDark} />
                             {showThinking && (
                               <span className="inline-block w-2 h-4 ml-0.5 bg-purple-400 animate-pulse align-middle" />
                             )}
@@ -2133,6 +2259,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             </div>
 
             {/* AI Input Bar */}
+            {aiHistoryReadOnly && <div className={`border-t px-4 py-3 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+              历史对话仅供查阅，不会作为新请求的上下文。开始新分析会清空当前对话视图，不影响已保存会话。
+              <button type="button" onClick={onAiClear} className="ml-3 rounded border border-current px-2 py-1">开始新的分析</button>
+            </div>}
             <div className={`flex items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
               {/* 快速/思考模式切换 */}
               <button
@@ -2151,6 +2281,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               <input
                 type="text"
                 value={aiCustomPrompt}
+                disabled={aiHistoryReadOnly}
                 onChange={(e) => setAiCustomPrompt(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !aiAnalyzing && filtered.length > 0) {
@@ -2172,7 +2303,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               ) : (
                 <button
                   onClick={() => { onAiAnalyze(); setAiCustomPrompt(''); }}
-                  disabled={filtered.length === 0}
+                  disabled={filtered.length === 0 || aiHistoryReadOnly}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
                 >
                   <Send size={14} />

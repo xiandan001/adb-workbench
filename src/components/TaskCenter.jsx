@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
+import { isDarkTheme } from '../shared/theme';
+import { draftFingerprint, readTaskDraft, writeTaskDraft, resolveScriptAfterSave } from '../shared/taskCenterWorkspace';
 import {
   advanceOnboardingStage,
   createSingleReplayScript,
@@ -14,6 +16,8 @@ import {
 import TaskCenterOnboarding from './TaskCenterOnboarding';
 import TaskCenterQuickStart from './TaskCenterQuickStart';
 import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
+import TaskCenterResultDrawer from './TaskCenterResultDrawer';
+import TaskCenterDraftDialog from './TaskCenterDraftDialog';
 import {
   AlertCircle,
   ArrowLeft,
@@ -125,13 +129,20 @@ const QUICK_TEMPLATES = [
   }
 ];
 
-function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices }) {
+function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange }) {
   const t = theme;
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
   const [scripts, setScripts] = useState([]);
   const [selectedScriptId, setSelectedScriptId] = useState('');
   const [draft, setDraft] = useState(createEmptyScript());
+  const [savedFingerprint, setSavedFingerprint] = useState('');
+  const [draftStorageError, setDraftStorageError] = useState('');
+  const [draftStorageBlocked, setDraftStorageBlocked] = useState(false);
+  const [draftRecovered, setDraftRecovered] = useState(false);
+  const [pendingDraftAction, setPendingDraftAction] = useState(null);
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+  const [starting, setStarting] = useState(false);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState([]);
   const [activeTasks, setActiveTasks] = useState([]);
   const [history, setHistory] = useState([]);
@@ -193,9 +204,19 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         if (!alive) return;
         const nextScripts = scriptRes?.scripts || [];
         setScripts(nextScripts);
-        const first = nextScripts[0] || createEmptyScript();
+        const restored = readTaskDraft();
+        const first = restored.workspace?.draft || nextScripts[0] || createEmptyScript();
         setSelectedScriptId(first.id);
         setDraft(cloneScript(first));
+        setSavedFingerprint(restored.workspace?.savedFingerprint ?? draftFingerprint(first));
+        setDraftStorageError(restored.error);
+        setDraftStorageBlocked(Boolean(restored.error));
+        if (restored.workspace) {
+          setDraftRecovered(true);
+          setWorkspaceView(['home', 'recording', 'editor'].includes(restored.workspace.workspaceView) ? restored.workspace.workspaceView : 'home');
+          setEditorMode(restored.workspace.editorMode === 'advanced' ? 'advanced' : 'simple');
+          setSelectedDeviceIds(Array.isArray(restored.workspace.selectedDeviceIds) ? restored.workspace.selectedDeviceIds : []);
+        }
         setActiveTasks(stateRes?.activeTasks || []);
         setHistory(stateRes?.history || []);
         const onboardingState = settingsRes?.success
@@ -203,7 +224,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           : null;
         setOnboardingStatus(onboardingState?.status || null);
         setOnboardingLoadError(settingsRes?.success ? '' : (settingsRes?.error || '教程状态读取失败'));
-        setOnboardingOpen(!onboardingState);
+        setOnboardingOpen(!onboardingState && !restored.workspace);
         setOnboardingLoaded(true);
       } catch (error) {
         if (!alive) return;
@@ -220,13 +241,16 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   }, []);
 
   useEffect(() => {
-    setSelectedDeviceIds(prev => {
-      if (prev.length === 0 && onlineDevices.length > 0) {
-        return [onlineDevices[0].id];
-      }
-      return prev.filter(id => onlineDevices.some(device => device.id === id));
-    });
-  }, [onlineDevices]);
+    if (loading) return;
+    setSelectedDeviceIds(prev => prev.length ? prev : [activeDeviceId || onlineDevices[0]?.id].filter(Boolean));
+  }, [activeDeviceId, onlineDevices, loading]);
+
+  useEffect(() => {
+    if (loading || draftStorageBlocked) return;
+    setDraftStorageError(writeTaskDraft({
+      draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds
+    }));
+  }, [draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds, loading, draftStorageBlocked]);
 
   useEffect(() => {
     if (!window.electronAPI?.onTaskCenterUpdate) return undefined;
@@ -238,6 +262,9 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
 
   const activeCount = activeTasks.filter(task => task.status === 'running' || task.status === 'queued').length;
   const selectedScript = scripts.find(script => script.id === selectedScriptId);
+  const draftDirty = draftFingerprint(draft) !== savedFingerprint;
+  const selectedTask = [...activeTasks, ...history].find(task => task.id === selectedTaskId);
+  const offlineTargets = selectedDeviceIds.filter(id => !onlineDevices.some(device => device.id === id));
   const recordingTask = useMemo(
     () => findOnboardingTask(recordingTaskId, activeTasks, history),
     [recordingTaskId, activeTasks, history]
@@ -373,7 +400,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   useEffect(() => {
     if (onlineDevices.length === 0) {
       clearScheduledRecorderRefresh();
-      setRecorder(prev => prev.deviceId ? { ...prev, deviceId: '', loading: false, recording: false, backgroundLoading: false } : prev);
+      setRecorder(prev => prev.loading || prev.recording || prev.backgroundLoading ? { ...prev, loading: false, recording: false, backgroundLoading: false } : prev);
       return;
     }
     if (onboardingInteractionActive && (
@@ -385,49 +412,68 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         : { ...prev, deviceId: '', loading: false, recording: false, backgroundLoading: false });
       return;
     }
-    const preferred = selectedDeviceIds[0] || onlineDevices[0].id;
-    setRecorder(prev => onlineDevices.some(device => device.id === prev.deviceId) ? prev : {
+    const preferred = activeDeviceId || selectedDeviceIds[0] || onlineDevices[0].id;
+    setRecorder(prev => (activeDeviceId ? prev.deviceId === activeDeviceId : Boolean(prev.deviceId)) ? prev : {
       ...prev,
       deviceId: preferred,
+      screenshotDataUrl: '',
+      nodes: [],
       loading: false,
       recording: false,
       backgroundLoading: false
     });
-  }, [onlineDevices, selectedDeviceIds, onboardingInteractionActive, onboardingStage]);
+  }, [onlineDevices, selectedDeviceIds, onboardingInteractionActive, onboardingStage, activeDeviceId]);
 
   const updateRecorder = (patch) => {
     if (Object.prototype.hasOwnProperty.call(patch, 'deviceId')) clearScheduledRecorderRefresh();
+    if (patch.deviceId) onActiveDeviceChange?.(patch.deviceId);
     setRecorder(prev => ({ ...prev, ...patch }));
   };
 
+  const replaceDraft = (action) => {
+    if (draftDirty) setPendingDraftAction(() => action);
+    else action();
+  };
+
   const selectScript = (script) => {
-    setSelectedScriptId(script.id);
-    setDraft(cloneScript(script));
+    replaceDraft((savedScript) => {
+      const next = resolveScriptAfterSave(script, savedScript);
+      setSelectedScriptId(next.id);
+      setDraft(cloneScript(next));
+      setSavedFingerprint(draftFingerprint(next));
+    });
   };
 
   const createScript = () => {
-    const next = createEmptyScript();
-    setSelectedScriptId(next.id);
-    setDraft(next);
-    setEditorMode('simple');
+    replaceDraft(() => {
+      const next = createEmptyScript();
+      setSelectedScriptId(next.id);
+      setDraft(next);
+      setSavedFingerprint(draftFingerprint(next));
+      setEditorMode('simple');
+    });
   };
 
-  const applyQuickTemplate = (templateId) => {
+  const applyQuickTemplate = (templateId, afterApply) => {
     if (templateId === 'external') {
       importStressScript();
       return;
     }
-    const next = createTemplateScript(templateId);
-    setSelectedScriptId(next.id);
-    setDraft(next);
-    setEditorMode('simple');
-    if (templateId === 'record') showToast?.('已创建录制流程，选择设备后读取界面即可开始');
-    if (templateId === 'launch') showToast?.('已创建启动应用压测模板，请先填写应用包名');
-    if (templateId === 'compare') showToast?.('已创建截图比对模板，请设置基准图后运行');
-    if (templateId === 'install-launch') showToast?.('已创建安装后启动验证模板，请先选择 APK 并填写包名');
-    if (templateId === 'crash-capture') showToast?.('已创建崩溃复现采集模板，请填写目标应用包名');
-    if (templateId === 'smoke') showToast?.('已创建基础冒烟检查模板，可直接选择设备运行');
-    if (templateId === 'performance-watch') showToast?.('已创建性能观察模板，请填写目标应用包名');
+    replaceDraft(() => {
+      const next = createTemplateScript(templateId);
+      setSelectedScriptId(next.id);
+      setDraft(next);
+      setSavedFingerprint('');
+      setEditorMode('simple');
+      if (templateId === 'record') showToast?.('已创建录制流程，选择设备后读取界面即可开始');
+      if (templateId === 'launch') showToast?.('已创建启动应用压测模板，请先填写应用包名');
+      if (templateId === 'compare') showToast?.('已创建截图比对模板，请设置基准图后运行');
+      if (templateId === 'install-launch') showToast?.('已创建安装后启动验证模板，请先选择 APK 并填写包名');
+      if (templateId === 'crash-capture') showToast?.('已创建崩溃复现采集模板，请填写目标应用包名');
+      if (templateId === 'smoke') showToast?.('已创建基础冒烟检查模板，可直接选择设备运行');
+      if (templateId === 'performance-watch') showToast?.('已创建性能观察模板，请填写目标应用包名');
+      afterApply?.();
+    });
   };
 
   const openScriptEditor = (script) => {
@@ -437,14 +483,15 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const startRecording = () => {
-    applyQuickTemplate('record');
-    setRecordingTaskId('');
-    if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY) {
-      setSelectedDeviceIds([]);
-      setRecorder(createRecorderState());
-      setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.OPEN_RECORDING));
-    }
-    setWorkspaceView('recording');
+    applyQuickTemplate('record', () => {
+      setRecordingTaskId('');
+      if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY) {
+        setSelectedDeviceIds([]);
+        setRecorder(createRecorderState());
+        setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.OPEN_RECORDING));
+      }
+      setWorkspaceView('recording');
+    });
   };
 
   const openAdvancedEditor = () => {
@@ -460,10 +507,16 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         setScripts(res.scripts || []);
         setSelectedScriptId(res.script.id);
         setDraft(cloneScript(res.script));
+        setSavedFingerprint(draftFingerprint(res.script));
         showToast?.('复现脚本已保存');
+        return res.script;
       } else {
         showToast?.(`保存失败：${res?.error || '未知错误'}`);
+        return false;
       }
+    } catch (error) {
+      showToast?.(`保存失败：${error.message || '未知错误'}`);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -490,6 +543,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         const next = nextScripts[0] || createEmptyScript();
         setSelectedScriptId(next.id);
         setDraft(cloneScript(next));
+        setSavedFingerprint(draftFingerprint(next));
         showToast?.('脚本已删除');
         return true;
       }
@@ -502,6 +556,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setScripts(res.scripts || []);
       setSelectedScriptId(res.script.id);
       setDraft(cloneScript(res.script));
+      setSavedFingerprint(draftFingerprint(res.script));
       setWorkspaceView('editor');
       showToast?.('脚本已导入');
       return true;
@@ -510,7 +565,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     return false;
   };
 
-  const importStressScript = async () => {
+  const importStressScript = () => replaceDraft(async () => {
     const dialog = await window.electronAPI?.showOpenDialog?.({
       title: '导入任务或外部脚本',
       properties: ['openFile'],
@@ -527,7 +582,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       return;
     }
     await completeStressScriptImport(filePath);
-  };
+  });
 
   const confirmExternalScriptImport = async () => {
     if (!externalImportDialog || externalImportLoading) return;
@@ -560,27 +615,47 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const runScript = async () => {
+    if (starting) return;
     if (selectedDeviceIds.length === 0) {
       showToast?.('请至少选择一台在线设备');
       return;
     }
-    const res = await window.electronAPI?.taskRun?.({
-      script: draft,
-      deviceIds: selectedDeviceIds,
-      outputBaseDir: taskCenterPath,
-      continueOnError: draft.continueOnError,
-      concurrency: 1
-    });
-    if (res?.ok) {
-      showToast?.(draft.mode === 'stress' ? '自动化压测已开始' : '任务已加入队列');
-    } else {
-      showToast?.(`启动失败：${res?.error || '未知错误'}`);
+    if (offlineTargets.length) {
+      showToast?.('所选设备已离线，请重新连接或取消勾选离线设备');
+      return;
+    }
+    setStarting(true);
+    try {
+      const res = await window.electronAPI?.taskRun?.({
+        script: draft,
+        deviceIds: selectedDeviceIds,
+        outputBaseDir: taskCenterPath,
+        continueOnError: draft.continueOnError,
+        concurrency: 1
+      });
+      if (res?.ok) {
+        if (res.task) {
+          setActiveTasks(prev => [res.task, ...prev.filter(item => item.id !== res.task.id)]);
+          setSelectedTaskId(res.task.id);
+        }
+        showToast?.(draft.mode === 'stress' ? '自动化压测已开始' : '任务已加入队列');
+      } else {
+        showToast?.(`启动失败：${res?.error || '未知错误'}`);
+      }
+    } catch (error) {
+      showToast?.(`启动失败：${error.message || '未知错误'}`);
+    } finally {
+      setStarting(false);
     }
   };
 
   const refreshRecorderSnapshot = async ({ deviceId = recorder.deviceId, silent = false, background = false } = {}) => {
     if (!deviceId) {
       showToast?.('请选择录制设备');
+      return false;
+    }
+    if (!onlineDevices.some(device => device.id === deviceId)) {
+      if (!silent) showToast?.('录制设备已离线，请重新连接或主动选择另一台设备');
       return false;
     }
     if (!background) clearScheduledRecorderRefresh({ clearVisual: true });
@@ -662,6 +737,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const recordAction = async (action, extra = {}, options = {}) => {
     if (!recorder.deviceId) {
       showToast?.('请选择录制设备');
+      return null;
+    }
+    if (!onlineDevices.some(device => device.id === recorder.deviceId)) {
+      showToast?.('录制设备已离线，请重新连接或主动选择另一台设备');
       return null;
     }
     if (recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
@@ -808,7 +887,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     openConfirmDialog({
       title: '清空脚本步骤',
       message: '确定清空当前脚本步骤吗？',
-      detail: `当前 ${stepCount} 个步骤会从草稿中移除；如果脚本尚未保存，关闭页面后无法恢复。`,
+      detail: `当前 ${stepCount} 个步骤会从草稿中移除；已经保存的脚本不会被修改。`,
       confirmLabel: '清空步骤',
       rememberKey: 'taskCenter.clearSteps',
       icon: AlertCircle,
@@ -849,7 +928,13 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const toggleDevice = (deviceId) => {
+    if (!selectedDeviceIds.includes(deviceId)) onActiveDeviceChange?.(deviceId);
     setSelectedDeviceIds(prev => prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]);
+  };
+
+  const openTaskPath = async (targetPath) => {
+    const res = await window.electronAPI?.artifactOpenPath?.(targetPath);
+    if (!res?.ok) showToast?.(`打开失败：${res?.error || '路径不可用'}`);
   };
 
   const updateStep = (index, patch) => {
@@ -903,6 +988,16 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
               任务中心
             </h3>
             <p className={`text-sm mt-1 ${muted}`}>先选择目标，复杂设置会在需要时再显示。</p>
+            <p className={`mt-2 text-xs ${draftStorageError ? 'text-red-500' : muted}`}>
+              {draftDirty ? '有未保存修改 · ' : ''}{draftRecovered ? '已恢复上次工作 · ' : ''}{draftStorageError || '当前草稿已自动保存在本机'}
+            </p>
+            {draftStorageError && (
+              <button type="button" className="mt-2 text-xs text-emerald-500 hover:underline" onClick={() => {
+                const error = writeTaskDraft({ draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds });
+                setDraftStorageError(error);
+                if (!error) setDraftStorageBlocked(false);
+              }}>{draftStorageBlocked ? '以当前草稿重新保存（覆盖无法读取的草稿）' : '重试保存本地草稿'}</button>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto xl:items-center">
             <div className="flex flex-wrap items-center gap-2">
@@ -952,6 +1047,12 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         </div>
       </div>
 
+      {(offlineTargets.length > 0 || (activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId))) && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-600">
+          <span>目标设备离线或未授权：{Array.from(new Set([...offlineTargets, ...((activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId)) ? [activeDeviceId] : [])])).join('、')}。不会自动切换设备。</span>
+          {offlineTargets.length > 0 && <button type="button" onClick={() => setSelectedDeviceIds(prev => prev.filter(id => !offlineTargets.includes(id)))} className="underline">取消勾选离线目标</button>}
+        </div>
+      )}
       {workspaceView === 'home' ? (
         <TaskCenterQuickStart
           theme={t}
@@ -962,6 +1063,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           onImport={importStressScript}
           onOpenScript={openScriptEditor}
           onOpenAdvanced={openAdvancedEditor}
+          onOpenTask={(task) => setSelectedTaskId(task.id)}
         />
       ) : workspaceView === 'recording' ? (
         <TaskCenterRecordingWorkspace
@@ -1089,6 +1191,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                 selectedDeviceIds={selectedDeviceIds}
                 recorder={recorder}
                 saving={saving}
+                runDisabled={starting || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0}
                 onApplyTemplate={applyQuickTemplate}
                 onDraftChange={(patch) => setDraft(prev => ({ ...prev, ...patch }))}
                 onToggleDevice={toggleDevice}
@@ -1116,7 +1219,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                     <div className="flex items-center gap-2">
                       <button onClick={() => setSelectedDeviceIds(onlineDevices.map(device => device.id))} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>全选</button>
                       <button onClick={() => setSelectedDeviceIds([])} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>清空</button>
-                      <button onClick={runScript} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2">
+                      <button onClick={runScript} disabled={starting || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
                         <Play size={15} />
                         {draft.mode === 'stress' ? '开始压测' : '运行'}
                       </button>
@@ -1210,7 +1313,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
             empty="当前没有运行中的任务"
             theme={t}
             onCancel={cancelTask}
-            onOpenPath={(targetPath) => window.electronAPI?.openFolder?.(targetPath)}
+            onOpenPath={openTaskPath}
+            onOpenTask={(task) => setSelectedTaskId(task.id)}
           />
           <TaskList
             title="运行历史"
@@ -1218,7 +1322,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
             empty="暂无运行历史"
             theme={t}
             onClear={history.length > 0 ? clearHistory : null}
-            onOpenPath={(targetPath) => window.electronAPI?.openFolder?.(targetPath)}
+            onOpenPath={openTaskPath}
+            onOpenTask={(task) => setSelectedTaskId(task.id)}
           />
         </section>
         </div>
@@ -1240,6 +1345,24 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           onRetryStateLoad={retryOnboardingStateLoad}
           dismissLabel={onboardingStatus ? '关闭' : '跳过'}
           initialError={onboardingLoadError}
+        />
+      )}
+      {selectedTask && <TaskCenterResultDrawer task={selectedTask} theme={t} onClose={() => setSelectedTaskId('')} onCancel={cancelTask} onOpenPath={openTaskPath} />}
+      {pendingDraftAction && (
+        <TaskCenterDraftDialog
+          name={draft.name}
+          saving={saving}
+          theme={t}
+          onCancel={() => setPendingDraftAction(null)}
+          onDiscard={() => { const action = pendingDraftAction; setPendingDraftAction(null); action(); }}
+          onSave={async () => {
+            const action = pendingDraftAction;
+            const savedScript = await saveScript();
+            if (savedScript) {
+              setPendingDraftAction(null);
+              action(savedScript);
+            }
+          }}
         />
       )}
       <ConfirmDialog
@@ -1277,6 +1400,7 @@ function SimpleModePanel({
   selectedDeviceIds,
   recorder,
   saving,
+  runDisabled,
   onApplyTemplate,
   onDraftChange,
   onToggleDevice,
@@ -1417,7 +1541,7 @@ function SimpleModePanel({
               {saving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}
               保存
             </button>
-            <button type="button" onClick={onRun} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2">
+            <button type="button" onClick={onRun} disabled={runDisabled} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
               <Play size={15} />
               开始运行
             </button>
@@ -1505,7 +1629,7 @@ function ConfirmDialog({ dialog, theme, loading, onRememberChoiceChange, onCance
 
   if (!dialog || typeof document === 'undefined') return null;
 
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const Icon = dialog.icon || AlertCircle;
   const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
   const titleClass = isDark ? 'text-[#E8EAED]' : 'text-slate-900';
@@ -1593,7 +1717,7 @@ function ExternalScriptImportDialog({ dialog, theme, loading, onChange, onCancel
 
   if (!dialog || typeof document === 'undefined') return null;
 
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const fileName = String(dialog.filePath || '').split(/[\\/]/).pop() || '外部脚本';
   const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
   const titleClass = isDark ? 'text-[#E8EAED]' : 'text-slate-900';
@@ -1913,7 +2037,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
               );
             })}
           </div>
-          <button data-task-center-guide={focusedMode ? 'snapshot' : undefined} onClick={onRefresh} disabled={!recorder.deviceId || recorderBusy || recorder.backgroundLoading} className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
+          <button data-task-center-guide={focusedMode ? 'snapshot' : undefined} onClick={onRefresh} disabled={!onlineDevices.some(device => device.id === recorder.deviceId) || recorderBusy || recorder.backgroundLoading} className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
             <RefreshCw size={13} className={recorderRefreshBusy ? 'animate-spin' : ''} />
             读取界面
           </button>
@@ -2590,8 +2714,8 @@ function renderStepFields(step, onChange, isDark) {
   );
 }
 
-function TaskList({ title, tasks, empty, theme, onCancel, onClear, onOpenPath }) {
-  const isDark = theme.primary === 'tech';
+function TaskList({ title, tasks, empty, theme, onCancel, onClear, onOpenPath, onOpenTask }) {
+  const isDark = isDarkTheme(theme);
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   return (
@@ -2604,15 +2728,15 @@ function TaskList({ title, tasks, empty, theme, onCancel, onClear, onOpenPath })
         {tasks.length === 0 ? (
           <div className={`py-10 text-center text-sm ${muted}`}>{empty}</div>
         ) : tasks.map(task => (
-          <TaskCard key={task.id} task={task} theme={theme} onCancel={onCancel} onOpenPath={onOpenPath} />
+          <TaskCard key={task.id} task={task} theme={theme} onCancel={onCancel} onOpenPath={onOpenPath} onOpenTask={onOpenTask} />
         ))}
       </div>
     </div>
   );
 }
 
-function TaskCard({ task, theme, onCancel, onOpenPath }) {
-  const isDark = theme.primary === 'tech';
+function TaskCard({ task, theme, onCancel, onOpenPath, onOpenTask }) {
+  const isDark = isDarkTheme(theme);
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const progress = task.totalSteps ? Math.round(((task.completedSteps + task.failedSteps) / task.totalSteps) * 100) : 0;
@@ -2630,6 +2754,8 @@ function TaskCard({ task, theme, onCancel, onOpenPath }) {
         <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
       </div>
       <div className={`mt-2 text-xs ${muted}`}>完成 {task.completedSteps || 0}，失败 {task.failedSteps || 0}，总计 {task.totalSteps || 0}</div>
+      {task.error && <p className="mt-2 text-xs text-red-500 break-words">{task.error}</p>}
+      <button type="button" onClick={() => onOpenTask?.(task)} className="mt-2 text-xs text-emerald-500 hover:underline">查看设备、步骤与日志</button>
       {task.mode === 'stress' && task.stressSummary && (
         <div className={`mt-2 text-xs ${task.stressSummary.passed ? 'text-emerald-400' : 'text-red-400'}`}>
           压测轮次 {task.stressSummary.successRounds || 0}/{task.stressSummary.totalRounds || 0}，成功率 {task.stressSummary.successRate || 0}%
@@ -2647,7 +2773,7 @@ function TaskCard({ task, theme, onCancel, onOpenPath }) {
           </button>
         </div>
       )}
-      {running && (
+      {(task.deviceRuns || []).length > 0 && (
         <div className="mt-3 space-y-2">
           {(task.deviceRuns || []).map(run => (
             <div key={run.deviceId} className={`rounded border px-2 py-1.5 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
@@ -2692,7 +2818,7 @@ function StatusPill({ status, compact }) {
 }
 
 function StatCard({ label, value, theme }) {
-  const isDark = theme.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   return (
     <div className={`rounded-lg border px-4 py-3 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
       <div className={`text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{label}</div>

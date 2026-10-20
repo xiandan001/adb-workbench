@@ -1,3 +1,4 @@
+import { isDarkTheme } from '../shared/theme';
 // 设备巡检报告与证据包导出 UI：只负责交互和进度展示，采集逻辑在 main 进程
 
 import { useEffect, useState } from 'react';
@@ -5,7 +6,7 @@ import { AlertCircle, Archive, CheckCircle2, ClipboardCheck, FolderOpen, Loader2
 
 export default function InspectionPanel({ open, device, theme, vipStatus, inspectionPath, onInspectionPathChange, onClose, onOpenMemberCenter, showToast }) {
   const t = theme || {};
-  const isDark = t.primary === 'tech';
+  const isDark = isDarkTheme(t);
   const isVipLoading = !vipStatus || vipStatus.reason === 'loading';
   const isVip = vipStatus?.activated === true;
   const [includeBugreport, setIncludeBugreport] = useState(false);

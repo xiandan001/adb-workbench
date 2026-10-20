@@ -1,3 +1,4 @@
+import { isDarkTheme } from '../shared/theme';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 
 function DangerConfirmModal({
@@ -18,7 +19,7 @@ function DangerConfirmModal({
   onConfirm
 }) {
   if (!open) return null;
-  const isDark = theme?.primary === 'tech';
+  const isDark = isDarkTheme(theme);
   const panel = isDark ? 'bg-[#202124] border-[#3E4145] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const soft = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
