@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BookmarkPlus, Trash2 } from 'lucide-react';
 import { deleteLogPreset, readLogPresets, saveLogPreset } from '../shared/logWorkspace';
+import SelectMenu from './SelectMenu';
 
 export default function LogFilterPresets({ filter, buffers, onApply, isDark }) {
   const [presets, setPresets] = useState(() => {
@@ -34,10 +35,12 @@ export default function LogFilterPresets({ filter, buffers, onApply, isDark }) {
     <div className={`mb-4 space-y-2 border-b pb-3 ${isDark ? 'border-[#3E4145] text-[#E8EAED]' : 'border-slate-200 text-slate-700'}`}>
       <label className="block text-xs font-medium" htmlFor="log-filter-preset">常用过滤</label>
       <div className="flex gap-1">
-        <select id="log-filter-preset" value={selectedId} onChange={event => setSelectedId(event.target.value)} className={`${field} flex-1`}>
-          <option value="">选择已保存的预设</option>
-          {presets.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
+        <SelectMenu
+          id="log-filter-preset" value={selectedId} onChange={setSelectedId} isDark={isDark}
+          compact accent="cyan" className="flex-1" placeholder="选择已保存的预设"
+          emptyText="暂无过滤预设，请先在下方输入名称并保存。"
+          options={presets.length ? [{ value: '', label: '不选择预设' }, ...presets.map(item => ({ value: item.id, label: item.name }))] : []}
+        />
         <button type="button" disabled={!selectedId} className={`${field} disabled:opacity-40`} onClick={() => {
           const preset = presets.find(item => item.id === selectedId);
           if (preset) { onApply(preset); setMessage(`已套用“${preset.name}”`); }

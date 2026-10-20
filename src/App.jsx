@@ -14,6 +14,7 @@ import QualityCenter from './components/QualityCenter';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import DangerConfirmModal from './components/DangerConfirmModal';
+import SelectMenu from './components/SelectMenu';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
@@ -1723,16 +1724,23 @@ function App() {
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance'].includes(activeTab) && (
             <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}>
               <label htmlFor="active-device" className="text-xs font-medium">当前设备</label>
-              <select
+              <SelectMenu
                 id="active-device"
                 value={activeDeviceId}
-                onChange={event => setActiveDeviceId(event.target.value)}
-                className={`min-w-0 max-w-full flex-1 rounded border px-2 py-1.5 text-sm ${t.input}`}
-              >
-                {!activeDeviceId && <option value="">尚未发现设备</option>}
-                {activeDeviceId && !activeDevice && <option value={activeDeviceId}>{activeDeviceId} · 已断开</option>}
-                {devices.map(device => <option key={device.id} value={device.id}>{deviceNames[device.id] || device.model || device.id} · {device.id} · {deviceStatusLabel(device.status)}</option>)}
-              </select>
+                onChange={setActiveDeviceId}
+                isDark={isDark}
+                placeholder="尚未发现设备"
+                emptyText="尚未发现设备"
+                className="min-w-0 max-w-full flex-1"
+                options={[
+                  ...(!activeDeviceId ? [{ value: '', label: '尚未发现设备' }] : []),
+                  ...(activeDeviceId && !activeDevice ? [{ value: activeDeviceId, label: `${activeDeviceId} · 已断开` }] : []),
+                  ...devices.map(device => ({
+                    value: device.id,
+                    label: `${deviceNames[device.id] || device.model || device.id} · ${device.id} · ${deviceStatusLabel(device.status)}`
+                  }))
+                ]}
+              />
               {activeDeviceId && activeDevice?.status !== 'device' && (
                 <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
                   <AlertCircle size={14} />

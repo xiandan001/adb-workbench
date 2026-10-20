@@ -6,6 +6,7 @@ const CHANGELOGS = {
     title: 'v4.2.5',
     date: '2026-10-20',
     items: [
+      { type: 'improve', text: '日志过滤预设与设备选择统一为自定义下拉菜单' },
       { type: 'feature', text: '新增日志过滤预设与分析会话保存、恢复，方便继续排查同一问题' },
       { type: 'feature', text: '产物中心新增证据包导出，集中打包报告、日志和截图' },
       { type: 'improve', text: '任务中心支持恢复未保存草稿、查看运行详情和定位失败步骤' },

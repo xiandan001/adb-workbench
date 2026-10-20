@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
+import SelectMenu from './SelectMenu';
 
 function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange }) {
   const isDark = isDarkTheme(theme);
@@ -26,7 +27,6 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const panel = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200';
   const soft = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
-  const input = isDark ? 'bg-[#202124] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-700';
 
   const deviceCounts = useMemo(() => ({
     online: devices.filter(device => device.status === 'device').length,
@@ -102,17 +102,24 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
             </div>
 
             <div>
-              <FieldLabel label="目标设备" isDark={isDark} />
-              <select
+              <FieldLabel label="目标设备" htmlFor="environment-check-device" isDark={isDark} />
+              <SelectMenu
+                id="environment-check-device"
                 value={selectedDeviceId}
-                onChange={(event) => onActiveDeviceChange?.(event.target.value)}
+                onChange={value => onActiveDeviceChange?.(value)}
                 disabled={running}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500 ${input}`}
-              >
-                {!selectedDeviceId && <option value="">未发现设备</option>}
-                {selectedDeviceId && !devices.some(device => device.id === selectedDeviceId) && <option value={selectedDeviceId}>{selectedDeviceId} · 已断开</option>}
-                {devices.map(device => <option key={device.id} value={device.id}>{device.model || device.id} · {deviceStatusLabel(device.status)}</option>)}
-              </select>
+                isDark={isDark}
+                accent="cyan"
+                placeholder="未发现设备"
+                emptyText="未发现设备"
+                className="w-full"
+                options={[
+                  ...(!selectedDeviceId ? [{ value: '', label: '未发现设备' }] : []),
+                  ...(selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)
+                    ? [{ value: selectedDeviceId, label: `${selectedDeviceId} · 已断开` }] : []),
+                  ...devices.map(device => ({ value: device.id, label: `${device.model || device.id} · ${deviceStatusLabel(device.status)}` }))
+                ]}
+              />
             </div>
 
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -226,11 +233,11 @@ function Stat({ label, value, tone, isDark }) {
   );
 }
 
-function FieldLabel({ label, isDark }) {
+function FieldLabel({ label, htmlFor, isDark }) {
   return (
-    <div className={`text-xs font-medium mb-1.5 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>
+    <label htmlFor={htmlFor} className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>
       {label}
-    </div>
+    </label>
   );
 }
 
