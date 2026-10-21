@@ -1,5 +1,5 @@
 // H5: 导入 memo 用于 LogRow 性能优化
-import { useCallback, useEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
 import { FolderOpen, Play, Square, Trash2, Download, Copy, RefreshCw, Terminal, Filter, BarChart3, HelpCircle, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, AlertTriangle, Zap, ShieldCheck, Search, Brain, CheckCircle, Layers, ChevronDown, Smartphone, Lock, BookmarkPlus } from 'lucide-react';
 import { filterEntries, countByLevel } from '../shared/filter';
 import { isDarkTheme } from '../shared/theme';
@@ -9,6 +9,7 @@ import LogSessionManager from './LogSessionManager';
 import LogEvidence from './LogEvidence';
 import LogMarkers from './LogMarkers';
 import { captureLogMarker, logEntryIdentity, MAX_LOG_MARKERS } from '../shared/logMarkers';
+import { appendLogWindow, createLogBatchBuffer, LOG_VIEW_LIMIT } from '../shared/logStream';
 // 日志诊断规则库面板
 import DiagnosticRuleLibrary from './DiagnosticRuleLibrary';
 
@@ -93,6 +94,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const runningRef = useRef(false);
   const [source, setSource] = useState('realtime');
   const [entries, setEntries] = useState([]);
+  const logBatchBufferRef = useRef(null);
+  const markerContextRef = useRef({ entries: [], deviceId: '', count: 0 });
   const loadedEntryCountRef = useRef(0);
   const [truncated, setTruncated] = useState(false);
   const [sourceLabel, setSourceLabel] = useState('');
@@ -222,6 +225,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, []);
 
   const restoreSession = (session) => {
+    logBatchBufferRef.current?.reset();
     aiStreamEpochRef.current += 1;
     aiHistoryReadOnlyRef.current = true;
     searchSessionRef.current += 1;
@@ -358,13 +362,18 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
   const counts = useMemo(() => countByLevel(filtered), [filtered]);
 
+  useLayoutEffect(() => {
+    markerContextRef.current = { entries, deviceId: captureDeviceId, count: markers.length };
+  }, [entries, captureDeviceId, markers.length]);
+
   const addMarker = useCallback((entry) => {
-    if (markers.length >= MAX_LOG_MARKERS) {
+    const context = markerContextRef.current;
+    if (context.count >= MAX_LOG_MARKERS) {
       setNote('问题标记已达 500 个上限，请保存会话后再整理标记；未丢弃任何标记');
       return;
     }
-    setMarkerDraft(captureLogMarker(entry, entries, captureDeviceId, '问题标记', crypto.randomUUID()));
-  }, [markers.length, entries, captureDeviceId]);
+    setMarkerDraft(captureLogMarker(entry, context.entries, context.deviceId, '问题标记', crypto.randomUUID()));
+  }, []);
 
   function locateMarker(marker) {
     const identity = logEntryIdentity(marker.entry);
@@ -444,10 +453,19 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, [syncLogViewport]);
 
   useEffect(() => {
+    let disposed = false;
+    const batchBuffer = createLogBatchBuffer(({ entries: batch, truncated: batchTruncated }) => {
+      if (batchTruncated || loadedEntryCountRef.current + batch.length > LOG_VIEW_LIMIT) setTruncated(true);
+      loadedEntryCountRef.current = Math.min(LOG_VIEW_LIMIT, loadedEntryCountRef.current + batch.length);
+      setEntries(previous => appendLogWindow(previous, batch));
+    });
+    logBatchBufferRef.current = batchBuffer;
+
     async function refreshDevices() {
       if (window.electronAPI && window.electronAPI.adbListDevices) {
         try {
           const ds = await window.electronAPI.adbListDevices();
+          if (disposed) return;
           setDevices(ds.map((d) => ({
             id: d.id,
             label: `${d.id}${d.model ? ` (${d.model})` : ''}`
@@ -462,14 +480,16 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       if (window.electronAPI && window.electronAPI.logGetState) {
         try {
           const s = await window.electronAPI.logGetState();
+          if (disposed) return;
           setSource(s.source);
           setCaptureDeviceId(s.deviceId || '');
           setRunning(s.running === true);
           runningRef.current = s.running === true;
           if (s.running && s.deviceId) setDeviceId(s.deviceId);
-          setEntries(s.entries || []);
-          loadedEntryCountRef.current = s.entries?.length || 0;
-          setTruncated(s.truncated);
+          const initialEntries = (s.entries || []).slice(-LOG_VIEW_LIMIT);
+          setEntries(initialEntries);
+          loadedEntryCountRef.current = initialEntries.length;
+          setTruncated(s.truncated || (s.entries?.length || 0) > LOG_VIEW_LIMIT);
           setupLogListeners();
         } catch (e) {
           console.error('Failed to load log state:', e);
@@ -478,6 +498,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       if (window.electronAPI && window.electronAPI.mcpGetInfo) {
         try {
           const info = await window.electronAPI.mcpGetInfo();
+          if (disposed) return;
           setMcpRunning(info.running);
           setMcpPort(info.port);
         } catch (e) {
@@ -488,6 +509,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       try {
         if (window.electronAPI?.vipGetStatus) {
           const vs = await window.electronAPI.vipGetStatus();
+          if (disposed) return;
           setVipStatusState(vs);
         }
       } catch { /* 静默 */ }
@@ -497,10 +519,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       const listeners = [];
       if (window.electronAPI && window.electronAPI.onLogReset) {
         const offReset = window.electronAPI.onLogReset((payload) => {
+          batchBuffer.reset();
           setSource(payload.source);
-          setEntries(payload.entries || []);
-          loadedEntryCountRef.current = payload.entries?.length || 0;
-          setTruncated(!!payload.truncated);
+          const resetEntries = (payload.entries || []).slice(-LOG_VIEW_LIMIT);
+          setEntries(resetEntries);
+          loadedEntryCountRef.current = resetEntries.length;
+          setTruncated(!!payload.truncated || (payload.entries?.length || 0) > LOG_VIEW_LIMIT);
           setNote(undefined);
           // 日志重置（开始抓取/清空/加载文件）时重置自动滚动标志，
           // 确保新日志到来时自动跟随到底部
@@ -509,16 +533,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         listeners.push(offReset);
       }
       if (window.electronAPI && window.electronAPI.onLogAppendBatch) {
-        const offAppend = window.electronAPI.onLogAppendBatch((batch) => {
-          if (loadedEntryCountRef.current + batch.length > 50000) setTruncated(true);
-          loadedEntryCountRef.current = Math.min(50000, loadedEntryCountRef.current + batch.length);
-          setEntries((prev) => {
-            const next = prev.length + batch.length > 50000
-              ? prev.slice(Math.max(0, prev.length + batch.length - 50000)).concat(batch)
-              : prev.concat(batch);
-            return next;
-          });
-        });
+        const offAppend = window.electronAPI.onLogAppendBatch(batchBuffer.push);
         listeners.push(offAppend);
       }
       logListenersRef.current = listeners;
@@ -757,6 +772,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     loadInitialState();
 
     return () => {
+      disposed = true;
+      batchBuffer.reset();
+      if (logBatchBufferRef.current === batchBuffer) logBatchBufferRef.current = null;
       logListenersRef.current.forEach(off => off && off());
       aiListenersRef.current.forEach(off => off && off());
       autoDiagnoseListenersRef.current.forEach(off => off && off());
@@ -846,6 +864,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     if (window.electronAPI && window.electronAPI.adbStopLog) {
       await window.electronAPI.adbStopLog();
     }
+    logBatchBufferRef.current?.flush();
     setRunning(false);
     // UX1: 操作反馈，3 秒后自动清除
     setNote('已停止抓取');
@@ -904,12 +923,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }
 
   async function onClear() {
-    if (window.electronAPI && window.electronAPI.logClear) {
-      await window.electronAPI.logClear({ source });
-    }
+    logBatchBufferRef.current?.reset();
     setEntries([]);
     loadedEntryCountRef.current = 0;
     setTruncated(false);
+    if (window.electronAPI && window.electronAPI.logClear) {
+      await window.electronAPI.logClear({ source });
+    }
     // UX1: 操作反馈，3 秒后自动清除
     setNote(markers.length ? '已清空日志；问题标记及冻结的上下文仍保留，可保存到会话' : '已清空日志');
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
@@ -1518,6 +1538,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
             {filtered.length.toLocaleString()} 条
           </div>
+          {truncated && <span className="text-xs text-amber-500" title="为保持响应，显示窗口仅保留最近的日志；更早的日志不包含在保存会话中，已添加的问题标记仍保留。">仅显示最近日志</span>}
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
             Source: {source === 'realtime' ? '实时抓取' : source === 'file' ? '日志文件' : source}

@@ -213,6 +213,7 @@ test('logger context changes never start capture or AI; session restore uses loc
       if (name === './adb-runtime.cjs') return { runAdb: () => { throw new Error('No ADB allowed'); }, spawnAdb: () => { throw new Error('No ADB allowed'); } };
       if (name === './ai-analyze.cjs') return { hasActiveAiRequest: () => false, clearAiConversation: () => { aiClears += 1; } };
       if (name === './log-sessions.cjs') return require('../electron/lib/log-sessions.cjs');
+      if (name === './log-capture-buffer.cjs') return require('../electron/lib/log-capture-buffer.cjs');
       return require(name);
     }
   }, { filename: sourcePath });
@@ -231,6 +232,11 @@ test('logger context changes never start capture or AI; session restore uses loc
   assert.equal(aiClears, 1);
   assert.equal(module.exports.getLogcatProc(), null);
   assert.equal(module.exports.getLogStore().file[0].raw, fixture().entries[0].raw);
+  const savedRealtime = await handlers.get('logSession:save')({}, { ...fixture(), source: 'realtime' });
+  const loadedRealtime = await handlers.get('logSession:load')({}, { id: savedRealtime.session.id });
+  assert.equal(loadedRealtime.ok, true);
+  assert.equal(module.exports.getLogStore().realtime[0].raw, fixture().entries[0].raw);
+  assert.equal(module.exports.getLogStoreBytes().realtime, Buffer.byteLength(fixture().entries[0].raw));
   module.exports.setLogcatProc({ running: true });
   const blocked = await handlers.get('logSession:load')({}, { id: saved.session.id });
   assert.equal(blocked.ok, false);

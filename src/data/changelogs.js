@@ -2,6 +2,15 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.3.1': {
+    title: 'v4.3.1',
+    date: '2026-10-21',
+    items: [
+      { type: 'fix', text: '修复 AI 日志助手开始抓取和长时间抓取时卡顿、无响应的问题' },
+      { type: 'improve', text: '合并高频日志刷新，优化日志缓存、过滤和自动诊断，保持停止抓取等操作及时响应' },
+      { type: 'improve', text: '历史 Wi-Fi 连接成功后自动进入设备页面并选中该设备，连接失败时保留错误提示' }
+    ]
+  },
   '4.3.0': {
     title: 'v4.3.0',
     date: '2026-10-21',

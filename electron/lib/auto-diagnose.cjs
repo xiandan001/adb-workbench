@@ -302,15 +302,13 @@ function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries
   const issue = detectIssue(line);
   if (!issue) return;
 
-  console.log(`[AutoDiagnose] 检测到 ${issue.label}（源: ${source}），line: ${line.slice(0, 100)}`);
-
   const now = Date.now();
   // 同类型问题在去抖窗口内不重复推送
   const lastFire = autoDiagnoseLastFireByType[issue.type] || 0;
   if (now - lastFire < AUTO_DIAGNOSE_DEBOUNCE_MS) {
-    console.log(`[AutoDiagnose] ${issue.label} 在去抖窗口内，跳过 (${Math.round((now - lastFire) / 1000)}s/${AUTO_DIAGNOSE_DEBOUNCE_MS / 1000}s)`);
     return;
   }
+  console.log(`[AutoDiagnose] 检测到 ${issue.label}（源: ${source}），line: ${line.slice(0, 100)}`);
 
   // 立即提取上下文快照（避免 logStore 截断后索引失效）
   // 支持外部传入的 entries（用于搜索结果重新扫描场景），避免使用错误的 logStore 源

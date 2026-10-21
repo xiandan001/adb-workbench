@@ -1250,6 +1250,11 @@ function App() {
       if (result.history) setConnectionHistory(result.history);
       setConnectionResults(prev => ({ ...prev, [target]: { status: result.success ? 'success' : 'error', message: result.message } }));
       showToast(result.message);
+      if (result.success && historyEntry) {
+        setActiveDeviceId(target);
+        setActiveTab('devices');
+        setConnectionFormOpen(false);
+      }
       return result.success;
     } finally {
       connectingAddressesRef.current.delete(target);

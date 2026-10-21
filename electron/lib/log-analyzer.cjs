@@ -13,10 +13,10 @@ const readline = require('readline');
 
 const ctx = require('./app-context.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
+const { createLogCaptureBuffer } = require('./log-capture-buffer.cjs');
 const { isDev } = ctx;
 
 let logcatProc = null;
-let logStore = { realtime: [], file: [] };
 let currentLogSource = 'realtime';
 let currentLogDeviceId = '';
 let navigationContext = null;
@@ -28,13 +28,21 @@ let pidPackageMap = new Map();
 const LOG_STORE_BYTES_LIMIT = 100 * 1024 * 1024; // 100MB
 const LOG_STORE_REALTIME_MAX_ENTRIES = 200000;
 const LOG_STORE_FILE_MAX_ENTRIES = 200000; // file 日志条数上限
-let logStoreBytes = { realtime: 0, file: 0 };
+const realtimeLogStore = createLogCaptureBuffer({ maxEntries: LOG_STORE_REALTIME_MAX_ENTRIES, maxBytes: LOG_STORE_BYTES_LIMIT });
+const logStore = {
+  get realtime() { return realtimeLogStore.toArray(); },
+  set realtime(entries) {
+    realtimeLogStore.clear();
+    for (const entry of entries) realtimeLogStore.push(entry);
+  },
+  file: []
+};
+const logStoreBytes = { get realtime() { return realtimeLogStore.bytes; }, file: 0 };
 
-// 实时日志批量发送：累积日志条目，每 100ms 或满 50 条时批量发送
-// 减少 IPC 调用次数，提升主进程与渲染进程性能
-const LOG_BATCH_SIZE = 50;
+// 每 100ms 合并推送，突发积压只保留最新 50,000 条 / 100MB，并显式标记截断。
+// 主进程另存最新 200,000 条 / 100MB；这不是完整日志的无损归档。
 const LOG_BATCH_FLUSH_INTERVAL_MS = 100;
-let pendingLogBatch = [];
+const pendingLogBatch = createLogCaptureBuffer({ maxEntries: 50000, maxBytes: LOG_STORE_BYTES_LIMIT });
 let logBatchFlushTimer = null;
 
 function entryBytes(entry) {
@@ -46,56 +54,26 @@ function clearLogBatchState() {
     clearTimeout(logBatchFlushTimer);
     logBatchFlushTimer = null;
   }
-  pendingLogBatch = [];
+  pendingLogBatch.clear();
 }
 
 function resetLogStoreSource(source) {
-  logStore[source] = [];
-  logStoreBytes[source] = 0;
-}
-
-function trimLogStore(source, maxEntries = LOG_STORE_REALTIME_MAX_ENTRIES) {
-  const store = logStore[source];
-  if (!store || store.length === 0) return;
-
-  let removeCount = Math.max(0, store.length - maxEntries);
-  let removeBytes = 0;
-  for (let i = 0; i < removeCount; i++) {
-    removeBytes += entryBytes(store[i]);
-  }
-
-  while (
-    removeCount < store.length &&
-    logStoreBytes[source] - removeBytes > LOG_STORE_BYTES_LIMIT
-  ) {
-    removeBytes += entryBytes(store[removeCount]);
-    removeCount++;
-  }
-
-  if (removeCount > 0) {
-    store.splice(0, removeCount);
-    logStoreBytes[source] = Math.max(0, logStoreBytes[source] - removeBytes);
-  }
-}
-
-function appendLogStoreEntry(source, entry, maxEntries) {
-  if (!logStore[source]) {
+  if (source === 'realtime') realtimeLogStore.clear();
+  else {
     logStore[source] = [];
     logStoreBytes[source] = 0;
   }
-  logStore[source].push(entry);
-  logStoreBytes[source] += entryBytes(entry);
-  trimLogStore(source, maxEntries);
 }
 
 function appendRealtimeEntry(entry) {
-  appendLogStoreEntry('realtime', entry, LOG_STORE_REALTIME_MAX_ENTRIES);
+  return realtimeLogStore.push(entry);
 }
 
 function flushLogBatch() {
-  if (pendingLogBatch.length === 0) return;
-  const batch = pendingLogBatch;
-  pendingLogBatch = [];
+  clearLogBatchFlushTimer();
+  if (pendingLogBatch.length === 0 && !pendingLogBatch.truncated) return;
+  const batch = { entries: pendingLogBatch.toArray(), truncated: pendingLogBatch.truncated };
+  pendingLogBatch.clear();
   ctx.broadcastToAllWindows('log:appendBatch', batch);
 }
 
@@ -109,16 +87,7 @@ function scheduleLogBatchFlush() {
 
 function pushLogToBatch(entry) {
   pendingLogBatch.push(entry);
-  if (pendingLogBatch.length >= LOG_BATCH_SIZE) {
-    // 立即 flush（取消定时器）
-    if (logBatchFlushTimer) {
-      clearTimeout(logBatchFlushTimer);
-      logBatchFlushTimer = null;
-    }
-    flushLogBatch();
-  } else {
-    scheduleLogBatchFlush();
-  }
+  scheduleLogBatchFlush();
 }
 
 function parseLogLine(source, line) {
@@ -273,7 +242,7 @@ function register(ipcMain) {
       currentLogSource = session.source;
       currentLogDeviceId = session.deviceId;
       logStore[session.source] = session.entries;
-      logStoreBytes[session.source] = session.entries.reduce((sum, entry) => sum + entryBytes(entry), 0);
+      if (session.source !== 'realtime') logStoreBytes[session.source] = session.entries.reduce((sum, entry) => sum + entryBytes(entry), 0);
     }
   });
   // ADB 设备列表（Log Analyzer 专用）
@@ -344,11 +313,11 @@ function register(ipcMain) {
         entry.deviceId = currentLogDeviceId;
         const pkg = resolvePkg(entry.pid);
         if (pkg) entry.pkg = pkg;
-        appendRealtimeEntry(entry);
-        // 批量发送：累积日志条目，每 100ms 或满 50 条时批量发送（减少 IPC 调用）
+        const lineIndex = appendRealtimeEntry(entry);
+        // 固定间隔合并发送，避免初次抓取积压日志造成 IPC 洪峰。
         pushLogToBatch(entry);
         // AI 自动诊断：检测崩溃/ANR/OOM 等关键问题
-        autoDiagnose.autoDiagnoseOnLine(line, logStore.realtime.length - 1);
+        if (lineIndex >= 0) autoDiagnose.autoDiagnoseOnLine(line, lineIndex);
       });
 
       // 消费 stderr 防止缓冲区满导致进程挂起
@@ -356,7 +325,9 @@ function register(ipcMain) {
 
       p.on('exit', () => {
         rl.close();
-        if (logcatProc === p) logcatProc = null;
+        if (logcatProc !== p) return;
+        logcatProc = null;
+        stopPidPackageResolver();
         // 进程退出时 flush 剩余批次，避免日志丢失
         if (logBatchFlushTimer) {
           clearTimeout(logBatchFlushTimer);
@@ -466,7 +437,7 @@ function register(ipcMain) {
   ipcMain.handle('log:getState', async () => {
     const entries = logStore[currentLogSource] || [];
     const limited = entries.length > 50000 ? entries.slice(entries.length - 50000) : entries;
-    return { source: currentLogSource, deviceId: currentLogDeviceId, running: !!logcatProc, entries: limited, truncated: entries.length !== limited.length };
+    return { source: currentLogSource, deviceId: currentLogDeviceId, running: !!logcatProc, entries: limited, truncated: entries.length !== limited.length || (currentLogSource === 'realtime' && realtimeLogStore.truncated) };
   });
 
   // 导出日志到文件
@@ -526,7 +497,10 @@ function getLogStore() { return logStore; }
 function getCurrentLogSource() { return currentLogSource; }
 function getLogcatProc() { return logcatProc; }
 function setLogcatProc(proc) { logcatProc = proc; }
-function setCurrentLogSource(source) { currentLogSource = source; }
+function setCurrentLogSource(source, deviceId = '') {
+  currentLogSource = source;
+  currentLogDeviceId = deviceId;
+}
 function resetLogStoreRealtime() {
   clearLogBatchState();
   resetLogStoreSource('realtime');

@@ -315,7 +315,7 @@ async function callMcpTool(name, args) {
       return mcpText({ ok: false, message: '无设备连接，请先通过 USB 或 WiFi 连接 Android 设备并授权调试' });
     }
     const deviceId = args.deviceId || undefined;
-    logAnalyzer.setCurrentLogSource('realtime');
+    logAnalyzer.setCurrentLogSource('realtime', deviceId || '');
     logAnalyzer.resetLogStoreRealtime();
     runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
     ctx.broadcastToAllWindows('log:reset', { source: 'realtime', entries: [] });
@@ -343,17 +343,20 @@ async function callMcpTool(name, args) {
     rl.on('line', (line) => {
       if (logAnalyzer.getLogcatProc() !== p) return;
       const entry = parseLogLine('realtime', line);
+      entry.deviceId = deviceId || '';
       const pkg = resolvePkg(entry.pid);
       if (pkg) entry.pkg = pkg;
       logAnalyzer.appendRealtimeEntry(entry);
-      // 批量发送：累积日志条目，每 100ms 或满 50 条时批量发送（减少 IPC 调用）
+      // 与 UI 捕获共用有界缓存及 100ms 合并推送。
       pushLogToBatch(entry);
     });
     // 消费 stderr 防止缓冲区满导致进程挂起（参考 IPC adb:startLog 实现）
     p.stderr.on('data', () => {});
     p.on('exit', () => {
       rl.close();
-      if (logAnalyzer.getLogcatProc() === p) logAnalyzer.setLogcatProc(null);
+      if (logAnalyzer.getLogcatProc() !== p) return;
+      logAnalyzer.setLogcatProc(null);
+      logAnalyzer.getStopPidPackageResolver()();
       // 进程退出时 flush 剩余批次，避免日志丢失
       logAnalyzer.clearLogBatchFlushTimer();
       logAnalyzer.getFlushLogBatch()();

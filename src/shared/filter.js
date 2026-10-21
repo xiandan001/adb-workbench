@@ -1,51 +1,47 @@
-import { levelOrder } from './logTypes';
+import { levelOrder } from './logTypes.js';
 
-export function matchFilter(entry, filter) {
-  if (filter.minLevel && entry.level) {
-    if (levelOrder[entry.level] < levelOrder[filter.minLevel]) return false;
-  }
-
-  if (typeof filter.pid === 'number') {
-    if (entry.pid !== filter.pid) return false;
-  }
-
-  if (filter.pkg) {
-    const p = (entry.pkg ?? '').toLowerCase();
-    if (!p.includes(filter.pkg.toLowerCase())) return false;
-  }
-
-  if (filter.tag) {
-    const t = (entry.tag ?? '').toLowerCase();
-    if (!t.includes(filter.tag.toLowerCase())) return false;
-  }
-
-  const hay = (entry.raw ?? '').toLowerCase();
-
-  if (filter.text) {
-    if (!hay.includes(filter.text.toLowerCase())) return false;
-  }
-
-  if (filter.excludeText) {
-    if (hay.includes(filter.excludeText.toLowerCase())) return false;
-  }
-
+function compileFilter(filter) {
+  const pkg = filter.pkg?.toLowerCase();
+  const tag = filter.tag?.toLowerCase();
+  const text = filter.text?.toLowerCase();
+  const excludeText = filter.excludeText?.toLowerCase();
+  let regex;
   if (filter.regex) {
     try {
-      const re = new RegExp(filter.regex, filter.regexFlags ?? 'i');
-      if (!re.test(entry.raw)) return false;
+      regex = new RegExp(filter.regex, filter.regexFlags ?? 'i');
     } catch {
-      return false;
+      return () => false;
     }
   }
 
-  return true;
+  return (entry) => {
+    if (filter.minLevel && entry.level && levelOrder[entry.level] < levelOrder[filter.minLevel]) return false;
+    if (typeof filter.pid === 'number' && entry.pid !== filter.pid) return false;
+    if (pkg && !(entry.pkg ?? '').toLowerCase().includes(pkg)) return false;
+    if (tag && !(entry.tag ?? '').toLowerCase().includes(tag)) return false;
+    if (text || excludeText) {
+      const hay = (entry.raw ?? '').toLowerCase();
+      if (text && !hay.includes(text)) return false;
+      if (excludeText && hay.includes(excludeText)) return false;
+    }
+    if (regex) {
+      // A reused g/y expression must still match each log independently.
+      regex.lastIndex = 0;
+      if (!regex.test(entry.raw)) return false;
+    }
+    return true;
+  };
+}
+
+export function matchFilter(entry, filter) {
+  return compileFilter(filter)(entry);
 }
 
 export function filterEntries(entries, filter) {
   if (!filter || (!filter.minLevel && !filter.text && !filter.excludeText && !filter.tag && typeof filter.pid !== 'number' && !filter.pkg && !filter.regex)) {
     return entries;
   }
-  return entries.filter((e) => matchFilter(e, filter));
+  return entries.filter(compileFilter(filter));
 }
 
 export function countByLevel(entries) {
