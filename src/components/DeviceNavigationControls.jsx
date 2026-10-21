@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import { SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../shared/deviceNavigationShortcuts';
 import DeviceShortcutEditor from './DeviceShortcutEditor';
 import DeviceShortcutConfirm from './DeviceShortcutConfirm';
+import useDeviceShortcutCapabilities from '../shared/useDeviceShortcutCapabilities';
 
 const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell };
 
@@ -16,6 +17,9 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
   const executor = useRef(createShortcutExecutor());
   const busyRef = useRef(false);
   const isDark = isDarkTheme(theme);
+  const descriptionId = useId();
+  const checks = useDeviceShortcutCapabilities(deviceId, isOnline, saved.config);
+  const unavailable = checks.filter(check => check.status === 'unsupported');
 
   useEffect(() => {
     const refresh = event => { if (!event.key || event.key === SHORTCUTS_KEY) setSaved(readDeviceShortcuts()); };
@@ -59,13 +63,21 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
     <div className="device-navigation-grid" role="group" aria-label="设备快捷操作">
       {(saved.config || defaultDeviceShortcuts()).slots.map(action => {
         const Icon = action.type === 'app' ? AppWindow : action.type === 'shell' ? Terminal : icons[action.action];
-        return <button key={action.id} type="button" className="device-navigation-button" onClick={() => runAction(action)}
-          disabled={!saved.config || !isOnline || Boolean(pending)} aria-busy={pending === action.id} aria-label={action.label} title={`${action.label}${action.type === 'shell' ? ' · 自定义 ADB 命令，执行前需确认' : ''}`}>
+        const check = checks.find(item => item.id === action.id);
+        const unsupported = check?.status === 'unsupported';
+        const reason = !isOnline ? '设备离线，请先连接设备' : check?.reason || (action.type === 'shell' ? '自定义 ADB 命令，每次执行前均需确认' : '正在检查支持情况，操作时仍会校验');
+        const shortReason = /未安装/.test(reason) ? '未安装应用' : /入口/.test(reason) ? '缺少启动入口' : '设备不支持';
+        return <span key={action.id} className="min-w-0" title={`${action.label} · ${reason}`}>
+          <button type="button" className="device-navigation-button h-full w-full" onClick={() => runAction(action)}
+          disabled={!saved.config || !isOnline || Boolean(pending) || unsupported} aria-busy={pending === action.id} aria-label={action.label} aria-describedby={`${descriptionId}-${action.id}`}>
           <span className="device-navigation-icon" aria-hidden="true">{pending === action.id ? <Loader2 size={19} className="animate-spin" /> : <Icon size={19} />}</span>
-          <span className="min-w-0 truncate">{pending === action.id ? '执行中…' : action.label}</span>
-        </button>;
+          <span className="min-w-0"><span className="block truncate">{pending === action.id ? '执行中…' : action.label}</span>{unsupported && <span className="block text-[10px] font-normal leading-3">{shortReason}</span>}</span>
+          {check?.status === 'unknown' && <CircleHelp size={12} className="shrink-0 text-amber-500" aria-hidden="true" />}
+          </button><span id={`${descriptionId}-${action.id}`} className="sr-only">{reason}</span>
+        </span>;
       })}
     </div>
+    {unavailable.length > 0 && <p className="mt-1.5 flex items-center justify-between gap-2 text-xs text-amber-600"><span>{unavailable.length} 个按钮在此设备不可用</span><button type="button" onClick={() => setEditing(true)} disabled={Boolean(pending)} className="underline underline-offset-2 disabled:opacity-40">编辑替换</button></p>}
     {saved.error && <div role="alert" className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">{saved.error}<button type="button" onClick={resetBroken} className="ml-2 underline">重置为默认配置</button></div>}
     {error && <div role="alert" className="mt-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</div>}
     {editing && saved.config && <DeviceShortcutEditor config={saved.config} deviceId={deviceId} isOnline={isOnline} isDark={isDark} pending={pending} onTest={runAction} onSave={save} onClose={() => setEditing(false)} />}

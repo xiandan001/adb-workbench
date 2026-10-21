@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -25,6 +25,7 @@ import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleF
 import { addRecentApk, readRecentApks, RECENT_APKS_KEY, saveShortcutList } from './shared/deviceShortcuts';
 import { connectWirelessDevice, historyConnectionAddress } from './shared/wirelessConnection';
 import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/deviceControlOptions';
+import { filterDeviceCards, readPinnedDevices, togglePinnedDevice } from './shared/deviceDiscovery';
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -36,6 +37,8 @@ const getOperationErrorMessage = (error) => {
 
 function App() {
   const [devices, setDevices] = useState([]);
+  const [deviceQuery, setDeviceQuery] = useState('');
+  const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
   const [activeDeviceId, setActiveDeviceId] = useState(() => localStorage.getItem('activeDeviceId') || '');
   const [navigationContext, setNavigationContext] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1259,6 +1262,7 @@ function App() {
       if (result.history) setConnectionHistory(result.history);
       setConnectionResults(prev => ({ ...prev, [target]: { status: result.success ? 'success' : 'error', message: result.message } }));
       showToast(result.message);
+      if (result.success) setDeviceQuery('');
       if (result.success && historyEntry) {
         setActiveDeviceId(target);
         setActiveTab('devices');
@@ -1323,11 +1327,20 @@ function App() {
     }
   };
 
+  const handleToggleDevicePin = (deviceId) => {
+    try { setPinnedDeviceIds(togglePinnedDevice(deviceId)); }
+    catch (failure) { showToast(`常用设备保存失败：${failure.message}`); }
+  };
+
   const t = theme || themes.default;
   const isDark = isDarkTheme(t);
   const activeDevice = devices.find(device => device.id === activeDeviceId);
   const hasOnlineDevice = devices.some(device => device.status === 'device');
   const showConnectionForm = connectionFormOpen || !hasOnlineDevice;
+  const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
+  const eligibleDevices = isVipOrLoading ? devices : devices.slice(0, 1);
+  const visibleDevices = filterDeviceCards(eligibleDevices, { query: deviceQuery, names: deviceNames, pinnedIds: pinnedDeviceIds });
+  const lockedCount = devices.length - eligibleDevices.length;
   const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
   const settingsNavShellClass = isDarkTheme(t)
     ? 'bg-[#202124] border-[#3E4145]/80'
@@ -1837,6 +1850,22 @@ function App() {
                 </div>}
               </div>
 
+              {(devices.length > 0 || deviceQuery) && <div className="mb-4 flex flex-wrap items-center gap-3">
+                <div className="relative min-w-0 flex-1 sm:max-w-md">
+                  <Search size={16} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${t.textMuted}`} />
+                  <input
+                    type="search"
+                    aria-label="搜索设备"
+                    value={deviceQuery}
+                    maxLength={300}
+                    onChange={event => setDeviceQuery(event.target.value)}
+                    placeholder="搜索设备名称、型号、序列号或 IP"
+                    className={`w-full rounded-lg border py-2 pl-9 pr-9 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 [&::-webkit-search-cancel-button]:hidden ${t.input}`}
+                  />
+                  {deviceQuery && <button type="button" aria-label="清空设备搜索" title="清空搜索" onClick={() => setDeviceQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${t.textMuted}`}><X size={15} /></button>}
+                </div>
+                <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />常用设备优先 · {visibleDevices.length} / {eligibleDevices.length} 台</span>
+              </div>}
               <div className="grid gap-6 grid-cols-1 xl:grid-cols-2">
                 {devices.length === 0 && !loading && !error ? (
                   <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
@@ -1845,18 +1874,20 @@ function App() {
                     <p className="text-sm">请确保已开启 USB 调试并连接设备</p>
                   </div>
                 ) : (
-                  (() => {
-                    const FREE_DEVICE_LIMIT = 1;
-                    const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
-                    const visibleDevices = isVipOrLoading ? devices : devices.slice(0, FREE_DEVICE_LIMIT);
-                    const lockedCount = isVipOrLoading ? 0 : Math.max(0, devices.length - FREE_DEVICE_LIMIT);
-                    return (
-                      <>
-                        {visibleDevices.map(device => (
+                  <>
+                    {deviceQuery.trim() && visibleDevices.length === 0 && <div className={`col-span-full rounded-xl border border-dashed p-8 text-center ${t.textMuted}`}>
+                      <Search size={24} className="mx-auto mb-3 opacity-60" />
+                      <p className="text-sm font-medium">没有匹配的设备</p>
+                      <p className="mt-1 text-xs">试试设备名称、型号、序列号或 IP。搜索不会改变当前设备选择。</p>
+                      <button type="button" onClick={() => setDeviceQuery('')} className={`mt-3 rounded-lg border px-3 py-1.5 text-xs ${t.button.secondary}`}>清空搜索</button>
+                    </div>}
+                    {visibleDevices.map(device => (
                     <DeviceCard
                       key={device.id}
                       device={device}
                       isActive={device.id === activeDeviceId}
+                      isPinned={pinnedDeviceIds.includes(device.id)}
+                      onTogglePin={() => handleToggleDevicePin(device.id)}
                       onSelectDevice={() => setActiveDeviceId(device.id)}
                       onEnvironmentCheck={() => {
                         setActiveDeviceId(device.id);
@@ -1932,9 +1963,7 @@ function App() {
                       </span>
                     </div>
                   )}
-                      </>
-                    );
-                  })()
+                  </>
                 )}
               </div>
             </>

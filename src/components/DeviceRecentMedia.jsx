@@ -16,47 +16,76 @@ export default function DeviceRecentMedia({ deviceId, theme, showToast }) {
   useEffect(() => {
     if (!open) return;
     let disposed = false;
-    let revision = 0;
-    const refresh = async () => {
-      const requestedRevision = ++revision;
-      setLoading(true);
-      setError('');
-      try {
-        const result = await window.electronAPI.deviceMediaList({ deviceId });
-        if (disposed || requestedRevision !== revision) return;
-        if (!result?.success) throw new Error(result?.error || '无法读取最近文件');
-        setItems(recentDeviceMedia(result.items, deviceId));
-      } catch (failure) {
-        if (!disposed && requestedRevision === revision) setError(failure.message || '无法读取最近文件');
-      } finally {
-        if (!disposed && requestedRevision === revision) setLoading(false);
+    let pending = null;
+    let refreshAgain = false;
+    let timer;
+    const refresh = async ({ quiet = false, clearError = true } = {}) => {
+      if (disposed) return;
+      if (pending) { refreshAgain = true; return pending; }
+      clearTimeout(timer);
+      pending = (async () => {
+        if (!quiet) setLoading(true);
+        if (clearError) setError('');
+        try {
+          const result = await window.electronAPI.deviceMediaList({ deviceId });
+          if (disposed) return;
+          if (!result?.success) throw new Error(result?.error || '无法读取最近文件');
+          setItems(recentDeviceMedia(result.items, deviceId));
+        } catch (failure) {
+          if (!disposed) setError(failure.message || '无法读取最近文件');
+        } finally {
+          if (!disposed) setLoading(false);
+        }
+      })();
+      await pending;
+      pending = null;
+      if (disposed) return;
+      if (refreshAgain) {
+        refreshAgain = false;
+        return refresh({ quiet: true, clearError: false });
       }
+      if (!document.hidden) timer = setTimeout(() => { void refreshIfVisible(); }, 5000);
+    };
+    const refreshIfVisible = () => {
+      if (!document.hidden) void refresh({ quiet: true, clearError: false });
     };
     refreshRef.current = refresh;
-    const unsubscribe = window.electronAPI?.onDeviceMediaChanged?.(() => { void refresh(); });
-    const initial = setTimeout(() => { void refresh(); }, 0);
+    const unsubscribe = window.electronAPI?.onDeviceMediaChanged?.(payload => {
+      if (!payload?.deviceId || payload.deviceId === deviceId) refreshIfVisible();
+    });
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    const initial = setTimeout(() => { setBusyId(''); void refresh(); }, 0);
     return () => {
       disposed = true;
       clearTimeout(initial);
+      clearTimeout(timer);
       unsubscribe?.();
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
       refreshRef.current = null;
     };
   }, [open, deviceId]);
 
   const act = async (id, action) => {
     if (actionPending.current) return;
+    const currentRefresh = refreshRef.current;
     actionPending.current = true;
     setBusyId(id);
     setError('');
     try {
       const result = await window.electronAPI.deviceMediaAction({ id, action });
+      if (currentRefresh !== refreshRef.current) return;
       if (!result?.success) throw new Error(result?.error || '文件操作未完成');
       if (action === 'copy') showToast?.('截图已复制');
     } catch (failure) {
-      setError(failure.message || '文件操作未完成');
+      if (currentRefresh === refreshRef.current) setError(failure.message || '文件操作未完成');
     } finally {
       actionPending.current = false;
-      setBusyId('');
+      if (currentRefresh === refreshRef.current) {
+        setBusyId('');
+        await currentRefresh?.({ clearError: false });
+      }
     }
   };
   const actionClass = `inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${theme.button.secondary}`;
@@ -79,16 +108,17 @@ export default function DeviceRecentMedia({ deviceId, theme, showToast }) {
             <div className="min-w-0 flex-1 basis-36">
               <p className="truncate text-xs" title={item.path}>{item.name || (item.type === 'video' ? '录屏' : '截图')}</p>
               <p className={`mt-1 text-[11px] ${theme.textMuted}`}>{new Date(item.createdAt).toLocaleString()} · {formatMediaBytes(item.bytes)}{item.type === 'video' && Number.isFinite(item.durationMs) ? ` · ${formatMediaDuration(item.durationMs)}` : ''}</p>
-              {item.exists === false && <p className="mt-1 text-[11px] text-amber-500">文件已移动或删除</p>}
+              {item.availabilityError && <p className="mt-1 text-[11px] text-amber-500">{item.availabilityError}</p>}
+              {item.logAvailabilityError && <p className="mt-1 text-[11px] text-amber-500">{item.logAvailabilityError}</p>}
               {item.logTruncated && <p className="mt-1 text-[11px] text-amber-500">关联日志达到 100 MB 上限，已截断</p>}
               {item.logError && <p className="mt-1 break-words text-[11px] text-amber-500">日志抓取提示：{item.logError}</p>}
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-1">
               {busyId === item.id && <Loader2 size={13} className="animate-spin" />}
-              <button type="button" disabled={Boolean(busyId) || item.exists === false} onClick={() => act(item.id, 'open')} className={actionClass}><Play size={12} />打开</button>
+              <button type="button" disabled={Boolean(busyId) || item.available === false} onClick={() => act(item.id, 'open')} className={actionClass}><Play size={12} />打开</button>
               <button type="button" disabled={Boolean(busyId)} onClick={() => act(item.id, 'folder')} className={actionClass}><FolderOpen size={12} />目录</button>
-              {item.type === 'image' && <button type="button" disabled={Boolean(busyId) || item.exists === false} onClick={() => act(item.id, 'copy')} className={actionClass}><Copy size={12} />复制</button>}
-              {item.logPath && <button type="button" disabled={Boolean(busyId)} onClick={() => act(item.id, 'log')} className={actionClass}><FileText size={12} />日志</button>}
+              {item.type === 'image' && <button type="button" disabled={Boolean(busyId) || item.available === false} onClick={() => act(item.id, 'copy')} className={actionClass}><Copy size={12} />复制</button>}
+              {item.logPath && <button type="button" disabled={Boolean(busyId) || item.available === false || item.logAvailable === false} onClick={() => act(item.id, 'log')} className={actionClass}><FileText size={12} />日志</button>}
             </div>
           </div>)}
         </div>

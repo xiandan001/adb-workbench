@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
+import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, Star } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
 import SelectMenu from './SelectMenu';
@@ -18,7 +18,7 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   const isOnline = device.status === 'device';
   const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
   const [isEditing, setIsEditing] = useState(false);
@@ -271,7 +271,9 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
   const scrcpyLoading = isLoading(`scrcpy_${device.id}`);
 
   return (
-    <div data-accent={t.primary} data-dark={isDarkTheme(t)} onClickCapture={onSelectDevice} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
+    <div data-accent={t.primary} data-dark={isDarkTheme(t)} onClickCapture={event => {
+      if (!event.target.closest('[data-device-pin]')) onSelectDevice?.();
+    }} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
       <div className={`device-card-header p-5 border-b flex justify-between items-start ${t.header.replace('border-b', 'border-b')}`}>
         <div className="flex items-center space-x-4">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isOnline ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}` : 'bg-slate-100 text-slate-400'}`}>
@@ -305,6 +307,17 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                   title="编辑名称"
                 >
                   <Pencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  data-device-pin
+                  aria-label={isPinned ? '取消置顶' : '设为常用'}
+                  aria-pressed={Boolean(isPinned)}
+                  title={isPinned ? '取消置顶' : '设为常用，优先显示'}
+                  onClick={onTogglePin}
+                  className={`rounded p-1 transition-colors ${isPinned ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
+                >
+                  <Star size={15} fill={isPinned ? 'currentColor' : 'none'} />
                 </button>
               </div>
             )}
@@ -429,7 +442,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           </div>
           <label className={`mt-2 inline-flex items-center gap-2 text-xs ${t.textMuted}`} title="默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。">
             <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" />
-            同时抓取日志<span className="text-[11px] opacity-75">不调用 AI · 上限 100 MB</span>
+            录屏同时抓取日志<span className="text-[11px] opacity-75">不调用 AI · 上限 100 MB</span>
           </label>
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>

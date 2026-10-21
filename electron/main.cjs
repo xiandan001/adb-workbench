@@ -33,6 +33,7 @@ const artifactCenter = require('./lib/artifact-center.cjs');
 const dataMigration = require('./lib/data-migration.cjs');
 const deviceMedia = require('./lib/device-media.cjs');
 const screenRecording = require('./lib/screen-recording.cjs');
+const shortcutCapabilities = require('./lib/device-shortcut-capabilities.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
@@ -162,6 +163,7 @@ app.whenReady().then(async () => {
   artifactCenter.register(ipcMain);
   dataMigration.register(ipcMain);
   deviceMedia.register(ipcMain);
+  shortcutCapabilities.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);

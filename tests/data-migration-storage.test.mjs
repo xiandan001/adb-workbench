@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { PORTABLE_PREF_KEYS, collectMigrationPreferences, applyMigrationPreferences, readMigratedPreference } from '../src/shared/dataMigrationStorage.js';
+import { PINNED_DEVICES_KEY, readPinnedDevices } from '../src/shared/deviceDiscovery.js';
 const require = createRequire(import.meta.url);
 const backend = require('../electron/lib/data-migration-policy.cjs');
 
@@ -13,6 +14,23 @@ function storage(initial = {}) {
 
 test('renderer and backend preference allowlists agree exactly', () => {
   assert.deepEqual(PORTABLE_PREF_KEYS, backend.PORTABLE_PREF_KEYS);
+});
+
+test('device pins migrate and restore without changing the active device or unrelated preferences', () => {
+  const saved = storage({ [PINNED_DEVICES_KEY]: '["离线设备","192.168.1.2:5555"]', activeDeviceId: 'current' });
+  const exported = collectMigrationPreferences(saved);
+  assert.deepEqual(exported, { [PINNED_DEVICES_KEY]: '["离线设备","192.168.1.2:5555"]' });
+  const target = storage({ activeDeviceId: 'target-current', unrelated: 'keep' });
+  applyMigrationPreferences(backend.normalizePreferences(exported), target);
+  assert.deepEqual(readPinnedDevices(target), ['离线设备', '192.168.1.2:5555']);
+  assert.equal(target.getItem('activeDeviceId'), 'target-current');
+  assert.equal(target.getItem('unrelated'), 'keep');
+  for (const value of [null, {}, [42], [''], [' '], ['bad\u0000id'], ['x'.repeat(301)], Array(1001).fill('a')]) {
+    const preferences = { [PINNED_DEVICES_KEY]: JSON.stringify(value) };
+    assert.throws(() => applyMigrationPreferences(preferences, target));
+    assert.throws(() => backend.normalizePreferences(preferences));
+  }
+  assert.deepEqual(readPinnedDevices(target), ['离线设备', '192.168.1.2:5555']);
 });
 
 test('collect copies only supported saved preferences and propagates failures', () => {

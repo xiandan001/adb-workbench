@@ -50,7 +50,7 @@ export default function DeviceRecordingStatus({ recording, isOnline, theme, show
         {status === 'recording' ? <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" /> : <Loader2 size={13} className="animate-spin" />}
         <span>{status === 'recording' ? '录制中' : status === 'starting' ? '正在启动录屏' : status === 'stopping' ? '正在停止录屏' : '正在保存录屏，请稍候'}</span>
         {status !== 'starting' && <span className="font-mono tabular-nums">{formatMediaDuration(recordingDuration(session, now))}</span>}
-        {session.withLogs && <span className={theme.textMuted}>同时抓取日志 · 不调用 AI</span>}
+        {session.withLogs && <span className={theme.textMuted}>录屏同时抓取日志 · 不调用 AI</span>}
         {status === 'recording' && <button type="button" disabled={!isOnline || pending} onClick={recording.stop} className={`${secondary} ml-auto`}>停止并保存</button>}
       </div>}
       {saved && <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2">

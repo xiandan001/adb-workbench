@@ -4,7 +4,14 @@ const { randomUUID } = require('crypto');
 
 function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onChange = () => {}, maxItems = 500 }) {
   const indexPath = path.join(directory, 'device-media-history.json');
+  const itemLimit = Number.isInteger(maxItems) && maxItems > 0 ? Math.min(maxItems, 500) : 500;
   let queue = Promise.resolve();
+
+  function enqueue(operation) {
+    const task = queue.then(operation);
+    queue = task.catch(() => {});
+    return task;
+  }
 
   async function read() {
     try {
@@ -15,6 +22,7 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
       return data.items;
     } catch (error) {
       if (error.code === 'ENOENT') return [];
+      if (error.code === 'EACCES' || error.code === 'EPERM') throw mediaError('MEDIA_INDEX_UNAVAILABLE', '最近文件记录暂时无法读取，请检查访问权限后重试');
       throw error;
     }
   }
@@ -26,6 +34,20 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
     const stat = await fs.promises.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || await fs.promises.realpath(file) !== expected) throw new Error('文件位置已变化，请从保存目录检查');
     return { path: file, stat };
+  }
+
+  function withoutLog(item) {
+    const next = { ...item };
+    for (const key of ['logPath', 'logRealPath', 'logBytes', 'logTruncated']) delete next[key];
+    return next;
+  }
+
+  async function inspect(item, log = false) {
+    try { await resolveFile(item, log); return { available: true }; }
+    catch (error) {
+      const failure = await classifyFileError(error, log ? item.logPath : item.path, log, log ? item.logRealPath : item.realPath);
+      return { available: false, missing: failure.missing, error: failure.error.message };
+    }
   }
 
   async function save(items) {
@@ -53,59 +75,125 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
     if (input.logPath) {
       const logPath = path.resolve(input.logPath);
       if (path.dirname(logPath) !== path.dirname(file) || path.extname(logPath).toLowerCase() !== '.log') throw new Error('关联日志必须位于录屏保存目录');
-      const logStat = await fs.promises.lstat(logPath);
-      if (!logStat.isFile() || logStat.isSymbolicLink()) throw new Error('关联日志文件无效');
-      Object.assign(item, { logPath, logRealPath: await fs.promises.realpath(logPath), logBytes: logStat.size, logTruncated: input.logTruncated === true });
+      try {
+        const logStat = await fs.promises.lstat(logPath);
+        if (!logStat.isFile() || logStat.isSymbolicLink()) throw new Error('关联日志文件无效');
+        Object.assign(item, { logPath, logRealPath: await fs.promises.realpath(logPath), logBytes: logStat.size, logTruncated: input.logTruncated === true });
+      } catch (error) {
+        // A removed optional log must not prevent a successfully saved video from being indexed.
+        if (!isMissing(error)) throw error;
+        const failure = await classifyFileError(error, logPath, true, path.join(path.dirname(item.realPath), path.basename(logPath)));
+        if (!failure.missing) throw failure.error;
+      }
     }
     if (input.logError) item.logError = String(input.logError).slice(0, 1000);
     // Limit metadata only. Original screenshots, videos and logs are never deleted here.
-    const next = [item, ...items.filter(entry => entry.realPath !== item.realPath)].sort((a, b) => b.createdAt - a.createdAt).slice(0, maxItems);
+    const next = [item, ...items.filter(entry => entry.realPath !== item.realPath)].sort((a, b) => b.createdAt - a.createdAt).slice(0, itemLimit);
     await save(next);
     onChange({ deviceId: item.deviceId });
     return { ...item, exists: true };
   }
 
-  return {
-    add(input) {
-      const task = queue.then(() => addNow(input));
-      queue = task.catch(() => {});
-      return task;
-    },
-    async list({ deviceId } = {}) {
-      await queue;
-      const items = (await read()).filter(item => !deviceId || item.deviceId === deviceId).slice(0, 10);
-      return Promise.all(items.map(async item => {
-        try { await resolveFile(item); return { ...item, exists: true }; }
-        catch { return { ...item, exists: false }; }
-      }));
-    },
-    async perform({ id, action } = {}) {
-      if (!['open', 'folder', 'copy', 'log'].includes(action)) throw new Error('无效的文件操作');
-      await queue;
-      const item = (await read()).find(entry => entry.id === id);
-      if (!item) throw new Error('该文件不在最近记录中，请从保存目录查看');
+  async function listNow({ deviceId } = {}) {
+    const items = await read();
+    const retained = [];
+    const visible = [];
+    let changed = items.length > itemLimit;
+    // Reconcile before taking the visible ten so older files can fill deleted rows.
+    for (const item of items.slice(0, itemLimit)) {
+      const media = await inspect(item);
+      if (media.missing) { changed = true; continue; }
+      let next = item;
+      let log;
+      if (item.logPath) {
+        log = await inspect(item, true);
+        if (log.missing) { next = withoutLog(item); changed = true; }
+      }
+      retained.push(next);
+      if (!deviceId || item.deviceId === deviceId) visible.push({
+        ...next, exists: media.available ? true : null, available: media.available,
+        ...(!media.available ? { availabilityError: media.error } : {}),
+        ...(next.logPath ? { logAvailable: log.available, ...(!log.available ? { logAvailabilityError: log.error } : {}) } : {})
+      });
+    }
+    // Do not emit onChange from a list refresh: subscribers already receive this result.
+    if (changed) await save(retained);
+    return visible.sort((a, b) => b.createdAt - a.createdAt).slice(0, 10);
+  }
+
+  async function resolveForAction(items, item, log = false) {
+    try { return await resolveFile(item, log); }
+    catch (error) {
+      const failure = await classifyFileError(error, log ? item.logPath : item.path, log, log ? item.logRealPath : item.realPath);
+      if (failure.missing) {
+        await save(log ? items.map(entry => entry.id === item.id ? withoutLog(entry) : entry) : items.filter(entry => entry.id !== item.id));
+        onChange({ deviceId: item.deviceId });
+      }
+      throw failure.error;
+    }
+  }
+
+  async function performNow({ id, action } = {}) {
+    if (!['open', 'folder', 'copy', 'log'].includes(action)) throw new Error('无效的文件操作');
+    const items = await read();
+    const item = items.find(entry => entry.id === id);
+    if (!item) throw mediaError('MEDIA_RECORD_MISSING', '该文件不在最近记录中，请刷新列表或从保存目录查看');
+    const media = await resolveForAction(items, item);
+    if (action === 'log' && !item.logPath) throw mediaError('MEDIA_LOG_MISSING', '关联日志已移动或删除，日志入口已移除');
+    const target = action === 'log' ? await resolveForAction(items, item, true) : media;
+    try {
       if (action === 'folder') {
-        try { await resolveFile(item); shell.showItemInFolder(item.path); }
-        catch {
-          const parent = path.dirname(item.path);
-          if (await fs.promises.realpath(parent) !== path.dirname(item.realPath)) throw new Error('保存目录已变化');
-          const error = await shell.openPath(parent);
-          if (error) throw new Error(error);
-        }
+        shell.showItemInFolder(media.path);
         return;
       }
-      const target = await resolveFile(item, action === 'log');
       if (action === 'copy') {
-        if (item.type !== 'image') throw new Error('只有截图可以复制为图片');
+        if (item.type !== 'image') throw mediaError('MEDIA_ACTION_INVALID', '只有截图可以复制为图片');
         const image = nativeImage.createFromPath(target.path);
-        if (image.isEmpty()) throw new Error('截图无法读取');
+        if (image.isEmpty()) throw mediaError('MEDIA_UNREADABLE', '截图暂时无法读取，请稍后重试');
         clipboard.writeImage(image);
       } else {
         const error = await shell.openPath(target.path);
-        if (error) throw new Error(error);
+        if (error) throw mediaError('MEDIA_OPEN_FAILED', '文件暂时无法打开，请检查文件访问权限和默认打开程序');
       }
+    } catch (error) {
+      // A file may disappear after the first check but before the OS opens it.
+      await resolveForAction(items, item);
+      if (action === 'log') await resolveForAction(items, item, true);
+      throw error.code?.startsWith('MEDIA_') ? error : fileError(error, action === 'log');
     }
+  }
+
+  return {
+    add: input => enqueue(() => addNow(input)),
+    list: args => enqueue(() => listNow(args)),
+    perform: args => enqueue(() => performNow(args))
   };
+}
+
+function isMissing(error) { return error?.code === 'ENOENT' || error?.code === 'ENOTDIR'; }
+
+function mediaError(code, message) { return Object.assign(new Error(message), { code }); }
+
+async function classifyFileError(error, file, log = false, realFile = file) {
+  if (isMissing(error)) {
+    try {
+      // Junctions can leave the visible drive online while the recorded target drive is disconnected.
+      for (const rootPath of new Set([path.parse(file).root, path.parse(realFile).root])) {
+        const root = await fs.promises.stat(rootPath);
+        if (!root.isDirectory()) throw new Error('Storage root unavailable');
+      }
+    } catch {
+      return { missing: false, error: mediaError('MEDIA_STORAGE_UNAVAILABLE', '存储位置暂时不可用，请重新连接磁盘或网络位置后重试') };
+    }
+  }
+  return { missing: isMissing(error), error: fileError(error, log) };
+}
+
+function fileError(error, log = false) {
+  const subject = log ? '关联日志' : '文件';
+  if (isMissing(error)) return mediaError(log ? 'MEDIA_LOG_MISSING' : 'MEDIA_FILE_MISSING', `${subject}已移动或删除，${log ? '日志入口已移除' : '已从最近文件中移除'}`);
+  if (error?.code === 'EACCES' || error?.code === 'EPERM') return mediaError('MEDIA_ACCESS_DENIED', `${subject}暂时无法读取，请检查访问权限后重试`);
+  return mediaError('MEDIA_UNREADABLE', `${subject}暂时无法读取或位置已变化，请检查保存目录后重试`);
 }
 
 function validItem(item) {
@@ -134,7 +222,7 @@ function register(ipcMain) {
   });
   ipcMain.handle('device-media:action', async (_event, args) => {
     try { await getStore().perform(args); return { success: true }; }
-    catch (error) { return { success: false, error: error.message }; }
+    catch (error) { return { success: false, error: error.message, code: error.code || 'MEDIA_ACTION_FAILED' }; }
   });
 }
 

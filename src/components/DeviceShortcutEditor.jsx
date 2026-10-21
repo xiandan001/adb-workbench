@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Play, RotateCcw, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { BUILTIN_SHORTCUTS, defaultDeviceShortcuts, normalizeDeviceShortcuts } from '../shared/deviceNavigationShortcuts';
+import useDeviceShortcutCapabilities from '../shared/useDeviceShortcutCapabilities';
 
 export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDark, pending, onTest, onSave, onClose }) {
   const dialogRef = useRef(null);
@@ -16,6 +17,11 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
   const [error, setError] = useState('');
   const [advanced, setAdvanced] = useState(config.slots.some(slot => slot.type === 'shell'));
   const slot = draft.slots[selected];
+  const validDraft = useMemo(() => {
+    try { return normalizeDeviceShortcuts(draft); } catch { return null; }
+  }, [draft]);
+  const checks = useDeviceShortcutCapabilities(deviceId, isOnline, validDraft);
+  const selectedCheck = checks.find(check => check.id === slot.id);
   const field = `w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-800'}`;
   const muted = isDark ? 'text-[#BDC1C6]' : 'text-slate-500';
   const button = `rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`;
@@ -113,7 +119,8 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-400/10 p-3">
         <p className={`min-w-0 break-all text-xs ${muted}`}>测试目标：{deviceId}{!isOnline ? '（离线）' : ''}</p>
-        <button type="button" disabled={!isOnline || Boolean(pending)} onClick={test} className={`${button} flex items-center gap-1.5`}>{pending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}测试此按钮</button>
+        <button type="button" disabled={!isOnline || Boolean(pending) || !validDraft || selectedCheck?.status === 'unsupported'} onClick={test} className={`${button} flex items-center gap-1.5`}>{pending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}测试此按钮</button>
+        {selectedCheck && <p className={`w-full break-words text-xs ${selectedCheck.status === 'supported' ? muted : 'text-amber-600'}`}>{selectedCheck.reason}</p>}
       </div>
       {error && <p role="alert" className="break-words text-xs text-red-500">{error}</p>}
     </div>

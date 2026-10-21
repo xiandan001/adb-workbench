@@ -2,6 +2,16 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.3.6': {
+    title: 'v4.3.6',
+    date: '2026-10-21',
+    items: [
+      { type: 'improve', text: '录屏日志选项更名为“录屏同时抓取日志”' },
+      { type: 'improve', text: '最近文件自动移除已删除的截图和录屏，关联日志删除后不再显示无效入口' },
+      { type: 'feature', text: '设备快捷操作提前检查支持情况，不可用时说明原因并支持编辑替换' },
+      { type: 'feature', text: '设备列表支持按名称、型号、序列号或 IP 搜索，常用设备可置顶并保存' }
+    ]
+  },
   '4.3.5': {
     title: 'v4.3.5',
     date: '2026-10-21',

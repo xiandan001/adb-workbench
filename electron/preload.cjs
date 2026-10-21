@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   deviceMediaList: (args) => ipcRenderer.invoke('device-media:list', args),
   deviceMediaAction: (args) => ipcRenderer.invoke('device-media:action', args),
+  deviceShortcutsCheck: (args) => ipcRenderer.invoke('device-shortcuts:check', args),
   onDeviceMediaChanged: (callback) => {
     const listener = safeListener(callback);
     ipcRenderer.on('device-media:changed', listener);
