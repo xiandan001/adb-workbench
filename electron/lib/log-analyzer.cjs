@@ -264,6 +264,7 @@ function createLogAnalyzerWindow() {
 function register(ipcMain) {
   require('./log-sessions.cjs').register(ipcMain, {
     getDirectory: () => path.join(require('electron').app.getPath('userData'), 'log-analysis-sessions'),
+    trashItem: file => require('electron').shell.trashItem(file),
     restore: (session) => {
       const aiModule = require('./ai-analyze.cjs');
       if (logcatProc || aiModule.hasActiveAiRequest()) throw new Error('请先停止日志抓取和 AI 分析后再恢复会话');
@@ -340,6 +341,7 @@ function register(ipcMain) {
       rl.on('line', (line) => {
         if (logcatProc !== p) return;
         const entry = parseLogLine('realtime', line);
+        entry.deviceId = currentLogDeviceId;
         const pkg = resolvePkg(entry.pid);
         if (pkg) entry.pkg = pkg;
         appendRealtimeEntry(entry);

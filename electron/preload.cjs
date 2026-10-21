@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   adbShell: (deviceId, command) => ipcRenderer.invoke('adb:shell', { deviceId, command }),
   adbShellCancel: (deviceId) => ipcRenderer.invoke('adb:shell:cancel', { deviceId }),
   adbScreenshot: (deviceId, localPath) => ipcRenderer.invoke('adb:screenshot', { deviceId, localPath }),
+  screenshotAction: (args) => ipcRenderer.invoke('adb:screenshotAction', args),
   adbScreenRecordStart: (deviceId, remotePath) => ipcRenderer.invoke('adb:screenrecord:start', { deviceId, remotePath }),
   adbScreenRecordStop: (deviceId, localPath) => ipcRenderer.invoke('adb:screenrecord:stop', { deviceId, localPath }),
   adbScreenRecordStatus: (deviceId) => ipcRenderer.invoke('adb:screenrecord:status', { deviceId }),
@@ -122,6 +123,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logSessionSave: (payload) => ipcRenderer.invoke('logSession:save', payload),
   logSessionList: () => ipcRenderer.invoke('logSession:list'),
   logSessionLoad: (args) => ipcRenderer.invoke('logSession:load', args),
+  logSessionRename: (args) => ipcRenderer.invoke('logSession:rename', args),
+  logSessionDelete: (args) => ipcRenderer.invoke('logSession:delete', args),
   onLogAnalyzerContext: (callback) => {
     const listener = safeListener(callback);
     ipcRenderer.on('logAnalyzer:context', listener);
@@ -313,6 +316,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   artifactOpenPath: (targetPath) => ipcRenderer.invoke('artifacts:openPath', targetPath),
   artifactsDelete: (args) => ipcRenderer.invoke('artifacts:delete', args),
   artifactExport: (id) => ipcRenderer.invoke('artifacts:export', { id }),
+  artifactPreview: (args) => ipcRenderer.invoke('artifacts:preview', args),
   // Quality center: regression baselines and difference reports
   regressionListBaselines: () => ipcRenderer.invoke('regression:listBaselines'),
   regressionCaptureBaseline: (args) => ipcRenderer.invoke('regression:captureBaseline', args),

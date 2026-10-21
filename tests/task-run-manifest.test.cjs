@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { writeRunManifest } = require('../electron/lib/task-run-manifest.cjs');
+const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('../electron/lib/task-run-manifest.cjs');
 
 for (const status of ['success', 'failed', 'cancelled']) {
   test(`${status} replay writes an indexable manifest with failure evidence`, (t) => {
@@ -11,10 +11,11 @@ for (const status of ['success', 'failed', 'cancelled']) {
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const record = {
       id: `task-${status}`, scriptName: '录制流程', mode: 'replay', status,
+      ...createRunComparisonIdentity({ id: 'saved-script', steps: [{ id: 'tap', type: 'tap' }] }),
       artifactDir: directory, startedAt: '2026-10-20T00:00:00Z', endedAt: '2026-10-20T00:01:00Z',
       error: status === 'failed' ? '找不到控件' : '',
       logs: [{ at: '2026-10-20T00:00:01Z', message: '执行步骤' }],
-      deviceRuns: [{ deviceId: 'device-A', status, steps: [{ label: '点击', status, error: '找不到控件' }] }]
+      deviceRuns: [{ deviceId: 'device-A', comparisonIdentity: deviceComparisonIdentity({ roSerialno: 'device-A' }), status, steps: [{ id: 'tap', label: '点击', status, error: '找不到控件' }] }]
     };
     writeRunManifest(record);
     const result = JSON.parse(fs.readFileSync(record.runResultPath, 'utf8'));
@@ -24,5 +25,10 @@ for (const status of ['success', 'failed', 'cancelled']) {
     assert.equal(result.deviceRuns[0].steps[0].error, '找不到控件');
     assert.equal(result.artifactDir, directory);
     assert.equal(result.logs[0].message, '执行步骤');
+    assert.equal(result.scriptId, 'saved-script');
+    assert.equal(result.scriptHash, record.scriptHash);
+    assert.equal(result.comparisonVersion, 1);
+    assert.equal(result.scriptSteps[0].id, 'tap');
+    assert.equal(result.deviceRuns[0].comparisonIdentity.roSerialno.length, 64);
   });
 }

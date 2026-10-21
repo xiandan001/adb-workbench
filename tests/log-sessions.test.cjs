@@ -48,6 +48,123 @@ test('saving enforces limits and rejects missing evidence instead of truncating'
   assert.throws(() => normalizeSession({ ...fixture(), evidence: [fixture().evidence[0], fixture().evidence[0]] }), /重复/);
 });
 
+test('markers survive session round-trip and legacy sessions remain readable without markers', async t => {
+  const { directory, store } = tempStore(t);
+  const marker = { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', note: '开始黑屏', createdAt: 12345,
+    entry: { id: 'previous-log', raw: '已滚出窗口的原始日志', ts: 1000, deviceId: 'old-device', source: 'realtime' },
+    context: [{ id: 'previous-context', raw: '问题附近原文', ts: 999, deviceId: 'old-device' }] };
+  const saved = await store.save({ ...fixture(), markers: [marker] });
+  assert.deepEqual((await store.read(saved.id)).markers, [marker]);
+  assert.equal((await store.list()).sessions[0].markerCount, 1);
+  const file = path.join(directory, `${saved.id}.json`);
+  const legacy = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete legacy.markers;
+  fs.writeFileSync(file, JSON.stringify(legacy), 'utf8');
+  assert.deepEqual((await store.read(saved.id)).markers, []);
+  assert.throws(() => normalizeSession({ ...fixture(), markers: Array(501).fill(marker) }), /500/);
+  assert.throws(() => normalizeSession({ ...fixture(), markers: [{ ...marker, context: Array(12).fill(marker.entry) }] }), /11/);
+  assert.throws(() => normalizeSession({ ...fixture(), markers: [marker, marker] }), /重复/);
+});
+
+test('normal history lists use metadata, legacy and damaged caches rebuild only once', async t => {
+  const { directory, store } = tempStore(t);
+  const saved = await store.save(fixture());
+  const source = path.join(directory, `${saved.id}.json`);
+  const metadata = path.join(directory, '.metadata', `${saved.id}.json`);
+  const originalRead = fs.promises.readFile;
+  let fullReads = 0;
+  t.mock.method(fs.promises, 'readFile', async function (file, ...args) {
+    if (String(file) === source) fullReads += 1;
+    return originalRead.call(this, file, ...args);
+  });
+  await createSessionStore(directory).list();
+  assert.equal(fullReads, 0);
+  fs.unlinkSync(metadata);
+  await store.list();
+  await createSessionStore(directory).list();
+  assert.equal(fullReads, 1);
+  fs.writeFileSync(metadata, '{broken', 'utf8');
+  await store.list();
+  await store.list();
+  assert.equal(fullReads, 2);
+});
+
+test('rename preserves original data, timestamp and updates metadata; recycle delete requires confirmation', async t => {
+  const { directory, store } = tempStore(t);
+  const saved = await store.save(fixture());
+  const before = await store.read(saved.id);
+  const renamed = await store.rename(saved.id, '新的中文名称');
+  assert.equal(renamed.name, '新的中文名称');
+  assert.equal(renamed.savedAt, saved.savedAt);
+  assert.deepEqual((await store.read(saved.id)).entries, before.entries);
+  assert.deepEqual((await store.read(saved.id)).aiTurns, before.aiTurns);
+  assert.equal((await store.list()).sessions[0].name, '新的中文名称');
+  await assert.rejects(store.rename(saved.id, ''), /名称/);
+  await assert.rejects(store.rename('../../outside', 'name'), /ID/);
+  await assert.rejects(store.trash(saved.id, false), /确认/);
+  await assert.rejects(store.trash(saved.id, true), /不支持回收站/);
+  const trashed = [];
+  const recycleStore = createSessionStore(directory, { trashItem: async file => {
+    trashed.push(file);
+    fs.renameSync(file, `${file}.recycled`);
+  } });
+  await assert.rejects(recycleStore.trash('../outside', true), /ID/);
+  await recycleStore.trash(saved.id, true);
+  assert.deepEqual(trashed, [path.join(directory, `${saved.id}.json`)]);
+  assert.equal((await recycleStore.list()).sessions.length, 0);
+  assert.equal(fs.existsSync(`${trashed[0]}.recycled`), true);
+});
+
+test('failed recycle request leaves the session and metadata intact', async t => {
+  const { directory, store } = tempStore(t);
+  const saved = await store.save(fixture());
+  const recycleStore = createSessionStore(directory, { trashItem: async () => { throw new Error('recycle unavailable'); } });
+  await assert.rejects(recycleStore.trash(saved.id, true), /recycle unavailable/);
+  assert.equal((await recycleStore.list()).sessions.length, 1);
+  assert.equal((await recycleStore.read(saved.id)).name, fixture().name);
+});
+
+test('rename refuses a name that would exceed the size limit before changing the original', async t => {
+  const { directory } = tempStore(t);
+  const sourcePath = path.join(__dirname, '../electron/lib/log-sessions.cjs');
+  const module = { exports: {} };
+  // Exercise the exact production byte guard with a small cap instead of allocating a 64 MB fixture.
+  vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8').replace('64 * 1024 * 1024', '2048'), {
+    module, exports: module.exports, require, Buffer
+  }, { filename: sourcePath });
+  const store = module.exports.createSessionStore(directory);
+  const input = { ...fixture(), name: 'a' };
+  const normalized = { ...module.exports.normalizeSession(input), id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', savedAt: new Date().toISOString() };
+  input.entries[0].raw += 'x'.repeat(2048 - Buffer.byteLength(JSON.stringify(normalized), 'utf8'));
+  const saved = await store.save(input);
+  const file = path.join(directory, `${saved.id}.json`);
+  const before = fs.readFileSync(file);
+  assert.equal(before.length, 2048);
+  await assert.rejects(store.rename(saved.id, '新'.repeat(80)), /64 MB/);
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.equal((await store.read(saved.id)).name, 'a');
+});
+
+test('metadata junction cannot supply a false summary or cause external deletion', async t => {
+  const { directory, store } = tempStore(t);
+  const saved = await store.save(fixture());
+  const metadataDirectory = path.join(directory, '.metadata');
+  const outside = path.join(directory, 'unrelated-data');
+  fs.mkdirSync(outside);
+  const metadata = JSON.parse(fs.readFileSync(path.join(metadataDirectory, `${saved.id}.json`), 'utf8'));
+  metadata.session.name = 'outside fake';
+  const outsideFile = path.join(outside, `${saved.id}.json`);
+  fs.writeFileSync(outsideFile, JSON.stringify(metadata), 'utf8');
+  fs.renameSync(metadataDirectory, path.join(directory, 'original-cache'));
+  try { fs.symlinkSync(outside, metadataDirectory, 'junction'); }
+  catch (error) { if (error.code === 'EPERM') { t.skip('junction creation unavailable'); return; } throw error; }
+  assert.equal((await store.list()).sessions[0].name, fixture().name);
+  assert.equal(JSON.parse(fs.readFileSync(outsideFile, 'utf8')).session.name, 'outside fake');
+  const recycleStore = createSessionStore(directory, { trashItem: async file => fs.renameSync(file, `${file}.recycled`) });
+  await recycleStore.trash(saved.id, true);
+  assert.equal(fs.existsSync(outsideFile), true);
+});
+
 test('store rejects path traversal and lists corrupt files as errors', async t => {
   const { directory, store } = tempStore(t);
   await assert.rejects(store.read('../../outside'), /ID 无效/);

@@ -156,7 +156,7 @@ export default function SelectMenu({ id, value, options, onChange, isDark, place
               {option.value === value && <Check size={13} className="shrink-0" />}
             </button>
           ))}
-        </div>, document.body
+        </div>, triggerRef.current?.closest('dialog[open]') || document.body
       )}
     </div>
   );

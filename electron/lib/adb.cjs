@@ -7,6 +7,7 @@ const { findScrcpyPath } = require('./commands.cjs');
 const { findExecutable } = require('./android-tool-cleanup.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
+const { createScreenshotActions } = require('./screenshot-actions.cjs');
 
 // ScreenRecord: Android native screen recording via adb shell screenrecord
 const screenRecordProcs = new Map();
@@ -397,6 +398,8 @@ function stopAllShellProcs() {
 }
 
 function register(ipcMain) {
+  const screenshots = createScreenshotActions(require('electron'));
+  ipcMain.handle('adb:screenshotAction', (_event, args) => screenshots.perform(args));
   // IPC Handlers for ADB
   ipcMain.handle('adb:getDevices', async () => {
     try {
@@ -517,7 +520,7 @@ function register(ipcMain) {
   ipcMain.handle('adb:screenshot', async (event, { deviceId, localPath }) => {
     try {
       const output = await runAdbText(['-s', deviceId, 'pull', '/sdcard/screen.png', localPath]);
-      return { success: true, output };
+      return { success: true, output, ...screenshots.remember(localPath) };
     } catch (error) {
       return { success: false, error: error.message };
     }

@@ -5,6 +5,7 @@ import {
   Archive,
   CheckSquare,
   ClipboardCheck,
+  Eye,
   FileDiff,
   FileJson,
   FileText,
@@ -18,6 +19,9 @@ import {
   Wrench
 } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
+import { formatBytes, sortArtifacts } from '../shared/artifactWorkspace';
+import SelectMenu from './SelectMenu';
+import ArtifactPreview from './ArtifactPreview';
 
 const TYPE_FILTERS = [
   { id: 'all', label: '全部' },
@@ -49,6 +53,9 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [error, setError] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+  const [visibleCount, setVisibleCount] = useState(30);
+  const [previewItem, setPreviewItem] = useState(null);
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -74,7 +81,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
 
   const filteredItems = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return items
+    return sortArtifacts(items
       .filter(item => typeFilter === 'all' || item.type === typeFilter)
       .filter(item => {
         if (!keyword) return true;
@@ -86,12 +93,16 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
           item.rootPath,
           item.reportPath
         ].some(value => String(value || '').toLowerCase().includes(keyword));
-      });
-  }, [items, query, typeFilter]);
+      }), sortOrder);
+  }, [items, query, typeFilter, sortOrder]);
+
+  useEffect(() => { setVisibleCount(30); }, [query, typeFilter, sortOrder]);
 
   const selectedItems = useMemo(() => items.filter(item => selectedIds.has(item.id)), [items, selectedIds]);
   const filteredIds = useMemo(() => filteredItems.map(item => item.id), [filteredItems]);
   const selectedCount = selectedIds.size;
+  const selectedBytes = selectedItems.reduce((sum, item) => sum + (item.sizeBytes || 0), 0);
+  const unknownSizeCount = selectedItems.filter(item => !Number.isFinite(item.sizeBytes)).length;
   const filteredSelected = filteredIds.filter(id => selectedIds.has(id)).length;
   const allFilteredSelected = filteredIds.length > 0 && filteredSelected === filteredIds.length;
   const hasFilter = typeFilter !== 'all' || query.trim().length > 0;
@@ -236,7 +247,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
                 className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
               />
             </div>
-            <div className={`flex gap-1 p-1 rounded-lg border ${soft}`}>
+            <div className={`flex flex-wrap gap-1 p-1 rounded-lg border ${soft}`}>
               {TYPE_FILTERS.map(filter => (
                 <button
                   key={filter.id}
@@ -274,7 +285,9 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
               </button>
               <span className={`text-xs ${muted}`}>
                 当前 {filteredItems.length} 项，已选 {selectedCount} 项
+                {selectedCount > 0 && ` · ${formatBytes(selectedBytes)}${unknownSizeCount ? `（另 ${unknownSizeCount} 项容量未知）` : ''}`}
               </span>
+              <SelectMenu id="artifact-sort" compact value={sortOrder} onChange={setSortOrder} isDark={isDark} options={[{ value: 'newest', label: '最新优先' }, { value: 'oldest', label: '最早优先' }, { value: 'size', label: '容量最大优先' }]} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {selectedCount > 0 && (
@@ -316,7 +329,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredItems.map(item => (
+              {filteredItems.slice(0, visibleCount).map(item => (
                 <ArtifactRow
                   key={item.id}
                   item={item}
@@ -330,17 +343,20 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
                   onToggleSelect={toggleItem}
                   onDelete={(target) => deleteArtifacts([target.id], '删除产物')}
                   onOpenPath={openPath}
+                  onPreview={setPreviewItem}
                 />
               ))}
+              {visibleCount < filteredItems.length && <button type="button" onClick={() => setVisibleCount(count => count + 30)} className={`w-full py-3 rounded-lg border text-sm ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>加载更多 · 已显示 {Math.min(visibleCount, filteredItems.length)} / {filteredItems.length} 项</button>}
             </div>
           )}
         </div>
       </section>
+      {previewItem && <ArtifactPreview item={previewItem} isDark={isDark} onClose={() => setPreviewItem(null)} />}
     </div>
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath }) {
+function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview }) {
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
   return (
@@ -374,8 +390,10 @@ function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting,
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className={`text-xs ${muted}`}>
           {item.deviceId ? `设备：${item.deviceId}` : '未记录设备'} · {item.artifactCount || 0} 项
+          {' · '}{formatBytes(item.sizeBytes)}
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => onPreview(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}><Eye size={14} />预览</button>
           <button type="button" onClick={() => onExport(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}>
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
             {exporting ? '正在打包…' : '导出证据包'}

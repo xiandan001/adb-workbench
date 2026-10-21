@@ -15,10 +15,13 @@ import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import DangerConfirmModal from './components/DangerConfirmModal';
 import SelectMenu from './components/SelectMenu';
+import ScreenshotResult from './components/ScreenshotResult';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
 import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
+import { addRecentApk, readRecentApks, RECENT_APKS_KEY, saveShortcutList } from './shared/deviceShortcuts';
+import { connectWirelessDevice, historyConnectionAddress } from './shared/wirelessConnection';
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -39,6 +42,9 @@ function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [wifiIp, setWifiIp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionFormOpen, setConnectionFormOpen] = useState(false);
+  const [connectionResults, setConnectionResults] = useState({});
+  const connectingAddressesRef = useRef(new Set());
   const [scrcpySettings, setScrcpySettings] = useState({
     screenOff: false,
     stayAwake: true,
@@ -102,6 +108,7 @@ function App() {
   };
   // 截图保存路径
   const [screenshotPath, setScreenshotPath] = useState('');
+  const [latestScreenshot, setLatestScreenshot] = useState(null);
   // 录屏保存路径
   const [screenRecordPath, setScreenRecordPath] = useState('');
   // 巡检报告与证据包保存路径
@@ -121,6 +128,7 @@ function App() {
   const [deviceNames, setDeviceNames] = useState({});
   const [expandedDeviceIds, setExpandedDeviceIds] = useState(new Set());
   const [apkInstallPaths, setApkInstallPaths] = useState({});
+  const [recentApks, setRecentApks] = useState(readRecentApks);
   const [apkPushPaths, setApkPushPaths] = useState({});
   const [apkInstallResults, setApkInstallResults] = useState({});
   const [apkPushResults, setApkPushResults] = useState({});
@@ -901,7 +909,7 @@ function App() {
         if (res.success) {
           const pullRes = await window.electronAPI.adbScreenshot(deviceId, localPath);
           if (pullRes.success) {
-            showToast(`截图已保存: ${localPath}`);
+            setLatestScreenshot({ path: pullRes.path || localPath, preview: pullRes.preview || '', deviceName: deviceNames[deviceId] || deviceId });
           } else {
             showDeviceFailure(deviceId, `截图保存失败: ${pullRes.error}`);
           }
@@ -1051,6 +1059,14 @@ function App() {
     }
   };
 
+  const selectInstallApk = (deviceId, selectedPath) => {
+    setApkInstallPaths(prev => ({ ...prev, [deviceId]: selectedPath }));
+    setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
+    const next = addRecentApk(recentApks, selectedPath);
+    setRecentApks(next);
+    if (!saveShortcutList(RECENT_APKS_KEY, next)) showToast('路径已选择，但最近 APK 记录未能保存');
+  };
+
   const handleSelectApkFile = async (deviceId, forWhat) => {
     try {
       if (window.electronAPI) {
@@ -1074,7 +1090,7 @@ function App() {
           const folder = selectedPath.substring(0, selectedPath.lastIndexOf('\\') !== -1 ? selectedPath.lastIndexOf('\\') : selectedPath.lastIndexOf('/'));
           setLastSelectFolder(folder);
           if (forWhat === 'install') {
-            setApkInstallPaths(prev => ({ ...prev, [deviceId]: selectedPath }));
+            selectInstallApk(deviceId, selectedPath);
           } else {
             setApkPushPaths(prev => ({ ...prev, [deviceId]: selectedPath }));
           }
@@ -1224,40 +1240,31 @@ function App() {
     }
   };
 
+  const connectDevice = async (address, historyEntry) => {
+    const target = address.trim();
+    if (!target || connectingAddressesRef.current.has(target)) return false;
+    connectingAddressesRef.current.add(target);
+    setConnectionResults(prev => ({ ...prev, [target]: { status: 'loading', message: '正在连接…' } }));
+    try {
+      const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
+      if (result.history) setConnectionHistory(result.history);
+      setConnectionResults(prev => ({ ...prev, [target]: { status: result.success ? 'success' : 'error', message: result.message } }));
+      showToast(result.message);
+      return result.success;
+    } finally {
+      connectingAddressesRef.current.delete(target);
+    }
+  };
+
   const handleWifiConnect = async (e) => {
     e.preventDefault();
-    if (!wifiIp.trim()) return;
-
+    if (isConnecting || !wifiIp.trim()) return;
     setIsConnecting(true);
     try {
-      if (window.electronAPI) {
-        const res = await window.electronAPI.adbConnect(wifiIp.trim());
-        if (res.success) {
-          showToast(`连接成功: ${res.message}`);
-          setWifiIp('');
-          fetchDevices();
-          // 保存到历史记录
-          await window.electronAPI.saveConnectionHistory({
-            deviceId: wifiIp.trim(),
-            deviceName: wifiIp.trim(),
-            ip: wifiIp.trim(),
-            type: 'wifi'
-          });
-          // 刷新历史记录
-          const historyResult = await window.electronAPI.loadConnectionHistory();
-          if (historyResult.success) {
-            setConnectionHistory(historyResult.data);
-          }
-        } else {
-          showToast(`连接失败: ${res.error}`);
-        }
-      } else {
-        showToast(`模拟 Wi-Fi 连接到: ${wifiIp}`);
+      if (await connectDevice(wifiIp)) {
         setWifiIp('');
-        fetchDevices();
+        setConnectionFormOpen(false);
       }
-    } catch (err) {
-      showToast(`网络请求错误: ${err.message}`);
     } finally {
       setIsConnecting(false);
     }
@@ -1305,6 +1312,8 @@ function App() {
   const t = theme || themes.default;
   const isDark = isDarkTheme(t);
   const activeDevice = devices.find(device => device.id === activeDeviceId);
+  const hasOnlineDevice = devices.some(device => device.status === 'device');
+  const showConnectionForm = connectionFormOpen || !hasOnlineDevice;
   const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
   const settingsNavShellClass = isDarkTheme(t)
     ? 'bg-[#202124] border-[#3E4145]/80'
@@ -1378,6 +1387,7 @@ function App() {
           {toast}
         </div>
       )}
+      {latestScreenshot && <ScreenshotResult key={latestScreenshot.path} screenshot={latestScreenshot} theme={t} onClose={() => setLatestScreenshot(null)} />}
       <GlobalCommandPalette
         open={commandPaletteOpen}
         commands={globalCommands}
@@ -1759,13 +1769,16 @@ function App() {
           {activeTab === 'devices' && (
             <>
               {/* Wi-Fi Connect Section */}
-              <div className={`mb-6 lg:mb-8 p-4 lg:p-5 rounded-xl border shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-                <div className="min-w-0 w-full xl:w-auto">
+              <div className={`mb-4 rounded-xl border shadow-sm ${showConnectionForm ? 'p-4' : 'px-4 py-2.5'} ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h3 className={`text-base lg:text-lg font-semibold flex items-center gap-2 whitespace-nowrap ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                      <Wifi size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
-                      Wi-Fi 无线连接
+                    <h3 className={`text-sm font-semibold flex items-center gap-2 whitespace-nowrap ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
+                      <Wifi size={17} className="text-emerald-500" />
+                      {hasOnlineDevice ? '设备连接' : '连接第一台设备'}
                     </h3>
+                    {!showConnectionForm && <span className={`text-xs ${t.textMuted}`}>{devices.filter(device => device.status === 'device').length} 台在线</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setActiveTab('history')}
@@ -1778,15 +1791,24 @@ function App() {
                         {connectionHistory.length}
                       </span>
                     </button>
+                    {hasOnlineDevice && <button
+                      type="button"
+                      aria-expanded={showConnectionForm}
+                      aria-controls="wireless-connection-form"
+                      onClick={() => setConnectionFormOpen(prev => !prev)}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${t.button.secondary}`}
+                    >{showConnectionForm ? '收起' : '连接设备'}</button>}
                   </div>
-                  <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>输入设备的 IP 地址和端口 (例如: 192.168.1.100:5555)</p>
                 </div>
+                {showConnectionForm && <div id="wireless-connection-form" className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center">
+                <p className={`flex-1 text-xs leading-relaxed ${t.textMuted}`}>{hasOnlineDevice ? '通过 Wi-Fi 连接另一台设备。' : 'USB：连接设备并开启 USB 调试；Wi-Fi：输入设备的 IP 地址和端口。'}<span className="block">地址示例：192.168.1.100:5555</span></p>
                 <form onSubmit={handleWifiConnect} className="flex w-full xl:w-auto gap-2">
                   <input
                     type="text"
                     value={wifiIp}
                     onChange={(e) => setWifiIp(e.target.value)}
                     placeholder="IP 地址:端口"
+                    aria-label="Wi-Fi 设备地址"
                     className={`min-w-0 flex-1 xl:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
                   />
                   <button
@@ -1797,6 +1819,7 @@ function App() {
                     {isConnecting ? '连接中...' : '连接'}
                   </button>
                 </form>
+                </div>}
               </div>
 
               <div className="grid gap-6 grid-cols-1 xl:grid-cols-2">
@@ -1854,6 +1877,8 @@ function App() {
                         });
                       }}
                       onSelectApkForInstall={() => handleSelectApkFile(device.id, 'install')}
+                      recentApks={recentApks}
+                      onSelectRecentApk={(path) => selectInstallApk(device.id, path)}
                       onSelectApkForPush={() => handleSelectApkFile(device.id, 'push')}
                       onInstallApk={() => handleInstallApk(device.id)}
                       onPushApk={() => handlePushApk(device.id)}
@@ -1994,7 +2019,10 @@ function App() {
                       const lockedHistoryCount = isVipOrLoading ? 0 : Math.max(0, connectionHistory.length - FREE_HISTORY_LIMIT);
                       return (
                         <>
-                          {visibleHistory.map((item) => (
+                          {visibleHistory.map((item) => {
+                            const address = historyConnectionAddress(item);
+                            const connectionResult = connectionResults[address];
+                            return (
                       <div
                         key={item.id}
                         className={`p-4 rounded-xl border transition-all hover:shadow-md group ${isDarkTheme(t) ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
@@ -2035,18 +2063,18 @@ function App() {
                         </div>
                         <div className={`mt-3 pt-3 border-t flex gap-2 ${isDarkTheme(t) ? 'border-[#5F6368]' : 'border-slate-200'}`}>
                           <button
-                            onClick={() => {
-                              setWifiIp(item.ip || item.deviceId);
-                              setActiveTab('devices');
-                              showToast('已填入 IP，请点击连接');
-                            }}
-                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''}`}
+                            type="button"
+                            onClick={() => connectDevice(address, item)}
+                            disabled={!address || connectionResult?.status === 'loading'}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''}`}
                           >
-                            连接
+                            {connectionResult?.status === 'loading' && <Loader2 size={14} className="animate-spin" />}
+                            {!address ? 'USB 设备请重新插拔' : connectionResult?.status === 'loading' ? '连接中…' : '连接'}
                           </button>
                         </div>
+                        {connectionResult && <p role={connectionResult.status === 'error' ? 'alert' : 'status'} className={`mt-2 break-words text-xs ${connectionResult.status === 'error' ? 'text-red-500' : connectionResult.status === 'success' ? 'text-emerald-500' : t.textMuted}`}>{connectionResult.message}</p>}
                       </div>
-                    ))}
+                    ); })}
                     {lockedHistoryCount > 0 && (
                       <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                         <Lock size={18} className="text-amber-400" />

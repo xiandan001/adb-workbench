@@ -2,6 +2,20 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.3.0': {
+    title: 'v4.3.0',
+    date: '2026-10-21',
+    items: [
+      { type: 'improve', text: '截图后可直接预览、复制图片和打开保存位置，预览 10 秒后自动关闭' },
+      { type: 'improve', text: '精简已连接状态下的首页布局，历史设备支持直接重连并显示连接结果' },
+      { type: 'feature', text: '新增最近使用的 APK 和常用应用收藏，方便重复安装和日常调试' },
+      { type: 'improve', text: '日志历史会话支持搜索、日期筛选、重命名和回收站删除，提升历史记录加载效率' },
+      { type: 'feature', text: '日志新增问题标记，可添加备注、查看当时上下文并随会话保存' },
+      { type: 'feature', text: '任务中心新增两次回放对比，核对脚本和设备后查看失败变化、耗时和证据' },
+      { type: 'improve', text: '产物中心支持查询更早记录、按日期或容量排序、查看所选容量及直接预览报告、数据和图片' },
+      { type: 'fix', text: '修复弹窗内自定义下拉菜单的显示和点击问题' }
+    ]
+  },
   '4.2.5': {
     title: 'v4.2.5',
     date: '2026-10-20',

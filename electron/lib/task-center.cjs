@@ -1,5 +1,5 @@
 // Task center: replay scripts, multi-device task queue, and execution history.
-const { writeRunManifest } = require('./task-run-manifest.cjs');
+const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
 
 const { app } = require('electron');
 const { Worker } = require('worker_threads');
@@ -1693,6 +1693,7 @@ function createTask(script, deviceIds, sender, args) {
     id,
     script: normalizedScript,
     scriptName: normalizedScript.name,
+    comparison: createRunComparisonIdentity(normalizedScript, args),
     sender,
     status: 'queued',
     createdAt: new Date().toISOString(),
@@ -1749,6 +1750,7 @@ function publicTask(task) {
     id: task.id,
     mode: task.script?.mode || 'replay',
     scriptName: task.scriptName,
+    ...(task.comparison || {}),
     status: task.status,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
@@ -1767,6 +1769,7 @@ function publicTask(task) {
     logs: (task.logs || []).slice(-80),
     deviceRuns: (task.deviceRuns || []).map(run => ({
       deviceId: run.deviceId,
+      comparisonIdentity: deviceComparisonIdentity(run.deviceIdentity),
       status: run.status,
       startedAt: run.startedAt,
       endedAt: run.endedAt,

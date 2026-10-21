@@ -15,7 +15,8 @@ function TaskCenterQuickStart({
   onImport,
   onOpenScript,
   onOpenAdvanced,
-  onOpenTask
+  onOpenTask,
+  onCompare
 }) {
   const isDark = isDarkTheme(theme);
   const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
@@ -123,7 +124,10 @@ function TaskCenterQuickStart({
         </section>
 
         <section className={'rounded-xl border p-5 ' + panelClass}>
-          <h4 className={'font-semibold ' + textClass}>最近运行</h4>
+          <div className="flex items-center justify-between gap-3">
+            <h4 className={'font-semibold ' + textClass}>最近运行</h4>
+            {history.length > 1 && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">比较两次运行</button>}
+          </div>
           <div className="mt-3 space-y-2">
             {recentHistory.length === 0 ? (
               <p className={'py-6 text-center text-sm ' + mutedClass}>暂无运行记录</p>

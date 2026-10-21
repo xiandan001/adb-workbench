@@ -4,15 +4,15 @@ const { app, shell, dialog, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { exportArtifact } = require('./artifact-export.cjs');
+const { artifactDetails, previewArtifact } = require('./artifact-preview.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
-const MAX_ITEMS = 160;
 
 function register(ipcMain) {
   ipcMain.handle('artifacts:list', async () => {
     try {
-      const items = await listArtifacts();
+      const items = await listArtifacts({ measure: true });
       return { ok: true, items };
     } catch (error) {
       return { ok: false, error: error.message, items: [] };
@@ -25,10 +25,20 @@ function register(ipcMain) {
     return error ? { ok: false, error } : { ok: true };
   });
 
+  ipcMain.handle('artifacts:preview', async (event, { id, name } = {}) => {
+    try {
+      const item = (await listArtifacts()).find(entry => entry.id === id);
+      if (!item) throw new Error('产物已不存在，请刷新列表后重试');
+      return { ok: true, ...await (name ? previewArtifact(item, name) : artifactDetails(item)) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('artifacts:delete', async (event, args) => {
     try {
       const result = await deleteArtifacts(args);
-      return { ok: true, ...result, items: await listArtifacts() };
+      return { ok: true, ...result, items: await listArtifacts({ measure: true }) };
     } catch (error) {
       return { ok: false, error: error.message, deleted: [], failed: [] };
     }
@@ -53,7 +63,7 @@ function register(ipcMain) {
   });
 }
 
-async function listArtifacts() {
+async function listArtifacts({ measure = false } = {}) {
   const settings = readSettings();
   const userData = app.getPath('userData');
   const buckets = [];
@@ -73,14 +83,24 @@ async function listArtifacts() {
     path.join(userData, 'device-guard')
   ])));
 
-  return buckets
+  const items = buckets
     .filter(Boolean)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
-    .slice(0, MAX_ITEMS);
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  // Bound concurrent filesystem work, but never hide older results from search/delete/export.
+  if (!measure) return items;
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      try { item.sizeBytes = (await artifactDetails(item)).sizeBytes; }
+      catch { item.sizeBytes = null; }
+    }
+  }));
+  return items;
 }
 
 async function scanTroubleshooting(baseDir) {
-  const dirs = await recentDirectories(baseDir, 60);
+  const dirs = await recentDirectories(baseDir);
   return Promise.all(dirs.map(async (dir) => {
     const summaryPath = path.join(dir, 'troubleshooting-summary.json');
     const reportPath = path.join(dir, 'troubleshooting-report.md');
@@ -108,7 +128,7 @@ async function scanTroubleshooting(baseDir) {
 
 async function scanInspection(baseDirs) {
   const allDirs = [];
-  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 70));
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir));
   return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'inspection-report.md');
     const summaryPath = path.join(dir, 'summary.json');
@@ -140,7 +160,7 @@ async function scanInspection(baseDirs) {
 async function scanPerformance(baseDirs) {
   const items = [];
   for (const baseDir of baseDirs) {
-    const files = await recentFiles(baseDir, 80);
+    const files = await recentFiles(baseDir);
     for (const file of files) {
       const name = path.basename(file);
       if (!/^performance(?:-report)?-.*\.(md|json)$/i.test(name)) continue;
@@ -169,7 +189,7 @@ async function scanPerformance(baseDirs) {
 
 async function scanTaskCenter(baseDirs) {
   const allDirs = [];
-  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir));
   return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'stress-report.md');
     const replayPath = path.join(dir, 'run-result.json');
@@ -199,7 +219,7 @@ async function scanTaskCenter(baseDirs) {
 
 async function scanRegression(baseDirs) {
   const allDirs = [];
-  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir));
   return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'regression-report.md');
     const resultPath = path.join(dir, 'regression-result.json');
@@ -228,7 +248,7 @@ async function scanRegression(baseDirs) {
 
 async function scanDeviceGuard(baseDirs) {
   const allDirs = [];
-  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir, 80));
+  for (const baseDir of baseDirs) allDirs.push(...await recentDirectories(baseDir));
   return Promise.all(allDirs.map(async (dir) => {
     const reportPath = path.join(dir, 'device-guard-report.md');
     const resultPath = path.join(dir, 'device-guard-result.json');
@@ -254,7 +274,7 @@ async function scanDeviceGuard(baseDirs) {
   }));
 }
 
-async function recentDirectories(baseDir, limit) {
+async function recentDirectories(baseDir) {
   if (!exists(baseDir)) return [];
   const entries = await fs.promises.readdir(baseDir, { withFileTypes: true }).catch(() => []);
   const dirs = [];
@@ -264,7 +284,7 @@ async function recentDirectories(baseDir, limit) {
     const stat = await safeStat(fullPath);
     dirs.push({ path: fullPath, time: stat?.mtime?.getTime() || 0 });
   }
-  return dirs.sort((a, b) => b.time - a.time).slice(0, limit).map(item => item.path);
+  return dirs.sort((a, b) => b.time - a.time).map(item => item.path);
 }
 
 async function deleteArtifacts(args) {
@@ -312,7 +332,7 @@ async function deleteArtifacts(args) {
   return { deleted, failed };
 }
 
-async function recentFiles(baseDir, limit) {
+async function recentFiles(baseDir) {
   if (!exists(baseDir)) return [];
   const entries = await fs.promises.readdir(baseDir, { withFileTypes: true }).catch(() => []);
   const files = [];
@@ -322,7 +342,7 @@ async function recentFiles(baseDir, limit) {
     const stat = await safeStat(fullPath);
     files.push({ path: fullPath, time: stat?.mtime?.getTime() || 0 });
   }
-  return files.sort((a, b) => b.time - a.time).slice(0, limit).map(item => item.path);
+  return files.sort((a, b) => b.time - a.time).map(item => item.path);
 }
 
 function readSettings() {

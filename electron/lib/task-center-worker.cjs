@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { writeRunManifest } = require('./task-run-manifest.cjs');
+const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
 
 let adbPath = workerData?.adbPath || 'adb';
 const defaultArtifactBaseDir = workerData?.defaultArtifactBaseDir || '';
@@ -105,6 +105,7 @@ async function handleWorkerMessage(message) {
 
 function prepareTaskForRun(source) {
   const task = source && typeof source === 'object' ? source : {};
+  task.comparison = createRunComparisonIdentity(task.script, task);
   task.cancelled = task.cancelled === true;
   task.currentProc = null;
   task.procs = new Set();
@@ -1589,6 +1590,7 @@ function publicTask(task) {
     id: task.id,
     mode: task.script?.mode || 'replay',
     scriptName: task.scriptName,
+    ...(task.comparison || {}),
     status: task.status,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
@@ -1610,6 +1612,7 @@ function publicTask(task) {
       deviceId: run.deviceId,
       originalDeviceId: run.originalDeviceId || run.deviceId,
       previousDeviceIds: Array.isArray(run.previousDeviceIds) ? run.previousDeviceIds.slice(-5) : [],
+      comparisonIdentity: deviceComparisonIdentity(run.deviceIdentity),
       status: run.status,
       startedAt: run.startedAt,
       endedAt: run.endedAt,

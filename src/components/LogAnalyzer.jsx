@@ -1,12 +1,14 @@
 // H5: 导入 memo 用于 LogRow 性能优化
 import { useCallback, useEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
-import { FolderOpen, Play, Square, Trash2, Download, Copy, RefreshCw, Terminal, Filter, BarChart3, HelpCircle, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, AlertTriangle, Zap, ShieldCheck, Search, Brain, CheckCircle, Layers, ChevronDown, Smartphone, Lock } from 'lucide-react';
+import { FolderOpen, Play, Square, Trash2, Download, Copy, RefreshCw, Terminal, Filter, BarChart3, HelpCircle, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, AlertTriangle, Zap, ShieldCheck, Search, Brain, CheckCircle, Layers, ChevronDown, Smartphone, Lock, BookmarkPlus } from 'lucide-react';
 import { filterEntries, countByLevel } from '../shared/filter';
 import { isDarkTheme } from '../shared/theme';
 import { captureLogEvidence, fingerprintLogLines, normalizeLogBuffers, normalizeLogFilter } from '../shared/logWorkspace';
 import LogFilterPresets from './LogFilterPresets';
 import LogSessionManager from './LogSessionManager';
 import LogEvidence from './LogEvidence';
+import LogMarkers from './LogMarkers';
+import { captureLogMarker, logEntryIdentity, MAX_LOG_MARKERS } from '../shared/logMarkers';
 // 日志诊断规则库面板
 import DiagnosticRuleLibrary from './DiagnosticRuleLibrary';
 
@@ -96,6 +98,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [sourceLabel, setSourceLabel] = useState('');
   const [captureDeviceId, setCaptureDeviceId] = useState('');
   const [evidence, setEvidence] = useState([]);
+  const [markers, setMarkers] = useState([]);
+  const [markerDraft, setMarkerDraft] = useState(null);
+  const [locatedMarkerIdentity, setLocatedMarkerIdentity] = useState('');
+  const markerIdentities = useMemo(() => new Set(markers.map(marker => logEntryIdentity(marker.entry))), [markers]);
+  const markerEntryIds = useMemo(() => new Set(markers.map(marker => marker.entry.id)), [markers]);
   const evidenceByRef = useMemo(() => new Map(evidence.map(entry => [entry.ref, entry])), [evidence]);
   const [aiHistoryReadOnly, setAiHistoryReadOnly] = useState(false);
   const [restoredSessionName, setRestoredSessionName] = useState('');
@@ -230,6 +237,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setTruncated(session.truncated);
     applyFilterPreset(session);
     setEvidence(session.evidence);
+    setMarkers(session.markers || []);
+    setMarkerDraft(null);
+    setLocatedMarkerIdentity('');
     aiTurnsRef.current = session.aiTurns;
     setAiTurns(session.aiTurns);
     aiContentRef.current = '';
@@ -347,6 +357,29 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, [entries, deferredFilter, smartSearchResult, smartSearching, smartSearchIncremental]);
 
   const counts = useMemo(() => countByLevel(filtered), [filtered]);
+
+  const addMarker = useCallback((entry) => {
+    if (markers.length >= MAX_LOG_MARKERS) {
+      setNote('问题标记已达 500 个上限，请保存会话后再整理标记；未丢弃任何标记');
+      return;
+    }
+    setMarkerDraft(captureLogMarker(entry, entries, captureDeviceId, '问题标记', crypto.randomUUID()));
+  }, [markers.length, entries, captureDeviceId]);
+
+  function locateMarker(marker) {
+    const identity = logEntryIdentity(marker.entry);
+    const index = filtered.findIndex(entry => entry.id === marker.entry.id && logEntryIdentity(entry, captureDeviceId) === identity);
+    if (index < 0) return '原日志不在当前视图中，可能被过滤或已超过显示上限。下方仍保留标记时的上下文；可关闭窗口调整过滤条件后再定位。';
+    const scroll = logScrollRef.current;
+    if (!scroll) return '日志视图尚未就绪，请稍后再试。';
+    autoScrollRef.current = false;
+    if (logAutoScrollRafRef.current != null) cancelAnimationFrame(logAutoScrollRafRef.current);
+    logAutoScrollRafRef.current = null;
+    scroll.scrollTop = Math.max(0, index * LOG_ROW_HEIGHT - scroll.clientHeight / 3);
+    syncLogViewport(scroll.scrollTop, scroll.clientHeight);
+    setLocatedMarkerIdentity(identity);
+    return true;
+  }
 
   const syncLogViewport = useCallback((scrollTop, height) => {
     pendingLogViewportRef.current = { scrollTop, height };
@@ -878,7 +911,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     loadedEntryCountRef.current = 0;
     setTruncated(false);
     // UX1: 操作反馈，3 秒后自动清除
-    setNote('已清空日志');
+    setNote(markers.length ? '已清空日志；问题标记及冻结的上下文仍保留，可保存到会话' : '已清空日志');
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
     noteTimerRef.current = setTimeout(() => setNote(undefined), 3000);
     // UX2: 清空日志后同步重置自动诊断状态，避免 toast 残留旧诊断结果
@@ -1470,14 +1503,16 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             isDark={isDark}
             disabled={running || aiAnalyzing || smartSearching || loading}
             entryCount={entries.length}
+            markerCount={markers.length}
             truncated={truncated}
             getSnapshot={() => ({
               entries, source, sourceLabel, deviceId: captureDeviceId, filter: { ...filter, text: filterTextInput || undefined },
-              buffers, aiTurns: aiTurnsRef.current, evidence, truncated
+              buffers, aiTurns: aiTurnsRef.current, evidence, markers, truncated
             })}
             onRestore={restoreSession}
             onMessage={setNote}
           />
+          <LogMarkers markers={markers} onChange={setMarkers} draft={markerDraft} onDismissDraft={() => setMarkerDraft(null)} isDark={isDark} onLocate={locateMarker} />
           <div className="flex-1" />
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
@@ -1938,7 +1973,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                       entry={entry}
                       isDark={isDark}
                       colWidths={colWidths}
-                      highlighted={smartSearchMatchedIds.has(entry.id)}
+                      highlighted={smartSearchMatchedIds.has(entry.id) || (locatedMarkerIdentity && markerEntryIds.has(entry.id) && locatedMarkerIdentity === logEntryIdentity(entry, captureDeviceId))}
+                      marked={markerEntryIds.has(entry.id) && markerIdentities.has(logEntryIdentity(entry, captureDeviceId))}
+                      onMark={addMarker}
                     />
                   ))}
                 </div>
@@ -2578,7 +2615,7 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
 }
 
 // H5: 使用 React.memo 避免不必要的重渲染（仅当 props 变化时才重新渲染）
-const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted }) {
+const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted, marked, onMark }) {
   const lvl = entry.level ?? 'V';
   const tag = entry.tag ?? '';
   const pkg = entry.pkg ?? '';
@@ -2600,8 +2637,9 @@ const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted }) {
       onDoubleClick={() => navigator.clipboard.writeText(entry.raw)}
       title={entry.raw}
     >
-      <span className={`truncate ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-        {fmtTs(entry.ts)}
+      <span className={`flex min-w-0 items-center gap-1 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
+        <button type="button" aria-label={`标记日志 ${fmtTs(entry.ts)}`} title={marked ? '已标记，可添加另一条备注' : '标记问题发生的位置'} onDoubleClick={event => event.stopPropagation()} onClick={() => onMark(entry)} className={`shrink-0 rounded p-0.5 hover:bg-emerald-500/15 focus-visible:outline-emerald-500 ${marked ? 'text-emerald-500' : 'hover:text-emerald-500'}`}><BookmarkPlus size={12} /></button>
+        <span className="truncate">{fmtTs(entry.ts)}</span>
       </span>
       <span className={`text-center font-bold text-xs rounded px-1 ${levelBgColors[lvl]} ${levelColors[lvl]}`}>
         {lvl}

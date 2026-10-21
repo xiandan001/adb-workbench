@@ -18,6 +18,7 @@ import TaskCenterQuickStart from './TaskCenterQuickStart';
 import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
 import TaskCenterDraftDialog from './TaskCenterDraftDialog';
+import TaskRunComparisonDialog from './TaskRunComparisonDialog';
 import {
   AlertCircle,
   ArrowLeft,
@@ -146,6 +147,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const [selectedDeviceIds, setSelectedDeviceIds] = useState([]);
   const [activeTasks, setActiveTasks] = useState([]);
   const [history, setHistory] = useState([]);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [recorder, setRecorder] = useState(createRecorderState());
@@ -1059,6 +1061,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           scripts={scripts}
           activeTasks={activeTasks}
           history={history}
+          onCompare={() => setComparisonOpen(true)}
           onRecord={startRecording}
           onImport={importStressScript}
           onOpenScript={openScriptEditor}
@@ -1318,6 +1321,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           />
           <TaskList
             title="运行历史"
+            onCompare={history.length > 1 ? () => setComparisonOpen(true) : null}
             tasks={history}
             empty="暂无运行历史"
             theme={t}
@@ -1348,6 +1352,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         />
       )}
       {selectedTask && <TaskCenterResultDrawer task={selectedTask} theme={t} onClose={() => setSelectedTaskId('')} onCancel={cancelTask} onOpenPath={openTaskPath} />}
+      {comparisonOpen && <TaskRunComparisonDialog history={history} theme={t} onClose={() => setComparisonOpen(false)} onOpenPath={openTaskPath} />}
       {pendingDraftAction && (
         <TaskCenterDraftDialog
           name={draft.name}
@@ -2714,7 +2719,7 @@ function renderStepFields(step, onChange, isDark) {
   );
 }
 
-function TaskList({ title, tasks, empty, theme, onCancel, onClear, onOpenPath, onOpenTask }) {
+function TaskList({ title, tasks, empty, theme, onCancel, onClear, onCompare, onOpenPath, onOpenTask }) {
   const isDark = isDarkTheme(theme);
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
@@ -2722,7 +2727,10 @@ function TaskList({ title, tasks, empty, theme, onCancel, onClear, onOpenPath, o
     <div className={`rounded-xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
       <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
         <div className={`font-semibold ${text}`}>{title}</div>
-        {onClear && <button onClick={onClear} className="text-xs text-red-400 hover:underline">清空</button>}
+        <div className="flex items-center gap-3">
+          {onCompare && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">比较两次运行</button>}
+          {onClear && <button onClick={onClear} className="text-xs text-red-400 hover:underline">清空</button>}
+        </div>
       </div>
       <div className="max-h-[440px] overflow-y-auto p-3 space-y-3">
         {tasks.length === 0 ? (

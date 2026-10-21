@@ -45,4 +45,19 @@ test('replay results are indexed and export accepts only a current artifact ID',
   const cancelled = await handlers.get('artifacts:export')({ sender: {} }, { id: result.items[0].id });
   assert.deepEqual(cancelled, { ok: true, cancelled: true });
   assert.equal(dialogCalls, 1);
+  // Every historical record must remain searchable, previewable and exportable.
+  for (let index = 0; index < 165; index++) {
+    const directory = path.join(root, 'task-center-artifacts', `older-${index}`);
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, 'run-result.json'), JSON.stringify({ scriptName: `Older ${index}`, endedAt: '2020-01-01T00:00:00Z' }));
+  }
+  const historical = await handlers.get('artifacts:list')();
+  assert.equal(historical.items.length, 166);
+  assert.ok(historical.items.every(item => item.sizeBytes > 0));
+  const oldest = historical.items.at(-1);
+  const preview = await handlers.get('artifacts:preview')({}, { id: oldest.id, name: 'run-result.json' });
+  assert.equal(preview.ok, true);
+  assert.ok(preview.content.includes('Older'));
+  assert.equal((await handlers.get('artifacts:preview')({}, { id: 'unknown', name: 'run-result.json' })).ok, false);
+  assert.equal((await handlers.get('artifacts:export')({ sender: {} }, { id: oldest.id })).cancelled, true);
 });

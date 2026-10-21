@@ -24,14 +24,17 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Star,
   Trash2,
   Upload,
   XCircle
 } from 'lucide-react';
 import DangerConfirmModal from './DangerConfirmModal';
+import SelectMenu from './SelectMenu';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
 import { executePersistedPackageBatch, readPackageBatchResult, storePackageBatchResult, PACKAGE_BATCH_RESULT_EVENT } from '../shared/packageBatchStore';
+import { FAVORITE_PACKAGES_EVENT, FAVORITE_PACKAGES_KEY, filterPackages, readFavoritePackages, saveShortcutList } from '../shared/deviceShortcuts';
 
 function OperationResult({ isDark, loading, loadingText, result }) {
   const status = loading ? 'loading' : result?.status;
@@ -62,6 +65,8 @@ function PackageManagerPanel({
   onInspectApplication,
   onViewApplicationLogs,
   onSelectApkForInstall,
+  recentApks = [],
+  onSelectRecentApk,
   onSelectApkForPush,
   onInstallApk,
   onPushApk,
@@ -86,6 +91,8 @@ function PackageManagerPanel({
   const [packages, setPackages] = useState([]);
   const [query, setQuery] = useState('');
   const [showSystem, setShowSystem] = useState(false);
+  const [favoritePackages, setFavoritePackages] = useState(readFavoritePackages);
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -136,12 +143,7 @@ function PackageManagerPanel({
   const isLoading = (key) => operationLoading?.[key];
   const packageCount = packages.length;
   const userPackageCount = packages.filter(item => !item.system).length;
-  const filteredPackages = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    return packages
-      .filter(item => showSystem || !item.system)
-      .filter(item => !text || item.packageName.toLowerCase().includes(text) || item.apkName.toLowerCase().includes(text));
-  }, [packages, query, showSystem]);
+  const filteredPackages = useMemo(() => filterPackages(packages, { query, showSystem, onlyFavorites, favorites: favoritePackages }), [packages, query, showSystem, onlyFavorites, favoritePackages]);
   const visiblePackageNames = useMemo(() => filteredPackages.map(item => item.packageName), [filteredPackages]);
   const selectedCount = selectedPackageNames.size;
   const allVisibleSelected = visiblePackageNames.length > 0 && visiblePackageNames.every(name => selectedPackageNames.has(name));
@@ -149,6 +151,27 @@ function PackageManagerPanel({
   useEffect(() => {
     showToastRef.current = showToast;
   }, [showToast]);
+
+  useEffect(() => {
+    const refreshFavorites = () => setFavoritePackages(readFavoritePackages());
+    window.addEventListener(FAVORITE_PACKAGES_EVENT, refreshFavorites);
+    window.addEventListener('storage', refreshFavorites);
+    return () => {
+      window.removeEventListener(FAVORITE_PACKAGES_EVENT, refreshFavorites);
+      window.removeEventListener('storage', refreshFavorites);
+    };
+  }, []);
+
+  const toggleFavorite = (packageName) => {
+    const current = readFavoritePackages();
+    const next = current.includes(packageName) ? current.filter(name => name !== packageName) : [...current, packageName];
+    if (!saveShortcutList(FAVORITE_PACKAGES_KEY, next)) {
+      reportFailure('收藏未能保存，请检查本地存储空间');
+      return;
+    }
+    setFavoritePackages(next);
+    window.dispatchEvent(new Event(FAVORITE_PACKAGES_EVENT));
+  };
 
   useEffect(() => {
     try {
@@ -521,6 +544,19 @@ function PackageManagerPanel({
                     安装
                   </button>
                 </div>
+                {recentApks.length > 0 && <div className="mt-2">
+                  <SelectMenu
+                    id={`recent-apks-${device.id}`}
+                    value={recentApks.includes(apkInstallPath) ? apkInstallPath : ''}
+                    options={recentApks.map(path => ({ value: path, label: path }))}
+                    onChange={onSelectRecentApk}
+                    placeholder="最近使用的 APK"
+                    isDark={isDark}
+                    compact
+                    disabled={isLoading(`install_${device.id}`)}
+                  />
+                  <p className={`mt-1 text-[11px] ${t.textMuted}`}>最近 5 个 APK · 选择后仅填入路径，点击“安装”才会执行</p>
+                </div>}
                 <OperationResult
                   isDark={isDark}
                   loading={isLoading(`install_${device.id}`)}
@@ -652,7 +688,7 @@ function PackageManagerPanel({
         {packageSearchVisible && (
           <div className={`rounded-lg border overflow-hidden ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
           <div className={`p-3 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1">
                 <Search size={14} className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`} />
                 <input
@@ -664,7 +700,17 @@ function PackageManagerPanel({
               </div>
               <button
                 type="button"
+                aria-pressed={onlyFavorites}
+                onClick={() => setOnlyFavorites(prev => !prev)}
+                className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${onlyFavorites ? 'border-amber-500/30 bg-amber-500/10 text-amber-500' : t.button.secondary}`}
+              >
+                <Star size={13} fill={onlyFavorites ? 'currentColor' : 'none'} />
+                收藏
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowSystem(prev => !prev)}
+                disabled={onlyFavorites}
                 className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${showSystem ? 'border-blue-500/30 bg-blue-500/10 text-blue-400' : t.button.secondary}`}
               >
                 {showSystem ? <Eye size={13} /> : <EyeOff size={13} />}
@@ -719,7 +765,7 @@ function PackageManagerPanel({
                   加载中...
                 </div>
               ) : filteredPackages.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-sm text-[#9AA0A6]">暂无应用</div>
+                <div className="min-h-24 flex items-center justify-center px-4 text-center text-sm text-[#9AA0A6]">{onlyFavorites ? '暂无匹配的收藏应用；点击应用右侧的星标即可收藏' : '暂无应用'}</div>
               ) : filteredPackages.map(pkg => (
                 <div
                   key={pkg.packageName}
@@ -727,7 +773,11 @@ function PackageManagerPanel({
                   tabIndex={0}
                   onClick={() => selectPackage(pkg)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') selectPackage(pkg);
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      selectPackage(pkg);
+                    }
                   }}
                   className={`w-full text-left px-3 py-2.5 border-b transition-colors cursor-pointer ${selectedPackage?.packageName === pkg.packageName ? 'bg-emerald-500/10' : isDark ? 'hover:bg-[#2D2F33]' : 'hover:bg-slate-50'} ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}
                 >
@@ -745,6 +795,14 @@ function PackageManagerPanel({
                       <div className="text-xs text-[#9AA0A6] truncate">{pkg.apkName || pkg.path}</div>
                     </div>
                     {pkg.system && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400">SYS</span>}
+                    <button
+                      type="button"
+                      aria-label={`${favoritePackages.includes(pkg.packageName) ? '取消收藏' : '收藏'} ${pkg.packageName}`}
+                      aria-pressed={favoritePackages.includes(pkg.packageName)}
+                      title={favoritePackages.includes(pkg.packageName) ? '取消收藏' : '收藏应用并优先显示'}
+                      onClick={(event) => { event.stopPropagation(); toggleFavorite(pkg.packageName); }}
+                      className={`shrink-0 rounded p-1.5 transition-colors ${favoritePackages.includes(pkg.packageName) ? 'text-amber-500 bg-amber-500/10' : 'text-slate-400 hover:text-amber-500'}`}
+                    ><Star size={16} fill={favoritePackages.includes(pkg.packageName) ? 'currentColor' : 'none'} /></button>
                   </div>
                 </div>
               ))}
