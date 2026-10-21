@@ -1,87 +1,74 @@
-import { useRef, useState } from 'react';
-import { Home, PanelRightOpen, Settings, Presentation, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil } from 'lucide-react';
+import { isDarkTheme } from '../shared/theme';
+import { SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../shared/deviceNavigationShortcuts';
+import DeviceShortcutEditor from './DeviceShortcutEditor';
+import DeviceShortcutConfirm from './DeviceShortcutConfirm';
 
-const actions = [
-  { id: 'home', label: '回到桌面', icon: <Home size={19} />, command: 'input keyevent KEYCODE_HOME' },
-  {
-    id: 'sidebar', label: '打开侧边栏', icon: <PanelRightOpen size={19} />,
-    packageName: 'com.xbh.navisetting',
-    command: 'am broadcast --user current -a com.xbh.action.show_control_panel -p com.xbh.navisetting'
-  },
-  {
-    id: 'settings', label: '打开系统设置', icon: <Settings size={19} />,
-    packageName: 'com.xbh.jyjsetting',
-    command: 'am start --user current -W -n com.xbh.jyjsetting/.mainsetting.view.MainActivity'
-  },
-  {
-    id: 'whiteboard', label: '打开白板', icon: <Presentation size={19} />,
-    packageName: 'com.xbh.whiteboard',
-    command: 'am start --user current -W -n com.xbh.whiteboard/.LaunchActivity'
-  }
-];
+const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell };
 
-function DeviceNavigationControls({ deviceId, isOnline, showToast }) {
+export default function DeviceNavigationControls({ deviceId, isOnline, showToast, theme }) {
+  const [saved, setSaved] = useState(() => readDeviceShortcuts());
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [confirmation, setConfirmation] = useState(null);
+  const executor = useRef(createShortcutExecutor());
   const busyRef = useRef(false);
+  const isDark = isDarkTheme(theme);
 
-  const runAction = async (action) => {
+  useEffect(() => {
+    const refresh = event => { if (!event.key || event.key === SHORTCUTS_KEY) setSaved(readDeviceShortcuts()); };
+    window.addEventListener(SHORTCUTS_CHANGED, refresh);
+    window.addEventListener('storage', refresh);
+    return () => { window.removeEventListener(SHORTCUTS_CHANGED, refresh); window.removeEventListener('storage', refresh); };
+  }, []);
+
+  const confirmShell = details => new Promise(resolve => {
+    setConfirmation({ ...details, resolve: value => { setConfirmation(null); resolve(value); } });
+  });
+  const runAction = async action => {
     if (!isOnline || busyRef.current) return;
-    const api = window.electronAPI;
-    if (!api?.adbShell) {
-      showToast('设备控制需要在桌面应用中使用');
-      return;
-    }
     busyRef.current = true;
     setError('');
     setPending(action.id);
     try {
-      if (action.packageName) {
-        const probe = await api.adbShell(deviceId, `pm path ${action.packageName}`);
-        if (!probe.success) throw new Error(probe.error || '无法读取设备应用信息');
-        if (!/^package:/m.test(probe.output || '')) {
-          throw new Error('设备未安装对应的系统应用');
-        }
-      }
-      // am 可能将错误写入输出且仍返回 0，合并 stderr 后检查实际结果。
-      const result = await api.adbShell(deviceId, `${action.command} 2>&1`);
-      const output = result.output || '';
-      if (!result.success || /(?:^|\n)\s*(?:Error(?:\s+type\s+\d+)?\s*:|Exception|java\.[\w.]+Exception)/i.test(output)) {
-        throw new Error(result.error || output || '设备未能执行指令');
-      }
-      showToast(`已发送${action.label}指令`);
+      const result = await executor.current({ api: window.electronAPI, deviceId, shortcut: action, confirmShell });
+      if (result.ok) showToast?.(`已发送${action.label}指令（${deviceId}）`);
     } catch (error) {
-      setError(`${action.label}失败：${error.message}`);
-      showToast(`${action.label}失败：${error.message}`);
-    } finally {
-      busyRef.current = false;
-      setPending('');
-    }
+      const message = `${action.label}失败：${error.message}`;
+      setError(message);
+      showToast?.(message);
+      if (editing) throw error;
+    } finally { busyRef.current = false; setPending(''); }
+  };
+  const save = config => {
+    saveDeviceShortcuts(config);
+    setEditing(false);
+    setError('');
+    showToast?.('已保存所有设备共用的快捷操作');
+  };
+  const resetBroken = () => {
+    try { save(defaultDeviceShortcuts()); } catch (error) { setError(error.message); }
   };
 
-  return (
-    <>
-    <div className="device-navigation-grid" role="group" aria-label="设备快捷操作">
-      {actions.map(action => (
-        <button
-          key={action.id}
-          type="button"
-          className="device-navigation-button"
-          onClick={() => runAction(action)}
-          disabled={!isOnline || Boolean(pending)}
-          aria-busy={pending === action.id}
-          aria-label={action.label}
-        >
-          <span className="device-navigation-icon" aria-hidden="true">
-            {pending === action.id ? <Loader2 size={19} className="animate-spin" /> : action.icon}
-          </span>
-          <span>{pending === action.id ? '执行中…' : action.label}</span>
-        </button>
-      ))}
+  return <>
+    <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+      <span className="opacity-60">快捷操作</span><button type="button" onClick={() => setEditing(true)} disabled={!saved.config || Boolean(pending)} className="flex items-center gap-1 rounded px-1 py-1 opacity-70 hover:opacity-100 disabled:opacity-30" aria-label="编辑快捷操作"><Pencil size={12} />编辑</button>
     </div>
+    <div className="device-navigation-grid" role="group" aria-label="设备快捷操作">
+      {(saved.config || defaultDeviceShortcuts()).slots.map(action => {
+        const Icon = action.type === 'app' ? AppWindow : action.type === 'shell' ? Terminal : icons[action.action];
+        return <button key={action.id} type="button" className="device-navigation-button" onClick={() => runAction(action)}
+          disabled={!saved.config || !isOnline || Boolean(pending)} aria-busy={pending === action.id} aria-label={action.label} title={`${action.label}${action.type === 'shell' ? ' · 自定义 ADB 命令，执行前需确认' : ''}`}>
+          <span className="device-navigation-icon" aria-hidden="true">{pending === action.id ? <Loader2 size={19} className="animate-spin" /> : <Icon size={19} />}</span>
+          <span className="min-w-0 truncate">{pending === action.id ? '执行中…' : action.label}</span>
+        </button>;
+      })}
+    </div>
+    {saved.error && <div role="alert" className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">{saved.error}<button type="button" onClick={resetBroken} className="ml-2 underline">重置为默认配置</button></div>}
     {error && <div role="alert" className="mt-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</div>}
-    </>
-  );
+    {editing && saved.config && <DeviceShortcutEditor config={saved.config} deviceId={deviceId} isOnline={isOnline} isDark={isDark} pending={pending} onTest={runAction} onSave={save} onClose={() => setEditing(false)} />}
+    {confirmation && <DeviceShortcutConfirm request={confirmation} isDark={isDark} />}
+  </>;
 }
-
-export default DeviceNavigationControls;

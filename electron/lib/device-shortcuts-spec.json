@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "storageKey": "adb-workbench.device-shortcuts.v1",
+  "slots": ["slot-1", "slot-2", "slot-3", "slot-4"],
+  "defaultActions": ["home", "sidebar", "settings", "whiteboard"],
+  "actions": [
+    { "id": "home", "label": "回到桌面", "command": "input keyevent KEYCODE_HOME" },
+    { "id": "back", "label": "返回", "command": "input keyevent KEYCODE_BACK" },
+    { "id": "recents", "label": "最近任务", "command": "input keyevent KEYCODE_APP_SWITCH" },
+    { "id": "notifications", "label": "通知栏", "command": "cmd statusbar expand-notifications" },
+    { "id": "sidebar", "label": "打开侧边栏", "packageName": "com.xbh.navisetting", "command": "am broadcast --user current -a com.xbh.action.show_control_panel -p com.xbh.navisetting" },
+    { "id": "settings", "label": "打开系统设置", "packageName": "com.xbh.jyjsetting", "command": "am start --user current -W -n com.xbh.jyjsetting/.mainsetting.view.MainActivity" },
+    { "id": "whiteboard", "label": "打开白板", "packageName": "com.xbh.whiteboard", "command": "am start --user current -W -n com.xbh.whiteboard/.LaunchActivity" }
+  ]
+}

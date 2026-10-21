@@ -1,5 +1,5 @@
 // ADB / scrcpy 操作 IPC handlers
-// 该模块管理 screenRecordProcs（只在内部使用），并提供 stopAllScreenRecords 供 before-quit 调用
+// 录屏生命周期由 screen-recording 模块管理。
 
 const { execFile, spawn } = require('child_process');
 const path = require('path');
@@ -8,9 +8,8 @@ const { findExecutable } = require('./android-tool-cleanup.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
 const { createScreenshotActions } = require('./screenshot-actions.cjs');
-
-// ScreenRecord: Android native screen recording via adb shell screenrecord
-const screenRecordProcs = new Map();
+const screenRecording = require('./screen-recording.cjs');
+const { recordMedia } = require('./device-media.cjs');
 
 // 终端 shell 执行：记录运行中的进程，支持主动中断
 // key: requestId, value: { proc, deviceId, timer, settle }
@@ -267,31 +266,12 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
 
 // 应用退出时自动停止所有录屏进程
 async function stopAllScreenRecords() {
-  if (screenRecordProcs.size === 0) return;
-  console.log(`[ScreenRecord] Stopping ${screenRecordProcs.size} recording(s) before quit...`);
-  const promises = [];
-  for (const [deviceId, proc] of screenRecordProcs) {
-    promises.push(new Promise((resolve) => {
-      try {
-        proc.kill('SIGTERM');
-      } catch (e) {
-        console.error(`[ScreenRecord] Failed to kill process for ${deviceId}:`, e.message);
-      }
-      // 尝试通过 adb 停止设备端的 screenrecord 进程
-      runAdb(['-s', deviceId, 'shell', 'pkill', '-l', '2', '-f', 'screenrecord'], { timeoutMs: 5000 })
-        .finally(() => {
-          screenRecordProcs.delete(deviceId);
-          resolve();
-        });
-    }));
-  }
-  await Promise.all(promises);
-  console.log('[ScreenRecord] All recordings stopped.');
+  return screenRecording.stopAllRecordings();
 }
 
 // 判断是否有正在进行的录屏（供 before-quit 决定是否 preventDefault）
 function hasActiveScreenRecords() {
-  return screenRecordProcs.size > 0;
+  return screenRecording.hasActiveRecordings();
 }
 
 function runTool(command, args, timeoutMs) {
@@ -399,6 +379,7 @@ function stopAllShellProcs() {
 
 function register(ipcMain) {
   const screenshots = createScreenshotActions(require('electron'));
+  screenRecording.register(ipcMain);
   ipcMain.handle('adb:screenshotAction', (_event, args) => screenshots.perform(args));
   // IPC Handlers for ADB
   ipcMain.handle('adb:getDevices', async () => {
@@ -520,54 +501,16 @@ function register(ipcMain) {
   ipcMain.handle('adb:screenshot', async (event, { deviceId, localPath }) => {
     try {
       const output = await runAdbText(['-s', deviceId, 'pull', '/sdcard/screen.png', localPath]);
-      return { success: true, output, ...screenshots.remember(localPath) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('adb:screenrecord:start', async (event, { deviceId, remotePath }) => {
-    try {
-      if (screenRecordProcs.has(deviceId)) {
-        return { success: false, error: '当前设备正在录屏中，请先停止' };
+      const saved = screenshots.remember(localPath);
+      try {
+        const media = await recordMedia({ type: 'image', deviceId, path: localPath, createdAt: Date.now() });
+        return { success: true, output, ...saved, mediaId: media.id };
+      } catch (error) {
+        return { success: true, output, ...saved, historyWarning: `截图已保存，但最近文件记录失败：${error.message}` };
       }
-      const p = spawnAdb(['-s', deviceId, 'shell', 'screenrecord', remotePath || '/sdcard/screenrecord.mp4'], {
-        detached: false
-      });
-      screenRecordProcs.set(deviceId, p);
-      p.on('exit', () => {
-        screenRecordProcs.delete(deviceId);
-      });
-      p.on('error', () => {
-        screenRecordProcs.delete(deviceId);
-      });
-      return { success: true, message: '录屏已开始' };
     } catch (error) {
       return { success: false, error: error.message };
     }
-  });
-
-  ipcMain.handle('adb:screenrecord:stop', async (event, { deviceId, localPath }) => {
-    try {
-      const p = screenRecordProcs.get(deviceId);
-      if (p) {
-        p.kill();
-        screenRecordProcs.delete(deviceId);
-      } else {
-        await runAdb(['-s', deviceId, 'shell', 'pkill', '-l', '2', '-f', 'screenrecord'], { timeoutMs: 5000 }).catch(() => {});
-      }
-      await new Promise(r => setTimeout(r, 800));
-      const remotePath = '/sdcard/screenrecord.mp4';
-      await runAdbText(['-s', deviceId, 'pull', remotePath, localPath]);
-      await runAdb(['-s', deviceId, 'shell', 'rm', '-f', remotePath], { timeoutMs: 5000 }).catch(() => {});
-      return { success: true, message: '录屏已停止并保存', path: localPath };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('adb:screenrecord:status', async (event, { deviceId }) => {
-    return { recording: screenRecordProcs.has(deviceId) };
   });
 
   // Reboot device
@@ -791,17 +734,6 @@ function register(ipcMain) {
     }
   });
 
-  // 定期清理 screenRecordProcs 中已退出的进程，防止 Map 累积僵尸条目
-  // 每 60 秒遍历一次，检查 p.killed || p.exitCode !== null
-  setInterval(() => {
-    if (screenRecordProcs.size === 0) return;
-    for (const [devId, p] of screenRecordProcs) {
-      if (p.killed || p.exitCode !== null) {
-        console.log(`[ScreenRecord] 定期清理：设备 ${devId} 的录屏进程已退出，从 Map 中删除`);
-        screenRecordProcs.delete(devId);
-      }
-    }
-  }, 60000).unref();
 }
 
 module.exports = {

@@ -16,9 +16,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   adbShellCancel: (deviceId) => ipcRenderer.invoke('adb:shell:cancel', { deviceId }),
   adbScreenshot: (deviceId, localPath) => ipcRenderer.invoke('adb:screenshot', { deviceId, localPath }),
   screenshotAction: (args) => ipcRenderer.invoke('adb:screenshotAction', args),
-  adbScreenRecordStart: (deviceId, remotePath) => ipcRenderer.invoke('adb:screenrecord:start', { deviceId, remotePath }),
+  adbScreenRecordStart: (deviceId, options = {}) => ipcRenderer.invoke('adb:screenrecord:start', { deviceId, withLogs: options.withLogs === true }),
   adbScreenRecordStop: (deviceId, localPath) => ipcRenderer.invoke('adb:screenrecord:stop', { deviceId, localPath }),
   adbScreenRecordStatus: (deviceId) => ipcRenderer.invoke('adb:screenrecord:status', { deviceId }),
+  recordingSessionsList: (args) => ipcRenderer.invoke('screenrecord:list', args),
+  recordingRetry: (id) => ipcRenderer.invoke('screenrecord:retry', { id }),
+  onRecordingState: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('screenrecord:state', listener);
+    return () => ipcRenderer.off('screenrecord:state', listener);
+  },
+  deviceMediaList: (args) => ipcRenderer.invoke('device-media:list', args),
+  deviceMediaAction: (args) => ipcRenderer.invoke('device-media:action', args),
+  onDeviceMediaChanged: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('device-media:changed', listener);
+    return () => ipcRenderer.off('device-media:changed', listener);
+  },
   adbReboot: (deviceId) => ipcRenderer.invoke('adb:reboot', { deviceId }),
   adbRebootLoader: (deviceId) => ipcRenderer.invoke('adb:rebootLoader', { deviceId }),
   adbUnlock: (deviceId) => ipcRenderer.invoke('adb:unlock', { deviceId }),

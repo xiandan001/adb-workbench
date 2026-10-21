@@ -2,6 +2,18 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.3.5': {
+    title: 'v4.3.5',
+    date: '2026-10-21',
+    items: [
+      { type: 'improve', text: '设备录屏支持计时、跨页面状态同步、自动结束保存及失败后重新保存' },
+      { type: 'feature', text: '设备第一排四个快捷按钮支持替换、排序和改名，可选择系统操作、应用及需确认的 ADB 命令' },
+      { type: 'feature', text: '设备卡片新增最近截图和录屏，可快速打开文件、目录或复制截图' },
+      { type: 'feature', text: '录屏可选择同时抓取日志，视频与日志关联保存，不自动调用 AI' },
+      { type: 'improve', text: '统一剩余下拉菜单样式，支持键盘操作和深色主题' },
+      { type: 'improve', text: '退出前提示保存录屏，快捷按钮配置支持本地保存和数据迁移' }
+    ]
+  },
   '4.3.2': {
     title: 'v4.3.2',
     date: '2026-10-21',

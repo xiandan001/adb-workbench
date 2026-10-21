@@ -24,6 +24,7 @@ import { isDarkTheme } from './shared/theme';
 import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
 import { addRecentApk, readRecentApks, RECENT_APKS_KEY, saveShortcutList } from './shared/deviceShortcuts';
 import { connectWirelessDevice, historyConnectionAddress } from './shared/wirelessConnection';
+import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/deviceControlOptions';
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -790,10 +791,10 @@ function App() {
     return () => clearTimeout(timer);
   }, [autoUpdateEnabled]);
 
-  const handleScreenRecordStart = async (deviceId) => {
+  const handleScreenRecordStart = async (deviceId, options = {}) => {
     try {
       if (window.electronAPI) {
-        const res = await window.electronAPI.adbScreenRecordStart(deviceId);
+        const res = await window.electronAPI.adbScreenRecordStart(deviceId, options);
         return res;
       }
       return { success: false, error: '录屏功能需要 Electron 环境' };
@@ -805,16 +806,7 @@ function App() {
   const handleScreenRecordStop = async (deviceId) => {
     try {
       if (window.electronAPI) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        let saveDir = screenRecordPath;
-        if (!saveDir) {
-          const userDataResult = await window.electronAPI.getUserDataPath();
-          const baseDir = userDataResult.success ? userDataResult.path : '.';
-          saveDir = `${baseDir}/screenrecord`;
-        }
-        await window.electronAPI.ensureFolder(saveDir);
-        const localPath = `${saveDir}/screenrecord-${timestamp}.mp4`;
-        const res = await window.electronAPI.adbScreenRecordStop(deviceId, localPath);
+        const res = await window.electronAPI.adbScreenRecordStop(deviceId);
         return res;
       }
       return { success: false, error: '录屏功能需要 Electron 环境' };
@@ -926,6 +918,7 @@ function App() {
           const pullRes = await window.electronAPI.adbScreenshot(deviceId, localPath);
           if (pullRes.success) {
             setLatestScreenshot({ path: pullRes.path || localPath, preview: pullRes.preview || '', deviceName: deviceNames[deviceId] || deviceId });
+            if (pullRes.historyWarning) showToast(pullRes.historyWarning);
           } else {
             showDeviceFailure(deviceId, `截图保存失败: ${pullRes.error}`);
           }
@@ -1878,7 +1871,7 @@ function App() {
                       onStart={() => handleStartScrcpy(device.id)}
                       onCommand={(cmd) => handleAdbCommand(device.id, cmd)}
                       onScreenshot={() => handleScreenshot(device.id)}
-                      onScreenRecordStart={(deviceId) => handleScreenRecordStart(deviceId)}
+                      onScreenRecordStart={handleScreenRecordStart}
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}
                       onReboot={() => handleReboot(device.id)}
                       onRebootLoader={() => handleRebootLoader(device.id)}
@@ -2225,17 +2218,9 @@ function App() {
                     <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>视频比特率</span>
                     <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--video-bit-rate</p>
                   </div>
-                  <select
-                    value={scrcpySettings.bitrate}
-                    onChange={(e) => setScrcpySettings(prev => ({ ...prev, bitrate: e.target.value }))}
-                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-                  >
-                    <option value="2 Mbps">2 Mbps</option>
-                    <option value="4 Mbps">4 Mbps</option>
-                    <option value="8 Mbps">8 Mbps (推荐)</option>
-                    <option value="16 Mbps">16 Mbps</option>
-                    <option value="32 Mbps">32 Mbps</option>
-                  </select>
+                  <SelectMenu id="cast-bitrate" value={scrcpySettings.bitrate} isDark={isDarkTheme(t)} className="w-40"
+                    onChange={value => setScrcpySettings(prev => ({ ...prev, bitrate: value }))}
+                    options={['2 Mbps', '4 Mbps', '8 Mbps', '16 Mbps', '32 Mbps'].map(value => ({ value, label: value === '8 Mbps' ? '8 Mbps（推荐）' : value }))} />
                 </div>
 
                 <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
@@ -2243,17 +2228,9 @@ function App() {
                     <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>最大分辨率</span>
                     <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--max-size，0 表示不限制</p>
                   </div>
-                  <select
-                    value={scrcpySettings.maxSize}
-                    onChange={(e) => setScrcpySettings(prev => ({ ...prev, maxSize: e.target.value }))}
-                    className={`border text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 block p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-                  >
-                    <option value="0">不限制</option>
-                    <option value="1920">1920</option>
-                    <option value="1280">1280</option>
-                    <option value="1024">1024</option>
-                    <option value="720">720</option>
-                  </select>
+                  <SelectMenu id="cast-resolution" value={scrcpySettings.maxSize} isDark={isDarkTheme(t)} className="w-40"
+                    onChange={value => setScrcpySettings(prev => ({ ...prev, maxSize: value }))}
+                    options={['0', '1920', '1280', '1024', '720'].map(value => ({ value, label: value === '0' ? '不限制' : value }))} />
                 </div>
               </div>
               </section>
@@ -2964,86 +2941,30 @@ function App() {
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变起点</label>
-                            <select
-                              value={themeColors.primaryFrom}
-                              onChange={(e) => setThemeColors(prev => ({ ...prev, primaryFrom: e.target.value }))}
-                              disabled={!themeColors.useGradient}
-                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
-                            >
-                              {[
-                                { value: 'from-emerald-400', label: '翠绿' },
-                                { value: 'from-cyan-400', label: '青色' },
-                                { value: 'from-blue-400', label: '蓝色' },
-                                { value: 'from-pink-400', label: '粉色' },
-                                { value: 'from-rose-400', label: '玫红' },
-                                { value: 'from-green-400', label: '绿色' },
-                                { value: 'from-orange-400', label: '橙色' },
-                                { value: 'from-amber-400', label: '琥珀' },
-                                { value: 'from-purple-400', label: '紫色' },
-                                { value: 'from-red-400', label: '红色' }
-                              ].map(c => (
-                                <option key={c.value} value={c.value}>{c.label}</option>
-                              ))}
-                            </select>
+<SelectMenu id="theme-primaryFrom" value={themeColors.primaryFrom} isDark={isDarkTheme(t)} className="w-full"
+                              onChange={value => setThemeColors(prev => ({ ...prev, primaryFrom: value }))}
+                              disabled={!themeColors.useGradient} options={gradientOptions('from', themeColors.primaryFrom)} />
                           </div>
                           <div>
                             <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变终点</label>
-                            <select
-                              value={themeColors.primaryTo}
-                              onChange={(e) => setThemeColors(prev => ({ ...prev, primaryTo: e.target.value }))}
-                              disabled={!themeColors.useGradient}
-                              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${themeColors.useGradient ? (isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700') : 'bg-slate-100 border-slate-200 text-[#9AA0A6] cursor-not-allowed'}`}
-                            >
-                              {[
-                                { value: 'to-emerald-500', label: '翠绿' },
-                                { value: 'to-cyan-500', label: '青色' },
-                                { value: 'to-blue-500', label: '蓝色' },
-                                { value: 'to-pink-500', label: '粉色' },
-                                { value: 'to-rose-500', label: '玫红' },
-                                { value: 'to-green-500', label: '绿色' },
-                                { value: 'to-orange-500', label: '橙色' },
-                                { value: 'to-amber-500', label: '琥珀' },
-                                { value: 'to-purple-500', label: '紫色' },
-                                { value: 'to-red-500', label: '红色' }
-                              ].map(c => (
-                                <option key={c.value} value={c.value}>{c.label}</option>
-                              ))}
-                            </select>
+<SelectMenu id="theme-primaryTo" value={themeColors.primaryTo} isDark={isDarkTheme(t)} className="w-full"
+                              onChange={value => setThemeColors(prev => ({ ...prev, primaryTo: value }))}
+                              disabled={!themeColors.useGradient} options={gradientOptions('to', themeColors.primaryTo)} />
                           </div>
                         </div>
 
                         <div>
                           <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>卡片背景</label>
-                          <select
-                            value={themeColors.card}
-                            onChange={(e) => setThemeColors(prev => ({ ...prev, card: e.target.value }))}
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-                          >
-                            <option value="bg-white">白色</option>
-                            <option value="bg-slate-800/80">深灰半透明</option>
-                            <option value="bg-pink-50">粉色</option>
-                            <option value="bg-blue-50">蓝色</option>
-                            <option value="bg-green-50">绿色</option>
-                            <option value="bg-orange-50">橙色</option>
-                            <option value="bg-purple-50">紫色</option>
-                          </select>
+<SelectMenu id="theme-card" value={themeColors.card} isDark={isDarkTheme(t)} className="w-full"
+                              onChange={value => setThemeColors(prev => ({ ...prev, card: value }))}
+                              options={CARD_BACKGROUNDS} />
                         </div>
 
                         <div>
                           <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>终端背景</label>
-                          <select
-                            value={themeColors.terminalBg}
-                            onChange={(e) => setThemeColors(prev => ({ ...prev, terminalBg: e.target.value }))}
-                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-                          >
-                            <option value="bg-[#202124]">深灰 (#202124)</option>
-                            <option value="bg-[#202124]">深灰 (slate-900)</option>
-                            <option value="bg-black">纯黑</option>
-                            <option value="bg-gradient-to-br from-pink-900 to-rose-900">粉紫渐变</option>
-                            <option value="bg-gradient-to-br from-slate-800 to-slate-900">灰渐变</option>
-                            <option value="bg-gradient-to-br from-blue-900 to-slate-900">蓝渐变</option>
-                            <option value="bg-gradient-to-br from-green-900 to-slate-900">绿渐变</option>
-                          </select>
+<SelectMenu id="theme-terminalBg" value={themeColors.terminalBg} isDark={isDarkTheme(t)} className="w-full"
+                              onChange={value => setThemeColors(prev => ({ ...prev, terminalBg: value }))}
+                              options={TERMINAL_BACKGROUNDS} />
                         </div>
                       </div>
 

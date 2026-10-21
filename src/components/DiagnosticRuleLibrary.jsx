@@ -4,6 +4,7 @@ import { isDarkTheme } from '../shared/theme';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Clipboard, Download, Edit3, Lock, Plus, RefreshCw, RotateCcw, Save, SearchCheck, Trash2, Upload, X } from 'lucide-react';
 import DangerConfirmModal from './DangerConfirmModal';
+import SelectMenu from './SelectMenu';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 
 const EMPTY_RULE = {
@@ -377,15 +378,12 @@ function RuleEditor({ rule, isDark, muted, saving, onCancel, onSave }) {
               <span className={muted}>正则</span>
               <input value={draft.pattern} onChange={(e) => setDraft(prev => ({ ...prev, pattern: e.target.value }))} disabled={draft.builtIn} className={`${fieldClass} mt-1 font-mono disabled:opacity-60`} />
             </label>
-            <label className="text-xs">
-              <span className={muted}>严重级别</span>
-              <select value={draft.severity} onChange={(e) => setDraft(prev => ({ ...prev, severity: e.target.value }))} disabled={draft.builtIn} className={`${fieldClass} mt-1 disabled:opacity-60`}>
-                <option value="info">info</option>
-                <option value="warning">warning</option>
-                <option value="error">error</option>
-                <option value="fatal">fatal</option>
-              </select>
-            </label>
+            <div className="text-xs">
+              <label htmlFor="diagnostic-rule-severity" className={muted}>严重级别</label>
+              <SelectMenu id="diagnostic-rule-severity" value={draft.severity} onChange={severity => setDraft(prev => ({ ...prev, severity }))}
+                disabled={draft.builtIn} isDark={isDark} className="mt-1"
+                options={['info', 'warning', 'error', 'fatal'].map(value => ({ value, label: value }))} />
+            </div>
           </div>
           <label className="text-xs">
             <span className={muted}>关键词</span>

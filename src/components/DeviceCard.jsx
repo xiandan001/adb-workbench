@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
+import SelectMenu from './SelectMenu';
 import DeviceNavigationControls from './DeviceNavigationControls';
+import DeviceRecordingStatus from './DeviceRecordingStatus';
+import DeviceRecentMedia from './DeviceRecentMedia';
+import useDeviceRecording from './useDeviceRecording';
 import './DeviceCard.css';
 // 设备巡检面板：采集逻辑在主进程 inspection 模块中
 import InspectionPanel from './InspectionPanel';
@@ -12,6 +16,7 @@ import PackageManagerPanel from './PackageManagerPanel';
 import DangerConfirmModal from './DangerConfirmModal';
 import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
+import { recordingButtonState } from '../shared/recordingWorkspace';
 
 function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError }) {
   const isOnline = device.status === 'device';
@@ -37,8 +42,10 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
   const [suUnsupportedOpen, setSuUnsupportedOpen] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showHistory, setShowHistory] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isSavingRecord, setIsSavingRecord] = useState(false);
+  const recording = useDeviceRecording(device.id, onScreenRecordStart, onScreenRecordStop);
+  const recordButton = recordingButtonState(recording.session, { loaded: recording.loaded, pending: recording.pending, isOnline });
+  const [recordWithLogs, setRecordWithLogs] = useState(false);
+  const recordingActive = ['starting', 'recording', 'stopping', 'saving'].includes(recording.session?.status);
   // 设备巡检弹窗状态
   const [showInspection, setShowInspection] = useState(false);
   const commandHistory = sharedCommandHistory || [];
@@ -346,7 +353,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             <button type="button" onClick={onEnvironmentCheck} className="mt-1 underline underline-offset-2">打开环境自检</button>
           </div>
         )}
-        <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} />
+        <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} theme={t} />
         <section className="device-control-section" aria-label="常用工具">
           <h4 className={`device-control-heading ${t.textMuted}`}>常用工具</h4>
           <div className="device-tool-grid">
@@ -360,34 +367,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               isOnline={isOnline}
             />
             <ControlButton
-              icon={isRecording ? <div className="w-4 h-4 rounded-full bg-red-700 shadow-sm shadow-red-900/30" /> : <Video size={16} />}
-              label={isSavingRecord ? '保存中...' : isRecording ? '停止录屏' : '录屏'}
-              onClick={async () => {
-                if (isRecording) {
-                  setIsSavingRecord(true);
-                  const res = await onScreenRecordStop(device.id);
-                  setIsSavingRecord(false);
-                  if (res.success) {
-                    setIsRecording(false);
-                    showToast(`录屏已保存: ${res.path}`);
-                  } else {
-                    showToast(`录屏停止失败: ${res.error}`);
-                  }
-                } else {
-                  const res = await onScreenRecordStart(device.id);
-                  if (res.success) {
-                    setIsRecording(true);
-                    showToast('录屏已开始');
-                  } else {
-                    showToast(`录屏启动失败: ${res.error}`);
-                  }
-                }
-              }}
-              disabled={!isOnline || isSavingRecord}
+              icon={recordButton.recording ? <div className="w-3 h-3 rounded-sm bg-white" /> : <Video size={16} />}
+              label={recordButton.label}
+              onClick={recordButton.recording ? recording.stop : () => recording.start({ withLogs: recordWithLogs })}
+              disabled={recordButton.disabled}
+              loading={recordButton.busy}
               theme={t}
               isOnline={isOnline}
-              isRecording={isRecording}
-              isSaving={isSavingRecord}
+              isRecording={recordButton.recording}
             />
             <ControlButton
               icon={<Volume2 size={16} />}
@@ -440,6 +427,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               isOnline={isOnline}
             />
           </div>
+          <label className={`mt-2 inline-flex items-center gap-2 text-xs ${t.textMuted}`} title="默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。">
+            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" />
+            同时抓取日志<span className="text-[11px] opacity-75">不调用 AI · 上限 100 MB</span>
+          </label>
+          <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
         <section className="device-control-section" aria-label="设备维护">
           <button
@@ -494,6 +486,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
           </div>}
         </section>
+        <DeviceRecentMedia deviceId={device.id} theme={t} showToast={showToast} />
       </div>
 
       {/* App 包管理增强：使用独立面板承载安装、推送、文件浏览、应用列表与会员操作 */}
@@ -597,21 +590,27 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 <FolderOpen size={14} />
                 选择
               </button>
-              <div className="relative">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   value={apkPushRemotePath}
                   onChange={(e) => onPushPathChange?.(e.target.value)}
-                  list={`push-remote-path-history-${device.id}`}
+                  aria-label="设备推送目标路径"
                   placeholder="/sdcard/"
                   readOnly={false}
                   className={`w-40 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white ${t.input}`}
                 />
-                <datalist id={`push-remote-path-history-${device.id}`}>
-                  {(pushRemotePathHistory || []).map((path, idx) => (
-                    <option key={idx} value={path} />
-                  ))}
-                </datalist>
+                {pushRemotePathHistory?.length > 0 && <SelectMenu
+                  id={`legacy-push-path-history-${device.id}`}
+                  value={apkPushRemotePath}
+                  options={[...new Set(pushRemotePathHistory)].map(path => ({ value: path, label: path }))}
+                  onChange={path => onPushPathChange?.(path)}
+                  isDark={isDarkTheme(t)}
+                  accent={t.primary}
+                  placeholder="历史路径"
+                  compact
+                  className="w-36"
+                />}
               </div>
               <button
                 onClick={onPushApk}

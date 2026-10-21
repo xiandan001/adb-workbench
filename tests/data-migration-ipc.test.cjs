@@ -37,6 +37,7 @@ function harness(t, restartError = '') {
       if (name === 'electron') return { app: { getPath: value => value === 'userData' ? data : root, getVersion: () => '4.3.2' }, dialog, BrowserWindow: { fromWebContents: () => ({}) } };
       if (name === './app-context.cjs') return { getMainWindow: () => ({ webContents: sender }) };
       if (name === './data-migration-core.cjs') return core;
+      if (name === './screen-recording.cjs') return { listUnresolved: () => [] };
       return require(name);
     }
   });

@@ -580,13 +580,21 @@ function PackageManagerPanel({
                     type="text"
                     value={apkPushRemotePath}
                     onChange={(e) => onPushPathChange?.(e.target.value)}
-                    list={`push-remote-path-history-${device.id}`}
+                    aria-label="设备推送目标路径"
                     placeholder="/sdcard/"
                     className={`w-40 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                   />
-                  <datalist id={`push-remote-path-history-${device.id}`}>
-                    {(pushRemotePathHistory || []).map((item, idx) => <option key={idx} value={item} />)}
-                  </datalist>
+                  {pushRemotePathHistory?.length > 0 && <SelectMenu
+                    id={`push-path-history-${device.id}`}
+                    value={apkPushRemotePath}
+                    options={[...new Set(pushRemotePathHistory)].map(path => ({ value: path, label: path }))}
+                    onChange={path => onPushPathChange?.(path)}
+                    isDark={isDark}
+                    accent={t.primary}
+                    placeholder="历史路径"
+                    compact
+                    className="w-36"
+                  />}
                   <button onClick={onPushApk} disabled={!isOnline || !apkPushPath || isLoading(`push_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
                     {isLoading(`push_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
                     推送

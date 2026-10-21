@@ -31,6 +31,9 @@ const performanceMonitor = require('./lib/performance-monitor.cjs');
 const taskCenter = require('./lib/task-center.cjs');
 const artifactCenter = require('./lib/artifact-center.cjs');
 const dataMigration = require('./lib/data-migration.cjs');
+const deviceMedia = require('./lib/device-media.cjs');
+const screenRecording = require('./lib/screen-recording.cjs');
+const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
 const acceptanceSuite = require('./lib/acceptance-suite.cjs');
@@ -101,6 +104,12 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event) => {
     event.preventDefault();
   });
+  mainWindow.on('close', event => {
+    if (!quitCleanupFinished && screenRecording.listUnresolved().length) {
+      event.preventDefault();
+      app.quit();
+    }
+  });
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -152,6 +161,7 @@ app.whenReady().then(async () => {
   taskCenter.register(ipcMain);
   artifactCenter.register(ipcMain);
   dataMigration.register(ipcMain);
+  deviceMedia.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);
@@ -192,10 +202,6 @@ function cleanupRuntimeResources() {
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   cleanupRuntimeResources();
-  // 停止所有录屏进程（如果有）
-  if (adb.hasActiveScreenRecords()) {
-    await adb.stopAllScreenRecords();
-  }
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
   } else {
@@ -209,6 +215,17 @@ app.on('before-quit', async (event) => {
   if (quitCleanupRunning) return;
 
   quitCleanupRunning = true;
+  try {
+    const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask: options => {
+      const owner = ctx.getMainWindow();
+      return owner && !owner.isDestroyed() ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
+    } });
+    if (!proceed) { quitCleanupRunning = false; return; }
+  } catch (error) {
+    quitCleanupRunning = false;
+    dialog.showErrorBox('未能完成录屏保存', `应用尚未退出，请返回设备页面重试。\n${error.message}`);
+    return;
+  }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();
   try {
     await cleanupBeforeQuit({ forUpdateInstall: shouldInstallUpdate });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Command, Keyboard, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
+import SelectMenu from './SelectMenu';
 import {
   COMMAND_ACTIONS,
   DEFAULT_COMMAND_SHORTCUT,
@@ -230,15 +231,13 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
           placeholder="描述"
           className={`px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${field}`}
         />
-        <select
+        <div><label htmlFor="global-command-action" className="sr-only">命令操作</label><SelectMenu
+          id="global-command-action"
           value={draft.action}
-          onChange={(event) => setDraft(prev => ({ ...prev, action: event.target.value }))}
-          className={`px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${field}`}
-        >
-          {COMMAND_ACTIONS.map(action => (
-            <option key={action.value} value={action.value}>{action.label}</option>
-          ))}
-        </select>
+          onChange={action => setDraft(prev => ({ ...prev, action }))}
+          isDark={isDark}
+          options={COMMAND_ACTIONS}
+        /></div>
         <button
           type="button"
           onClick={addCommand}

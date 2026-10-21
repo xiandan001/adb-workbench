@@ -1,10 +1,12 @@
 const { normalizeSession } = require('./log-sessions.cjs');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
+const { normalizeDeviceShortcuts } = require('./device-shortcuts-policy.cjs');
+const { storageKey: SHORTCUTS_KEY } = require('./device-shortcuts-spec.json');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings'
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json',
@@ -158,6 +160,7 @@ function normalizePreference(key, raw) {
   let value;
   try { value = JSON.parse(raw); } catch { invalid(`偏好 ${key} JSON`); }
   assertSafeJson(value);
+  if (key === SHORTCUTS_KEY) value = normalizeDeviceShortcuts(value);
   if (['autoUpdateEnabled', 'packageSearchVisible'].includes(key)) return JSON.stringify(boolean(value, key));
   if (key === 'globalCommandSettings') value = normalizeCommands(value);
   if (key === 'logFilterPresets.v1') value = normalizePresets(value);

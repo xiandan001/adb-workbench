@@ -85,6 +85,7 @@ function register(ipcMain, { restart = () => {
 
   action('migration:import', async (event, { token, preferences, confirmed }) => {
     if (confirmed !== true) throw new Error('请先确认覆盖同名数据并重启应用');
+    if (require('./screen-recording.cjs').listUnresolved().length) throw new Error('请先停止录屏并保存待恢复的录屏，再导入数据');
     if (!preview || preview.token !== token || preview.sender !== event.sender) throw new Error('备份预览已失效，请重新选择备份文件');
     const staged = await core.stageImport(directory(), preview.payload, preferences || {});
     preview = null;

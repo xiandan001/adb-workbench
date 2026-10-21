@@ -1,8 +1,10 @@
+import { normalizeDeviceShortcuts, SHORTCUTS_KEY } from './deviceNavigationShortcuts.js';
+
 // Keep this list in sync with the main-process migration policy (covered by a contract test).
 export const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings'
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY
 ]);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -22,6 +24,7 @@ function parsePreference(key, raw) {
   }
   const value = JSON.parse(raw);
   assertSafeValue(value);
+  if (key === SHORTCUTS_KEY) return normalizeDeviceShortcuts(value);
   if (['autoUpdateEnabled', 'packageSearchVisible'].includes(key)) {
     if (typeof value !== 'boolean') throw new Error('偏好开关无效');
   } else if (['adb-workbench.favorite-packages.v1', 'logFilterPresets.v1'].includes(key)) {
