@@ -34,6 +34,8 @@ const dataMigration = require('./lib/data-migration.cjs');
 const deviceMedia = require('./lib/device-media.cjs');
 const screenRecording = require('./lib/screen-recording.cjs');
 const shortcutCapabilities = require('./lib/device-shortcut-capabilities.cjs');
+const serial = require('./lib/serial.cjs');
+const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
@@ -106,7 +108,7 @@ function createWindow() {
     event.preventDefault();
   });
   mainWindow.on('close', event => {
-    if (!quitCleanupFinished && screenRecording.listUnresolved().length) {
+    if (!quitCleanupFinished && (screenRecording.listUnresolved().length || serial.needsQuitConfirmation())) {
       event.preventDefault();
       app.quit();
     }
@@ -164,6 +166,7 @@ app.whenReady().then(async () => {
   dataMigration.register(ipcMain);
   deviceMedia.register(ipcMain);
   shortcutCapabilities.register(ipcMain);
+  serial.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);
@@ -203,6 +206,8 @@ function cleanupRuntimeResources() {
 }
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
+  // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
+  await serial.cleanup().catch(error => console.warn('[Serial] quit cleanup failed:', error.message));
   cleanupRuntimeResources();
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
@@ -218,14 +223,16 @@ app.on('before-quit', async (event) => {
 
   quitCleanupRunning = true;
   try {
-    const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask: options => {
+    const ask = options => {
       const owner = ctx.getMainWindow();
       return owner && !owner.isDestroyed() ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
-    } });
+    };
+    if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveCurrent() })) { quitCleanupRunning = false; return; }
+    const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });
     if (!proceed) { quitCleanupRunning = false; return; }
   } catch (error) {
     quitCleanupRunning = false;
-    dialog.showErrorBox('未能完成录屏保存', `应用尚未退出，请返回设备页面重试。\n${error.message}`);
+    dialog.showErrorBox('未能完成退出前保存', `应用尚未退出，请返回设备页面重试。\n${error.message}`);
     return;
   }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();

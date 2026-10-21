@@ -10,6 +10,19 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  serialListPorts: () => ipcRenderer.invoke('serial:list'),
+  serialSnapshot: () => ipcRenderer.invoke('serial:snapshot'),
+  serialConnect: args => ipcRenderer.invoke('serial:connect', args),
+  serialDisconnect: () => ipcRenderer.invoke('serial:disconnect'),
+  serialSend: args => ipcRenderer.invoke('serial:send', args),
+  serialClear: () => ipcRenderer.invoke('serial:clear'),
+  serialSave: () => ipcRenderer.invoke('serial:save'),
+  serialSubscribe: args => ipcRenderer.invoke('serial:subscribe', args),
+  onSerialChanged: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('serial:changed', listener);
+    return () => ipcRenderer.off('serial:changed', listener);
+  },
   getDevices: () => ipcRenderer.invoke('adb:getDevices'),
   startScrcpy: (deviceId, settings) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings }),
   adbShell: (deviceId, command) => ipcRenderer.invoke('adb:shell', { deviceId, command }),

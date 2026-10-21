@@ -44,11 +44,13 @@
     "unicode": true
   },
   "electronDist": ".electron-cache/electron",
+  "npmRebuild": false,
   "asar": true,
   "asarUnpack": [
     "electron/lib/performance-worker.cjs",
     "electron/lib/task-center-worker.cjs",
-    "electron/lib/task-run-manifest.cjs"
+    "electron/lib/task-run-manifest.cjs",
+    "node_modules/@serialport/bindings-cpp/prebuilds/**/*"
   ],
   "compression": "maximum",
   "removePackageScripts": true,

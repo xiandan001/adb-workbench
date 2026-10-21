@@ -2,11 +2,13 @@ const { normalizeSession } = require('./log-sessions.cjs');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
 const { normalizeDeviceShortcuts } = require('./device-shortcuts-policy.cjs');
 const { storageKey: SHORTCUTS_KEY } = require('./device-shortcuts-spec.json');
+const { normalizePreferences: normalizeSerialPreferences } = require('./serial-policy.cjs');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1'
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
+  'adb-workbench.serial-preferences.v1'
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json',
@@ -15,7 +17,7 @@ const FILES = new Set([
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const SESSION_FILE = new RegExp(`^log-analysis-sessions/(${UUID})\\.json$`);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const COMMAND_ACTIONS = new Set(['tab:devices', 'environmentCheck', 'tab:troubleshoot', 'tab:artifacts',
+const COMMAND_ACTIONS = new Set(['tab:devices', 'tab:serial', 'environmentCheck', 'tab:troubleshoot', 'tab:artifacts',
   'tab:quality', 'tab:history', 'tab:tasks', 'tab:performance', 'tab:settings', 'logAnalyzer', 'refreshDevices']);
 const RULE_IDS = new Set(['builtin-crash', 'builtin-anr', 'builtin-native-crash', 'builtin-oom', 'builtin-watchdog', 'builtin-kernel-panic']);
 const STEP_TYPES = new Set(['shell', 'installApk', 'pushFile', 'screenshot', 'imageCompare', 'perfSnapshot', 'tap',
@@ -161,6 +163,7 @@ function normalizePreference(key, raw) {
   try { value = JSON.parse(raw); } catch { invalid(`偏好 ${key} JSON`); }
   assertSafeJson(value);
   if (key === SHORTCUTS_KEY) value = normalizeDeviceShortcuts(value);
+  if (key === 'adb-workbench.serial-preferences.v1') value = normalizeSerialPreferences(value);
   if (key === 'adb-workbench.pinned-devices.v1') {
     value = [...new Set(array(value, 1000, '常用设备').map(id => {
       text(id, 300, '常用设备 ID', false);

@@ -18,6 +18,12 @@ function harness(t, restartError = '') {
   const handlers = new Map();
   const timers = [];
   const calls = [];
+  const serial = { needsQuitConfirmation: () => false };
+  serial.reserveForMigration = () => {
+    if (serial.needsQuitConfirmation()) throw new Error('请先断开串口');
+    serial.reserved = true;
+    return () => { serial.reserved = false; };
+  };
   const dialog = {
     showSaveDialog: async () => ({ canceled: true }),
     showOpenDialog: async () => ({ canceled: false, filePaths: [backup] }),
@@ -38,6 +44,7 @@ function harness(t, restartError = '') {
       if (name === './app-context.cjs') return { getMainWindow: () => ({ webContents: sender }) };
       if (name === './data-migration-core.cjs') return core;
       if (name === './screen-recording.cjs') return { listUnresolved: () => [] };
+      if (name === './serial.cjs') return serial;
       return require(name);
     }
   });
@@ -45,7 +52,7 @@ function harness(t, restartError = '') {
     if (restartError) throw new Error(restartError);
     calls.push({ restart: true });
   } });
-  return { root, data, backup, sender, handlers, timers, calls, dialog, core, api: module.exports };
+  return { root, data, backup, sender, handlers, timers, calls, dialog, core, serial, api: module.exports };
 }
 
 test('migration is restricted to main window and cancellation does not create data', async t => {
@@ -87,6 +94,26 @@ test('corrupt backup fails before preview token or pending writes', async t => {
   h.core.readArchive = () => { throw new Error('corrupt archive'); };
   const result = await h.handlers.get('migration:preview')({ sender: h.sender });
   assert.equal(result.ok, false); assert.equal(result.token, undefined);
+  assert.equal(h.calls.length, 0);
+});
+
+test('active or unsaved serial data blocks migration before staging without closing it', async t => {
+  const h = harness(t); const event = { sender: h.sender };
+  const preview = await h.handlers.get('migration:preview')(event);
+  h.serial.needsQuitConfirmation = () => true;
+  const result = await h.handlers.get('migration:import')(event, { token: preview.token, confirmed: true, preferences: {} });
+  assert.equal(result.ok, false); assert.match(result.error, /串口/);
+  assert.equal(h.calls.length, 0);
+  h.serial.needsQuitConfirmation = () => false;
+  assert.equal((await h.handlers.get('migration:import')(event, { token: preview.token, confirmed: true, preferences: {} })).ok, true);
+});
+
+test('failed migration staging releases the serial connection reservation', async t => {
+  const h = harness(t); const event = { sender: h.sender };
+  const preview = await h.handlers.get('migration:preview')(event);
+  h.core.stageImport = async () => { assert.equal(h.serial.reserved, true); throw new Error('disk full'); };
+  const result = await h.handlers.get('migration:import')(event, { token: preview.token, confirmed: true, preferences: {} });
+  assert.equal(result.ok, false); assert.equal(h.serial.reserved, false);
   assert.equal(h.calls.length, 0);
 });
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { PORTABLE_PREF_KEYS, collectMigrationPreferences, applyMigrationPreferences, readMigratedPreference } from '../src/shared/dataMigrationStorage.js';
 import { PINNED_DEVICES_KEY, readPinnedDevices } from '../src/shared/deviceDiscovery.js';
+import { SERIAL_PREFS_KEY, SERIAL_HISTORY_KEY, defaultSerialPreferences, readSerialPreferences } from '../src/shared/serialSettings.js';
 const require = createRequire(import.meta.url);
 const backend = require('../electron/lib/data-migration-policy.cjs');
 
@@ -14,6 +15,31 @@ function storage(initial = {}) {
 
 test('renderer and backend preference allowlists agree exactly', () => {
   assert.deepEqual(PORTABLE_PREF_KEYS, backend.PORTABLE_PREF_KEYS);
+});
+
+test('serial preferences migrate but history, COM bindings and running state never migrate', () => {
+  const prefs = { ...defaultSerialPreferences(), config: { ...defaultSerialPreferences().config, baudRate: 115200 },
+    favorites: [{ id: 'status', name: '状态', mode: 'hex', content: '00 ff', lineEnding: 'none' }] };
+  const source = storage({ [SERIAL_PREFS_KEY]: JSON.stringify(prefs), [SERIAL_HISTORY_KEY]: '[{"content":"private"}]',
+    'serial-current-port': 'COM4', 'serial-active-session': 'running' });
+  const portable = collectMigrationPreferences(source);
+  assert.deepEqual(Object.keys(portable), [SERIAL_PREFS_KEY]);
+  const target = storage({ [SERIAL_HISTORY_KEY]: 'keep local history', 'serial-current-port': 'COM9', activeDeviceId: 'unchanged' });
+  applyMigrationPreferences(backend.normalizePreferences(portable), target);
+  assert.deepEqual(readSerialPreferences(target), prefs);
+  assert.equal(target.getItem(SERIAL_HISTORY_KEY), 'keep local history');
+  assert.equal(target.getItem('serial-current-port'), 'COM9');
+  assert.equal(target.getItem('activeDeviceId'), 'unchanged');
+  for (const unsafe of [{ ...prefs, path: 'COM4' }, { ...prefs, autoConnect: true }, { ...prefs, sessionId: 'running' },
+    { ...prefs, config: { ...prefs.config, path: 'COM4' } },
+    { ...prefs, favorites: [{ ...prefs.favorites[0], autoSend: true }] }]) {
+    const input = { [SERIAL_PREFS_KEY]: JSON.stringify(unsafe) };
+    assert.throws(() => backend.normalizePreferences(input));
+    assert.throws(() => applyMigrationPreferences(input, target));
+    assert.deepEqual(readSerialPreferences(target), prefs);
+  }
+  assert.throws(() => backend.normalizePreferences({ [SERIAL_HISTORY_KEY]: '[]' }));
+  assert.throws(() => applyMigrationPreferences({ [SERIAL_HISTORY_KEY]: '[]' }, target));
 });
 
 test('device pins migrate and restore without changing the active device or unrelated preferences', () => {

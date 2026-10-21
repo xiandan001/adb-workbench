@@ -2,6 +2,16 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.5.0': {
+    title: 'v4.5.0',
+    date: '2026-10-21',
+    items: [
+      { type: 'feature', text: '侧边栏新增独立的串口 / RS232 页面，动态发现电脑串口，支持含 921600 在内的常用波特率与热插拔提示' },
+      { type: 'feature', text: '支持文本和 HEX 数据收发、时间戳与字节统计，以及收发记录保存' },
+      { type: 'feature', text: '新增串口常用命令与发送历史，连接参数和常用命令可随数据迁移保存' },
+      { type: 'improve', text: '串口切换页面不断连，断线保留当前记录，退出前提示保存未保存的数据' }
+    ]
+  },
   '4.3.6': {
     title: 'v4.3.6',
     date: '2026-10-21',
