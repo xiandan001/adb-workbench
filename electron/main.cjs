@@ -1,7 +1,7 @@
 // 瘦入口：app 生命周期 + createWindow + 注册所有领域模块
 // 各领域逻辑已拆分到 electron/lib/ 下的模块中
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -30,6 +30,7 @@ const packageManager = require('./lib/package-manager.cjs');
 const performanceMonitor = require('./lib/performance-monitor.cjs');
 const taskCenter = require('./lib/task-center.cjs');
 const artifactCenter = require('./lib/artifact-center.cjs');
+const dataMigration = require('./lib/data-migration.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
 const acceptanceSuite = require('./lib/acceptance-suite.cjs');
@@ -111,8 +112,17 @@ function createWindow() {
   ctx.setMainWindow(mainWindow);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!gotTheLock) return;
+
+  if (dataMigration.hasPendingImport()) {
+    try { await dataMigration.prepareStartup(); }
+    catch (error) {
+      dialog.showErrorBox('数据迁移未完成', `为保护现有数据，应用暂未启动。请保留数据目录中的恢复备份后重试。\n${error.message}`);
+      app.exit(1);
+      return;
+    }
+  }
 
   // 检测版本升级：必须在 createWindow() 之前执行。
   // 因为 createWindow() 会立即加载页面，渲染进程会马上调用 app:checkChangelog
@@ -141,6 +151,7 @@ app.whenReady().then(() => {
   performanceMonitor.register(ipcMain);
   taskCenter.register(ipcMain);
   artifactCenter.register(ipcMain);
+  dataMigration.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);
@@ -198,7 +209,7 @@ app.on('before-quit', async (event) => {
   if (quitCleanupRunning) return;
 
   quitCleanupRunning = true;
-  const shouldInstallUpdate = updater.shouldInstallDownloadedUpdateOnQuit();
+  const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();
   try {
     await cleanupBeforeQuit({ forUpdateInstall: shouldInstallUpdate });
   } catch (err) {

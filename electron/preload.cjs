@@ -49,6 +49,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveCustomThemes: (customThemes) => ipcRenderer.invoke('themes:saveCustomThemes', customThemes),
   loadCustomThemes: () => ipcRenderer.invoke('themes:loadCustomThemes'),
   loadAllSettings: () => ipcRenderer.invoke('settings:loadAll'),
+  migrationExport: (args) => ipcRenderer.invoke('migration:export', args),
+  migrationPreview: () => ipcRenderer.invoke('migration:preview'),
+  migrationImport: (args) => ipcRenderer.invoke('migration:import', args),
+  migrationBootstrap: () => ipcRenderer.invoke('migration:bootstrap'),
+  migrationAcknowledge: (args) => ipcRenderer.invoke('migration:acknowledge', args),
+  migrationRollback: (args) => ipcRenderer.invoke('migration:rollback', args),
   saveSettingsPatch: (patch) => ipcRenderer.invoke('settings:savePatch', patch),
   // 截图保存路径设置
   saveScreenshotPath: (path) => ipcRenderer.invoke('settings:saveScreenshotPath', path),

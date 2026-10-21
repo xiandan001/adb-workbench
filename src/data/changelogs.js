@@ -2,6 +2,15 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.3.2': {
+    title: 'v4.3.2',
+    date: '2026-10-21',
+    items: [
+      { type: 'feature', text: '偏好设置新增数据导出与导入，方便在不同电脑间迁移使用数据' },
+      { type: 'feature', text: '导入前可预览备份内容，确认后保留恢复备份并重启生效' },
+      { type: 'improve', text: '设备别名、当前主题和投屏偏好支持本地保存与迁移' }
+    ]
+  },
   '4.3.1': {
     title: 'v4.3.1',
     date: '2026-10-21',

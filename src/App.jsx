@@ -16,6 +16,8 @@ import GlobalCommandPalette, { GlobalCommandSettings } from './components/Global
 import DangerConfirmModal from './components/DangerConfirmModal';
 import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
+import DataMigrationSettings from './components/DataMigrationSettings';
+import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
@@ -45,12 +47,12 @@ function App() {
   const [connectionFormOpen, setConnectionFormOpen] = useState(false);
   const [connectionResults, setConnectionResults] = useState({});
   const connectingAddressesRef = useRef(new Set());
-  const [scrcpySettings, setScrcpySettings] = useState({
+  const [scrcpySettings, setScrcpySettings] = useState(() => readMigratedPreference('scrcpySettings', {
     screenOff: false,
     stayAwake: true,
     bitrate: '8 Mbps',
     maxSize: '0'
-  });
+  }));
   // Toast 提示状态
   const [toast, setToast] = useState(null);
   // 避免连续提示时旧定时器清掉新的 Toast。
@@ -125,7 +127,7 @@ function App() {
   const qualityCenterPathLoadedRef = useRef(false);
   const [backgroundTasks, setBackgroundTasks] = useState({ inspection: null, performanceReport: null });
   const backgroundTaskHideTimersRef = useRef({});
-  const [deviceNames, setDeviceNames] = useState({});
+  const [deviceNames, setDeviceNames] = useState(() => readMigratedPreference('deviceNames', {}));
   const [expandedDeviceIds, setExpandedDeviceIds] = useState(new Set());
   const [apkInstallPaths, setApkInstallPaths] = useState({});
   const [recentApks, setRecentApks] = useState(readRecentApks);
@@ -141,8 +143,9 @@ function App() {
   const [lastSelectFolder, setLastSelectFolder] = useState('');
   // 推送远程路径历史记录
   const [pushRemotePathHistory, setPushRemotePathHistory] = useState([]);
-  const [currentTheme, setCurrentTheme] = useState('default');
+  const [currentTheme, setCurrentTheme] = useState(() => readMigratedPreference('currentTheme', 'default'));
   const [customThemes, setCustomThemes] = useState([]);
+  const [customThemesLoaded, setCustomThemesLoaded] = useState(false);
   const [showThemeEditor, setShowThemeEditor] = useState(false);
   const [editingTheme, setEditingTheme] = useState(null);
   const [newThemeName, setNewThemeName] = useState('');
@@ -162,6 +165,15 @@ function App() {
     return localStorage.getItem('autoUpdateEnabled') !== 'false';
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem('deviceNames', JSON.stringify(deviceNames));
+      localStorage.setItem('currentTheme', currentTheme);
+      localStorage.setItem('scrcpySettings', JSON.stringify(scrcpySettings));
+    } catch {
+      showToast('本地偏好保存失败，请检查可用存储空间');
+    }
+  }, [deviceNames, currentTheme, scrcpySettings, showToast]);
   const [globalCommandSettings, setGlobalCommandSettings] = useState(() => {
     try {
       return normalizeCommandSettings(JSON.parse(localStorage.getItem('globalCommandSettings') || '{}'));
@@ -450,7 +462,10 @@ function App() {
         window.electronAPI.loadQualityCenterPath?.(),
         window.electronAPI.loadPushRemotePathHistory?.()
       ]);
-      if (themesResult?.success && themesResult.data?.length > 0) setCustomThemes(themesResult.data);
+      if (themesResult?.success) {
+        setCustomThemes(themesResult.data || []);
+        setCustomThemesLoaded(true);
+      }
       applySettings({
         screenshotPath: screenshotResult?.data,
         screenRecordPath: screenRecordResult?.data,
@@ -466,7 +481,8 @@ function App() {
       if (window.electronAPI.loadAllSettings) {
         const result = await window.electronAPI.loadAllSettings();
         if (result?.success) {
-          if (result.data?.customThemes?.length > 0) setCustomThemes(result.data.customThemes);
+          setCustomThemes(result.data?.customThemes || []);
+          setCustomThemesLoaded(true);
           applySettings(result.data?.settings || {});
           return;
         }
@@ -500,12 +516,12 @@ function App() {
 
   useEffect(() => {
     const saveThemes = async () => {
-      if (window.electronAPI) {
+      if (window.electronAPI && customThemesLoaded) {
         await window.electronAPI.saveCustomThemes(customThemes);
       }
     };
     saveThemes();
-  }, [customThemes]);
+  }, [customThemes, customThemesLoaded]);
 
   // 保存截图路径变化时自动保存
   useEffect(() => {
@@ -1341,6 +1357,7 @@ function App() {
     { id: 'settings-cast', label: '投屏', icon: Smartphone },
     { id: 'settings-paths', label: '保存路径', icon: Folder },
     { id: 'settings-appearance', label: '外观', icon: Palette },
+    { id: 'settings-data', label: '数据迁移', icon: DownloadCloud },
     { id: 'settings-update', label: '更新', icon: Package },
     { id: 'settings-danger', label: '高危操作', icon: RotateCcw }
   ], []);
@@ -2648,6 +2665,10 @@ function App() {
                     })}
                   </div>
                 </div>
+              </section>
+
+              <section id="settings-data" className={settingsSectionClass}>
+                <DataMigrationSettings theme={t} showToast={showToast} />
               </section>
 
               <section id="settings-update" className={settingsSectionClass}>
