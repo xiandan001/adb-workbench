@@ -39,6 +39,38 @@ test('missing delta rows request an authoritative snapshot; metadata-only revisi
   assert.equal(applySerialDelta(initial, { revision: 7, firstId: 1, lastId: 1, entries: [], status: 'connected' }).needsSnapshot, false);
 });
 
+test('same-ID growth replaces the row without duplicating records or byte counts', () => {
+  const first = { ...row(1), hex: 'ab05', bytes: 2, parts: 1, time: 100, endTime: 100 };
+  const initial = applySerialSnapshot(emptySerialSnapshot(), { revision: 2, firstId: 1, lastId: 1, rxBytes: 2, entries: [first] });
+  const updated = { ...first, hex: 'ab050adf4e', bytes: 5, parts: 2, endTime: 110 };
+  const result = applySerialDelta(initial, { baseRevision: 2, revision: 3, firstId: 1, lastId: 1, rxBytes: 5, entries: [updated] });
+  assert.deepEqual(result.entries, [updated]);
+  assert.equal(result.rxBytes, 5);
+  assert.equal(result.needsSnapshot, false);
+  assert.equal(initial.entries[0].hex, 'ab05');
+});
+
+test('missed same-ID updates are detected by baseRevision and remain sticky until a full snapshot', () => {
+  const initial = applySerialSnapshot(emptySerialSnapshot(), { revision: 2, firstId: 1, lastId: 2, entries: [row(1), row(2)] });
+  const gap = applySerialDelta(initial, { baseRevision: 3, revision: 4, firstId: 1, lastId: 2, entries: [{ ...row(2), text: 'new' }] });
+  assert.equal(gap.entries.length, 2);
+  assert.equal(gap.needsSnapshot, true);
+  const next = applySerialDelta(gap, { baseRevision: 4, revision: 5, firstId: 1, lastId: 2, entries: [] });
+  assert.equal(next.needsSnapshot, true);
+  assert.equal(applySerialDelta(next, { baseRevision: 5, revision: 6, reset: true, firstId: 0, lastId: 0, entries: [] }).needsSnapshot, true);
+  assert.equal(applySerialSnapshot(next, { revision: 3, firstId: 1, lastId: 2, entries: [row(1), row(2)] }), next);
+  const repaired = applySerialSnapshot(next, { revision: 5, firstId: 1, lastId: 2, entries: [{ ...row(1), text: 'missed update' }, row(2)] });
+  assert.equal(repaired.needsSnapshot, false);
+  assert.equal(repaired.entries[0].text, 'missed update');
+});
+
+test('a full snapshot newer than the last publication safely accepts the next overlapping delta', () => {
+  const initial = applySerialSnapshot(emptySerialSnapshot(), { revision: 8, firstId: 1, lastId: 1, entries: [row(1)] });
+  const result = applySerialDelta(initial, { baseRevision: 5, revision: 9, firstId: 1, lastId: 1, entries: [{ ...row(1), text: 'latest' }] });
+  assert.equal(result.needsSnapshot, false);
+  assert.equal(result.entries[0].text, 'latest');
+});
+
 test('reset clears rows without assuming IDs restart; snapshot replaces equal revision', () => {
   const initial = applySerialSnapshot(emptySerialSnapshot(), { revision: 2, firstId: 20, lastId: 20, entries: [row(20)] });
   const cleared = applySerialDelta(initial, { revision: 3, reset: true, firstId: 0, lastId: 0, entries: [] });

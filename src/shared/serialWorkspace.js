@@ -18,7 +18,10 @@ function mergeSnapshot(current, incoming, replace) {
 }
 
 export function applySerialDelta(current, delta) {
-  return mergeSnapshot(current, delta, Boolean(delta?.reset));
+  const merged = mergeSnapshot(current, delta, Boolean(delta?.reset));
+  if (merged === current) return current;
+  const missedUpdate = Number.isFinite(delta?.baseRevision) && delta.baseRevision > current.revision;
+  return { ...merged, needsSnapshot: current.needsSnapshot || merged.needsSnapshot || missedUpdate };
 }
 
 export function applySerialSnapshot(current, snapshot) {

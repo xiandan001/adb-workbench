@@ -2,6 +2,16 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.5.1': {
+    title: 'v4.5.1',
+    date: '2026-10-22',
+    items: [
+      { type: 'improve', text: '串口 HEX 收发记录统一为大写、字节间空格，列表、详情、复制及导出显示一致' },
+      { type: 'improve', text: '串口连续接收片段自动合并显示，增加毫秒时间和中文收发标识，查看更直观' },
+      { type: 'feature', text: '新增独立 ASCII 收发模式，支持不可见字节显示及非 ASCII 输入校验' },
+      { type: 'improve', text: '新增 HEX 整理、发送字节预览与连接步骤提示，优化串口上手体验' }
+    ]
+  },
   '4.5.0': {
     title: 'v4.5.0',
     date: '2026-10-21',

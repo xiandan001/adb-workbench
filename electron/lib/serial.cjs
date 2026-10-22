@@ -17,6 +17,7 @@ function createSerialController({ service, getOwner, saveSnapshot }) {
     if (saving) throw new Error('正在保存串口记录，请稍候');
     saving = true;
     try {
+      service.sealReceive();
       const snapshot = service.snapshot();
       if (!snapshot.entries.length) throw new Error('暂无可保存的串口记录');
       const result = await saveSnapshot(snapshot);

@@ -22,6 +22,7 @@ function fixture() {
     listPorts: async () => [{ path: 'COM12' }], snapshot: () => structuredClone(snapshot),
     connect: async args => calls.push({ connect: args }), disconnect: async () => calls.push({ disconnect: true }),
     send: async args => calls.push({ send: args }), clear: () => calls.push({ clear: true }),
+    sealReceive: () => calls.push({ seal: true }),
     markSaved: revision => calls.push({ saved: revision }), needsQuitConfirmation: () => true
   };
   const controller = createSerialController({ service, getOwner: () => owner,
@@ -60,12 +61,13 @@ test('save exports an immutable revision and only marks that revision after succ
   const h = fixture();
   assert.equal((await h.controller.saveCurrent()).success, true);
   assert.equal(h.calls.find(call => call.saved).saved, 3);
+  assert.equal(h.calls[0].seal, true, 'seal the receive segment before the export snapshot');
   assert.equal(h.calls.find(call => call.export).export.entries[0].hex, '00FF');
   const cancelled = createSerialController({ service: h.service, getOwner: () => h.owner,
     saveSnapshot: async () => ({ success: true, cancelled: true }) });
   const count = h.calls.length;
   assert.equal((await cancelled.saveCurrent()).cancelled, true);
-  assert.equal(h.calls.length, count);
+  assert.deepEqual(h.calls.slice(count), [{ seal: true }]);
 });
 
 test('pending connect blocks migration and reservation blocks late new connects', async () => {
@@ -91,7 +93,7 @@ test('serial export preserves binary evidence, scope and safe atomic file writes
   t.after(() => { assert.equal(path.dirname(root), path.resolve(os.tmpdir())); fs.rmSync(root, { recursive: true, force: true }); });
   const snapshot = fixture().snapshot;
   const formatted = formatSerialSnapshot(snapshot);
-  assert.match(formatted, /COM12/); assert.match(formatted, /9600/); assert.match(formatted, /00FF/);
+  assert.match(formatted, /COM12/); assert.match(formatted, /9600/); assert.match(formatted, /HEX: 00 FF/);
   assert.match(formatted, /截断|移出/); assert.match(formatted, /\\u0000/);
   const output = path.join(root, 'capture.log');
   await writeSerialSnapshot(output, snapshot);
@@ -101,6 +103,17 @@ test('serial export preserves binary evidence, scope and safe atomic file writes
   const linked = path.join(root, 'linked.log'); fs.linkSync(output, linked);
   await assert.rejects(writeSerialSnapshot(linked, snapshot), /链接|普通/);
   assert.deepEqual(fs.readdirSync(root).sort(), ['capture.log', 'linked.log']);
+});
+
+test('export renders the user HEX response with readable ASCII without changing binary evidence', () => {
+  const snapshot = fixture().snapshot;
+  Object.assign(snapshot.entries[0], { hex: 'ab050adf4e', bytes: 5, parts: 2, endTime: 1700000000010 });
+  const formatted = formatSerialSnapshot(snapshot);
+  assert.ok(formatted.includes('HEX: AB 05 0A DF 4E'));
+  const slash = String.fromCharCode(92);
+  assert.ok(formatted.includes(`ASCII: ${slash}xAB${slash}x05${slash}n${slash}xDFN`));
+  assert.match(formatted, /合并.*2/);
+  assert.equal(snapshot.entries[0].hex, 'ab050adf4e');
 });
 
 test('quit cancel/save leaves the connection untouched; only explicit exit proceeds', async () => {

@@ -42,6 +42,26 @@ test('serial preferences migrate but history, COM bindings and running state nev
   assert.throws(() => applyMigrationPreferences({ [SERIAL_HISTORY_KEY]: '[]' }, target));
 });
 
+test('ASCII v1 preferences migrate with old UTF-8 and HEX favorites without binding or execution state', () => {
+  const prefs = { ...defaultSerialPreferences(), receiveMode: 'ascii', sendMode: 'ascii', lineEnding: 'crlf', favorites: [
+    { id: 'ascii', name: 'AT', mode: 'ascii', content: 'AT', lineEnding: 'crlf' },
+    { id: 'text', name: '文本', mode: 'text', content: '中文😀', lineEnding: 'lf' },
+    { id: 'hex', name: '字节', mode: 'hex', content: '00 ff', lineEnding: 'none' }
+  ] };
+  const source = storage({ [SERIAL_PREFS_KEY]: JSON.stringify(prefs) });
+  const target = storage({ activeDeviceId: 'unchanged', 'serial-current-port': 'COM9' });
+  applyMigrationPreferences(backend.normalizePreferences(collectMigrationPreferences(source)), target);
+  assert.deepEqual(readSerialPreferences(target), prefs);
+  assert.equal(target.getItem('activeDeviceId'), 'unchanged');
+  assert.equal(target.getItem('serial-current-port'), 'COM9');
+  assert.equal(target.getItem(SERIAL_HISTORY_KEY), null);
+  const invalid = { ...prefs, favorites: [{ ...prefs.favorites[0], content: '中' }] };
+  const input = { [SERIAL_PREFS_KEY]: JSON.stringify(invalid) };
+  assert.throws(() => backend.normalizePreferences(input), /ASCII/);
+  assert.throws(() => applyMigrationPreferences(input, target), /ASCII/);
+  assert.deepEqual(readSerialPreferences(target), prefs);
+});
+
 test('device pins migrate and restore without changing the active device or unrelated preferences', () => {
   const saved = storage({ [PINNED_DEVICES_KEY]: '["离线设备","192.168.1.2:5555"]', activeDeviceId: 'current' });
   const exported = collectMigrationPreferences(saved);

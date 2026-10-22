@@ -72,6 +72,29 @@ test('HEX encoding preserves all bytes and never appends a text ending', () => {
   }
 });
 
+test('ASCII sends exact 7-bit values, applies newline once and never interprets typed escapes', () => {
+  const allAscii = String.fromCharCode(...Array.from({ length: 128 }, (_, index) => index));
+  for (const policy of policies) {
+    assert.deepEqual([...policy.encodeMessage(message(allAscii, 'ascii'))], Array.from({ length: 128 }, (_, index) => index));
+    assert.deepEqual([...policy.encodeMessage(message('AT', 'ascii', 'crlf'))], [65, 84, 13, 10]);
+    assert.deepEqual([...policy.encodeMessage(message('A\r\n', 'ascii', 'crlf'))], [65, 13, 10, 13, 10]);
+    assert.deepEqual([...policy.encodeMessage(message('\\r\\n', 'ascii'))], [92, 114, 92, 110]);
+    assert.equal(policy.encodeMessage(message('A'.repeat(65534), 'ascii', 'crlf')).length, 65536);
+    assert.throws(() => policy.encodeMessage(message('A'.repeat(65535), 'ascii', 'crlf')), /64/);
+    assert.throws(() => policy.encodeMessage(message('', 'ascii')), /内容/);
+  }
+});
+
+test('ASCII rejects every high byte and Unicode before encoding instead of truncating or masking', () => {
+  for (const policy of policies) {
+    for (let byte = 128; byte <= 255; byte++) assert.throws(() => policy.encodeMessage(message(String.fromCharCode(byte), 'ascii')), /ASCII/);
+    for (const content of ['中', 'é', '😀', 'A\u0080Z', '\ud800', '\udfff', 'Ａ', '\u200b']) {
+      assert.throws(() => policy.encodeMessage(message(content, 'ascii')), /ASCII/);
+    }
+    assert.deepEqual([...policy.encodeMessage(message('中文é😀', 'text'))], [...Buffer.from('中文é😀')]);
+  }
+});
+
 test('invalid or empty sends are rejected with contextual reasons', () => {
   for (const policy of policies) {
     for (const content of ['', ' ', '0', '0 0', '0xFF', 'FF,00', 'GG', 'FF:00', '00\0ff']) {
@@ -132,6 +155,34 @@ test('preference storage restores defaults without writing and explicitly saves 
   assert.deepEqual(frontend.saveSerialPreferences(input, saved), input);
   assert.deepEqual(frontend.readSerialPreferences(saved), input);
   assert.equal(saved.getItem('unrelated'), 'keep');
+});
+
+test('v1 ASCII preferences and favorites coexist with untouched old UTF-8 and HEX preferences/history', () => {
+  const oldPrefs = { ...preferences(), favorites: [favorite, { id: 'utf8', name: '文本', ...message('中文😀') }] };
+  const oldHistory = [{ ...message('中文😀'), time: 10 }, { ...message('00 ff', 'hex'), time: 9 }];
+  const saved = storage({ [frontend.SERIAL_PREFS_KEY]: JSON.stringify(oldPrefs), [frontend.SERIAL_HISTORY_KEY]: JSON.stringify(oldHistory) });
+  assert.deepEqual(frontend.readSerialPreferences(saved), oldPrefs);
+  assert.deepEqual(frontend.readSerialHistory(saved), oldHistory);
+  const next = { ...oldPrefs, receiveMode: 'ascii', sendMode: 'ascii', favorites: [...oldPrefs.favorites,
+    { id: 'ascii', name: 'AT命令', ...message('AT', 'ascii', 'crlf') }] };
+  for (const policy of policies) assert.deepEqual(policy.normalizePreferences(next), next);
+  frontend.saveSerialPreferences(next, saved);
+  assert.deepEqual(frontend.readSerialPreferences(saved), next);
+  const history = frontend.appendSerialHistory(message('AT', 'ascii', 'crlf'), saved);
+  assert.equal(history[0].mode, 'ascii');
+  assert.deepEqual(history.slice(1), oldHistory);
+  assert.deepEqual(frontend.readSerialHistory(saved), history);
+  const raw = saved.getItem(frontend.SERIAL_PREFS_KEY);
+  assert.throws(() => frontend.saveSerialPreferences({ ...next, favorites: [{ id: 'bad', name: '错误', ...message('é', 'ascii') }] }, saved), /ASCII/);
+  assert.equal(saved.getItem(frontend.SERIAL_PREFS_KEY), raw);
+});
+
+test('invalid ASCII history is preserved and rejected rather than rewritten on a later send', () => {
+  const raw = JSON.stringify([{ ...message('é', 'ascii'), time: 42 }]);
+  const saved = storage({ [frontend.SERIAL_HISTORY_KEY]: raw });
+  assert.throws(() => frontend.readSerialHistory(saved), /异常/);
+  assert.throws(() => frontend.appendSerialHistory(message('AT', 'ascii'), saved), /异常/);
+  assert.equal(saved.getItem(frontend.SERIAL_HISTORY_KEY), raw);
 });
 
 test('corrupt, inaccessible or full preference storage is not silently overwritten', () => {

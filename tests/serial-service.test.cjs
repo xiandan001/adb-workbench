@@ -151,7 +151,7 @@ test('invalid HEX and stale session never reach the native port', async t => {
 });
 
 test('UTF-8 crosses native callbacks intact, RX/TX decoders are separate and HEX is byte exact', async t => {
-  const { service, ports } = harness(t);
+  const { service, ports } = harness(t, { service: { mergeReceive: false } });
   await service.connect({ path: 'COM2', config: CONFIG });
   const bytes = Buffer.from('中');
   ports[0].emit('data', bytes.subarray(0, 2));
@@ -194,7 +194,7 @@ test('large native chunks are split to 16 KiB while retaining all raw bytes', as
 });
 
 test('retention is constrained by raw byte and entry limits with chronological IDs', async t => {
-  const { service, ports } = harness(t, { service: { maxEntries: 3, maxBytes: 6 } });
+  const { service, ports } = harness(t, { service: { maxEntries: 3, maxBytes: 6, mergeReceive: false } });
   await service.connect({ path: 'COM2', config: CONFIG });
   for (let number = 1; number <= 5; number++) ports[0].emit('data', Buffer.from([number, number]));
   const data = service.snapshot();
@@ -208,7 +208,7 @@ test('retention is constrained by raw byte and entry limits with chronological I
 });
 
 test('deltas batch additions rather than replaying the full snapshot, and clear is a reset', async t => {
-  const { service, ports, changes } = harness(t);
+  const { service, ports, changes } = harness(t, { service: { mergeReceive: false } });
   await service.connect({ path: 'COM2', config: CONFIG });
   ports[0].emit('data', Buffer.from('a'));
   ports[0].emit('data', Buffer.from('b'));
@@ -405,7 +405,7 @@ test('native synchronous close error event does not trigger recursive close call
 });
 
 test('production retention never exceeds 5000 rows or 4 MiB after a burst', async t => {
-  const { service, ports } = harness(t);
+  const { service, ports } = harness(t, { service: { mergeReceive: false } });
   await service.connect({ path: 'COM2', config: CONFIG });
   for (let index = 0; index < 5001; index++) ports[0].emit('data', Buffer.from([index % 256]));
   let data = service.snapshot();
@@ -447,4 +447,177 @@ test('clear resets pending decoders without touching the hardware or next record
   assert.equal(service.snapshot().entries[0].id, 2);
   assert.equal(ports[0].calls.close, 0);
   assert.equal(ports[0].writes.length, 0);
+});
+
+test('RX user reply AB05 + 0ADF4E is stored immediately and merged within 50 ms', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  const first = service.snapshot();
+  assert.equal(first.rxBytes, 2);
+  assert.equal(first.entries[0].hex, 'ab05');
+  clock += 10;
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  const merged = service.snapshot();
+  assert.equal(merged.entries.length, 1);
+  assert.equal(merged.entries[0].id, first.entries[0].id);
+  assert.equal(merged.entries[0].hex, 'ab050adf4e');
+  assert.equal(merged.entries[0].bytes, 5);
+  assert.equal(merged.entries[0].parts, 2);
+  assert.equal(merged.entries[0].time, 1000);
+  assert.equal(merged.entries[0].endTime, 1010);
+  assert.equal(merged.rxBytes, 5);
+  assert.equal(first.entries[0].hex, 'ab05', 'old snapshots remain consistent');
+});
+
+test('published RX same-ID growth is an upsert with chained baseRevision', async t => {
+  let clock = 1000;
+  const { service, ports, changes } = harness(t, { service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  await delay(115);
+  assert.equal(changes[0].baseRevision, 0);
+  const exported = service.snapshot();
+  service.markSaved(exported.revision);
+  clock += 10;
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  await delay(115);
+  assert.equal(changes[1].reset, false);
+  assert.equal(changes[1].baseRevision, changes[0].revision);
+  assert.equal(changes[1].entries.length, 1);
+  assert.equal(changes[1].entries[0].id, changes[0].entries[0].id);
+  assert.equal(changes[1].entries[0].hex, 'ab050adf4e');
+  assert.equal(changes[1].rxBytes, 5);
+  assert.equal(service.snapshot().unsaved, true);
+  service.markSaved(exported.revision);
+  assert.equal(service.snapshot().unsaved, true, 'an older save cannot mark amended bytes clean');
+});
+
+test('RX grouping uses an inclusive 50 ms idle gap, 1 second span and clock rollback boundaries', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from([1]));
+  clock += 50;
+  ports[0].emit('data', Buffer.from([2]));
+  assert.equal(service.snapshot().entries.length, 1);
+  clock += 51;
+  ports[0].emit('data', Buffer.from([3]));
+  assert.equal(service.snapshot().entries.length, 2);
+  service.clear();
+  clock = 2000;
+  for (let index = 0; index <= 20; index++) {
+    ports[0].emit('data', Buffer.from([index]));
+    clock += 50;
+  }
+  assert.equal(service.snapshot().entries.length, 2, 'a callback at the 1 second boundary begins a new segment');
+  assert.equal(service.snapshot().entries[0].parts, 20);
+  clock = 1500;
+  ports[0].emit('data', Buffer.from([255]));
+  assert.equal(service.snapshot().entries.length, 3, 'clock rollback cannot extend the prior segment');
+});
+
+test('RX grouping splits exactly at 16 KiB without losing data or recounting prior bytes', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.alloc(16380, 0x41));
+  clock += 1;
+  ports[0].emit('data', Buffer.alloc(10, 0x42));
+  const snapshot = service.snapshot();
+  assert.deepEqual(snapshot.entries.map(entry => entry.bytes), [16384, 6]);
+  assert.deepEqual(snapshot.entries.map(entry => entry.parts), [2, 1]);
+  assert.equal(snapshot.rxBytes, 16390);
+  assert.equal(snapshot.entries.map(entry => entry.hex).join(''), Buffer.concat([Buffer.alloc(16380, 0x41), Buffer.alloc(10, 0x42)]).toString('hex'));
+});
+
+test('sealReceive ends grouping but not UTF-8 decoding; ordinary snapshots do not seal', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from([0xe4, 0xb8]));
+  service.sealReceive();
+  clock += 1;
+  ports[0].emit('data', Buffer.from([0xad]));
+  const snapshot = service.snapshot();
+  assert.equal(snapshot.entries.length, 2);
+  assert.equal(snapshot.entries[0].text + snapshot.entries[1].text, '中');
+  const exportedRevision = snapshot.revision;
+  service.sealReceive();
+  service.markSaved(exportedRevision);
+  clock += 1;
+  ports[0].emit('data', Buffer.from('A'));
+  service.snapshot();
+  clock += 1;
+  ports[0].emit('data', Buffer.from('B'));
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.hex), ['e4b8', 'ad', '4142']);
+  assert.equal(service.snapshot().unsaved, true);
+});
+
+test('valid send start and TX commit seal RX; invalid send does not split received data', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { behavior: { manualWrite: true, manualDrain: true }, service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('A'));
+  await assert.rejects(service.send({ sessionId: service.snapshot().sessionId, mode: 'hex', content: '0', lineEnding: 'none' }));
+  clock += 1;
+  ports[0].emit('data', Buffer.from('B'));
+  assert.equal(service.snapshot().entries[0].text, 'AB');
+  const sending = service.send({ sessionId: service.snapshot().sessionId, mode: 'text', content: 'T', lineEnding: 'none' });
+  clock += 1;
+  ports[0].emit('data', Buffer.from('C'));
+  assert.equal(service.snapshot().entries.length, 2, 'RX during write cannot merge with pre-write RX');
+  ports[0].finishWrite();
+  ports[0].finishDrain();
+  await sending;
+  clock += 1;
+  ports[0].emit('data', Buffer.from('D'));
+  assert.deepEqual(service.snapshot().entries.map(entry => `${entry.direction}:${entry.text}`), ['RX:AB', 'RX:C', 'TX:T', 'RX:D']);
+});
+
+test('dirty RX updates are pruned on eviction, remain bounded and clear starts a new identity', async t => {
+  let clock = 1000;
+  const { service, ports, changes } = harness(t, { service: { now: () => clock, maxEntries: 2, maxBytes: 6 } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('ABC'));
+  clock += 1;
+  ports[0].emit('data', Buffer.from('DEF'));
+  clock += 1;
+  ports[0].emit('data', Buffer.from('GHI'));
+  await delay(115);
+  assert.equal(changes[0].entries.length, 1);
+  assert.equal(changes[0].entries[0].text, 'GHI');
+  assert.equal(changes[0].evicted, 1);
+  assert.equal(changes[0].rxBytes, 9);
+  const oldId = changes[0].entries[0].id;
+  service.clear();
+  clock += 1;
+  ports[0].emit('data', Buffer.from('Z'));
+  await delay(115);
+  assert.equal(changes[1].reset, true);
+  assert.deepEqual(changes[1].entries.map(entry => entry.text), ['Z']);
+  assert.ok(changes[1].entries[0].id > oldId);
+  assert.equal(changes[1].rxBytes, 1);
+});
+
+test('disconnection and a cancelled write preserve merged RX and never merge a later session', async t => {
+  let clock = 1000;
+  const { service, ports } = harness(t, { behavior: index => index ? {} : { manualWrite: true }, service: { now: () => clock } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('A'));
+  clock += 1;
+  ports[0].emit('data', Buffer.from('B'));
+  const failure = assert.rejects(service.send({ sessionId: service.snapshot().sessionId, mode: 'text', content: 'T', lineEnding: 'none' }), /结果无法确认/);
+  clock += 1;
+  ports[0].emit('data', Buffer.from('C'));
+  await service.disconnect();
+  await failure;
+  await service.connect({ path: 'COM10', config: CONFIG });
+  clock += 1;
+  ports[1].emit('data', Buffer.from('D'));
+  ports[0].finishWrite();
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.text), ['AB', 'C', 'D']);
+  assert.notEqual(service.snapshot().entries[1].sessionId, service.snapshot().entries[2].sessionId);
+  assert.equal(service.snapshot().txBytes, 0);
 });

@@ -37,7 +37,7 @@ function normalizeConfig(value = DEFAULT_CONFIG) {
 
 function messageFields(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('发送内容格式无效');
-  const mode = enumValue(value.mode, ['text', 'hex'], '发送模式');
+  const mode = enumValue(value.mode, ['text', 'hex', 'ascii'], '发送模式');
   const lineEnding = enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), '换行设置');
   if (typeof value.content !== 'string' || !value.content.length) throw new Error('发送内容不能为空');
   return { mode, content: value.content, lineEnding };
@@ -60,6 +60,11 @@ function encodeMessage(value) {
   const { mode, content, lineEnding } = messageFields(value);
   if (mode === 'hex') return encodedOutput(hexBytes(content));
   if (content.length > MAX_SEND_BYTES) throw new Error('单次发送不能超过 64 KiB');
+  if (mode === 'ascii') {
+    for (let index = 0; index < content.length; index++) {
+      if (content.charCodeAt(index) > 127) throw new Error('ASCII 仅支持 0–127 的字符，第 ' + (index + 1) + ' 个字符不符合；中文或其他 Unicode 请使用 UTF-8');
+    }
+  }
   const bytes = encodeUtf8(content + LINE_ENDINGS[lineEnding]);
   if (bytes.length > MAX_SEND_BYTES) throw new Error('单次发送不能超过 64 KiB');
   return encodedOutput(bytes);
@@ -85,8 +90,8 @@ function normalizePreferences(value) {
   const favorites = value.favorites.map(normalizeFavorite);
   if (new Set(favorites.map(item => item.id)).size !== favorites.length) throw new Error('常用命令 ID 重复');
   return { version: 1, config: normalizeConfig(value.config),
-    receiveMode: enumValue(value.receiveMode, ['text', 'hex'], '接收模式'),
-    sendMode: enumValue(value.sendMode, ['text', 'hex'], '发送模式'),
+    receiveMode: enumValue(value.receiveMode, ['text', 'hex', 'ascii'], '接收模式'),
+    sendMode: enumValue(value.sendMode, ['text', 'hex', 'ascii'], '发送模式'),
     lineEnding: enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), '换行设置'), favorites };
 }
 

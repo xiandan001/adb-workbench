@@ -7,15 +7,15 @@ const OPEN_TIMEOUT_MS = 15000;
 const PORT_FIELDS = ['path', 'manufacturer', 'serialNumber', 'pnpId', 'locationId', 'vendorId', 'productId', 'friendlyName'];
 
 function createSerialService({ listPorts: enumerate, createPort, onChange = () => {}, now = Date.now,
-  writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes }) {
+  writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes, mergeReceive = true }) {
   if (typeof enumerate !== 'function' || typeof createPort !== 'function') throw new Error('串口驱动未初始化');
-  const buffer = createSerialBuffer({ now, maxEntries, maxBytes });
+  const buffer = createSerialBuffer({ now, maxEntries, maxBytes, mergeReceive });
   const state = { status: 'disconnected', path: '', config: { ...DEFAULT_CONFIG }, sessionId: '', error: '', sending: false };
   let active = null;
   let revision = 0;
   let lastDataRevision = 0;
   let savedRevision = 0;
-  let publishedId = 0;
+  let publishedRevision = 0;
   let resetPending = false;
   let batchTimer = null;
   let disposed = false;
@@ -35,8 +35,8 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (batchTimer || disposed) return;
     batchTimer = setTimeout(() => {
       batchTimer = null;
-      const delta = { ...metadata(), entries: buffer.entriesAfter(resetPending ? 0 : publishedId), reset: resetPending };
-      publishedId = buffer.cursor();
+      const delta = { ...metadata(), baseRevision: publishedRevision, entries: buffer.drainChanges(resetPending), reset: resetPending };
+      publishedRevision = delta.revision;
       resetPending = false;
       try { onChange(delta); } catch { /* A renderer observer cannot break the hardware lifecycle. */ }
     }, BATCH_MS);
@@ -153,6 +153,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (active) throw new Error('请先断开并释放当前串口，再连接其他端口');
     if (!validPath(path)) throw new Error('请选择有效的串口');
     const normalized = normalizeConfig(config);
+    buffer.sealReceive();
     const session = {
       id: randomUUID(), path, config: normalized, port: null,
       openPending: true, openSucceeded: false, cancelled: false, released: false,
@@ -182,6 +183,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (session.released) return Promise.resolve(snapshot());
     if (session.closePromise) return session.closePromise;
     session.cancelled = true;
+    buffer.sealReceive();
     session.openAction.reject(new Error(session.failure || '串口连接已取消，正在断开'));
     cancelWrite(session, '串口正在断开，发送结果无法确认；已发送的部分数据无法撤回');
     if (active === session) {
@@ -253,6 +255,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   }
 
   function writeBytes(session, bytes) {
+    buffer.sealReceive();
     const action = deferred();
     let finished = false;
     const current = () => active === session && !session.cancelled && !session.released && state.status === 'connected';
@@ -277,6 +280,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
         action.reject(new Error('串口连接已变化，发送结果无法确认；已发送的部分数据无法撤回'));
         return;
       }
+      buffer.sealReceive();
       buffer.append({ sessionId: session.id, path: session.path, config: session.config, direction: 'TX', bytes });
       state.sending = false;
       changed({ data: true });
@@ -313,6 +317,11 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     return snapshot();
   }
 
+  function sealReceive() {
+    assertRunning();
+    buffer.sealReceive();
+  }
+
   function markSaved(exportedRevision) {
     if (!Number.isSafeInteger(exportedRevision) || exportedRevision < 0 || exportedRevision > revision) throw new Error('保存的串口记录版本无效');
     const wasUnsaved = lastDataRevision > savedRevision;
@@ -332,7 +341,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (active) await requestClose(active);
   }
 
-  return { listPorts, snapshot, connect, disconnect, send, clear, markSaved, needsQuitConfirmation, dispose };
+  return { listPorts, snapshot, connect, disconnect, send, clear, sealReceive, markSaved, needsQuitConfirmation, dispose };
 }
 
 function deferred() {
