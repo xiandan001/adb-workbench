@@ -5,6 +5,39 @@ const { createSerialBuffer, MAX_BYTES, MAX_ENTRIES } = require('../electron/lib/
 const config = { baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
 const record = (bytes, extra = {}) => ({ bytes, sessionId: 'session-A', path: 'COM2', config, direction: 'RX', ...extra });
 
+test('four RX fragments form two complete pairs and a fifth never updates either pair', () => {
+  let clock = 100;
+  const buffer = createSerialBuffer({ now: () => clock });
+  for (const hex of ['ab05', '0adf4e', 'ab079844', '00962a']) {
+    buffer.append(record(Buffer.from(hex, 'hex')));
+    clock += 10;
+  }
+  const pairs = buffer.entriesAfter();
+  assert.deepEqual(pairs.map(row => row.hex), ['ab050adf4e', 'ab07984400962a']);
+  assert.deepEqual(pairs.map(row => row.parts), [2, 2]);
+  assert.deepEqual(pairs.map(row => row.bytes), [5, 7]);
+  assert.equal(buffer.metadata().rxBytes, 12);
+  assert.deepEqual(buffer.drainChanges(), pairs);
+  buffer.append(record(Buffer.from('ff', 'hex')));
+  const update = buffer.drainChanges();
+  assert.equal(update.length, 1);
+  assert.equal(update[0].hex, 'ff');
+  assert.equal(update[0].parts, 1);
+  assert.ok(update[0].id > pairs[1].id);
+  assert.deepEqual(buffer.entriesAfter().slice(0, 2), pairs);
+  assert.equal(buffer.metadata().rxBytes, 13);
+});
+
+test('UTF-8 decoder continues across the two-part display boundary without byte loss', () => {
+  const buffer = createSerialBuffer({ now: () => 100 });
+  for (const byte of [0xe4, 0xb8, 0xad]) buffer.append(record(Buffer.from([byte])));
+  const rows = buffer.entriesAfter();
+  assert.deepEqual(rows.map(row => row.hex), ['e4b8', 'ad']);
+  assert.deepEqual(rows.map(row => row.parts), [2, 1]);
+  assert.equal(rows.map(row => row.text).join(''), '中');
+  assert.equal(buffer.metadata().rxBytes, 3);
+});
+
 test('dirty rows are bounded upserts; snapshots do not consume changes or expose mutable rows', () => {
   let clock = 100;
   const buffer = createSerialBuffer({ now: () => clock });
@@ -36,12 +69,12 @@ test('all RX bytes are retained or counted as evicted during a sustained multi-m
   const rows = buffer.entriesAfter();
   assert.ok(rows.length <= MAX_ENTRIES);
   assert.ok(rows.reduce((sum, row) => sum + row.bytes, 0) <= MAX_BYTES);
-  assert.ok(rows.every(row => row.bytes <= 16384));
+  assert.ok(rows.every(row => row.bytes <= 16384 && row.parts <= 2));
   assert.equal(buffer.metadata().rxBytes, 5000 * part.length);
   assert.equal(buffer.metadata().evicted, rows[0].id - 1);
   assert.ok(buffer.drainChanges().length <= rows.length);
   assert.deepEqual(buffer.drainChanges(), []);
-  assert.equal(rows.at(-1).hex, '61'.repeat(8192));
+  assert.equal(rows.at(-1).hex, '61'.repeat(2048));
 });
 
 test('TX calls never merge and empty RX callbacks cannot extend a grouping interval', () => {
@@ -105,6 +138,6 @@ test('deterministic mixed traffic preserves byte suffixes, counts, limits and re
     assert.ok(allHex.endsWith(rows.map(row => row.hex).join('')));
     assert.equal(metadata.rxBytes, rxBytes);
     assert.equal(metadata.txBytes, txBytes);
-    assert.ok(rows.every(row => row.bytes * 2 === row.hex.length && row.endTime - row.time < 1000));
+    assert.ok(rows.every(row => row.bytes * 2 === row.hex.length && row.endTime - row.time < 1000 && row.parts <= 2));
   }
 });

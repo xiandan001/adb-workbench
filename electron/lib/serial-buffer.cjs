@@ -5,6 +5,7 @@ const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 16 * 1024;
 const RX_MERGE_GAP_MS = 50;
 const RX_MERGE_SPAN_MS = 1000;
+const RX_MERGE_MAX_PARTS = 2;
 
 function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES, mergeReceive = true } = {}) {
   const entryLimit = boundedLimit(maxEntries, MAX_ENTRIES);
@@ -75,6 +76,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
   function canMerge(tail, sessionId, direction, time) {
     return mergeReceive && direction === 'RX' && tail && receiveId === tail.id
       && tail.direction === 'RX' && tail.sessionId === sessionId && tail.bytes < chunkLimit
+      && tail.parts < RX_MERGE_MAX_PARTS
       && time >= tail.endTime && time - tail.endTime <= RX_MERGE_GAP_MS
       && time >= tail.time && time - tail.time < RX_MERGE_SPAN_MS;
   }
@@ -152,4 +154,4 @@ function boundedLimit(value, maximum) {
   return Number.isInteger(value) && value > 0 ? Math.min(value, maximum) : maximum;
 }
 
-module.exports = { createSerialBuffer, MAX_ENTRIES, MAX_BYTES, MAX_CHUNK_BYTES, RX_MERGE_GAP_MS, RX_MERGE_SPAN_MS };
+module.exports = { createSerialBuffer, MAX_ENTRIES, MAX_BYTES, MAX_CHUNK_BYTES, RX_MERGE_GAP_MS, RX_MERGE_SPAN_MS, RX_MERGE_MAX_PARTS };

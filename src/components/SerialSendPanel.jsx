@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Clock, Pencil, Plus, Send, Star, Trash2, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { encodeMessage } from '../shared/serialSettings';
@@ -7,11 +7,14 @@ import { formatHex } from '../shared/serialFormat';
 const bytesHex = bytes => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 const commandPreview = item => item.mode === 'hex' ? formatHex(item.content.replace(/\s+/gu, '').slice(0, 80)) : item.content.slice(0, 120);
 
-export default function SerialSendPanel({ theme, isDark, preferences, onPreferences, draft, onDraft, commandsOpen, onCommandsOpen, connected, sending, busy, onSend, history }) {
+export default function SerialSendPanel({ theme, isDark, preferences, onPreferences, draft, onDraft, commandsOpen, onCommandsOpen, connected, sending, busy, onSend, history, showToast }) {
   const id = useId();
   const [favoriteName, setFavoriteName] = useState('');
   const [editingId, setEditingId] = useState('');
   const [favoriteError, setFavoriteError] = useState('');
+  const [feedback, setFeedback] = useState({ sequence: 0, active: false, kind: '', key: '', source: '' });
+  const textareaRef = useRef(null);
+  const feedbackTimer = useRef(null);
   const { sendMode: mode, lineEnding, favorites } = preferences;
   const message = useMemo(() => ({ mode, content: draft, lineEnding }), [mode, draft, lineEnding]);
   const validation = useMemo(() => {
@@ -24,10 +27,29 @@ export default function SerialSendPanel({ theme, isDark, preferences, onPreferen
   const button = `inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs disabled:opacity-40 ${theme.button.secondary}`;
   const locked = sending || busy;
   const sendDisabled = !connected || locked || Boolean(validation.error);
+  useEffect(() => () => clearTimeout(feedbackTimer.current), []);
+  useLayoutEffect(() => {
+    if (!feedback.sequence) return;
+    textareaRef.current?.focus({ preventScroll: true });
+    textareaRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  }, [feedback.sequence]);
+  const dismissFeedback = () => {
+    clearTimeout(feedbackTimer.current);
+    setFeedback(previous => previous.active ? { ...previous, active: false } : previous);
+  };
   const fill = item => {
+    dismissFeedback();
     onDraft(item.content);
     onPreferences({ sendMode: item.mode, lineEnding: item.lineEnding });
     setFavoriteError('');
+  };
+  const selectCommand = (item, kind, key, source) => {
+    fill(item);
+    setEditingId('');
+    setFavoriteName('');
+    setFeedback(previous => ({ sequence: previous.sequence + 1, active: true, kind, key, source }));
+    showToast?.('已填入发送区，尚未发送');
+    feedbackTimer.current = setTimeout(() => setFeedback(previous => ({ ...previous, active: false })), 3000);
   };
   const saveFavorite = async () => {
     setFavoriteError('');
@@ -37,7 +59,7 @@ export default function SerialSendPanel({ theme, isDark, preferences, onPreferen
     const next = editingId ? favorites.map(previous => previous.id === editingId ? item : previous) : [...favorites, item];
     if (await onPreferences({ favorites: next })) { setEditingId(''); setFavoriteName(''); }
   };
-  const submit = () => { if (!sendDisabled) onSend(message); };
+  const submit = () => { if (!sendDisabled) { dismissFeedback(); onSend(message); } };
 
   return <div className="space-y-2 border-t border-slate-400/20 pt-3">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">发送数据</h3><div className="flex flex-wrap items-center gap-2">
@@ -45,7 +67,8 @@ export default function SerialSendPanel({ theme, isDark, preferences, onPreferen
       <label className="sr-only" htmlFor={`${id}-ending`}>发送换行符</label><SelectMenu id={`${id}-ending`} isDark={isDark} compact value={mode === 'hex' ? 'none' : lineEnding} disabled={locked || mode === 'hex'} onChange={value => onPreferences({ lineEnding: value })} options={[{ value: 'none', label: '不追加换行' }, { value: 'lf', label: '追加 LF' }, { value: 'cr', label: '追加 CR' }, { value: 'crlf', label: '追加 CRLF' }]} className="w-32" />
       {mode === 'hex' && <button type="button" onClick={() => { if (!validation.error) onDraft(formatHex(bytesHex(validation.data))); }} disabled={locked || Boolean(validation.error)} className={button} title="仅整理编辑区，不会发送">整理 HEX</button>}
     </div></div>
-    <textarea aria-label="串口发送内容" value={draft} rows={3} maxLength={1048576} spellCheck={false} onChange={event => onDraft(event.target.value)} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} placeholder={mode === 'hex' ? '例如：AA 06 10 01 A7 EF（只发送这些字节）' : mode === 'ascii' ? '例如：AT（仅接受 7-bit ASCII 字符）' : '输入发送内容；Enter 换行，Ctrl+Enter 发送'} className={`${field} resize-y font-mono text-xs`} />
+    <textarea ref={textareaRef} aria-label="串口发送内容" aria-describedby={feedback.active ? `${id}-feedback` : undefined} data-command-feedback-sequence={feedback.sequence} data-command-highlighted={feedback.active ? 'true' : 'false'} value={draft} rows={3} maxLength={1048576} spellCheck={false} onChange={event => { dismissFeedback(); onDraft(event.target.value); }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} placeholder={mode === 'hex' ? '例如：AA 06 10 01 A7 EF（只发送这些字节）' : mode === 'ascii' ? '例如：AT（仅接受 7-bit ASCII 字符）' : '输入发送内容；Enter 换行，Ctrl+Enter 发送'} className={`${field} resize-y font-mono text-xs ${feedback.active ? 'ring-2 ring-emerald-400' : ''}`} />
+    <p id={`${id}-feedback`} role="status" aria-label="命令回填反馈" aria-live="polite" aria-atomic="true" data-command-feedback-sequence={feedback.sequence} data-command-feedback-active={feedback.active ? 'true' : 'false'} className={feedback.active ? `rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs ${isDark ? 'text-emerald-300' : 'text-emerald-700'}` : 'sr-only'}>{feedback.active && <span key={feedback.sequence}>已填入发送区，尚未发送 · {feedback.source}</span>}</p>
     <div className="flex flex-wrap items-center justify-between gap-2"><div className={`min-w-0 flex-1 text-xs ${theme.textMuted}`}><span>{draft && validation.error ? <span role="alert" className="text-amber-500">{validation.error}</span> : `待发送 ${validation.bytes.toLocaleString()} B · 单次最多 64 KiB`}</span><p className="mt-1 text-[11px]">{mode === 'hex' ? 'HEX 严格发送原始字节，不追加换行；整理只修改显示格式。' : mode === 'ascii' ? 'ASCII 只接受 0–127 字符，字面 \\r / \\n 不会转换；仅追加所选换行符一次。' : 'UTF-8 编码，仅追加所选换行符一次。'}写入成功不代表设备已执行或回应。</p>{!connected && <p className="mt-1 text-[11px]">请先连接串口，再发送数据。</p>}</div><button type="button" disabled={sendDisabled} onClick={submit} className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Send size={14} />{sending ? '写入中…' : '发送'}<span className="hidden text-[10px] opacity-75 sm:inline">Ctrl+Enter</span></button></div>
     {validation.preview && <div aria-label="实际发送字节预览" className={`rounded-lg border border-slate-400/20 px-3 py-2 text-[11px] ${theme.textMuted}`}><span>实际发送字节（HEX）{validation.bytes > 32 ? ' · 仅预览前 32 B' : ''}</span><code className="mt-1 block break-all leading-5">{validation.preview}{validation.bytes > 32 ? ' …' : ''}</code></div>}
     <button type="button" aria-expanded={commandsOpen} aria-controls={`${id}-commands`} onClick={() => onCommandsOpen(!commandsOpen)} className={`inline-flex items-center gap-1.5 rounded py-1 text-xs ${theme.textMuted}`}><ChevronDown size={13} className={commandsOpen ? '' : '-rotate-90'} /><Star size={13} />常用命令 / 发送历史</button>
@@ -54,8 +77,8 @@ export default function SerialSendPanel({ theme, isDark, preferences, onPreferen
       <div className="flex flex-wrap gap-2"><input aria-label="常用命令名称" value={favoriteName} maxLength={80} onChange={event => setFavoriteName(event.target.value)} placeholder={editingId ? '编辑常用命令名称' : '给当前发送内容起个名字'} className={`${field} min-w-0 flex-1 basis-48`} /><button type="button" onClick={saveFavorite} disabled={!draft || Boolean(validation.error) || (!editingId && favorites.length >= 30)} className={button}><Plus size={13} />{editingId ? '保存修改' : '保存常用命令'}</button>{editingId && <button type="button" onClick={() => { setEditingId(''); setFavoriteName(''); setFavoriteError(''); }} className={button}><X size={13} />取消编辑</button>}</div>
       {favoriteError && <p role="alert" className="text-xs text-amber-500">{favoriteError}</p>}
       <div className="grid gap-3 lg:grid-cols-2">
-        <div className="min-w-0"><h4 className={`mb-2 text-xs ${theme.textMuted}`}>常用命令（{favorites.length}/30）</h4><div className="max-h-40 overflow-auto space-y-1">{favorites.length ? favorites.map(item => <div key={item.id} className="flex items-center gap-1 rounded-lg bg-slate-400/10 p-1"><button type="button" onClick={() => { fill(item); setEditingId(''); setFavoriteName(''); }} className="min-w-0 flex-1 px-2 py-1 text-left" title={`${item.name} · ${item.mode.toUpperCase()} · 仅回填`}><span className="block truncate text-xs">{item.name}</span><span className={`block truncate font-mono text-[11px] ${theme.textMuted}`}>{item.mode.toUpperCase()} · {commandPreview(item)}</span></button><button type="button" aria-label={`编辑常用命令 ${item.name}`} onClick={() => { fill(item); setEditingId(item.id); setFavoriteName(item.name); }} className="rounded p-2"><Pencil size={13} /></button><button type="button" aria-label={`删除常用命令 ${item.name}`} onClick={async () => { if (await onPreferences({ favorites: favorites.filter(previous => previous.id !== item.id) }) && editingId === item.id) { setEditingId(''); setFavoriteName(''); } }} className="rounded p-2"><Trash2 size={13} /></button></div>) : <p className={`py-2 text-xs ${theme.textMuted}`}>暂无常用命令</p>}</div></div>
-        <div className="min-w-0"><h4 className={`mb-2 flex items-center gap-1 text-xs ${theme.textMuted}`}><Clock size={12} />最近成功发送（{history.length}/50）</h4><div className="max-h-40 space-y-1 overflow-auto">{history.length ? history.map((item, index) => <button type="button" key={`${item.time}-${index}`} onClick={() => { fill(item); setEditingId(''); setFavoriteName(''); }} title="仅回填，不发送" className="block w-full rounded-lg bg-slate-400/10 px-3 py-2 text-left"><span className={`block text-[11px] ${theme.textMuted}`}>{new Date(item.time).toLocaleString()} · {item.mode.toUpperCase()}</span><span className="mt-1 block truncate font-mono text-xs">{commandPreview(item)}</span></button>) : <p className={`py-2 text-xs ${theme.textMuted}`}>成功写入串口后会出现在这里</p>}</div></div>
+        <div className="min-w-0"><h4 className={`mb-2 text-xs ${theme.textMuted}`}>常用命令（{favorites.length}/30）</h4><div className="max-h-40 overflow-auto space-y-1">{favorites.length ? favorites.map(item => <div key={item.id} className="flex items-center gap-1 rounded-lg bg-slate-400/10 p-1"><button type="button" data-serial-favorite-id={item.id} data-command-selected={feedback.active && feedback.kind === 'favorite' && feedback.key === item.id ? 'true' : 'false'} onClick={() => selectCommand(item, 'favorite', item.id, `常用命令：${item.name}`)} className={`min-w-0 flex-1 rounded-md px-2 py-1 text-left ${feedback.active && feedback.kind === 'favorite' && feedback.key === item.id ? 'bg-emerald-500/15 ring-1 ring-emerald-500/60' : ''}`} title={`${item.name} · ${item.mode.toUpperCase()} · 仅回填`}><span className="block truncate text-xs">{item.name}</span><span className={`block truncate font-mono text-[11px] ${theme.textMuted}`}>{item.mode.toUpperCase()} · {commandPreview(item)}</span></button><button type="button" aria-label={`编辑常用命令 ${item.name}`} onClick={() => { fill(item); setEditingId(item.id); setFavoriteName(item.name); }} className="rounded p-2"><Pencil size={13} /></button><button type="button" aria-label={`删除常用命令 ${item.name}`} onClick={async () => { if (await onPreferences({ favorites: favorites.filter(previous => previous.id !== item.id) }) && editingId === item.id) { setEditingId(''); setFavoriteName(''); } }} className="rounded p-2"><Trash2 size={13} /></button></div>) : <p className={`py-2 text-xs ${theme.textMuted}`}>暂无常用命令</p>}</div></div>
+        <div className="min-w-0"><h4 className={`mb-2 flex items-center gap-1 text-xs ${theme.textMuted}`}><Clock size={12} />最近成功发送（{history.length}/50）</h4><div className="max-h-40 space-y-1 overflow-auto">{history.length ? history.map((item, index) => <button type="button" key={`${item.time}-${index}`} data-serial-history-index={index} data-command-selected={feedback.active && feedback.kind === 'history' && feedback.key === `${item.time}-${index}` ? 'true' : 'false'} onClick={() => selectCommand(item, 'history', `${item.time}-${index}`, `最近成功发送：第 ${index + 1} 条`)} title="仅回填，不发送" className={`block w-full rounded-lg px-3 py-2 text-left ${feedback.active && feedback.kind === 'history' && feedback.key === `${item.time}-${index}` ? 'bg-emerald-500/15 ring-1 ring-emerald-500/60' : 'bg-slate-400/10'}`}><span className={`block text-[11px] ${theme.textMuted}`}>{new Date(item.time).toLocaleString()} · {item.mode.toUpperCase()}</span><span className="mt-1 block truncate font-mono text-xs">{commandPreview(item)}</span></button>) : <p className={`py-2 text-xs ${theme.textMuted}`}>成功写入串口后会出现在这里</p>}</div></div>
       </div>
     </div>}
   </div>;

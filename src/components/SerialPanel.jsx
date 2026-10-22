@@ -201,7 +201,7 @@ export default function SerialPanel({ theme, showToast }) {
       {(error || snapshot.error) && <p role="alert" className="break-words rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error || snapshot.error}</p>}
       {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{persistenceError}</p>}
       <SerialDataView theme={theme} isDark={isDark} snapshot={snapshot} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={save} onClear={() => act('clear', () => window.electronAPI.serialClear())} saving={pending === 'save'} busy={Boolean(pending)} showToast={showToast} />
-      <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={connected} sending={snapshot.sending || pending === 'send'} busy={Boolean(pending)} onSend={send} history={history} />
+      <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={connected} sending={snapshot.sending || pending === 'send'} busy={Boolean(pending)} onSend={send} history={history} showToast={showToast} />
     </div>
   </section>;
 }

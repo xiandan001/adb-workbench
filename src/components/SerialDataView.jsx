@@ -69,7 +69,7 @@ export default function SerialDataView({ theme, isDark, snapshot, receiveMode, o
     </div>
     <div className={`flex flex-wrap justify-between gap-1 text-[11px] ${theme.textMuted}`}><span>接收 {snapshot.rxBytes.toLocaleString()} B · 发送 {snapshot.txBytes.toLocaleString()} B · 缓存 {entries.length} 条{snapshot.unsaved ? ' · 有未保存记录' : ''}</span><span>{following ? '跟随最新' : '已暂停滚动，仍持续接收'} · 点击记录查看完整内容</span></div>
     {snapshot.evicted > 0 && <p role="status" className="text-xs text-amber-500">仅保留最近记录，较早的 {snapshot.evicted} 条记录已移出缓存；保存仅包含当前缓存。</p>}
-    <p className={`text-[11px] leading-5 ${theme.textMuted}`}>相邻接收间隔不超过 50 ms 时合并显示，每条最多 16 KiB 或 1 秒；仅整理显示，不代表完整协议帧。{receiveMode === 'ascii' ? 'ASCII 将不可见或高位字节显示为转义，原始数据保持不变。' : '文本不可读时可切换 HEX 查看原始字节。'}</p>
+    <p className={`text-[11px] leading-5 ${theme.textMuted}`}>相邻接收间隔不超过 50 ms 时，每行最多合并 2 段，第三段另起一行；仍限制每条 16 KiB 或 1 秒。仅整理显示，不代表完整协议帧。{receiveMode === 'ascii' ? 'ASCII 将不可见或高位字节显示为转义，原始数据保持不变。' : '文本不可读时可切换 HEX 查看原始字节。'}</p>
     {detail && <SerialEntryDetail entry={detail} mode={receiveMode} theme={theme} onClose={() => setDetailId(null)} onCopy={copy} />}
   </div>;
 }

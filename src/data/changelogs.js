@@ -7,9 +7,10 @@ const CHANGELOGS = {
     date: '2026-10-22',
     items: [
       { type: 'improve', text: '串口 HEX 收发记录统一为大写、字节间空格，列表、详情、复制及导出显示一致' },
-      { type: 'improve', text: '串口连续接收片段自动合并显示，增加毫秒时间和中文收发标识，查看更直观' },
+      { type: 'improve', text: '串口连续接收片段每行最多合并两段，后续片段另起一行，保留毫秒时间和中文收发标识' },
       { type: 'feature', text: '新增独立 ASCII 收发模式，支持不可见字节显示及非 ASCII 输入校验' },
-      { type: 'improve', text: '新增 HEX 整理、发送字节预览与连接步骤提示，优化串口上手体验' }
+      { type: 'improve', text: '新增 HEX 整理、发送字节预览与连接步骤提示，优化串口上手体验' },
+      { type: 'improve', text: '点击常用命令或发送历史后高亮提示并定位发送框，明确显示已填入但尚未发送' }
     ]
   },
   '4.5.0': {

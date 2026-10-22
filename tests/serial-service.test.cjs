@@ -492,9 +492,24 @@ test('published RX same-ID growth is an upsert with chained baseRevision', async
   assert.equal(service.snapshot().unsaved, true);
   service.markSaved(exported.revision);
   assert.equal(service.snapshot().unsaved, true, 'an older save cannot mark amended bytes clean');
+  clock += 10;
+  ports[0].emit('data', Buffer.from('ab079844', 'hex'));
+  clock += 10;
+  ports[0].emit('data', Buffer.from('00962a', 'hex'));
+  await delay(115);
+  assert.equal(changes[2].baseRevision, changes[1].revision);
+  assert.deepEqual(changes[2].entries.map(entry => entry.hex), ['ab07984400962a']);
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.hex), ['ab050adf4e', 'ab07984400962a']);
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.parts), [2, 2]);
+  clock += 10;
+  ports[0].emit('data', Buffer.from('ff', 'hex'));
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.parts), [2, 2, 1]);
+  await delay(115);
+  assert.deepEqual(changes[3].entries.map(entry => entry.hex), ['ff']);
+  assert.equal(service.snapshot().rxBytes, 13);
 });
 
-test('RX grouping uses an inclusive 50 ms idle gap, 1 second span and clock rollback boundaries', async t => {
+test('RX grouping keeps independent 50 ms and rollback boundaries with two-part precedence over the span limit', async t => {
   let clock = 1000;
   const { service, ports } = harness(t, { service: { now: () => clock } });
   await service.connect({ path: 'COM2', config: CONFIG });
@@ -502,20 +517,22 @@ test('RX grouping uses an inclusive 50 ms idle gap, 1 second span and clock roll
   clock += 50;
   ports[0].emit('data', Buffer.from([2]));
   assert.equal(service.snapshot().entries.length, 1);
-  clock += 51;
+  service.clear();
   ports[0].emit('data', Buffer.from([3]));
-  assert.equal(service.snapshot().entries.length, 2);
+  clock += 51;
+  ports[0].emit('data', Buffer.from([4]));
+  assert.equal(service.snapshot().entries.length, 2, 'the gap still splits a one-part row before its two-part limit');
   service.clear();
   clock = 2000;
   for (let index = 0; index <= 20; index++) {
     ports[0].emit('data', Buffer.from([index]));
     clock += 50;
   }
-  assert.equal(service.snapshot().entries.length, 2, 'a callback at the 1 second boundary begins a new segment');
-  assert.equal(service.snapshot().entries[0].parts, 20);
+  assert.equal(service.snapshot().entries.length, 11, 'two-part rows finish before a stream can reach the 1 second cap');
+  assert.deepEqual(service.snapshot().entries.map(entry => entry.parts), [...Array(10).fill(2), 1]);
   clock = 1500;
   ports[0].emit('data', Buffer.from([255]));
-  assert.equal(service.snapshot().entries.length, 3, 'clock rollback cannot extend the prior segment');
+  assert.equal(service.snapshot().entries.length, 12, 'clock rollback cannot extend the prior one-part segment');
 });
 
 test('RX grouping splits exactly at 16 KiB without losing data or recounting prior bytes', async t => {
