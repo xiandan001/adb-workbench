@@ -331,7 +331,8 @@ test('terminal IPC preserves main-owner authorization and compact successes and 
     terminalRead: args => { reads++; return { sessionId: args.sessionId, startOffset: 0, endOffset: 1, nextOffset: 1, hex: '41', truncated: false }; },
     terminalWrite: async args => { writes++; if (args.content === 'fail') throw Object.assign(new Error('input refused'), { code: 'SERIAL_TERMINAL_BACKPRESSURE' }); return { bytes: Buffer.byteLength(args.content) }; }
   };
-  createSerialController({ service, getOwner: () => owner, saveSnapshot: () => {} }).register({ handle: (name, handler) => handlers.set(name, handler) });
+  const workspaces = { get: workspace => { assert.equal(workspace, 'terminal'); return service; }, snapshot: service.snapshot };
+  createSerialController({ workspaces, getOwner: () => owner, saveSnapshot: () => {} }).register({ handle: (name, handler) => handlers.set(name, handler) });
   for (const name of ['serial:terminal-read', 'serial:terminal-write']) {
     const denied = await handlers.get(name)({ sender: {} }, { sessionId: 'test', content: 'A', offset: 0 });
     assert.equal(denied.success, false);

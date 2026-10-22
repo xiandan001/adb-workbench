@@ -1,7 +1,8 @@
 const MAX_ROWS = 5000;
+export const SERIAL_WORKSPACES = Object.freeze(['rs232', 'terminal']);
 
-export function emptySerialSnapshot() {
-  return { status: 'disconnected', path: '', sessionId: '', error: '', sending: false, revision: -1,
+export function emptySerialSnapshot(workspace = 'rs232') {
+  return { workspace, status: 'disconnected', path: '', sessionId: '', error: '', sending: false, revision: -1,
     rxBytes: 0, txBytes: 0, evicted: 0, firstId: 0, lastId: 0, unsaved: false, entries: [], needsSnapshot: false };
 }
 
@@ -28,8 +29,22 @@ export function applySerialSnapshot(current, snapshot) {
   return mergeSnapshot(current, snapshot, true);
 }
 
+export function emptySerialWorkspaces() {
+  return Object.fromEntries(SERIAL_WORKSPACES.map(workspace => [workspace, emptySerialSnapshot(workspace)]));
+}
+
+function applyWorkspace(current, incoming, reducer) {
+  const workspace = incoming?.workspace;
+  if (!SERIAL_WORKSPACES.includes(workspace)) return current;
+  const next = reducer(current[workspace], incoming);
+  return next === current[workspace] ? current : { ...current, [workspace]: next };
+}
+
+export function applySerialWorkspaceSnapshot(current, snapshot) { return applyWorkspace(current, snapshot, applySerialSnapshot); }
+export function applySerialWorkspaceDelta(current, delta) { return applyWorkspace(current, delta, applySerialDelta); }
+
 // UI-only session state survives page navigation, never connects or sends on restoration.
-const workspace = { selectedPath: '', draft: '', advanced: false, commandsOpen: false, following: true, mode: 'rs232', terminal: { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' } };
+const workspace = { selectedPath: '', draft: '', advanced: false, terminalSelectedPath: '', terminalAdvanced: false, commandsOpen: false, following: true, mode: 'rs232', terminal: { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' } };
 export function readSerialWorkspace() { return { ...workspace, terminal: { ...workspace.terminal } }; }
 export function updateSerialWorkspace(changes) { Object.assign(workspace, changes); }
 

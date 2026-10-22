@@ -94,6 +94,28 @@ test('writer disposal discards queued text and ignores an old write completion',
   assert.equal(writer.enqueue('stale'), false);
 });
 
+test('accepted terminal paste finishes on its original session after switching views', async () => {
+  const first = deferred();
+  const writes = [];
+  let activeView = 'terminal';
+  const writer = createSerialTerminalWriter({ sessionId: 'terminal-COM17', delayMs: 1000,
+    canWrite: () => true,
+    write: async message => { writes.push(message); if (writes.length === 1) return first.promise; return { success: true, bytes: bytes(message.content) }; } });
+  const acceptUserInput = content => activeView === 'terminal' && writer.enqueue(content);
+  const paste = 'a'.repeat(1500) + '\r';
+  assert.equal(acceptUserInput(paste), true);
+  const running = writer.flush();
+  await tick();
+  activeView = 'rs232';
+  assert.equal(acceptUserInput('hidden-new-input'), false);
+  first.resolve({ success: true, bytes: 512 });
+  await running;
+  assert.equal(writes.map(item => item.content).join(''), paste);
+  assert.ok(writes.every(item => item.sessionId === 'terminal-COM17'));
+  assert.equal(writer.state().queuedBytes, 0);
+  writer.dispose();
+});
+
 test('writer schedules text enqueued between drain completion and promise cleanup', async () => {
   const writes = [];
   const writer = createSerialTerminalWriter({ sessionId: 's1', delayMs: 0,

@@ -50,6 +50,28 @@ test('archive round-trip includes only portable files/preferences, preserving ra
   assert.equal(gunzipSync(archive).toString().includes('DO-NOT-EXPORT'), false);
 });
 
+test('pre-v2 serial backup checksum remains valid and rollback preserves exact v1 preference bytes', async t => {
+  const key = 'adb-workbench.serial-preferences.v1';
+  const config = { baudRate: 57600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
+  const old = { version: 1, config, receiveMode: 'ascii', sendMode: 'hex', lineEnding: 'crlf',
+    favorites: [{ id: 'status', name: '状态', mode: 'ascii', content: 'AT', lineEnding: 'crlf' }] };
+  const originalRaw = JSON.stringify(old, null, 2) + '\n';
+  const legacyPayload = payload([], { [key]: originalRaw });
+  // Build the exact old envelope rather than re-encoding it through the new
+  // normalizer: its checksum must be checked before v1 is upgraded in memory.
+  const archive = gzipSync(JSON.stringify({ format: 'adb-workbench-backup', payload: legacyPayload, sha256: HASH(legacyPayload) }));
+  const decoded = core.readArchive(archive).payload;
+  assert.deepEqual(JSON.parse(decoded.preferences[key]), { ...old, version: 2, terminalConfig: { ...config } });
+  const root = temp(t, 'serial-v1-migration');
+  const staged = await core.stageImport(root, decoded, { [key]: originalRaw });
+  const applied = await core.applyPendingImport(root);
+  assert.equal(applied.id, staged.id);
+  assert.equal(applied.previousPreferences[key], originalRaw);
+  assert.equal(JSON.parse(applied.preferences[key]).terminalConfig.baudRate, 57600);
+  const rolledBack = await core.rollbackStartupImport(root, staged.id);
+  assert.equal(rolledBack.preferences[key], originalRaw);
+});
+
 test('corrupt, unsupported, duplicate, traversal and oversized archive data are rejected', () => {
   assert.throws(() => core.readArchive(Buffer.from('broken')), /损坏/);
   const envelope = JSON.parse(gunzipSync(encodeArchive(payload())).toString());

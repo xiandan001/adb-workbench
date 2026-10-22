@@ -227,7 +227,7 @@ app.on('before-quit', async (event) => {
       const owner = ctx.getMainWindow();
       return owner && !owner.isDestroyed() ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
     };
-    if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveCurrent() })) { quitCleanupRunning = false; return; }
+    if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { quitCleanupRunning = false; return; }
     const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });
     if (!proceed) { quitCleanupRunning = false; return; }
   } catch (error) {

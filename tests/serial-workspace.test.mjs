@@ -1,8 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applySerialDelta, applySerialSnapshot, emptySerialSnapshot, createSerialDiscovery, readSerialWorkspace, updateSerialWorkspace } from '../src/shared/serialWorkspace.js';
+import { applySerialDelta, applySerialSnapshot, emptySerialSnapshot, createSerialDiscovery, readSerialWorkspace, updateSerialWorkspace,
+  emptySerialWorkspaces, applySerialWorkspaceSnapshot, applySerialWorkspaceDelta } from '../src/shared/serialWorkspace.js';
 
 const row = id => ({ id, bytes: 1, hex: '41', text: 'A' });
+
+test('independent serial workspaces can reuse revisions and record IDs without mixing data', () => {
+  let states = emptySerialWorkspaces();
+  states = applySerialWorkspaceSnapshot(states, { ...emptySerialSnapshot('rs232'), revision: 100, firstId: 1, lastId: 1, entries: [{ ...row(1), text: 'RS232' }] });
+  states = applySerialWorkspaceSnapshot(states, { ...emptySerialSnapshot('terminal'), revision: 2, firstId: 1, lastId: 1, entries: [{ ...row(1), text: 'TERMINAL' }] });
+  assert.equal(states.rs232.entries[0].text, 'RS232');
+  assert.equal(states.terminal.entries[0].text, 'TERMINAL');
+  const previousTerminal = states.terminal;
+  states = applySerialWorkspaceDelta(states, { workspace: 'rs232', baseRevision: 100, revision: 101, firstId: 1, lastId: 1, entries: [{ ...row(1), text: 'RS232 updated' }] });
+  assert.equal(states.terminal, previousTerminal);
+  assert.equal(states.rs232.entries[0].text, 'RS232 updated');
+  assert.equal(applySerialWorkspaceDelta(states, { workspace: 'unknown', revision: 999 }), states);
+  assert.equal(applySerialWorkspaceSnapshot(states, { revision: 999, entries: [] }), states);
+});
+
+test('clearing or receiving a late snapshot only changes its captured serial workspace', () => {
+  let states = emptySerialWorkspaces();
+  states = applySerialWorkspaceSnapshot(states, { ...emptySerialSnapshot('terminal'), revision: 7, firstId: 1, lastId: 1, txBytes: 1, unsaved: true, entries: [row(1)] });
+  states = applySerialWorkspaceSnapshot(states, { ...emptySerialSnapshot('rs232'), revision: 1, path: 'COM17', status: 'connected' });
+  states = applySerialWorkspaceDelta(states, { workspace: 'rs232', baseRevision: 1, revision: 2, reset: true, firstId: 0, lastId: 0, txBytes: 0, entries: [], unsaved: false });
+  assert.equal(states.terminal.txBytes, 1);
+  assert.equal(states.terminal.unsaved, true);
+  assert.equal(states.terminal.entries.length, 1);
+  assert.equal(states.rs232.entries.length, 0);
+  assert.equal(states.rs232.path, 'COM17');
+});
 
 test('serial page workspace retains only session UI state across navigation without a whole-page collapse', () => {
   const original = readSerialWorkspace();
@@ -31,6 +58,20 @@ test('serial mode defaults to RS232 and terminal settings remain local UI state 
     assert.equal(readSerialWorkspace().terminal.enter, 'lf');
     assert.equal(readSerialWorkspace().terminal.style, 'classic');
     assert.equal('connected' in copied, false);
+  } finally { updateSerialWorkspace(original); }
+});
+
+test('RS232 and terminal keep independent port selections and advanced-panel state', () => {
+  const original = readSerialWorkspace();
+  try {
+    updateSerialWorkspace({ selectedPath: 'COM3', advanced: true, terminalSelectedPath: 'COM17', terminalAdvanced: false });
+    updateSerialWorkspace({ mode: 'terminal', terminalSelectedPath: 'COM22', terminalAdvanced: true });
+    assert.equal(readSerialWorkspace().selectedPath, 'COM3');
+    assert.equal(readSerialWorkspace().advanced, true);
+    assert.equal(readSerialWorkspace().terminalSelectedPath, 'COM22');
+    assert.equal(readSerialWorkspace().terminalAdvanced, true);
+    updateSerialWorkspace({ mode: 'rs232', selectedPath: 'COM4' });
+    assert.equal(readSerialWorkspace().terminalSelectedPath, 'COM22');
   } finally { updateSerialWorkspace(original); }
 });
 

@@ -3,7 +3,8 @@ const encodedOutput = value => Buffer.from(value);
 
 const DEFAULT_CONFIG = Object.freeze({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
 const CONFIG_KEYS = ['baudRate', 'dataBits', 'stopBits', 'parity', 'flowControl'];
-const PREF_KEYS = ['version', 'config', 'receiveMode', 'sendMode', 'lineEnding', 'favorites'];
+const PREF_KEYS_V1 = ['version', 'config', 'receiveMode', 'sendMode', 'lineEnding', 'favorites'];
+const PREF_KEYS_V2 = [...PREF_KEYS_V1, 'terminalConfig'];
 const FAVORITE_KEYS = ['id', 'name', 'mode', 'content', 'lineEnding'];
 const LINE_ENDINGS = Object.freeze({ none: '', lf: '\n', cr: '\r', crlf: '\r\n' });
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -84,12 +85,15 @@ function normalizeFavorite(value) {
 }
 
 function normalizePreferences(value) {
-  exactObject(value, PREF_KEYS, '串口偏好');
-  if (value.version !== 1) throw new Error('串口偏好版本不受支持');
+  if (value?.version !== 1 && value?.version !== 2) throw new Error('串口偏好版本不受支持');
+  exactObject(value, value.version === 1 ? PREF_KEYS_V1 : PREF_KEYS_V2, '串口偏好');
+  if (value.config === undefined || (value.version === 2 && value.terminalConfig === undefined)) throw new Error('串口偏好缺少连接参数');
+  const config = normalizeConfig(value.config);
+  const terminalConfig = normalizeConfig(value.version === 1 ? value.config : value.terminalConfig);
   if (!Array.isArray(value.favorites) || value.favorites.length > 30) throw new Error('常用命令最多保存 30 条');
   const favorites = value.favorites.map(normalizeFavorite);
   if (new Set(favorites.map(item => item.id)).size !== favorites.length) throw new Error('常用命令 ID 重复');
-  return { version: 1, config: normalizeConfig(value.config),
+  return { version: 2, config, terminalConfig,
     receiveMode: enumValue(value.receiveMode, ['text', 'hex', 'ascii'], '接收模式'),
     sendMode: enumValue(value.sendMode, ['text', 'hex', 'ascii'], '发送模式'),
     lineEnding: enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), '换行设置'), favorites };

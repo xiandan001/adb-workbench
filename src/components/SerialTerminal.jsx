@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Eraser, ClipboardPaste, Save, TerminalSquare } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -20,7 +20,7 @@ function PasteConfirmation({ paste, theme, onConfirm, onCancel }) {
   </dialog>;
 }
 
-export default function SerialTerminal({ theme, isDark, snapshot, settings, onSettings, onSave, saving, busy, showToast }) {
+export default function SerialTerminal({ active = true, theme, isDark, snapshot, settings, onSettings, onSave, saving, busy, showToast }) {
   const id = useId();
   const hostRef = useRef(null);
   const settingsButtonRef = useRef(null);
@@ -38,13 +38,14 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
   const [paste, setPaste] = useState(null);
   const connected = snapshot.status === 'connected';
   const sessionId = snapshot.sessionId;
-  const live = useRef({ connected, sessionId, settings, replaying: Boolean(sessionId), paused: false, readFailed: false, showToast });
+  const live = useRef({ active, activation: 0, connected, sessionId, settings, replaying: Boolean(sessionId), paused: false, readFailed: false, showToast });
   const button = `inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.secondary}`;
 
-  useEffect(() => {
-    Object.assign(live.current, { connected, sessionId, settings, showToast });
+  useLayoutEffect(() => {
+    if (live.current.active !== active) live.current.activation++;
+    Object.assign(live.current, { active, connected, sessionId, settings, showToast });
     syncInputRef.current?.();
-  }, [connected, sessionId, settings, showToast]);
+  }, [active, connected, sessionId, settings, showToast]);
 
   useEffect(() => {
     let disposed = false;
@@ -60,7 +61,7 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
     term.open(host);
     termRef.current = term;
     term.textarea.setAttribute('aria-label', '串口终端输入');
-    const canInput = () => !disposed && live.current.connected && !live.current.replaying && !live.current.paused && !live.current.readFailed && !document.hidden && document.hasFocus();
+    const canInput = () => !disposed && live.current.active && live.current.connected && !live.current.replaying && !live.current.paused && !live.current.readFailed && !document.hidden && document.hasFocus();
     const syncInput = () => {
       const disabled = !canInput();
       term.options.disableStdin = disabled;
@@ -89,15 +90,16 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
         const prepared = prepareTerminalPaste(content, live.current.settings.enter);
         setNotice('');
         if (!prepared.bytes) return;
-        if (prepared.requiresConfirmation) setPaste({ content, bytes: prepared.bytes, sessionId: live.current.sessionId });
+        if (prepared.requiresConfirmation) setPaste({ content, bytes: prepared.bytes, sessionId: live.current.sessionId, activation: live.current.activation });
         else performPaste(content);
       } catch (error) { writerRef.current?.pause(error.message); }
     };
     const pasteClipboard = async () => {
       const requestedSession = live.current.sessionId;
+      const requestedActivation = live.current.activation;
       try {
         const content = await navigator.clipboard.readText();
-        if (!disposed && requestedSession === live.current.sessionId) requestPaste(content);
+        if (!disposed && live.current.active && requestedActivation === live.current.activation && requestedSession === live.current.sessionId) requestPaste(content);
       } catch { if (!disposed) setNotice('无法读取剪贴板，请使用系统粘贴操作'); }
     };
     const pasteEvent = event => {
@@ -152,13 +154,20 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
     resize();
     const visibility = () => {
       syncInput();
-      if (document.hidden) readerRef.current?.pause();
+      if (document.hidden || !live.current.active) readerRef.current?.pause();
       else { readerRef.current?.start(); resize(); }
     };
     document.addEventListener('visibilitychange', visibility);
     actionsRef.current = {
       copy, pasteClipboard, performPaste,
       clearScreen() { term.clear(); term.write('\x1b[2J\x1b[H'); },
+      resize,
+      deactivate() {
+        lastKey = null;
+        readerRef.current?.pause();
+        term.blur();
+        Promise.resolve().then(() => { if (!disposed) setPaste(null); });
+      },
     };
     return () => {
       disposed = true;
@@ -203,7 +212,7 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
     });
     readerRef.current = reader;
     Promise.resolve().then(() => { if (!disposed) { setReadError(''); setTruncated(false); } });
-    if (!document.hidden) reader.start();
+    if (live.current.active && !document.hidden) reader.start();
     return () => { disposed = true; reader.dispose(); if (readerRef.current === reader) readerRef.current = null; };
   }, [sessionId]);
 
@@ -223,10 +232,19 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
     return () => { disposed = true; writer.dispose(); if (writerRef.current === writer) writerRef.current = null; };
   }, [connected, sessionId]);
 
+  useEffect(() => {
+    if (!active) actionsRef.current?.deactivate();
+    else {
+      if (!document.hidden) readerRef.current?.start();
+      actionsRef.current?.resize();
+    }
+    syncInputRef.current?.();
+  }, [active]);
+
   const confirmPaste = () => {
     const selected = paste;
     setPaste(null);
-    if (selected?.sessionId !== sessionId || !connected) { setNotice('串口会话已变化，未粘贴任何内容'); return; }
+    if (!active || selected?.sessionId !== sessionId || selected.activation !== live.current.activation || !connected) { setNotice('串口会话或界面已变化，未粘贴任何内容'); return; }
     actionsRef.current?.performPaste(selected.content);
   };
   const resume = () => {
@@ -242,7 +260,7 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
     readerRef.current?.start();
     syncInputRef.current?.();
   };
-  const inputReady = connected && !replaying && !sendError && !readError;
+  const inputReady = active && connected && !replaying && !sendError && !readError;
 
   return <section aria-label="串口终端" className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -262,6 +280,6 @@ export default function SerialTerminal({ theme, isDark, snapshot, settings, onSe
       <div className="w-40 space-y-1 text-xs"><label htmlFor={`${id}-backspace`}>退格发送</label><SelectMenu id={`${id}-backspace`} isDark={isDark} value={settings.backspace} onChange={backspace => onSettings({ backspace })} options={[{ value: 'del', label: 'DEL（默认）' }, { value: 'bs', label: 'BS' }]} /></div>
       <label className="flex items-center gap-2 py-2 text-xs"><input type="checkbox" checked={settings.localEcho} onChange={event => onSettings({ localEcho: event.target.checked })} />本地回显</label><p className={`w-full text-[11px] ${theme.textMuted}`}>设备已回显字符时，请保持本地回显关闭，以免重复显示。改变设置不会发送数据。</p>
     </div>}
-    {paste && connected && paste.sessionId === sessionId && <PasteConfirmation paste={paste} theme={theme} onConfirm={confirmPaste} onCancel={() => setPaste(null)} />}
+    {active && paste && connected && paste.sessionId === sessionId && <PasteConfirmation paste={paste} theme={theme} onConfirm={confirmPaste} onCancel={() => setPaste(null)} />}
   </section>;
 }

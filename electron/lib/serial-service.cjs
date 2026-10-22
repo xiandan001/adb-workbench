@@ -463,6 +463,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   }
 
   return { listPorts, snapshot, connect, disconnect, send, terminalRead, terminalWrite,
+    hasActiveConnection: () => !!active,
     clear, sealReceive, markSaved, needsQuitConfirmation, dispose };
 }
 

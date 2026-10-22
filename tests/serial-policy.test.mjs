@@ -9,7 +9,9 @@ const policies = [frontend, backend];
 const config = { baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
 const message = (content, mode = 'text', lineEnding = 'none') => ({ mode, content, lineEnding });
 const favorite = { id: 'power', name: '开机', ...message('00 ff', 'hex', 'crlf') };
-const preferences = () => ({ version: 1, config: { ...config }, receiveMode: 'text', sendMode: 'text', lineEnding: 'none', favorites: [] });
+const preferences = () => ({ version: 2, config: { ...config }, terminalConfig: { ...config },
+  receiveMode: 'text', sendMode: 'text', lineEnding: 'none', favorites: [] });
+const legacyPreferences = () => ({ version: 1, config: { ...config }, receiveMode: 'text', sendMode: 'text', lineEnding: 'none', favorites: [] });
 
 function storage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -30,7 +32,83 @@ test('renderer and backend defaults match and returned defaults are independent'
   const first = frontend.defaultSerialPreferences();
   first.favorites.push(favorite);
   first.config.baudRate = 115200;
+  assert.equal(first.terminalConfig.baudRate, 9600);
+  assert.notEqual(first.config, first.terminalConfig);
   assert.deepEqual(frontend.defaultSerialPreferences(), preferences());
+});
+
+test('legacy v1 upgrades to v2 with independent copies of the original framing and no command changes', () => {
+  const input = { ...legacyPreferences(), config: { ...config, baudRate: 38400, dataBits: 7, stopBits: 2, parity: 'even', flowControl: 'xonxoff' },
+    receiveMode: 'ascii', sendMode: 'hex', lineEnding: 'crlf', favorites: [favorite] };
+  const expected = { ...input, version: 2, terminalConfig: { ...input.config } };
+  for (const policy of policies) {
+    const result = policy.normalizePreferences(input);
+    assert.deepEqual(result, expected);
+    assert.notEqual(result.config, input.config);
+    assert.notEqual(result.terminalConfig, input.config);
+    assert.notEqual(result.config, result.terminalConfig);
+    result.terminalConfig.baudRate = 921600;
+    assert.equal(result.config.baudRate, 38400);
+    assert.equal(input.config.baudRate, 38400);
+    assert.deepEqual(result.favorites, input.favorites);
+  }
+  assert.deepEqual(frontend.normalizePreferences(input), backend.normalizePreferences(input));
+});
+
+test('v2 serial and terminal parameters validate and persist independently', () => {
+  const input = { ...preferences(), config: { ...config, baudRate: 19200 },
+    terminalConfig: { ...config, baudRate: 921600, parity: 'odd', flowControl: 'rtscts' } };
+  for (const policy of policies) {
+    const result = policy.normalizePreferences(input);
+    assert.deepEqual(result, input);
+    assert.notEqual(result.config, input.config);
+    assert.notEqual(result.terminalConfig, input.terminalConfig);
+    const terminalChange = policy.normalizePreferences({ ...result, terminalConfig: { ...result.terminalConfig, baudRate: 115200 } });
+    assert.deepEqual(terminalChange.config, input.config);
+    const serialChange = policy.normalizePreferences({ ...result, config: { ...result.config, baudRate: 9600 } });
+    assert.deepEqual(serialChange.terminalConfig, input.terminalConfig);
+  }
+  const saved = storage();
+  frontend.saveSerialPreferences(input, saved);
+  assert.deepEqual(frontend.readSerialPreferences(saved), input);
+  assert.equal(JSON.parse(saved.getItem(frontend.SERIAL_PREFS_KEY)).version, 2);
+});
+
+test('reading v1 never writes storage; the first explicit save upgrades both configs and preserves history', () => {
+  const original = { ...legacyPreferences(), config: { ...config, baudRate: 57600 }, favorites: [favorite] };
+  const raw = JSON.stringify(original);
+  const history = JSON.stringify([{ ...message('unchanged history'), time: 100 }]);
+  const saved = storage({ [frontend.SERIAL_PREFS_KEY]: raw, [frontend.SERIAL_HISTORY_KEY]: history });
+  let writes = 0;
+  const write = saved.setItem;
+  saved.setItem = (key, value) => { writes++; write(key, value); };
+  const read = frontend.readSerialPreferences(saved);
+  assert.equal(read.version, 2);
+  assert.equal(read.config.baudRate, 57600);
+  assert.equal(read.terminalConfig.baudRate, 57600);
+  assert.equal(writes, 0);
+  assert.equal(saved.getItem(frontend.SERIAL_PREFS_KEY), raw);
+  frontend.saveSerialPreferences({ ...read, terminalConfig: { ...read.terminalConfig, baudRate: 921600 } }, saved);
+  assert.equal(writes, 1);
+  const restored = frontend.readSerialPreferences(saved);
+  assert.equal(restored.config.baudRate, 57600);
+  assert.equal(restored.terminalConfig.baudRate, 921600);
+  assert.deepEqual(restored.favorites, original.favorites);
+  assert.equal(saved.getItem(frontend.SERIAL_HISTORY_KEY), history);
+});
+
+test('v2 rejects missing or unsafe terminal parameters and cannot smuggle v2 fields into v1', () => {
+  const missingTerminal = { ...legacyPreferences(), version: 2 };
+  for (const policy of policies) {
+    for (const invalid of [missingTerminal, { ...preferences(), terminalConfig: undefined }, { ...preferences(), config: undefined },
+      { ...legacyPreferences(), terminalConfig: { ...config } }, { ...preferences(), terminalConfig: null },
+      { ...preferences(), terminalConfig: { ...config, baudRate: 0 } },
+      { ...preferences(), terminalConfig: { ...config, path: 'COM3' } },
+      { ...preferences(), terminalConfig: { ...config, autoConnect: true } },
+      { ...preferences(), terminalConfig: { ...config, parity: 'invalid' } }]) {
+      assert.throws(() => policy.normalizePreferences(invalid));
+    }
+  }
 });
 
 test('framing validation accepts explicit supported values and rejects incomplete or unsafe configurations', () => {
@@ -124,6 +202,7 @@ test('portable preferences and favorites normalize without mutation and keep exa
     assert.deepEqual(next, input);
     assert.notEqual(next, input);
     assert.notEqual(next.config, input.config);
+    assert.notEqual(next.terminalConfig, input.terminalConfig);
     assert.notEqual(next.favorites[0], input.favorites[0]);
     assert.equal(next.favorites[0].content, '00 ff');
   }
@@ -131,7 +210,7 @@ test('portable preferences and favorites normalize without mutation and keep exa
 });
 
 test('portable preferences reject extra state, missing keys, unsafe objects and invalid favorites', () => {
-  const invalid = [null, {}, { ...preferences(), version: 2 }, { ...preferences(), path: 'COM4' },
+  const invalid = [null, {}, { ...preferences(), version: 3 }, { ...preferences(), path: 'COM4' },
     { ...preferences(), sessionId: 'running' }, { ...preferences(), autoConnect: true },
     { ...preferences(), receiveMode: 'binary' }, { ...preferences(), lineEnding: 'auto' },
     { ...preferences(), favorites: [{ ...favorite, autoSend: true }] },
@@ -158,12 +237,13 @@ test('preference storage restores defaults without writing and explicitly saves 
 });
 
 test('v1 ASCII preferences and favorites coexist with untouched old UTF-8 and HEX preferences/history', () => {
-  const oldPrefs = { ...preferences(), favorites: [favorite, { id: 'utf8', name: '文本', ...message('中文😀') }] };
+  const oldPrefs = { ...legacyPreferences(), favorites: [favorite, { id: 'utf8', name: '文本', ...message('中文😀') }] };
+  const upgraded = { ...oldPrefs, version: 2, terminalConfig: { ...oldPrefs.config } };
   const oldHistory = [{ ...message('中文😀'), time: 10 }, { ...message('00 ff', 'hex'), time: 9 }];
   const saved = storage({ [frontend.SERIAL_PREFS_KEY]: JSON.stringify(oldPrefs), [frontend.SERIAL_HISTORY_KEY]: JSON.stringify(oldHistory) });
-  assert.deepEqual(frontend.readSerialPreferences(saved), oldPrefs);
+  assert.deepEqual(frontend.readSerialPreferences(saved), upgraded);
   assert.deepEqual(frontend.readSerialHistory(saved), oldHistory);
-  const next = { ...oldPrefs, receiveMode: 'ascii', sendMode: 'ascii', favorites: [...oldPrefs.favorites,
+  const next = { ...upgraded, receiveMode: 'ascii', sendMode: 'ascii', favorites: [...oldPrefs.favorites,
     { id: 'ascii', name: 'AT命令', ...message('AT', 'ascii', 'crlf') }] };
   for (const policy of policies) assert.deepEqual(policy.normalizePreferences(next), next);
   frontend.saveSerialPreferences(next, saved);
@@ -186,7 +266,8 @@ test('invalid ASCII history is preserved and rejected rather than rewritten on a
 });
 
 test('corrupt, inaccessible or full preference storage is not silently overwritten', () => {
-  for (const raw of ['{bad', '{}', JSON.stringify({ ...preferences(), path: 'COM4' })]) {
+  for (const raw of ['{bad', '{}', JSON.stringify({ ...preferences(), path: 'COM4' }),
+    JSON.stringify({ ...preferences(), terminalConfig: { ...config, baudRate: 0 } })]) {
     const saved = storage({ [frontend.SERIAL_PREFS_KEY]: raw });
     assert.throws(() => frontend.readSerialPreferences(saved), /异常|损坏/);
     assert.throws(() => frontend.saveSerialPreferences(preferences(), saved), /异常|损坏/);
@@ -197,6 +278,17 @@ test('corrupt, inaccessible or full preference storage is not silently overwritt
   assert.throws(() => frontend.saveSerialPreferences({ ...preferences(), sendMode: 'hex' }, saved), /quota/);
   assert.deepEqual(frontend.readSerialPreferences(saved), preferences());
   assert.throws(() => frontend.readSerialPreferences({ getItem() { throw new Error('blocked'); } }), /blocked/);
+});
+
+test('failed first v2 save retains the exact valid v1 bytes for later recovery', () => {
+  const legacy = { ...legacyPreferences(), config: { ...config, baudRate: 38400 } };
+  const raw = JSON.stringify(legacy);
+  const saved = storage({ [frontend.SERIAL_PREFS_KEY]: raw });
+  const upgraded = frontend.readSerialPreferences(saved);
+  saved.setItem = () => { throw new Error('quota'); };
+  assert.throws(() => frontend.saveSerialPreferences({ ...upgraded, terminalConfig: { ...config, baudRate: 921600 } }, saved), /quota/);
+  assert.equal(saved.getItem(frontend.SERIAL_PREFS_KEY), raw);
+  assert.equal(frontend.readSerialPreferences(saved).terminalConfig.baudRate, 38400);
 });
 
 test('successful-send history stores only message and timestamp, newest first, and caps at 50', () => {

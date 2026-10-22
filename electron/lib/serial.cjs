@@ -1,51 +1,69 @@
 const path = require('node:path');
 const { writeSerialSnapshot } = require('./serial-export.cjs');
 
-function createSerialController({ service, getOwner, saveSnapshot }) {
+const WORKSPACES = ['rs232', 'terminal'];
+
+function createSerialController({ workspaces, getOwner, saveSnapshot }) {
   let subscribed = false;
   let subscriber;
   let saving = false;
-  let connecting = false;
-  let connectRequest = 0;
   let migrationReserved = false;
   const watched = new WeakSet();
   const authorize = event => {
     const owner = getOwner();
     if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) throw new Error('请在主窗口操作串口');
   };
-  async function saveCurrent() {
+  async function saveCurrent(workspace = 'rs232') {
+    const service = workspaces.get(workspace);
     if (saving) throw new Error('正在保存串口记录，请稍候');
     saving = true;
     try {
       service.sealReceive();
-      const snapshot = service.snapshot();
-      if (!snapshot.entries.length) throw new Error('暂无可保存的串口记录');
+      const snapshot = workspaces.snapshot(workspace);
+      if (!snapshot.entries.length) throw new Error('当前工作区暂无可保存的串口记录');
       const result = await saveSnapshot(snapshot);
       if (result.success && !result.cancelled) service.markSaved(snapshot.revision);
       return result;
     } finally { saving = false; }
   }
+  async function saveAll() {
+    const states = workspaces.snapshots();
+    const dirty = WORKSPACES.filter(workspace => states[workspace].unsaved && states[workspace].entries.length);
+    const candidates = dirty.length ? dirty : WORKSPACES.filter(workspace => states[workspace].entries.length);
+    for (const workspace of candidates) {
+      const result = await saveCurrent(workspace);
+      if (!result.success || result.cancelled) return result;
+    }
+    return { success: true };
+  }
   function publish(delta) {
     const owner = getOwner();
-    if (!subscribed || !owner || owner.isDestroyed() || !owner.isVisible() || owner.isMinimized()
+    if (!WORKSPACES.includes(delta?.workspace) || !subscribed || !owner || owner.isDestroyed() || !owner.isVisible() || owner.isMinimized()
       || owner.webContents !== subscriber || subscriber.isDestroyed()) return;
     try { subscriber.send('serial:changed', delta); } catch { subscribed = false; }
   }
-  function needsQuitConfirmation() { return connecting || service.needsQuitConfirmation(); }
+  function needsQuitConfirmation() { return workspaces.needsQuitConfirmation(); }
   function reserveForMigration() {
-    if (needsQuitConfirmation()) throw new Error('请先断开串口，并保存或清空当前串口记录，再导入数据');
+    if (needsQuitConfirmation()) throw new Error('请先断开 RS232 和串口终端，并分别保存或清空记录，再导入数据');
     migrationReserved = true;
     return () => { migrationReserved = false; };
   }
   function register(ipcMain) {
-    const handle = (channel, operation, snapshotOnError = true) => ipcMain.handle(channel, async (event, args) => {
+    const handle = (channel, operation, { fixedWorkspace, compact = false, requireWorkspace = false } = {}) => ipcMain.handle(channel, async (event, args) => {
       let authorized = false;
-      try { authorize(event); authorized = true; return { success: true, ...await operation(args, event) }; }
+      let workspace;
+      try {
+        authorize(event); authorized = true;
+        if (requireWorkspace && args?.workspace === undefined) throw new Error('请明确选择要操作的串口工作区');
+        workspace = fixedWorkspace || (args?.workspace === undefined ? 'rs232' : args.workspace);
+        if (!WORKSPACES.includes(workspace)) throw new Error('串口工作区无效');
+        return { success: true, ...await operation(args, event, workspace) };
+      }
       catch (error) { return { success: false, error: error.message, ...(error.code ? { code: error.code } : {}),
-        ...(authorized && snapshotOnError ? { snapshot: service.snapshot() } : {}) }; }
+        ...(authorized && WORKSPACES.includes(workspace) && !compact ? { snapshot: workspaces.snapshot(workspace) } : {}) }; }
     });
-    handle('serial:list', async () => ({ ports: await service.listPorts() }));
-    handle('serial:snapshot', () => ({ snapshot: service.snapshot() }));
+    handle('serial:list', async () => ({ ports: await workspaces.get('rs232').listPorts() }));
+    handle('serial:snapshot', (_args, _event, workspace) => ({ snapshot: workspaces.snapshot(workspace) }));
     handle('serial:subscribe', (args, event) => {
       if (typeof args?.active !== 'boolean') throw new Error('串口订阅状态无效');
       subscribed = args.active; subscriber = event.sender;
@@ -56,48 +74,51 @@ function createSerialController({ service, getOwner, saveSnapshot }) {
         subscriber.on('render-process-gone', clear);
         subscriber.once('destroyed', clear);
       }
-      return { snapshot: service.snapshot() };
+      return { snapshots: workspaces.snapshots() };
     });
-    handle('serial:connect', async args => {
+    handle('serial:connect', async (args, _event, workspace) => {
       if (migrationReserved) throw new Error('数据导入已准备，请重启应用后再连接串口');
-      if (connecting) throw new Error('正在连接串口，请稍候');
-      connecting = true;
-      const request = ++connectRequest;
-      try {
-        const ports = await service.listPorts();
-        if (request !== connectRequest) throw new Error('串口连接已取消');
-        if (migrationReserved) throw new Error('正在准备数据导入，不能连接串口');
-        if (!ports.some(port => port.path === args?.path)) throw new Error('所选串口已不可用，请刷新后重新选择');
-        await service.connect(args);
-        return { snapshot: service.snapshot() };
-      } finally { connecting = false; }
-    });
-    handle('serial:disconnect', async () => { connectRequest++; await service.disconnect(); return { snapshot: service.snapshot() }; });
-    handle('serial:send', async args => { await service.send(args); return { snapshot: service.snapshot() }; });
-    handle('serial:terminal-read', args => service.terminalRead(args), false);
-    handle('serial:terminal-write', args => service.terminalWrite(args), false);
-    handle('serial:clear', () => { service.clear(); return { snapshot: service.snapshot() }; });
-    handle('serial:save', saveCurrent);
+      await workspaces.get(workspace).connect(args);
+      return { snapshot: workspaces.snapshot(workspace) };
+    }, { requireWorkspace: true });
+    handle('serial:disconnect', async (_args, _event, workspace) => {
+      await workspaces.get(workspace).disconnect(); return { snapshot: workspaces.snapshot(workspace) };
+    }, { requireWorkspace: true });
+    handle('serial:send', async (args, _event, workspace) => {
+      if (workspace !== 'rs232') throw new Error('请在 RS232 调试工作区发送此类数据');
+      await workspaces.get(workspace).send(args); return { snapshot: workspaces.snapshot(workspace) };
+    }, { requireWorkspace: true });
+    handle('serial:terminal-read', args => workspaces.get('terminal').terminalRead(args), { fixedWorkspace: 'terminal', compact: true });
+    handle('serial:terminal-write', args => workspaces.get('terminal').terminalWrite(args), { fixedWorkspace: 'terminal', compact: true });
+    handle('serial:clear', (_args, _event, workspace) => {
+      workspaces.get(workspace).clear(); return { snapshot: workspaces.snapshot(workspace) };
+    }, { requireWorkspace: true });
+    handle('serial:save', (_args, _event, workspace) => saveCurrent(workspace), { requireWorkspace: true });
   }
-  return { register, publish, saveCurrent, needsQuitConfirmation, reserveForMigration };
+  return { register, publish, saveCurrent, saveAll, needsQuitConfirmation, reserveForMigration };
 }
 
-let service;
+let workspaces;
 let controller;
 function publish(delta) { controller?.publish(delta); }
 function register(ipcMain, options = {}) {
+  if (Object.hasOwn(options, 'service')) throw new Error('串口工作区必须分别初始化，请使用 createService 或 workspaces');
   const { app, dialog } = require('electron');
   const ctx = require('./app-context.cjs');
   const { createSerialService } = require('./serial-service.cjs');
-  // Native binding is loaded only when the serial module is used, not during general app startup.
-  service = options.service || createSerialService({
-    listPorts: () => require('serialport').SerialPort.list(),
-    createPort: config => new (require('serialport').SerialPort)(config), onChange: publish
+  const { createSerialWorkspaces } = require('./serial-workspaces.cjs');
+  // Each workspace owns its native handle and caches; enumeration never opens a port.
+  workspaces = options.workspaces || createSerialWorkspaces({
+    createService: options.createService || ((workspace, onChange) => createSerialService({
+      listPorts: () => require('serialport').SerialPort.list(),
+      createPort: config => new (require('serialport').SerialPort)(config),
+      mergeReceive: workspace === 'rs232', onChange
+    })), onChange: publish
   });
-  controller = createSerialController({ service, getOwner: () => ctx.getMainWindow(),
+  controller = createSerialController({ workspaces, getOwner: () => ctx.getMainWindow(),
     saveSnapshot: async snapshot => {
       const result = await dialog.showSaveDialog(ctx.getMainWindow(), {
-        title: '保存当前串口记录', defaultPath: path.join(app.getPath('downloads'), `serial-${new Date().toISOString().replace(/[:.]/g, '-')}.log`),
+        title: '保存当前串口记录', defaultPath: path.join(app.getPath('downloads'), `serial-${snapshot.workspace}-${new Date().toISOString().replace(/[:.]/g, '-')}.log`),
         filters: [{ name: '串口记录', extensions: ['log', 'txt'] }]
       });
       if (result.canceled || !result.filePath) return { success: true, cancelled: true };
@@ -107,10 +128,12 @@ function register(ipcMain, options = {}) {
   });
   controller.register(ipcMain);
 }
-function snapshot() { return service?.snapshot() || { entries: [], status: 'disconnected', unsaved: false }; }
+function snapshot(workspace = 'rs232') { return workspaces?.snapshot(workspace) || { workspace, entries: [], status: 'disconnected', unsaved: false }; }
+function snapshots() { return Object.fromEntries(WORKSPACES.map(workspace => [workspace, snapshot(workspace)])); }
 function needsQuitConfirmation() { return controller?.needsQuitConfirmation() || false; }
 function reserveForMigration() { return controller?.reserveForMigration() || (() => {}); }
-async function saveCurrent() { return controller?.saveCurrent(); }
-async function cleanup() { await service?.dispose(); }
+async function saveCurrent(workspace) { return controller?.saveCurrent(workspace); }
+async function saveAll() { return controller?.saveAll(); }
+async function cleanup() { await workspaces?.dispose(); }
 
-module.exports = { createSerialController, register, publish, snapshot, needsQuitConfirmation, reserveForMigration, saveCurrent, cleanup };
+module.exports = { createSerialController, register, publish, snapshot, snapshots, needsQuitConfirmation, reserveForMigration, saveCurrent, saveAll, cleanup };

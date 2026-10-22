@@ -42,7 +42,7 @@ test('serial preferences migrate but history, COM bindings and running state nev
   assert.throws(() => applyMigrationPreferences({ [SERIAL_HISTORY_KEY]: '[]' }, target));
 });
 
-test('ASCII v1 preferences migrate with old UTF-8 and HEX favorites without binding or execution state', () => {
+test('ASCII v2 preferences migrate with old UTF-8 and HEX favorites without binding or execution state', () => {
   const prefs = { ...defaultSerialPreferences(), receiveMode: 'ascii', sendMode: 'ascii', lineEnding: 'crlf', favorites: [
     { id: 'ascii', name: 'AT', mode: 'ascii', content: 'AT', lineEnding: 'crlf' },
     { id: 'text', name: '文本', mode: 'text', content: '中文😀', lineEnding: 'lf' },
@@ -60,6 +60,40 @@ test('ASCII v1 preferences migrate with old UTF-8 and HEX favorites without bind
   assert.throws(() => backend.normalizePreferences(input), /ASCII/);
   assert.throws(() => applyMigrationPreferences(input, target), /ASCII/);
   assert.deepEqual(readSerialPreferences(target), prefs);
+});
+
+test('migration accepts v1 and v2 serial preferences while preserving two independent v2 configs', () => {
+  const legacy = { version: 1, config: { ...defaultSerialPreferences().config, baudRate: 57600 }, receiveMode: 'ascii',
+    sendMode: 'hex', lineEnding: 'crlf', favorites: [{ id: 'status', name: '状态', mode: 'ascii', content: 'AT', lineEnding: 'crlf' }] };
+  const v2 = { ...legacy, version: 2, terminalConfig: { ...legacy.config, baudRate: 921600, parity: 'odd' } };
+  for (const input of [legacy, v2]) {
+    const raw = JSON.stringify(input);
+    const source = storage({ [SERIAL_PREFS_KEY]: raw, [SERIAL_HISTORY_KEY]: 'local-only' });
+    const portable = collectMigrationPreferences(source);
+    assert.equal(source.getItem(SERIAL_PREFS_KEY), raw, 'export validation must not upgrade the source in place');
+    const normalized = backend.normalizePreferences(portable);
+    const expected = input.version === 1 ? { ...legacy, version: 2, terminalConfig: { ...legacy.config } } : v2;
+    assert.deepEqual(JSON.parse(normalized[SERIAL_PREFS_KEY]), expected);
+    const target = storage({ activeDeviceId: 'keep', [SERIAL_HISTORY_KEY]: 'keep-target-history' });
+    applyMigrationPreferences(normalized, target);
+    assert.deepEqual(readSerialPreferences(target), expected);
+    assert.equal(target.getItem('activeDeviceId'), 'keep');
+    assert.equal(target.getItem(SERIAL_HISTORY_KEY), 'keep-target-history');
+    const directTarget = storage();
+    applyMigrationPreferences(portable, directTarget);
+    assert.deepEqual(readSerialPreferences(directTarget), expected);
+  }
+});
+
+test('malformed v2 terminal config rejects migration before touching any existing preference', () => {
+  const saved = storage({ currentTheme: 'default', [SERIAL_PREFS_KEY]: JSON.stringify(defaultSerialPreferences()) });
+  const before = saved.getItem(SERIAL_PREFS_KEY);
+  const invalid = { ...defaultSerialPreferences(), terminalConfig: { ...defaultSerialPreferences().config, path: 'COM3' } };
+  const preferences = { currentTheme: 'tech', [SERIAL_PREFS_KEY]: JSON.stringify(invalid) };
+  assert.throws(() => backend.normalizePreferences(preferences));
+  assert.throws(() => applyMigrationPreferences(preferences, saved));
+  assert.equal(saved.getItem('currentTheme'), 'default');
+  assert.equal(saved.getItem(SERIAL_PREFS_KEY), before);
 });
 
 test('device pins migrate and restore without changing the active device or unrelated preferences', () => {

@@ -11,14 +11,14 @@ const safeListener = (callback) => (event, ...args) => {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   serialListPorts: () => ipcRenderer.invoke('serial:list'),
-  serialSnapshot: () => ipcRenderer.invoke('serial:snapshot'),
+  serialSnapshot: args => ipcRenderer.invoke('serial:snapshot', args),
   serialConnect: args => ipcRenderer.invoke('serial:connect', args),
-  serialDisconnect: () => ipcRenderer.invoke('serial:disconnect'),
+  serialDisconnect: args => ipcRenderer.invoke('serial:disconnect', args),
   serialSend: args => ipcRenderer.invoke('serial:send', args),
   serialTerminalRead: args => ipcRenderer.invoke('serial:terminal-read', args),
   serialTerminalWrite: args => ipcRenderer.invoke('serial:terminal-write', args),
-  serialClear: () => ipcRenderer.invoke('serial:clear'),
-  serialSave: () => ipcRenderer.invoke('serial:save'),
+  serialClear: args => ipcRenderer.invoke('serial:clear', args),
+  serialSave: args => ipcRenderer.invoke('serial:save', args),
   serialSubscribe: args => ipcRenderer.invoke('serial:subscribe', args),
   onSerialChanged: callback => {
     const listener = safeListener(callback);
