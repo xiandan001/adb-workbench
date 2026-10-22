@@ -4,7 +4,7 @@ const { createSshCommandHistory } = require('./ssh-command-history.cjs');
 
 let controller;
 function register(ipcMain) {
-  const { app, dialog, safeStorage } = require('electron');
+  const { app, dialog, safeStorage, shell } = require('electron');
   const { Client } = require('ssh2');
   const ctx = require('./app-context.cjs');
   const { createSshSessionService } = require('./ssh-session.cjs');
@@ -42,6 +42,7 @@ function register(ipcMain) {
   }, assertSession: id => sessions.getSessionContext(id).assertCurrent(),
     onChange: event => controller?.publish(event) });
   controller = createSshController({ sessions, files, profiles, history, getOwner,
+    openLocalDirectory: directory => shell.openPath(directory),
     dialogs: { ask, open: options => dialog.showOpenDialog(getOwner(), options) },
     onPublish: (snapshot, owner) => owner.webContents.send('ssh:changed', snapshot) });
   controller.register(ipcMain);

@@ -2,7 +2,7 @@ export const SSH_LAYOUT_KEY = 'adb-workbench.ssh-layout.v1';
 export const MAX_SSH_DOCUMENTS = 12;
 const MAX_OPEN_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_SSH_LAYOUT = Object.freeze({ version: 1, files: 0.27, editor: 0.48, transfersOpen: false, appearance: 'current' });
-const initialSession = () => ({ documents: [], activeDocumentId: '', activeTerminalId: '', directory: '' });
+const initialSession = () => ({ documents: [], activeDocumentId: '', activeTerminalId: '', directory: '', directoryRevision: 0 });
 export const emptySshView = () => ({ selectedSessionId: '', sessions: {} });
 
 export function sshWorkspaceReducer(state, action) {
@@ -26,7 +26,14 @@ export function sshWorkspaceReducer(state, action) {
     }
   } else if (action.type === 'select-document') next = { ...current, activeDocumentId: action.documentId };
   else if (action.type === 'select-terminal') next = { ...current, activeTerminalId: action.terminalId };
-  else if (action.type === 'directory') next = { ...current, directory: action.path };
+  else if (action.type === 'directory') {
+    if (action.revision !== undefined && action.revision !== (current.directoryRevision || 0)) return state;
+    next = { ...current, directory: action.path };
+  } else if (action.type === 'reveal-directory') {
+    if (typeof action.path !== 'string' || !action.path.startsWith('/') || action.path.includes('\0')) return state;
+    next = { ...current, directory: action.path, directoryRevision: (current.directoryRevision || 0) + 1 };
+    return { ...state, selectedSessionId: action.sessionId, sessions: { ...state.sessions, [action.sessionId]: next } };
+  }
   else if (action.type === 'move-path') {
     if (typeof action.source !== 'string' || !action.source || typeof action.path !== 'string' || !action.path) return state;
     next = { ...current, documents: current.documents.map(document => document.path === action.source || document.path.startsWith(`${action.source}/`)
@@ -95,6 +102,29 @@ export function reconcileSshSelection(selected, previousRoot, nextRoot, entries)
   if (remoteParent(selected.path) !== nextRoot) return selected;
   const current = entries.find(item => item.name === selected.name);
   return current ? { ...current, path: selected.path } : null;
+}
+
+export function createSshDirectoryRequests() {
+  let revision = 0;
+  const pending = new Map();
+  return {
+    begin(path, asRoot) {
+      if (!asRoot && pending.has(path)) return null;
+      if (asRoot) { revision++; pending.clear(); }
+      const request = { path, revision };
+      pending.set(path, request);
+      return request;
+    },
+    isCurrent(request) { return request.revision === revision && pending.get(request.path) === request; },
+    finish(request) { if (pending.get(request.path) === request) pending.delete(request.path); },
+    invalidate() { revision++; pending.clear(); },
+  };
+}
+
+export function clearSshDirectoryLoading(nodes) {
+  if (!Object.values(nodes).some(node => node.loading)) return nodes;
+  return Object.fromEntries(Object.entries(nodes).map(([path, node]) => [path, node.loading
+    ? { ...node, loading: false, loaded: false, cursor: undefined, truncated: false } : node]));
 }
 
 export function sshResult(result, fallback = 'SSH 操作未完成') {

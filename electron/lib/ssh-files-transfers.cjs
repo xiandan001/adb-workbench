@@ -43,17 +43,21 @@ async function localFingerprint(p, guard) {
 
 function createTransfers({ acquire, emit, reserveMutation }) {
   const jobs = new Map(); const queue = []; let running = 0; let disposed = false;
+  const canClear = job => job.settled === true && finalStates.has(job.status) && !job.retrying && !job.committing;
   function view(job) {
     return { id: job.id, sessionId: job.sessionId, direction: job.direction, source: job.sources.join('\n'), target: job.destination, bytes: job.bytes, total: job.total, status: job.status,
+      canClear: canClear(job),
       speed: job.started ? Math.round(job.bytes * 1000 / Math.max(1, Date.now() - job.started)) : 0,
       ...(job.error ? { error: job.error, errorCode: job.errorCode } : {}), ...(job.conflicts?.length ? { conflicts: [...job.conflicts] } : {}), completedFiles: [...job.completed.values()].filter(item => item.hash).length };
   }
   function changed(job, force = false) {
+    if (jobs.get(job.id) !== job) return;
     const now = Date.now();
     if (force || now - job.lastEvent >= 100) { job.lastEvent = now; emit({ type: 'transfer', transfer: view(job) }); }
   }
   function guard(job) { if (job.cancelled || disposed) throw policy.fail('SFTP_CANCELLED', '传输已取消'); }
   function get(id) { const job = jobs.get(id); if (!job) throw policy.fail('SFTP_TRANSFER_INVALID', '传输记录不存在或已移出列表'); return job; }
+  function settle(job) { job.resolveDone(); job.settled = true; changed(job, true); }
   async function validateLocalSource(p) {
     const stat = await fs.lstat(p);
     if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw policy.fail('SFTP_LOCAL_LINK', '上传不支持符号链接或特殊文件');
@@ -250,13 +254,13 @@ function createTransfers({ acquire, emit, reserveMutation }) {
   function pump() {
     while (running < 2 && queue.length) {
       const job = queue.shift();
-      if (job.cancelled) { job.status = 'cancelled'; changed(job, true); job.resolveDone(); continue; }
+      if (job.cancelled) { job.status = 'cancelled'; settle(job); continue; }
       running++;
-      void execute(job).finally(() => { running--; job.resolveDone(); pump(); });
+      void execute(job).finally(() => { running--; settle(job); pump(); });
     }
   }
   function enqueue(job) {
-    job.done = new Promise(resolve => { job.resolveDone = resolve; }); queue.push(job); job.status = 'queued'; changed(job, true); queueMicrotask(pump);
+    job.settled = false; job.done = new Promise(resolve => { job.resolveDone = resolve; }); queue.push(job); job.status = 'queued'; changed(job, true); queueMicrotask(pump);
   }
   async function startTransfer({ sessionId, direction, sources, destination, overwrite = false } = {}) {
     if (disposed || !['upload', 'download'].includes(direction) || !Array.isArray(sources) || !sources.length || sources.length > 100 || typeof overwrite !== 'boolean') throw policy.fail('SFTP_TRANSFER_INVALID', '传输参数无效');
@@ -275,7 +279,7 @@ function createTransfers({ acquire, emit, reserveMutation }) {
       target = await fs.realpath(chosen); ctx.guard();
     }
     if ([...jobs.values()].filter(job => !finalStates.has(job.status)).length >= 20) throw policy.fail('SFTP_TRANSFER_LIMIT', '等待传输的任务过多，请等待部分完成');
-    for (const [id, existing] of jobs) if (jobs.size >= 100 && finalStates.has(existing.status)) jobs.delete(id);
+    for (const [id, existing] of jobs) if (jobs.size >= 100 && canClear(existing)) jobs.delete(id);
     const id = randomUUID();
     const job = { id, sessionId, direction, sources: selected, destination: target, overwrite, bytes: 0, total: 0, status: 'queued', completed: new Map(), createdDirectories: new Set(), lastEvent: 0, cancelled: false };
     jobs.set(id, job); enqueue(job); return { transferId: id };
@@ -285,12 +289,12 @@ function createTransfers({ acquire, emit, reserveMutation }) {
     if (finalStates.has(job.status)) return { cancelled: job.status === 'cancelled' };
     job.cancelled = true; job.status = 'cancelling'; changed(job, true);
     const queued = queue.indexOf(job);
-    if (queued !== -1) { queue.splice(queued, 1); job.status = 'cancelled'; changed(job, true); job.resolveDone(); }
+    if (queued !== -1) { queue.splice(queued, 1); job.status = 'cancelled'; settle(job); }
     await job.done; return { cancelled: true };
   }
   async function retryTransfer({ transferId, overwrite = false } = {}) {
     const job = get(transferId);
-    if (!finalStates.has(job.status) || job.status === 'completed' || job.retrying || typeof overwrite !== 'boolean') throw policy.fail('SFTP_RETRY_INVALID', '当前传输不能重试');
+    if (!canClear(job) || job.status === 'completed' || typeof overwrite !== 'boolean') throw policy.fail('SFTP_RETRY_INVALID', '当前传输不能重试');
     if ([...jobs.values()].filter(item => !finalStates.has(item.status)).length >= 20) throw policy.fail('SFTP_TRANSFER_LIMIT', '等待传输的任务过多，请稍后重试');
     const previous = job.status; job.retrying = true; job.cancelled = false; job.status = 'planning'; changed(job, true);
     try {
@@ -298,12 +302,40 @@ function createTransfers({ acquire, emit, reserveMutation }) {
       if (job.cancelled) { job.status = 'cancelled'; changed(job, true); return { transferId: job.id }; }
       job.error = undefined; job.errorCode = undefined; job.overwrite = overwrite; job.conflicts = []; enqueue(job); return { transferId: job.id };
     } catch (error) { job.status = job.cancelled ? 'cancelled' : previous; changed(job, true); throw error; }
-    finally { job.retrying = false; }
+    finally { job.retrying = false; changed(job, true); }
   }
   function listTransfers({ sessionId } = {}) { return [...jobs.values()].filter(job => sessionId === undefined || job.sessionId === sessionId).map(view); }
+  function clearTransfer({ transferId } = {}) {
+    const job = get(transferId);
+    if (!canClear(job)) throw policy.fail('SFTP_TRANSFER_BUSY', '传输仍在进行或正在收尾，请稍候再清除记录');
+    jobs.delete(transferId); emit({ type: 'transfer-records-cleared', removedIds: [transferId] });
+    return { removedIds: [transferId] };
+  }
+  function clearTransfers() {
+    const removedIds = [];
+    for (const [id, job] of jobs) if (canClear(job)) { jobs.delete(id); removedIds.push(id); }
+    if (removedIds.length) emit({ type: 'transfer-records-cleared', removedIds: [...removedIds] });
+    return { removedIds };
+  }
+  async function getTransferLocation({ transferId } = {}) {
+    const job = get(transferId);
+    if (job.status !== 'completed' || !canClear(job)) throw policy.fail('SFTP_TRANSFER_NOT_COMPLETED', '请等待传输完成后打开所在目录');
+    if (job.direction === 'upload') return { kind: 'remote', sessionId: job.sessionId, path: job.destination };
+    // A completed download remains local evidence even after its SSH session
+    // has closed. Never reacquire SFTP, create a directory or follow a new link.
+    try {
+      const stat = await fs.lstat(job.destination);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('not ordinary directory');
+      const canonical = await fs.realpath(job.destination);
+      const unchanged = process.platform === 'win32' ? canonical.toLowerCase() === job.destination.toLowerCase() : canonical === job.destination;
+      if (!unchanged) throw new Error('destination redirected');
+    } catch { throw policy.fail('SFTP_LOCAL_DIRECTORY', '下载目录已移动、删除或不再是原来的普通目录，请检查本地保存位置'); }
+    if (jobs.get(transferId) !== job) throw policy.fail('SFTP_TRANSFER_INVALID', '传输记录已清除，无法再从列表定位目录');
+    return { kind: 'local', sessionId: job.sessionId, path: job.destination };
+  }
   function disposeSession(sessionId) { for (const job of jobs.values()) if (job.sessionId === sessionId && !finalStates.has(job.status)) { job.cancelled = true; changed(job, true); } }
   async function dispose() { disposed = true; for (const job of jobs.values()) job.cancelled = true; await Promise.allSettled([...jobs.values()].map(job => job.done)); }
-  return { api: { startTransfer, cancelTransfer, retryTransfer, listTransfers }, disposeSession, dispose };
+  return { api: { startTransfer, cancelTransfer, retryTransfer, listTransfers, clearTransfer, clearTransfers, getTransferLocation }, disposeSession, dispose };
 }
 
 module.exports = { createTransfers };

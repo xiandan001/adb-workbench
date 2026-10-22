@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptySshView, sshWorkspaceReducer, normalizeSshLayout, readSshLayout, saveSshLayout, SSH_LAYOUT_KEY, dirtySshPaths, remoteParent, remoteChild, reconcileSshSelection } from '../src/shared/sshWorkspace.js';
+import { emptySshView, sshWorkspaceReducer, normalizeSshLayout, readSshLayout, saveSshLayout, SSH_LAYOUT_KEY, dirtySshPaths, remoteParent, remoteChild, reconcileSshSelection, createSshDirectoryRequests, clearSshDirectoryLoading } from '../src/shared/sshWorkspace.js';
 
 const document = (sessionId, path = '/etc/test.txt') => ({ sessionId, documentId: `${sessionId}:${path}`, path, kind: 'text', text: 'original', revision: 'r1', size: 8, readOnly: false });
 const open = (state, sessionId, path) => sshWorkspaceReducer(state, { type: 'open-document', sessionId, document: document(sessionId, path) });
@@ -130,4 +130,56 @@ test('SSH deletion keeps local content and marks only the deleted path and desce
   assert.equal(state.sessions.A.documents[0].dirty, true);
   assert.equal(state.sessions.A.documents[1].remoteMissing, undefined);
   assert.equal(state.sessions.B.documents[0].remoteMissing, undefined);
+});
+
+test('transfer folder navigation selects its host without replacing dirty documents or terminal state', () => {
+  let state = open(open(emptySshView(), 'A'), 'B');
+  state = sshWorkspaceReducer(state, { type: 'edit-document', sessionId: 'A', documentId: 'A:/etc/test.txt', text: 'retain draft' });
+  state = sshWorkspaceReducer(state, { type: 'select-terminal', sessionId: 'A', terminalId: 'A-pty2' });
+  state = sshWorkspaceReducer(state, { type: 'select-session', sessionId: 'B' });
+  const documents = state.sessions.A.documents; const otherHost = state.sessions.B;
+  state = sshWorkspaceReducer(state, { type: 'reveal-directory', sessionId: 'A', path: '/uploads' });
+  assert.equal(state.selectedSessionId, 'A'); assert.equal(state.sessions.A.directory, '/uploads');
+  assert.equal(state.sessions.A.directoryRevision, 1); assert.equal(state.sessions.A.activeTerminalId, 'A-pty2');
+  assert.equal(state.sessions.A.documents, documents); assert.equal(state.sessions.A.documents[0].dirty, true);
+  assert.equal(state.sessions.B, otherHost);
+  state = sshWorkspaceReducer(state, { type: 'reveal-directory', sessionId: 'A', path: '/uploads' });
+  assert.equal(state.sessions.A.directoryRevision, 2, 'same directory reveal requests a fresh listing');
+  const before = state;
+  assert.equal(sshWorkspaceReducer(state, { type: 'directory', sessionId: 'A', path: '/old', revision: 1 }), before);
+  state = sshWorkspaceReducer(state, { type: 'directory', sessionId: 'A', path: '/resolved', revision: 2 });
+  assert.equal(state.sessions.A.directory, '/resolved'); assert.equal(state.sessions.A.documents, documents);
+  assert.equal(sshWorkspaceReducer(state, { type: 'reveal-directory', sessionId: 'A', path: 'relative' }), state);
+});
+
+test('SSH directory request gate rejects old root and same-path late results but allows a fresh repeat', () => {
+  const requests = createSshDirectoryRequests();
+  const oldRoot = requests.begin('/old', true);
+  const expansion = requests.begin('/old/child', false);
+  assert.equal(requests.begin('/old/child', false), null);
+  const current = requests.begin('/uploads', true);
+  assert.equal(requests.isCurrent(oldRoot), false); assert.equal(requests.isCurrent(expansion), false);
+  assert.equal(requests.isCurrent(current), true);
+  const refreshedChild = requests.begin('/old/child', false);
+  assert.ok(refreshedChild, 'abandoned child must not remain blocked by an old pending request');
+  requests.finish(expansion); assert.equal(requests.isCurrent(refreshedChild), true);
+  const repeat = requests.begin('/uploads', true);
+  requests.finish(current);
+  assert.equal(requests.isCurrent(current), false); assert.equal(requests.isCurrent(repeat), true);
+  requests.invalidate(); assert.equal(requests.isCurrent(repeat), false);
+  const next = requests.begin('/uploads', true); assert.equal(requests.isCurrent(next), true);
+});
+
+test('root navigation clears abandoned spinners and one-use cursors while retaining visible entries', () => {
+  const entries = [{ name: 'cached.txt' }];
+  const idle = { loaded: true, loading: false, entries: [] };
+  const cleared = clearSshDirectoryLoading({ '/child': { loading: true }, '/cached': { loaded: true, loading: true, entries, cursor: 'consumed-page-token', truncated: true }, '/idle': idle });
+  assert.deepEqual(cleared['/child'], { loading: false, loaded: false, cursor: undefined, truncated: false });
+  assert.equal(cleared['/cached'].loading, false); assert.equal(cleared['/cached'].loaded, false);
+  assert.equal(cleared['/cached'].cursor, undefined, 'a cancelled next-page request may already have consumed its token');
+  assert.equal(cleared['/cached'].truncated, false);
+  assert.equal(cleared['/cached'].entries, entries); assert.equal(cleared['/idle'], idle);
+  const withNewRequest = { ...cleared, '/child': { ...cleared['/child'], loading: true } };
+  assert.equal(withNewRequest['/child'].loading, true);
+  assert.equal(clearSshDirectoryLoading(cleared), cleared);
 });

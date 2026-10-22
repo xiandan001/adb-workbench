@@ -4,7 +4,7 @@ const { randomUUID } = require('node:crypto');
 const { createSshShortcutGuard } = require('./ssh-shortcuts.cjs');
 
 const ACTIVE_TRANSFERS = new Set(['queued', 'planning', 'running', 'preparing', 'transferring', 'cancelling']);
-function createSshController({ sessions, files, profiles, history, getOwner, dialogs, onPublish = () => {} }) {
+function createSshController({ sessions, files, profiles, history, getOwner, dialogs, openLocalDirectory, onPublish = () => {} }) {
   let revision = 0;
   let subscribed = false;
   let timer;
@@ -344,6 +344,27 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
       return files.startTransfer({ sessionId: args.sessionId, direction: 'download', sources: args.sources, destination: result.filePaths[0], overwrite: false });
     });
     handle('cancel-transfer', args => files.cancelTransfer(args));
+    handle('clear-transfer', async args => {
+      const result = await files.clearTransfer({ transferId: args.transferId });
+      publish(); return result;
+    }, { offline: true });
+    handle('clear-transfers', async () => {
+      const result = await files.clearTransfers();
+      publish(); return result;
+    }, { offline: true });
+    handle('open-transfer-location', async (args, event) => {
+      const location = await files.getTransferLocation({ transferId: args.transferId });
+      authorize(event);
+      if (location.kind === 'local') {
+        if (!openLocalDirectory || await openLocalDirectory(location.path)) throw new Error('无法打开所在文件夹，请检查目录是否仍存在或访问权限');
+        return location;
+      }
+      if (location.kind !== 'remote') throw new Error('传输所在目录无效');
+      writableSession(location.sessionId);
+      const directory = await files.list({ sessionId: location.sessionId, path: location.path });
+      authorize(event); writableSession(location.sessionId);
+      return { kind: 'remote', sessionId: location.sessionId, path: directory.path };
+    }, { offline: true });
     handle('retry-transfer', async args => {
       const transfer = files.listTransfers().find(item => item.id === args.transferId);
       if (!transfer) throw new Error('传输记录不存在');

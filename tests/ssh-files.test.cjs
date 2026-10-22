@@ -421,4 +421,141 @@ test('delete returns its exact target without discarding an open draft token', a
   assert.deepEqual(files.closeDocument({ sessionId: 'session-1', documentId: document.documentId }), { closed: true });
 });
 
+async function transferRecordDirectory(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ssh-transfer-records-'));
+  t.after(async () => {
+    const target = await fs.realpath(directory);
+    assert.equal(path.dirname(target), await fs.realpath(os.tmpdir()));
+    assert.ok(path.basename(target).startsWith('ssh-transfer-records-'));
+    await fs.rm(target, { recursive: true, force: true });
+  });
+  return directory;
+}
+async function settledTransfer(files, transferId) {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const value = files.listTransfers().find(item => item.id === transferId);
+    if (value?.canClear) return value;
+    await pause(2);
+  }
+  throw new Error('Transfer did not settle');
+}
+test('transfer record clear keeps downloaded bytes and resolves its directory after SSH disconnect', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); h.sftp.put('/home/test/a.txt', 'file', 'downloaded bytes');
+  const { transferId } = await h.files.startTransfer({ sessionId: 'session-1', direction: 'download', sources: ['/home/test/a.txt'], destination: directory });
+  assert.equal((await complete(h.files, transferId)).canClear, true);
+  h.disconnect(); const calls = h.sftp.calls.length;
+  assert.deepEqual(await h.files.getTransferLocation({ transferId, path: 'ignored-renderer-path' }), { kind: 'local', sessionId: 'session-1', path: await fs.realpath(directory) });
+  assert.deepEqual(h.files.clearTransfer({ transferId }), { removedIds: [transferId] });
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'downloaded bytes');
+  assert.equal(h.sftp.node('/home/test/a.txt').data.toString(), 'downloaded bytes'); assert.equal(h.sftp.calls.length, calls);
+  assert.deepEqual(h.files.listTransfers(), []);
+  assert.throws(() => h.files.clearTransfer({ transferId }), /不存在|移出/);
+  await assert.rejects(h.files.getTransferLocation({ transferId }), /不存在|移出/);
+});
+test('transfer location uses the recorded upload destination and clearing never deletes either copy', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); const source = path.join(directory, 'upload.txt'); await fs.writeFile(source, 'keep both');
+  const { transferId } = await h.files.startTransfer({ sessionId: 'session-1', direction: 'upload', sources: [source], destination: '/home/test' });
+  assert.equal((await complete(h.files, transferId)).canClear, true);
+  assert.deepEqual(await h.files.getTransferLocation({ transferId, destination: '/forged' }), { kind: 'remote', sessionId: 'session-1', path: '/home/test' });
+  const calls = h.sftp.calls.length;
+  assert.deepEqual(h.files.clearTransfers(), { removedIds: [transferId] });
+  assert.equal(await fs.readFile(source, 'utf8'), 'keep both'); assert.equal(h.sftp.node('/home/test/upload.txt').data.toString(), 'keep both'); assert.equal(h.sftp.calls.length, calls);
+  assert.deepEqual(h.files.clearTransfers(), { removedIds: [] });
+});
+test('settling transfer records cannot clear or retry before the worker promise has finished', async t => {
+  const observed = []; const retries = []; let files;
+  const h = fixture(t, { onChange: event => {
+    if (event.type !== 'transfer' || event.transfer.status !== 'conflict') return;
+    const record = event.transfer;
+    if (record.canClear === false) retries.push(assert.rejects(files.retryTransfer({ transferId: record.id }), { code: 'SFTP_RETRY_INVALID' }));
+    let clearError;
+    try { files.clearTransfer({ transferId: record.id }); } catch (failure) { clearError = failure.code; }
+    observed.push({ canClear: record.canClear, clearError });
+  } }); files = h.files;
+  assert.equal(typeof files.clearTransfer, 'function');
+  const directory = await transferRecordDirectory(t); const source = path.join(directory, 'a.txt'); await fs.writeFile(source, 'new'); h.sftp.put('/home/test/a.txt', 'file', 'old');
+  await files.startTransfer({ sessionId: 'session-1', direction: 'upload', sources: [source], destination: '/home/test' });
+  for (let attempt = 0; !observed.some(item => item.canClear) && attempt < 500; attempt++) await pause(2);
+  assert.deepEqual(observed, [{ canClear: false, clearError: 'SFTP_TRANSFER_BUSY' }, { canClear: true, clearError: undefined }]);
+  await Promise.all(retries);
+  assert.deepEqual(files.listTransfers(), []); assert.equal(h.sftp.node('/home/test/a.txt').data.toString(), 'old');
+});
+test('transfer record bulk clear removes failed cancelled and conflict records while active work continues', async t => {
+  const h = fixture(t); assert.equal(typeof h.files.clearTransfers, 'function');
+  const directory = await transferRecordDirectory(t); const start = async name => {
+    const source = path.join(directory, name); await fs.writeFile(source, name);
+    return h.files.startTransfer({ sessionId: 'session-1', direction: 'upload', sources: [source], destination: '/home/test' });
+  };
+  h.sftp.put('/home/test/conflict.txt', 'file', 'old'); const conflict = await start('conflict.txt'); assert.equal((await settledTransfer(h.files, conflict.transferId)).status, 'conflict');
+  h.sftp.failWrite = true; const failed = await start('failed.txt'); assert.equal((await settledTransfer(h.files, failed.transferId)).status, 'failed'); h.sftp.failWrite = false;
+  const cancelled = await start('cancelled.txt'); await h.files.cancelTransfer(cancelled); assert.equal((await settledTransfer(h.files, cancelled.transferId)).status, 'cancelled');
+  let release; let entered; const held = new Promise(resolve => { entered = resolve; }); const nativeWrite = h.sftp.write.bind(h.sftp);
+  h.sftp.write = (...args) => { release = () => nativeWrite(...args); entered(); };
+  const active = await start('active.txt'); await held;
+  try {
+    assert.equal(h.files.listTransfers().find(item => item.id === active.transferId).canClear, false);
+    assert.throws(() => h.files.clearTransfer(active), { code: 'SFTP_TRANSFER_BUSY' });
+    await assert.rejects(h.files.getTransferLocation(active), /完成/);
+    assert.deepEqual(new Set(h.files.clearTransfers().removedIds), new Set([conflict.transferId, failed.transferId, cancelled.transferId]));
+    assert.deepEqual(h.files.listTransfers().map(item => item.id), [active.transferId]);
+    await assert.rejects(h.files.retryTransfer(conflict), /不存在|移出/);
+  } finally { h.sftp.write = nativeWrite; release(); }
+  assert.equal((await settledTransfer(h.files, active.transferId)).status, 'completed'); assert.equal(h.sftp.node('/home/test/active.txt').data.toString(), 'active.txt');
+  assert.equal(h.sftp.node('/home/test/conflict.txt').data.toString(), 'old');
+});
+test('retrying transfer records remain protected through failed acquisition and become clearable only afterwards', async t => {
+  let sftp; let held = false; let rejectAcquire; const events = [];
+  const h = fixture(t, { getSftp: () => held ? new Promise((_resolve, reject) => { rejectAcquire = reject; }) : Promise.resolve(sftp), onChange: event => events.push(event) }); sftp = h.sftp;
+  assert.equal(typeof h.files.clearTransfer, 'function');
+  const directory = await transferRecordDirectory(t); const source = path.join(directory, 'a.txt'); await fs.writeFile(source, 'new'); sftp.put('/home/test/a.txt', 'file', 'old');
+  const job = await h.files.startTransfer({ sessionId: 'session-1', direction: 'upload', sources: [source], destination: '/home/test' }); await settledTransfer(h.files, job.transferId);
+  held = true; const retry = h.files.retryTransfer({ ...job, overwrite: true }); const rejected = assert.rejects(retry, /fixture failure/); await pause(1);
+  try {
+    assert.throws(() => h.files.clearTransfer(job), { code: 'SFTP_TRANSFER_BUSY' }); assert.deepEqual(h.files.clearTransfers(), { removedIds: [] });
+  } finally { rejectAcquire(new Error('fixture failure')); }
+  await rejected;
+  const final = events.filter(event => event.transfer?.id === job.transferId && event.transfer.status === 'conflict').slice(-2);
+  assert.deepEqual(final.map(event => event.transfer.canClear), [false, true]);
+  assert.deepEqual(h.files.clearTransfer(job), { removedIds: [job.transferId] }); assert.equal(sftp.node('/home/test/a.txt').data.toString(), 'old');
+});
+test('transfer location rejects missing or replaced local directories without contacting SSH', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); const target = path.join(directory, 'download'); await fs.mkdir(target);
+  h.sftp.put('/home/test/a.txt', 'file', 'keep'); const job = await h.files.startTransfer({ sessionId: 'session-1', direction: 'download', sources: ['/home/test/a.txt'], destination: target });
+  assert.equal((await complete(h.files, job.transferId)).canClear, true); h.disconnect(); const calls = h.sftp.calls.length;
+  await fs.rename(target, path.join(directory, 'moved'));
+  await assert.rejects(h.files.getTransferLocation(job), /目录|移动|删除/);
+  await fs.writeFile(target, 'not a directory'); await assert.rejects(h.files.getTransferLocation(job), /目录/);
+  assert.equal(h.sftp.calls.length, calls); assert.equal(await fs.readFile(path.join(directory, 'moved', 'a.txt'), 'utf8'), 'keep');
+});
+test('transfer location rejects a completed destination redirected by a directory junction', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); const target = path.join(directory, 'download'); const moved = path.join(directory, 'original'); await fs.mkdir(target);
+  h.sftp.put('/home/test/a.txt', 'file', 'keep'); const job = await h.files.startTransfer({ sessionId: 'session-1', direction: 'download', sources: ['/home/test/a.txt'], destination: target }); await settledTransfer(h.files, job.transferId);
+  await fs.rename(target, moved);
+  try { await fs.symlink(moved, target, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (failure) { if (failure.code === 'EPERM' || failure.code === 'EACCES') { t.skip('Directory links unavailable'); return; } throw failure; }
+  await assert.rejects(h.files.getTransferLocation(job), { code: 'SFTP_LOCAL_DIRECTORY' });
+  assert.equal(await fs.readFile(path.join(moved, 'a.txt'), 'utf8'), 'keep');
+});
+test('transfer location detects parent junction redirection even when the destination leaf is a directory', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); const parent = path.join(directory, 'parent'); const target = path.join(parent, 'download'); const moved = path.join(directory, 'original'); await fs.mkdir(target, { recursive: true });
+  h.sftp.put('/home/test/a.txt', 'file', 'keep'); const job = await h.files.startTransfer({ sessionId: 'session-1', direction: 'download', sources: ['/home/test/a.txt'], destination: target }); await settledTransfer(h.files, job.transferId);
+  await fs.rename(parent, moved);
+  try { await fs.symlink(moved, parent, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (failure) { if (failure.code === 'EPERM' || failure.code === 'EACCES') { t.skip('Directory links unavailable'); return; } throw failure; }
+  assert.equal((await fs.lstat(target)).isSymbolicLink(), false);
+  await assert.rejects(h.files.getTransferLocation(job), { code: 'SFTP_LOCAL_DIRECTORY' });
+  assert.equal(await fs.readFile(path.join(moved, 'download', 'a.txt'), 'utf8'), 'keep');
+});
+test('transfer location does not return a removed record after asynchronous filesystem validation', async t => {
+  const h = fixture(t); const directory = await transferRecordDirectory(t); h.sftp.put('/home/test/a.txt', 'file', 'keep');
+  const job = await h.files.startTransfer({ sessionId: 'session-1', direction: 'download', sources: ['/home/test/a.txt'], destination: directory }); const record = await settledTransfer(h.files, job.transferId);
+  const nativeLstat = fs.lstat; let release;
+  fs.lstat = async target => target === record.target ? new Promise((resolve, reject) => { release = () => nativeLstat(target).then(resolve, reject); }) : nativeLstat(target);
+  try {
+    const location = h.files.getTransferLocation(job); const rejected = assert.rejects(location, { code: 'SFTP_TRANSFER_INVALID' });
+    assert.equal(typeof release, 'function'); h.files.clearTransfer(job); release(); await rejected;
+  } finally { fs.lstat = nativeLstat; }
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'keep'); assert.deepEqual(h.files.listTransfers(), []);
+});
+
 module.exports = { FakeSftp, fixture, complete };

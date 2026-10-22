@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }),
   sshDownload: args => ipcRenderer.invoke('ssh:download', args),
   sshCancelTransfer: args => ipcRenderer.invoke('ssh:cancel-transfer', args),
+  sshClearTransfer: args => ipcRenderer.invoke('ssh:clear-transfer', args),
+  sshClearTransfers: () => ipcRenderer.invoke('ssh:clear-transfers'),
+  sshOpenTransferLocation: args => ipcRenderer.invoke('ssh:open-transfer-location', args),
   sshRetryTransfer: args => ipcRenderer.invoke('ssh:retry-transfer', args),
   onSshChanged: callback => {
     const listener = safeListener(callback);

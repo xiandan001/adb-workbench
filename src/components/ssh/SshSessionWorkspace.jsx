@@ -13,7 +13,7 @@ export default function SshSessionWorkspace({ session, view = EMPTY_VIEW, active
   const selectedTerminal = session.terminals?.find(item => item.id === view.activeTerminalId) || session.terminals?.[0];
   useEffect(() => { stateRef.current = view; }, [view]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const directoryChanged = useCallback(path => onAction({ type: 'directory', sessionId: session.id, path }), [onAction, session.id]);
+  const directoryChanged = useCallback((path, revision) => onAction({ type: 'directory', sessionId: session.id, path, revision }), [onAction, session.id]);
   const closeToken = async documentId => { try { await window.electronAPI.sshCloseDocument({ sessionId: session.id, documentId }); } catch { /* Session disposal already releases its tokens. */ } };
   const openFile = async (path, replace = false) => {
     const existing = stateRef.current.documents.find(item => item.path === path);
@@ -60,7 +60,7 @@ export default function SshSessionWorkspace({ session, view = EMPTY_VIEW, active
     <div className="min-h-0 flex-1 p-2">{(session.terminals || []).map(item => <div key={item.id} hidden={selectedTerminal?.id !== item.id} className="h-full min-h-0"><SshTerminal session={session} terminal={item} historyRevision={historyRevision} onNewTerminal={() => terminalAction()} active={active && selectedTerminal?.id === item.id} theme={theme} isDark={isDark} showToast={showToast} /></div>)}{!session.terminals?.length && <p className={`p-5 text-center text-xs ${theme.textMuted}`}>暂无终端，点击 + 新建。文件区仍可使用。</p>}</div>
   </section>;
   return <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">{error && <p role="alert" className="max-h-16 shrink-0 overflow-auto break-words text-xs text-red-500">{error}</p>}<div className="min-h-0 flex-1"><SshSplitPanels layout={layout} onChange={onLayout} onCommit={onCommitLayout}
-    left={<SshFileTree session={session} active={active} path={view.directory} onPath={directoryChanged} onOpen={openFile} onMoved={({ source, path }) => onAction({ type: 'move-path', sessionId: session.id, source, path })} onDeleted={path => onAction({ type: 'delete-path', sessionId: session.id, path })} refreshKey={fileRevision} theme={theme} showToast={showToast} />}
+    left={<SshFileTree session={session} active={active} path={view.directory} directoryRevision={view.directoryRevision || 0} onPath={directoryChanged} onOpen={openFile} onMoved={({ source, path }) => onAction({ type: 'move-path', sessionId: session.id, source, path })} onDeleted={path => onAction({ type: 'delete-path', sessionId: session.id, path })} refreshKey={fileRevision} theme={theme} showToast={showToast} />}
     top={<SshEditorTabs session={session} documents={view.documents} activeDocumentId={view.activeDocumentId} onSelect={documentId => onAction({ type: 'select-document', sessionId: session.id, documentId })} onEdit={(documentId, text) => onAction({ type: 'edit-document', sessionId: session.id, documentId, text })} onSave={saveFile} onClose={closeFile} onReload={reload} loading={loading} theme={theme} showToast={showToast} />}
     bottom={terminalPane} /></div></div>;
 }

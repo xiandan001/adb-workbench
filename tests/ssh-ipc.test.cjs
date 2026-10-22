@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createSshController } = require('../electron/lib/ssh-controller.cjs');
 
-function fixture(t) {
+function fixture(t, { openDirectoryResult = '' } = {}) {
   const handlers = new Map(); const calls = []; const mainFrame = {};
   const sender = Object.assign(new EventEmitter(), { mainFrame, isDestroyed: () => false, setIgnoreMenuShortcuts: value => calls.push(['menu-ignore', value]) });
   const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: sender });
@@ -38,7 +38,9 @@ function fixture(t) {
     setPaused: (identity, paused) => { historyCalls.push(['pause', identity, paused]); pauses.set(keyOf(identity), paused); }
   };
   const published = [];
-  const controller = createSshController({ sessions, files, profiles, history, getOwner: () => owner, dialogs, onPublish: data => published.push(data) });
+  const controller = createSshController({ sessions, files, profiles, history, getOwner: () => owner, dialogs,
+    openLocalDirectory: async target => { calls.push(['open-directory', target]); return openDirectoryResult; },
+    onPublish: data => published.push(data) });
   controller.register({ handle: (channel, action) => handlers.set(channel, action) });
   t.after(() => controller.dispose());
   const run = (name, args, event = { sender, senderFrame: mainFrame }) => handlers.get(`ssh:${name}`)(event, args);
@@ -51,6 +53,50 @@ test('every SSH IPC rejects foreign windows and subframes before invoking any op
     assert.equal((await handler({ sender: h.sender, senderFrame: {} }, {})).success, false, channel);
   }
   assert.deepEqual(h.calls, []);
+});
+
+test('transfer record clearing forwards IDs only and publishes the refreshed snapshot', async t => {
+  const h = fixture(t);
+  h.files.clearTransfer = args => { h.calls.push(['clear-one', args]); return { removedIds: [args.transferId] }; };
+  h.files.clearTransfers = (...args) => { h.calls.push(['clear-all', args]); return { removedIds: ['old'] }; };
+  await h.run('subscribe', { active: true });
+  assert.deepEqual((await h.run('clear-transfer', { transferId: 'done', path: 'untrusted', deleteFiles: true })).removedIds, ['done']);
+  assert.deepEqual(h.calls.find(([name]) => name === 'clear-one'), ['clear-one', { transferId: 'done' }]);
+  assert.deepEqual((await h.run('clear-transfers', { deleteFiles: true })).removedIds, ['old']);
+  assert.deepEqual(h.calls.find(([name]) => name === 'clear-all'), ['clear-all', []]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(h.published.length, 1);
+  assert.ok(!h.calls.some(([name]) => ['delete', 'dispose-files', 'disconnect', 'retry'].includes(name)));
+});
+
+test('completed local transfer location ignores supplied paths and remains usable after host removal', async t => {
+  const h = fixture(t); h.state.splice(0);
+  h.files.getTransferLocation = args => { h.calls.push(['location', args]); return { kind: 'local', sessionId: 'a', path: 'C:\\fixture\\Downloads' }; };
+  const result = await h.run('open-transfer-location', { transferId: 'download', path: 'C:\\untrusted.exe', sessionId: 'b' });
+  assert.equal(result.success, true); assert.equal(result.kind, 'local');
+  assert.deepEqual(h.calls, [['location', { transferId: 'download' }], ['open-directory', 'C:\\fixture\\Downloads']]);
+});
+
+test('missing folders and failed native folder opening report errors without a shell fallback', async t => {
+  const h = fixture(t, { openDirectoryResult: 'native launch failed' });
+  h.files.getTransferLocation = () => ({ kind: 'local', sessionId: 'a', path: 'C:\\fixture' });
+  assert.match((await h.run('open-transfer-location', { transferId: 'download' })).error, /无法打开/);
+  h.files.getTransferLocation = () => { throw new Error('所在文件夹已移动或删除'); };
+  assert.match((await h.run('open-transfer-location', { transferId: 'download' })).error, /已移动或删除/);
+  assert.equal(h.calls.filter(([name]) => name === 'open-directory').length, 1);
+});
+
+test('remote transfer navigation validates its owning connection and folder without local launch', async t => {
+  const h = fixture(t);
+  h.files.getTransferLocation = () => ({ kind: 'remote', sessionId: 'b', path: '/data/packages' });
+  h.files.list = async args => { h.calls.push(['list', args]); return { ...args, entries: [] }; };
+  const result = await h.run('open-transfer-location', { transferId: 'upload', sessionId: 'a', path: '/untrusted' });
+  assert.deepEqual(result, { success: true, kind: 'remote', sessionId: 'b', path: '/data/packages' });
+  assert.deepEqual(h.calls, [['list', { sessionId: 'b', path: '/data/packages' }]]);
+  h.state[1].status = 'disconnected';
+  assert.equal((await h.run('open-transfer-location', { transferId: 'upload' })).success, false);
+  h.state[1].status = 'connected'; h.files.list = async () => { h.state[1].status = 'disconnected'; return { path: '/data/packages' }; };
+  assert.equal((await h.run('open-transfer-location', { transferId: 'upload' })).success, false);
 });
 test('snapshot and notifications contain no saved secrets; renderer cannot supply resolved config', async t => {
   const h = fixture(t);

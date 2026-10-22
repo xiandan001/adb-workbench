@@ -2,6 +2,15 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.6.1': {
+    title: 'v4.6.1',
+    date: '2026-10-22',
+    items: [
+      { type: 'feature', text: 'SSH 传输完成后可打开所在目录：下载打开本地文件夹，上传定位对应主机的远端目录' },
+      { type: 'feature', text: 'SSH 传输队列支持单条清除和一键清除已结束记录，仅移除记录，不删除文件、不影响正在传输的任务' },
+      { type: 'improve', text: '优化用户体验' }
+    ]
+  },
   '4.6.0': {
     title: 'v4.6.0',
     date: '2026-10-22',

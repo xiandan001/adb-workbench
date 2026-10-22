@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUp, ChevronRight, File, FilePlus2, Folder, FolderPlus, Home, Link2, Loader2, MoveRight, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react';
 import SelectMenu from '../SelectMenu';
 import SshFileContextMenu from './SshFileContextMenu';
-import { formatSshBytes, reconcileSshSelection, remoteChild, remoteParent, sshResult } from '../../shared/sshWorkspace';
+import { clearSshDirectoryLoading, createSshDirectoryRequests, formatSshBytes, reconcileSshSelection, remoteChild, remoteParent, sshResult } from '../../shared/sshWorkspace';
 import { isDarkTheme } from '../../shared/theme';
 
 function NameDialog({ operation, theme, onSubmit, onClose }) {
@@ -22,7 +22,7 @@ function NameDialog({ operation, theme, onSubmit, onClose }) {
   </dialog>;
 }
 
-export default function SshFileTree({ session, active, path, onPath, onOpen, onMoved, onDeleted, refreshKey, theme, showToast }) {
+export default function SshFileTree({ session, active, path, directoryRevision = 0, onPath, onOpen, onMoved, onDeleted, refreshKey, theme, showToast }) {
   const [rootPath, setRootPath] = useState(path || '');
   const [pathInput, setPathInput] = useState(path || '');
   const [nodes, setNodes] = useState({});
@@ -37,49 +37,60 @@ export default function SshFileTree({ session, active, path, onPath, onOpen, onM
   const [showHidden, setShowHidden] = useState(false);
   const [sort, setSort] = useState('name');
   const sortId = useId();
-  const rootRequest = useRef(0);
-  const pending = useRef(new Set());
+  const requests = useRef(createSshDirectoryRequests());
+  const navigationRevision = useRef(directoryRevision);
   const nodesRef = useRef(nodes);
   const loadRef = useRef(null);
   const rootRef = useRef(rootPath);
   const connected = session.status === 'connected';
   const button = `rounded p-1.5 disabled:opacity-35 ${theme.button.secondary}`;
-  useEffect(() => { nodesRef.current = nodes; rootRef.current = rootPath; }, [nodes, rootPath]);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useLayoutEffect(() => {
+    requests.current.invalidate(); navigationRevision.current = directoryRevision;
+    setNodes(clearSshDirectoryLoading);
+    const nextPath = path || '';
+    if (rootRef.current !== nextPath) setSelected(null);
+    rootRef.current = nextPath; setRootPath(nextPath); setPathInput(nextPath); setMenu(null);
+  }, [directoryRevision, path, connected]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { if (!active) Promise.resolve().then(() => { if (alive.current) setMenu(null); }); }, [active]);
 
   const load = useCallback(async (directory, { asRoot = false, more = false, force = false } = {}) => {
     if (!connected || !alive.current) return;
     const key = directory || '.';
-    if (pending.current.has(key)) return;
     const known = nodesRef.current[directory];
+    const append = more && Boolean(known?.cursor);
     if (!asRoot && known?.loaded && !force && !more) { setExpanded(previous => ({ ...previous, [directory]: !previous[directory] })); return; }
-    const request = asRoot ? ++rootRequest.current : 0;
-    pending.current.add(key);
+    const request = requests.current.begin(key, asRoot);
+    if (!request) return;
+    const requestedNavigation = navigationRevision.current;
     setError('');
-    setNodes(previous => ({ ...previous, [directory]: { ...previous[directory], loading: true, error: '' } }));
+    setNodes(previous => {
+      const next = asRoot ? clearSshDirectoryLoading(previous) : previous;
+      return { ...next, [directory]: { ...next[directory], loading: true, error: '' } };
+    });
     try {
-      const result = sshResult(await window.electronAPI.sshList({ sessionId: session.id, path: directory, ...(more && known?.cursor ? { cursor: known.cursor } : {}) }), '无法读取远端目录');
+      const result = sshResult(await window.electronAPI.sshList({ sessionId: session.id, path: directory, ...(append ? { cursor: known.cursor } : {}) }), '无法读取远端目录');
       if (result.sessionId !== session.id) throw new Error('目录所属 SSH 会话不匹配');
-      if (!alive.current) return;
-      const entries = [...(more ? known?.entries || [] : []), ...(result.entries || [])];
+      if (!alive.current || !requests.current.isCurrent(request)) return;
+      const entries = [...(append ? known?.entries || [] : []), ...(result.entries || [])];
       const unique = [...new Map(entries.map(item => [item.name, item])).values()];
       setNodes(previous => ({ ...previous, [directory]: { ...previous[directory], loading: false }, [result.path]: { entries: unique, loaded: true, loading: false, cursor: result.cursor, truncated: result.truncated } }));
       setExpanded(previous => ({ ...previous, [result.path]: true }));
-      if (asRoot && request === rootRequest.current) {
+      if (asRoot) {
         const previousRoot = rootRef.current;
         rootRef.current = result.path;
-        setRootPath(result.path); setPathInput(result.path); onPath(result.path);
+        setRootPath(result.path); setPathInput(result.path); onPath(result.path, requestedNavigation);
         setSelected(previous => reconcileSshSelection(previous, previousRoot, result.path, unique));
       }
     } catch (failure) {
-      if (alive.current) { setError(failure.message); setNodes(previous => ({ ...previous, [directory]: { ...previous[directory], loading: false, error: failure.message } })); }
-    } finally { pending.current.delete(key); }
+      if (alive.current && requests.current.isCurrent(request)) { setError(failure.message); setNodes(previous => ({ ...previous, [directory]: { ...previous[directory], loading: false, error: failure.message } })); }
+    } finally { requests.current.finish(request); }
   }, [connected, onPath, session.id]);
   useEffect(() => { loadRef.current = load; }, [load]);
   useEffect(() => {
     if (active && connected) void loadRef.current?.(rootRef.current, { asRoot: true, force: true });
-  }, [active, connected, refreshKey]);
+  }, [active, connected, refreshKey, directoryRevision]);
 
   const run = async action => {
     if (busy || !connected) return;
