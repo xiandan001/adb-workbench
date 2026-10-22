@@ -126,3 +126,25 @@ test('quit cancel/save leaves the connection untouched; only explicit exit proce
   h.service.needsQuitConfirmation = () => false;
   assert.equal(await confirmSerialQuit({ ...args, ask: () => assert.fail('no prompt needed') }), true);
 });
+
+test('export describes canonical AB frames and preserves separate rows and unrecognized bytes', () => {
+  const snapshot = fixture().snapshot;
+  const base = snapshot.entries[0];
+  snapshot.rxBytes = 27;
+  snapshot.entries = [
+    { ...base, id: 3, kind: 'frame', protocol: 'ab', hex: 'ab050adf4e', bytes: 5, parts: 1 },
+    { ...base, id: 4, kind: 'frame', protocol: 'ab', hex: 'ab07984401860b', bytes: 7, parts: 1 },
+    { ...base, id: 5, kind: 'pending', hex: 'ab07', bytes: 2, parts: 1 },
+    { ...base, id: 6, kind: 'raw', hex: 'ff', bytes: 1, parts: 1 },
+    { ...base, id: 7, kind: 'frame', protocol: 'xbh', hex: 'fe09584248434d4401f101cf', bytes: 12, parts: 3 }
+  ];
+  const formatted = formatSerialSnapshot(snapshot);
+  assert.deepEqual([...formatted.matchAll(/^HEX: (.*)$/gm)].map(match => match[1]), [
+    'AB 05 0A DF 4E', 'AB 07 98 44 01 86 0B', 'AB 07', 'FF', 'FE 09 58 42 48 43 4D 44 01 F1 01 CF'
+  ]);
+  assert.equal((formatted.match(/记录类型：完整报文（AB 长度与 CRC 已校验）/g) || []).length, 2);
+  assert.match(formatted, /记录类型：待补齐（原始字节已保留）/);
+  assert.match(formatted, /记录类型：完整报文（FE \/ XBHCMD 长度、固定标识与包尾已校验）/);
+  assert.match(formatted, /记录类型：原始数据（未识别为完整 AB 或 FE 报文）/);
+  assert.doesNotMatch(formatted, /每行最多 2 段/);
+});

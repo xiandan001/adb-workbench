@@ -5,6 +5,143 @@ const { createSerialBuffer, MAX_BYTES, MAX_ENTRIES } = require('../electron/lib/
 const config = { baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
 const record = (bytes, extra = {}) => ({ bytes, sessionId: 'session-A', path: 'COM2', config, direction: 'RX', ...extra });
 
+test('one callback containing ACK and response is split into two CRC-verified frames', () => {
+  const buffer = createSerialBuffer();
+  buffer.append(record(Buffer.from('ab050adf4eab07984401860b', 'hex')));
+  assert.deepEqual(buffer.entriesAfter().map(row => [row.kind, row.hex]), [
+    ['frame', 'ab050adf4e'], ['frame', 'ab07984401860b']
+  ]);
+  assert.equal(buffer.metadata().rxBytes, 12);
+});
+
+test('every-byte callbacks are visible immediately and complete one frame regardless of part count', () => {
+  let clock = 100;
+  const buffer = createSerialBuffer({ now: () => clock });
+  const bytes = Buffer.from('ab07984401860b', 'hex');
+  for (let index = 0; index < bytes.length; index++) {
+    buffer.append(record(bytes.subarray(index, index + 1)));
+    assert.equal(buffer.metadata().rxBytes, index + 1);
+    assert.equal(buffer.entriesAfter().map(row => row.hex).join(''), bytes.subarray(0, index + 1).toString('hex'));
+    clock += 80;
+  }
+  const rows = buffer.entriesAfter();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'frame');
+  assert.equal(rows[0].parts, bytes.length);
+});
+
+test('final resync preserves old pending UTF-8 attribution and discovers the nested valid response', () => {
+  const buffer = createSerialBuffer();
+  const first = Buffer.from('abffc3', 'hex');
+  const second = Buffer.from('ab050adf4e', 'hex');
+  buffer.append(record(first));
+  buffer.append(record(second));
+  assert.equal(buffer.entriesAfter()[0].kind, 'pending');
+  assert.equal(buffer.sealReceive(), true);
+  const rows = buffer.entriesAfter();
+  assert.equal(rows.map(row => row.hex).join(''), Buffer.concat([first, second]).toString('hex'));
+  assert.equal(rows.map(row => row.text).join(''), Buffer.concat([first, second]).toString('utf8'));
+  assert.equal(rows.at(-1).kind, 'frame');
+  assert.equal(rows.at(-1).hex, 'ab050adf4e');
+  assert.equal(buffer.metadata().rxBytes, 8);
+});
+
+test('FE printing response keeps final 01 CF and callback attribution in one verified frame', () => {
+  let clock = 100;
+  const buffer = createSerialBuffer({ now: () => clock });
+  buffer.append(record(Buffer.from('fe09584248434d4401f1', 'hex')));
+  const first = buffer.entriesAfter()[0];
+  assert.equal(first.kind, 'pending');
+  assert.equal(first.protocol, 'xbh');
+  assert.equal(first.bytes, 10);
+  clock += 60;
+  buffer.append(record(Buffer.from('01cf', 'hex')));
+  const completed = buffer.entriesAfter()[0];
+  assert.equal(completed.id, first.id);
+  assert.equal(completed.hex, 'fe09584248434d4401f101cf');
+  assert.equal(completed.kind, 'frame');
+  assert.equal(completed.protocol, 'xbh');
+  assert.equal(completed.parts, 2);
+  assert.equal(buffer.metadata().rxBytes, 12);
+});
+
+test('small cache and TX eviction never resurrect discarded protocol prefixes', () => {
+  const buffer = createSerialBuffer({ maxEntries: 1, maxBytes: 4 });
+  buffer.append(record(Buffer.from('ab05', 'hex')));
+  assert.equal(buffer.hasPendingReceive(), true);
+  buffer.append(record(Buffer.from('TX'), { direction: 'TX' }));
+  assert.equal(buffer.hasPendingReceive(), false);
+  buffer.append(record(Buffer.from('0adf4e', 'hex')));
+  assert.equal(buffer.entriesAfter().map(row => row.hex).join(''), '0adf4e');
+  assert.equal(buffer.entriesAfter()[0].kind, 'raw');
+  assert.equal(buffer.metadata().rxBytes, 5);
+  assert.equal(buffer.metadata().txBytes, 2);
+  buffer.clear();
+  buffer.append(record(Buffer.from('ab050adf4e', 'hex')));
+  assert.ok(buffer.entriesAfter().every(row => row.kind === 'raw'));
+  assert.ok(buffer.entriesAfter().reduce((sum, row) => sum + row.bytes, 0) <= 4);
+  assert.equal(buffer.metadata().rxBytes, 5);
+});
+
+test('logical 500 ms idle resynchronizes a false candidate before accepting new bytes', () => {
+  let clock = 100;
+  const buffer = createSerialBuffer({ now: () => clock });
+  buffer.append(record(Buffer.from('abffab050adf4e', 'hex')));
+  clock += 500;
+  buffer.append(record(Buffer.from('Z')));
+  assert.deepEqual(buffer.entriesAfter().map(row => [row.kind, row.hex]), [
+    ['raw', 'abff'], ['frame', 'ab050adf4e'], ['raw', '5a']
+  ]);
+  assert.equal(buffer.metadata().rxBytes, 8);
+  assert.equal(buffer.hasPendingReceive(), false);
+});
+
+test('structural repair keeps pending decoder ownership for the interleaved TX stream', () => {
+  const buffer = createSerialBuffer();
+  buffer.append(record(Buffer.from('abffab05', 'hex')));
+  buffer.append(record(Buffer.from('e4b8', 'hex'), { direction: 'TX' }));
+  buffer.append(record(Buffer.from('0adf4e', 'hex')));
+  assert.equal(buffer.sealReceive(), true);
+  assert.equal(buffer.consumeReset(), true);
+  buffer.endSession('session-A');
+  const rows = buffer.entriesAfter();
+  assert.equal(rows.find(row => row.direction === 'TX').text, '�');
+  assert.equal(rows.find(row => row.direction === 'TX').hex, 'e4b8');
+  assert.equal(rows.filter(row => row.direction === 'RX').map(row => row.hex).join(''), 'abffab050adf4e');
+  assert.equal(buffer.metadata().evicted, 0);
+});
+
+test('ordinary ASCII and Chinese printing stays byte exact across every UTF-8 byte boundary', () => {
+  let clock = 100;
+  const buffer = createSerialBuffer({ now: () => clock });
+  const bytes = Buffer.from('Boot OK\r\n串口打印：连接成功\në\t完成');
+  for (let index = 0; index < bytes.length; index++) {
+    buffer.append(record(bytes.subarray(index, index + 1)));
+    clock += 1;
+  }
+  buffer.sealReceive();
+  buffer.endSession('session-A');
+  const rows = buffer.entriesAfter();
+  assert.equal(rows.map(row => row.hex).join(''), bytes.toString('hex'));
+  assert.equal(rows.map(row => row.text).join(''), bytes.toString('utf8'));
+  assert.equal(buffer.metadata().rxBytes, bytes.length);
+  assert.equal(buffer.hasPendingReceive(), false);
+});
+
+test('a large single native callback is processed in bounded slices without changing its part count', () => {
+  const buffer = createSerialBuffer();
+  const frame = Buffer.from('ab050adf4e', 'hex');
+  const bytes = Buffer.alloc(frame.length * 40000);
+  for (let offset = 0; offset < bytes.length; offset += frame.length) frame.copy(bytes, offset);
+  buffer.append(record(bytes));
+  const rows = buffer.entriesAfter();
+  assert.equal(rows.length, MAX_ENTRIES);
+  assert.equal(buffer.metadata().rxBytes, bytes.length);
+  assert.equal(buffer.metadata().evicted, 35000);
+  assert.ok(rows.every(row => row.kind === 'frame' && row.parts === 1 && row.hex === frame.toString('hex')));
+  assert.equal(buffer.drainChanges().length, MAX_ENTRIES);
+});
+
 test('four RX fragments form two complete pairs and a fifth never updates either pair', () => {
   let clock = 100;
   const buffer = createSerialBuffer({ now: () => clock });

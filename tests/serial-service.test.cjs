@@ -68,6 +68,284 @@ function harness(t, options = {}) {
   return { service, ports, changes };
 }
 
+test('pending ACK survives TX drain completion and completes without hiding the TX row', async t => {
+  const { service, ports } = harness(t, { behavior: { manualWrite: true, manualDrain: true } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sending = service.send({ sessionId: service.snapshot().sessionId, mode: 'hex', content: 'aa061001a7ef', lineEnding: 'none' });
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  const pendingId = service.snapshot().entries[0].id;
+  ports[0].finishWrite();
+  ports[0].finishDrain();
+  await sending;
+  assert.equal(service.snapshot().entries.filter(row => row.direction === 'TX').length, 1);
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  const rows = service.snapshot().entries;
+  assert.deepEqual(rows.filter(row => row.direction === 'RX').map(row => [row.id, row.kind, row.hex]), [[pendingId, 'frame', 'ab050adf4e']]);
+  assert.equal(service.snapshot().rxBytes, 5);
+  assert.equal(service.snapshot().txBytes, 6);
+});
+
+test('bad-length resync across TX commit preserves chronological RX and TX bytes', async t => {
+  const { service, ports, changes } = harness(t, { behavior: { manualWrite: true, manualDrain: true } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sending = service.send({ sessionId: service.snapshot().sessionId, mode: 'text', content: 'T', lineEnding: 'none' });
+  ports[0].emit('data', Buffer.from('abffab05', 'hex'));
+  ports[0].finishWrite();
+  ports[0].finishDrain();
+  await sending;
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  service.sealReceive();
+  const rows = service.snapshot().entries;
+  assert.deepEqual(rows.map(row => [row.direction, row.kind, row.hex]), [
+    ['RX', 'raw', 'abff'], ['RX', 'frame', 'ab050adf4e'], ['TX', 'raw', '54']
+  ]);
+  assert.equal(service.snapshot().rxBytes, 7);
+  assert.equal(service.snapshot().txBytes, 1);
+  assert.equal(service.snapshot().evicted, 0);
+  assert.ok(rows.every((row, index) => !index || row.id === rows[index - 1].id + 1));
+  await delay(115);
+  assert.equal(changes.at(-1).reset, true);
+  assert.deepEqual(changes.at(-1).entries, rows);
+});
+
+test('500 ms receive idle finalizes false length without dropping immediately visible bytes', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('abffab050adf4e', 'hex'));
+  assert.equal(service.snapshot().rxBytes, 7);
+  assert.equal(service.snapshot().entries[0].kind, 'pending');
+  await delay(550);
+  assert.deepEqual(service.snapshot().entries.map(row => [row.kind, row.hex]), [['raw', 'abff'], ['frame', 'ab050adf4e']]);
+  assert.equal(service.snapshot().rxBytes, 7);
+});
+
+test('clear cancels protocol idle work and a later suffix cannot revive the old prefix', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  assert.equal(service.snapshot().entries[0].kind, 'pending');
+  service.clear();
+  const revision = service.snapshot().revision;
+  await delay(550);
+  assert.equal(service.snapshot().revision, revision);
+  assert.equal(service.snapshot().entries.length, 0);
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  assert.deepEqual(service.snapshot().entries.map(row => [row.kind, row.hex]), [['raw', '0adf4e']]);
+  assert.equal(service.snapshot().rxBytes, 3);
+});
+
+test('a saved pending snapshot is immutable and completing its frame remains unsaved', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  const saved = service.snapshot();
+  service.markSaved(saved.revision);
+  assert.equal(service.snapshot().unsaved, false);
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  assert.equal(saved.entries[0].kind, 'pending');
+  assert.equal(saved.entries[0].hex, 'ab05');
+  assert.equal(service.snapshot().entries[0].kind, 'frame');
+  assert.equal(service.snapshot().entries[0].id, saved.entries[0].id);
+  assert.equal(service.snapshot().unsaved, true);
+  assert.equal(service.snapshot().rxBytes, 5);
+});
+
+test('terminal raw reads replay RX exactly once independently of protocol updates and RS232 clear', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  const first = service.terminalRead({ sessionId, offset: 0 });
+  assert.equal(first.hex, 'ab05');
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  const second = service.terminalRead({ sessionId, offset: first.nextOffset });
+  assert.equal(second.hex, '0adf4e');
+  assert.equal(second.nextOffset, 5);
+  service.clear();
+  assert.equal(service.terminalRead({ sessionId, offset: 0 }).hex, 'ab050adf4e');
+  await service.disconnect();
+  assert.equal(service.terminalRead({ sessionId, offset: 5 }).hex, '');
+  await service.connect({ path: 'COM10', config: CONFIG });
+  assert.throws(() => service.terminalRead({ sessionId, offset: 0 }), error => error.code === 'SERIAL_TERMINAL_SESSION_CHANGED');
+  assert.equal(service.terminalRead({ sessionId: service.snapshot().sessionId, offset: 0 }).endOffset, 0);
+});
+
+test('RX typed-array and DataView offsets are normalized once for both serial buffers', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const first = new Uint8Array([255, 65, 66, 255]);
+  const second = new Uint8Array([255, 67, 68, 255]);
+  assert.doesNotThrow(() => ports[0].emit('data', first.subarray(1, 3)));
+  assert.doesNotThrow(() => ports[0].emit('data', new DataView(second.buffer, 1, 2)));
+  first.fill(0); second.fill(0);
+  assert.equal(service.terminalRead({ sessionId, offset: 0 }).hex, '41424344');
+  assert.equal(service.snapshot().entries.map(row => row.hex).join(''), '41424344');
+  assert.equal(service.snapshot().entries.map(row => row.text).join(''), 'ABCD');
+  assert.equal(service.snapshot().rxBytes, 4);
+});
+
+test('terminal key writes are FIFO and compact with exact UTF-8 and control bytes', async t => {
+  const { service, ports } = harness(t, { behavior: { manualWrite: true, manualDrain: true }, service: { writeTimeoutMs: 1000 } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const values = ['A', '\t\x1b[A', '\x03\r中'];
+  const pending = values.map(content => service.terminalWrite({ sessionId, content }));
+  await delay(1);
+  assert.equal(ports[0].writes.length, 1);
+  await assert.rejects(service.send({ sessionId, mode: 'text', content: 'not interleaved', lineEnding: 'none' }), /发送|写入/);
+  for (let index = 0; index < values.length; index++) {
+    assert.equal(ports[0].writes.length, index + 1);
+    ports[0].finishWrite(); ports[0].finishDrain();
+    assert.deepEqual(await pending[index], { bytes: Buffer.byteLength(values[index]) });
+    await delay(1);
+  }
+  assert.equal(Buffer.concat(ports[0].writes).equals(Buffer.from(values.join(''))), true);
+  assert.equal(service.snapshot().txBytes, Buffer.byteLength(values.join('')));
+});
+
+test('terminal input waits behind a normal send without racing its native write', async t => {
+  const { service, ports } = harness(t, { behavior: { manualWrite: true, manualDrain: true }, service: { writeTimeoutMs: 1000 } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const normal = service.send({ sessionId, mode: 'text', content: 'AT\r', lineEnding: 'none' });
+  const terminal = service.terminalWrite({ sessionId, content: '\t' });
+  assert.equal(ports[0].writes.length, 1);
+  ports[0].finishWrite(); ports[0].finishDrain(); await normal;
+  await delay(1);
+  assert.equal(ports[0].writes.length, 2);
+  ports[0].finishWrite(); ports[0].finishDrain();
+  assert.deepEqual(await terminal, { bytes: 1 });
+});
+
+test('terminal queue enforces byte and item backpressure before accepting excess input', async t => {
+  const first = harness(t, { behavior: { manualWrite: true }, service: { writeTimeoutMs: 1000 } });
+  await first.service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = first.service.snapshot().sessionId;
+  const held = first.service.terminalWrite({ sessionId, content: 'A'.repeat(65536) });
+  const rejectedHeld = assert.rejects(held, /无法确认|断开|退出/);
+  await assert.rejects(first.service.terminalWrite({ sessionId, content: 'B' }), error => error.code === 'SERIAL_TERMINAL_BACKPRESSURE');
+  await first.service.disconnect(); await rejectedHeld;
+  const second = harness(t, { behavior: { manualWrite: true }, service: { writeTimeoutMs: 1000 } });
+  await second.service.connect({ path: 'COM2', config: CONFIG });
+  const nextId = second.service.snapshot().sessionId;
+  const items = Array.from({ length: 256 }, () => second.service.terminalWrite({ sessionId: nextId, content: 'x' }).catch(error => error));
+  await assert.rejects(second.service.terminalWrite({ sessionId: nextId, content: 'z' }), error => error.code === 'SERIAL_TERMINAL_BACKPRESSURE');
+  await second.service.disconnect();
+  assert.ok((await Promise.all(items)).every(result => result instanceof Error));
+});
+
+test('disconnect and dispose reject queued terminal input without replaying it into the next session', async t => {
+  const { service, ports } = harness(t, { behavior: index => index ? {} : { manualWrite: true }, service: { writeTimeoutMs: 1000 } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const oldId = service.snapshot().sessionId;
+  const items = ['one', 'two', 'three'].map(content => service.terminalWrite({ sessionId: oldId, content }).catch(error => error));
+  await delay(1);
+  await service.disconnect();
+  assert.ok((await Promise.all(items)).every(result => result instanceof Error));
+  await service.connect({ path: 'COM10', config: CONFIG });
+  ports[0].finishWrite();
+  await delay(1);
+  assert.equal(ports[0].writes.length, 1);
+  assert.equal(ports[1].writes.length, 0);
+  await assert.rejects(service.terminalWrite({ sessionId: oldId, content: 'stale' }), error => error.code === 'SERIAL_TERMINAL_SESSION_CHANGED');
+  const currentId = service.snapshot().sessionId;
+  assert.deepEqual(await service.terminalWrite({ sessionId: currentId, content: 'new' }), { bytes: 3 });
+  ports[1].behavior.manualWrite = true;
+  const disposed = ['four', 'five'].map(content => service.terminalWrite({ sessionId: currentId, content }).catch(error => error));
+  await delay(1);
+  await service.dispose();
+  assert.ok((await Promise.all(disposed)).every(result => result instanceof Error));
+});
+
+test('terminal native failure rejects the queued suffix and closes without retry', async t => {
+  const { service, ports } = harness(t, { behavior: { writeError: new Error('device removed') } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const items = ['a', 'b', 'c'].map(content => service.terminalWrite({ sessionId, content }).catch(error => error));
+  assert.ok((await Promise.all(items)).every(result => result instanceof Error));
+  await delay(5);
+  assert.equal(ports[0].writes.length, 1);
+  assert.equal(ports[0].calls.close, 1);
+  assert.equal(service.snapshot().txBytes, 0);
+});
+
+test('terminal drain timeout cancels queued suffix with distinct unknown and never-written results', async t => {
+  const { service, ports } = harness(t, { behavior: { manualDrain: true } });
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const items = ['a', 'b'].map(content => service.terminalWrite({ sessionId, content }).catch(error => error));
+  const failures = await Promise.all(items);
+  assert.equal(failures[0].code, 'SERIAL_TERMINAL_WRITE_UNKNOWN');
+  assert.equal(failures[1].code, 'SERIAL_TERMINAL_SESSION_CLOSED');
+  await delay(5);
+  assert.equal(ports[0].writes.length, 1);
+  ports[0].finishDrain();
+  assert.equal(service.snapshot().txBytes, 0);
+  assert.equal(service.snapshot().status, 'error');
+});
+
+test('terminal rejects malformed or oversized input before touching the port and leaves queue capacity intact', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  for (const content of ['', null, 3, '中'.repeat(22000), 'x'.repeat(65537)]) {
+    await assert.rejects(service.terminalWrite({ sessionId, content }), error => error.code === 'SERIAL_TERMINAL_INPUT_INVALID');
+  }
+  assert.equal(ports[0].writes.length, 0);
+  assert.deepEqual(await service.terminalWrite({ sessionId, content: '\x00\x03\t\x1b[A\r\n' }), { bytes: 8 });
+  assert.equal(ports[0].writes[0].toString('hex'), '0003091b5b410d0a');
+});
+
+test('terminal keystrokes do not flush an in-progress protocol response', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  ports[0].emit('data', Buffer.from('ab05', 'hex'));
+  await service.terminalWrite({ sessionId, content: '\t' });
+  ports[0].emit('data', Buffer.from('0adf4e', 'hex'));
+  assert.deepEqual(service.snapshot().entries.filter(row => row.direction === 'RX').map(row => [row.kind, row.hex]), [['frame', 'ab050adf4e']]);
+});
+
+test('synchronous disconnect before queued write starts performs no late native write', async t => {
+  const { service, ports } = harness(t);
+  await service.connect({ path: 'COM2', config: CONFIG });
+  const sessionId = service.snapshot().sessionId;
+  const input = service.terminalWrite({ sessionId, content: 'never written' }).catch(error => error);
+  await service.disconnect();
+  assert.ok(await input instanceof Error);
+  await delay(1);
+  assert.equal(ports[0].writes.length, 0);
+  assert.equal(service.snapshot().txBytes, 0);
+});
+
+test('terminal IPC preserves main-owner authorization and compact successes and errors', async () => {
+  const { createSerialController } = require('../electron/lib/serial.cjs');
+  const handlers = new Map();
+  const sender = new EventEmitter(); sender.isDestroyed = () => false;
+  const owner = { webContents: sender, isDestroyed: () => false };
+  let writes = 0;
+  let reads = 0;
+  const service = {
+    snapshot: () => assert.fail('terminal IPC must never allocate a full snapshot'),
+    terminalRead: args => { reads++; return { sessionId: args.sessionId, startOffset: 0, endOffset: 1, nextOffset: 1, hex: '41', truncated: false }; },
+    terminalWrite: async args => { writes++; if (args.content === 'fail') throw Object.assign(new Error('input refused'), { code: 'SERIAL_TERMINAL_BACKPRESSURE' }); return { bytes: Buffer.byteLength(args.content) }; }
+  };
+  createSerialController({ service, getOwner: () => owner, saveSnapshot: () => {} }).register({ handle: (name, handler) => handlers.set(name, handler) });
+  for (const name of ['serial:terminal-read', 'serial:terminal-write']) {
+    const denied = await handlers.get(name)({ sender: {} }, { sessionId: 'test', content: 'A', offset: 0 });
+    assert.equal(denied.success, false);
+    assert.equal(denied.snapshot, undefined);
+    assert.equal(denied.hex, undefined);
+  }
+  assert.equal(writes + reads, 0);
+  assert.deepEqual(await handlers.get('serial:terminal-write')({ sender }, { sessionId: 'test', content: '\t' }), { success: true, bytes: 1 });
+  const failure = await handlers.get('serial:terminal-write')({ sender }, { sessionId: 'test', content: 'fail' });
+  assert.deepEqual(failure, { success: false, error: 'input refused', code: 'SERIAL_TERMINAL_BACKPRESSURE' });
+  const data = await handlers.get('serial:terminal-read')({ sender }, { sessionId: 'test', offset: 0 });
+  assert.equal(data.hex, '41'); assert.equal(data.snapshot, undefined);
+});
+
 test('enumeration is naturally sorted, preserves safe optional metadata and never opens ports', async t => {
   const { service, ports } = harness(t, {
     listPorts: async () => [

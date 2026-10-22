@@ -1,11 +1,14 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { Cable } from 'lucide-react';
 import SerialConnectionSettings from './SerialConnectionSettings';
 import SerialDataView from './SerialDataView';
 import SerialSendPanel from './SerialSendPanel';
+import SelectMenu from './SelectMenu';
 import { appendSerialHistory, defaultSerialPreferences, normalizePreferences, readSerialHistory, readSerialPreferences, saveSerialPreferences } from '../shared/serialSettings';
 import { applySerialDelta, applySerialSnapshot, createSerialDiscovery, emptySerialSnapshot, readSerialWorkspace, updateSerialWorkspace } from '../shared/serialWorkspace';
 import { isDarkTheme } from '../shared/theme';
+
+const SerialTerminal = lazy(() => import('./SerialTerminal'));
 
 function initialSettings() {
   let preferences = defaultSerialPreferences();
@@ -192,16 +195,18 @@ export default function SerialPanel({ theme, showToast }) {
 
   return <section aria-label="串口 / RS232" className={`mb-4 rounded-xl border shadow-sm ${theme.card} ${theme.text}`}>
     <div className="flex w-full flex-wrap items-center gap-2.5 rounded-xl px-4 py-3 text-left">
-      <Cable size={18} className={connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">串口 / RS232</h2><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? ' · 有未保存记录' : ''}</span>
+      <Cable size={18} className={connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">串口 / RS232</h2><label className="sr-only" htmlFor={`${id}-mode`}>工作模式</label><SelectMenu id={`${id}-mode`} isDark={isDark} compact value={workspace.mode} onChange={mode => updateWorkspace({ mode })} options={[{ value: 'rs232', label: 'RS232调试' }, { value: 'terminal', label: '串口终端' }]} className="w-36" /><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? ' · 有未保存记录' : ''}</span>
     </div>
     <div className="space-y-4 border-t border-slate-400/20 p-4">
-      <p className={`text-xs leading-5 ${theme.textMuted}`}>① 选择串口和设备对应的波特率 → ② 点击连接 → ③ 选择格式，查看或发送数据。软件不会自动连接或发送。</p>
+      <p className={`text-xs leading-5 ${theme.textMuted}`}>① 选择串口和设备对应的波特率 → ② 点击连接 → {workspace.mode === 'terminal' ? '③ 点击终端后用键盘操作设备 Shell。' : '③ 选择格式，查看或发送数据。'}切换模式不会重连或自动发送。</p>
       <SerialConnectionSettings theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : workspace.selectedPath} onSelectPath={selectedPath => updateWorkspace({ selectedPath })} config={connected ? snapshot.config : preferences.config} onConfig={config => changePreferences({ config })} status={snapshot.status} activePath={snapshot.path} pending={Boolean(pending) && pending !== 'send'} connectingRequest={pending === 'connect'} cancelling={pending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act('connect', () => window.electronAPI.serialConnect({ path: workspace.selectedPath, config: preferences.config }))} onDisconnect={() => act('disconnect', () => window.electronAPI.serialDisconnect())} advanced={workspace.advanced} onAdvanced={advanced => updateWorkspace({ advanced })} />
       {discoveryError ? <p role="alert" className="text-xs text-amber-500">{discoveryError}。已保留上次列表，可点击刷新重试。</p> : !ports.length && <p className={`text-xs ${theme.textMuted}`}>未发现串口，请连接串口线并检查驱动。串口工具独立于 ADB 设备连接。</p>}
       {(error || snapshot.error) && <p role="alert" className="break-words rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error || snapshot.error}</p>}
       {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{persistenceError}</p>}
-      <SerialDataView theme={theme} isDark={isDark} snapshot={snapshot} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={save} onClear={() => act('clear', () => window.electronAPI.serialClear())} saving={pending === 'save'} busy={Boolean(pending)} showToast={showToast} />
-      <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={connected} sending={snapshot.sending || pending === 'send'} busy={Boolean(pending)} onSend={send} history={history} showToast={showToast} />
+      {workspace.mode === 'terminal' ? <Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>正在打开串口终端…</p>}><SerialTerminal key={snapshot.sessionId || 'unconnected'} theme={theme} isDark={isDark} snapshot={snapshot} settings={workspace.terminal} onSettings={changes => updateWorkspace({ terminal: { ...workspace.terminal, ...changes } })} onSave={save} saving={pending === 'save'} busy={Boolean(pending)} showToast={showToast} /></Suspense> : <>
+        <SerialDataView theme={theme} isDark={isDark} snapshot={snapshot} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={save} onClear={() => act('clear', () => window.electronAPI.serialClear())} saving={pending === 'save'} busy={Boolean(pending)} showToast={showToast} />
+        <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={connected} sending={snapshot.sending || pending === 'send'} busy={Boolean(pending)} onSend={send} history={history} showToast={showToast} />
+      </>}
     </div>
   </section>;
 }

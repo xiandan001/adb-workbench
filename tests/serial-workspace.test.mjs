@@ -9,12 +9,28 @@ test('serial page workspace retains only session UI state across navigation with
   try {
     updateSerialWorkspace({ selectedPath: 'COM10', draft: '待发送草稿', advanced: true, commandsOpen: true, following: false });
     const restored = readSerialWorkspace();
-    assert.deepEqual(restored, { selectedPath: 'COM10', draft: '待发送草稿', advanced: true, commandsOpen: true, following: false });
+    assert.deepEqual(restored, { ...original, selectedPath: 'COM10', draft: '待发送草稿', advanced: true, commandsOpen: true, following: false });
     restored.draft = 'mutated copy';
     assert.equal(readSerialWorkspace().draft, '待发送草稿');
     assert.equal('open' in restored, false);
     assert.equal('connected' in restored, false);
     assert.equal('sessionId' in restored, false);
+  } finally { updateSerialWorkspace(original); }
+});
+
+test('serial mode defaults to RS232 and terminal settings remain local UI state across navigation', () => {
+  const original = readSerialWorkspace();
+  try {
+    assert.equal(original.mode, 'rs232');
+    assert.deepEqual(original.terminal, { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' });
+    updateSerialWorkspace({ mode: 'terminal', terminal: { ...original.terminal, enter: 'lf', style: 'classic' } });
+    assert.equal(readSerialWorkspace().mode, 'terminal');
+    const copied = readSerialWorkspace();
+    copied.terminal.enter = 'crlf';
+    copied.terminal.style = 'current';
+    assert.equal(readSerialWorkspace().terminal.enter, 'lf');
+    assert.equal(readSerialWorkspace().terminal.style, 'classic');
+    assert.equal('connected' in copied, false);
   } finally { updateSerialWorkspace(original); }
 });
 

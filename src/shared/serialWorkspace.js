@@ -29,8 +29,8 @@ export function applySerialSnapshot(current, snapshot) {
 }
 
 // UI-only session state survives page navigation, never connects or sends on restoration.
-const workspace = { selectedPath: '', draft: '', advanced: false, commandsOpen: false, following: true };
-export function readSerialWorkspace() { return { ...workspace }; }
+const workspace = { selectedPath: '', draft: '', advanced: false, commandsOpen: false, following: true, mode: 'rs232', terminal: { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' } };
+export function readSerialWorkspace() { return { ...workspace, terminal: { ...workspace.terminal } }; }
 export function updateSerialWorkspace(changes) { Object.assign(workspace, changes); }
 
 export function createSerialDiscovery({ list, onResult }) {

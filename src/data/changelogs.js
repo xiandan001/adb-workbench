@@ -2,6 +2,17 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.5.2': {
+    title: 'v4.5.2',
+    date: '2026-10-22',
+    items: [
+      { type: 'feature', text: '串口 / RS232 页面新增“串口终端”和“RS232 调试”两种模式，共用串口连接' },
+      { type: 'feature', text: '串口终端支持逐键输入、Tab、方向键、Ctrl+C 等控制键，以及终端回显、复制粘贴和清屏' },
+      { type: 'feature', text: '终端支持当前主题与经典黑底样式切换，默认保持当前样式' },
+      { type: 'improve', text: '串口 AB 与 FE / XBHCMD 报文按完整内容分行，支持连续多包分别显示与分段接收补齐' },
+      { type: 'improve', text: '发送数据区域新增清空输入按钮，不影响收发记录、常用命令及发送历史' }
+    ]
+  },
   '4.5.1': {
     title: 'v4.5.1',
     date: '2026-10-22',

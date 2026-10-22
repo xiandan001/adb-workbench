@@ -38,10 +38,11 @@ function createSerialController({ service, getOwner, saveSnapshot }) {
     return () => { migrationReserved = false; };
   }
   function register(ipcMain) {
-    const handle = (channel, operation) => ipcMain.handle(channel, async (event, args) => {
+    const handle = (channel, operation, snapshotOnError = true) => ipcMain.handle(channel, async (event, args) => {
       let authorized = false;
       try { authorize(event); authorized = true; return { success: true, ...await operation(args, event) }; }
-      catch (error) { return { success: false, error: error.message, ...(authorized ? { snapshot: service.snapshot() } : {}) }; }
+      catch (error) { return { success: false, error: error.message, ...(error.code ? { code: error.code } : {}),
+        ...(authorized && snapshotOnError ? { snapshot: service.snapshot() } : {}) }; }
     });
     handle('serial:list', async () => ({ ports: await service.listPorts() }));
     handle('serial:snapshot', () => ({ snapshot: service.snapshot() }));
@@ -73,6 +74,8 @@ function createSerialController({ service, getOwner, saveSnapshot }) {
     });
     handle('serial:disconnect', async () => { connectRequest++; await service.disconnect(); return { snapshot: service.snapshot() }; });
     handle('serial:send', async args => { await service.send(args); return { snapshot: service.snapshot() }; });
+    handle('serial:terminal-read', args => service.terminalRead(args), false);
+    handle('serial:terminal-write', args => service.terminalWrite(args), false);
     handle('serial:clear', () => { service.clear(); return { snapshot: service.snapshot() }; });
     handle('serial:save', saveCurrent);
   }

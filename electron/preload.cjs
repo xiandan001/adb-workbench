@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   serialConnect: args => ipcRenderer.invoke('serial:connect', args),
   serialDisconnect: () => ipcRenderer.invoke('serial:disconnect'),
   serialSend: args => ipcRenderer.invoke('serial:send', args),
+  serialTerminalRead: args => ipcRenderer.invoke('serial:terminal-read', args),
+  serialTerminalWrite: args => ipcRenderer.invoke('serial:terminal-write', args),
   serialClear: () => ipcRenderer.invoke('serial:clear'),
   serialSave: () => ipcRenderer.invoke('serial:save'),
   serialSubscribe: args => ipcRenderer.invoke('serial:subscribe', args),
