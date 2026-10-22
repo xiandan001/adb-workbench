@@ -19,6 +19,12 @@ function harness(t, restartError = '') {
   const timers = [];
   const calls = [];
   const serial = { needsQuitConfirmation: () => false };
+  const ssh = { needsQuitConfirmation: () => false };
+  ssh.reserveForMigration = () => {
+    if (ssh.needsQuitConfirmation()) throw new Error('请先断开 SSH');
+    ssh.reserved = true;
+    return () => { ssh.reserved = false; };
+  };
   serial.reserveForMigration = () => {
     if (serial.needsQuitConfirmation()) throw new Error('请先断开串口');
     serial.reserved = true;
@@ -45,6 +51,7 @@ function harness(t, restartError = '') {
       if (name === './data-migration-core.cjs') return core;
       if (name === './screen-recording.cjs') return { listUnresolved: () => [] };
       if (name === './serial.cjs') return serial;
+      if (name === './ssh.cjs') return ssh;
       return require(name);
     }
   });
@@ -52,7 +59,7 @@ function harness(t, restartError = '') {
     if (restartError) throw new Error(restartError);
     calls.push({ restart: true });
   } });
-  return { root, data, backup, sender, handlers, timers, calls, dialog, core, serial, api: module.exports };
+  return { root, data, backup, sender, handlers, timers, calls, dialog, core, serial, ssh, api: module.exports };
 }
 
 test('migration is restricted to main window and cancellation does not create data', async t => {
@@ -114,7 +121,17 @@ test('failed migration staging releases the serial connection reservation', asyn
   h.core.stageImport = async () => { assert.equal(h.serial.reserved, true); throw new Error('disk full'); };
   const result = await h.handlers.get('migration:import')(event, { token: preview.token, confirmed: true, preferences: {} });
   assert.equal(result.ok, false); assert.equal(h.serial.reserved, false);
+  assert.equal(h.ssh.reserved, false);
   assert.equal(h.calls.length, 0);
+});
+
+test('SSH activity blocks import and releases serial reservation without staging', async t => {
+  const h = harness(t); const event = { sender: h.sender };
+  const preview = await h.handlers.get('migration:preview')(event);
+  h.ssh.needsQuitConfirmation = () => true;
+  const result = await h.handlers.get('migration:import')(event, { token: preview.token, confirmed: true });
+  assert.equal(result.ok, false); assert.match(result.error, /SSH/);
+  assert.equal(h.serial.reserved, false); assert.equal(h.calls.length, 0);
 });
 
 test('startup acknowledgement validates identity and keeps visible recovery result', async t => {

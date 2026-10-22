@@ -2,6 +2,22 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.6.0': {
+    title: 'v4.6.0',
+    date: '2026-10-22',
+    items: [
+      { type: 'feature', text: '新增 SSH 工作区，支持保存连接、密码或私钥登录、多主机连接及每台主机多个独立终端' },
+      { type: 'feature', text: '远端文件树、文件编辑器与终端同屏显示，支持分区调整和经典深色主题' },
+      { type: 'feature', text: '支持 SFTP 文件和文件夹上传下载、拖拽上传、进度查看、取消和重试' },
+      { type: 'feature', text: '支持远端文件查看、编辑保存及冲突保护，文件区新增常用右键操作' },
+      { type: 'feature', text: 'SSH 命令记忆默认开启，支持按主机关闭记忆、本机加密保存、搜索、删除和清空历史' },
+      { type: 'feature', text: '支持终端选区复制、快捷键粘贴和右键操作，多行粘贴前可预览确认' },
+      { type: 'improve', text: '新建 Bash 4.4+ 终端自动准备命令识别与历史候选；Tab 仅补入，Enter 执行' },
+      { type: 'improve', text: '主动断开 SSH 后退出当前会话，保留未保存内容提示；切换页面不影响其他连接' },
+      { type: 'fix', text: '修复部分错误' },
+      { type: 'improve', text: '优化用户体验' }
+    ]
+  },
   '4.5.2': {
     title: 'v4.5.2',
     date: '2026-10-22',

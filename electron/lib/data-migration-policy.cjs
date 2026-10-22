@@ -17,7 +17,7 @@ const FILES = new Set([
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const SESSION_FILE = new RegExp(`^log-analysis-sessions/(${UUID})\\.json$`);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const COMMAND_ACTIONS = new Set(['tab:devices', 'tab:serial', 'environmentCheck', 'tab:troubleshoot', 'tab:artifacts',
+const COMMAND_ACTIONS = new Set(['tab:devices', 'tab:serial', 'tab:ssh', 'environmentCheck', 'tab:troubleshoot', 'tab:artifacts',
   'tab:quality', 'tab:history', 'tab:tasks', 'tab:performance', 'tab:settings', 'logAnalyzer', 'refreshDevices']);
 const RULE_IDS = new Set(['builtin-crash', 'builtin-anr', 'builtin-native-crash', 'builtin-oom', 'builtin-watchdog', 'builtin-kernel-panic']);
 const STEP_TYPES = new Set(['shell', 'installApk', 'pushFile', 'screenshot', 'imageCompare', 'perfSnapshot', 'tap',

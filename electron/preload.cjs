@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // 安全 listener 包装：隔离 callback 异常，避免影响后续 IPC 事件处理
 const safeListener = (callback) => (event, ...args) => {
@@ -10,6 +10,47 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  sshSnapshot: () => ipcRenderer.invoke('ssh:snapshot'),
+  sshSubscribe: args => ipcRenderer.invoke('ssh:subscribe', args),
+  sshConnect: args => ipcRenderer.invoke('ssh:connect', args),
+  sshDisconnect: args => ipcRenderer.invoke('ssh:disconnect', args),
+  sshCloseSession: args => ipcRenderer.invoke('ssh:close-session', args),
+  sshSaveProfile: args => ipcRenderer.invoke('ssh:save-profile', args),
+  sshDeleteProfile: args => ipcRenderer.invoke('ssh:delete-profile', args),
+  sshSelectKey: () => ipcRenderer.invoke('ssh:select-key'),
+  sshOpenTerminal: args => ipcRenderer.invoke('ssh:open-terminal', args),
+  sshCloseTerminal: args => ipcRenderer.invoke('ssh:close-terminal', args),
+  sshTerminalRead: args => ipcRenderer.invoke('ssh:terminal-read', args),
+  sshTerminalWrite: args => ipcRenderer.invoke('ssh:terminal-write', args),
+  sshTerminalResize: args => ipcRenderer.invoke('ssh:terminal-resize', args),
+  sshTerminalFocus: args => ipcRenderer.invoke('ssh:terminal-focus', args),
+  sshEnableShellIntegration: args => ipcRenderer.invoke('ssh:enable-shell-integration', args),
+  sshHistoryList: args => ipcRenderer.invoke('ssh:history-list', args),
+  sshHistoryRemove: args => ipcRenderer.invoke('ssh:history-remove', args),
+  sshHistoryClear: args => ipcRenderer.invoke('ssh:history-clear', args),
+  sshHistoryPause: args => ipcRenderer.invoke('ssh:history-pause', args),
+  sshSetDrafts: args => ipcRenderer.invoke('ssh:set-drafts', args),
+  sshList: args => ipcRenderer.invoke('ssh:list', args),
+  sshPreview: args => ipcRenderer.invoke('ssh:preview', args),
+  sshOpenDocument: args => ipcRenderer.invoke('ssh:open-document', args),
+  sshCloseDocument: args => ipcRenderer.invoke('ssh:close-document', args),
+  sshSaveDocument: args => ipcRenderer.invoke('ssh:save-document', args),
+  sshMkdir: args => ipcRenderer.invoke('ssh:mkdir', args),
+  sshCreateFile: args => ipcRenderer.invoke('ssh:create-file', args),
+  sshMove: args => ipcRenderer.invoke('ssh:move', args),
+  sshDelete: args => ipcRenderer.invoke('ssh:delete', args),
+  sshUpload: args => ipcRenderer.invoke('ssh:upload', args),
+  sshUploadDropped: (args, files) => ipcRenderer.invoke('ssh:upload-dropped', {
+    sessionId: args.sessionId, destination: args.destination, paths: Array.from(files).map(file => webUtils.getPathForFile(file))
+  }),
+  sshDownload: args => ipcRenderer.invoke('ssh:download', args),
+  sshCancelTransfer: args => ipcRenderer.invoke('ssh:cancel-transfer', args),
+  sshRetryTransfer: args => ipcRenderer.invoke('ssh:retry-transfer', args),
+  onSshChanged: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('ssh:changed', listener);
+    return () => ipcRenderer.off('ssh:changed', listener);
+  },
   serialListPorts: () => ipcRenderer.invoke('serial:list'),
   serialSnapshot: args => ipcRenderer.invoke('serial:snapshot', args),
   serialConnect: args => ipcRenderer.invoke('serial:connect', args),

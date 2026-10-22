@@ -35,6 +35,7 @@ const deviceMedia = require('./lib/device-media.cjs');
 const screenRecording = require('./lib/screen-recording.cjs');
 const shortcutCapabilities = require('./lib/device-shortcut-capabilities.cjs');
 const serial = require('./lib/serial.cjs');
+const ssh = require('./lib/ssh.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -108,7 +109,7 @@ function createWindow() {
     event.preventDefault();
   });
   mainWindow.on('close', event => {
-    if (!quitCleanupFinished && (screenRecording.listUnresolved().length || serial.needsQuitConfirmation())) {
+    if (!quitCleanupFinished && (screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
       event.preventDefault();
       app.quit();
     }
@@ -167,6 +168,7 @@ app.whenReady().then(async () => {
   deviceMedia.register(ipcMain);
   shortcutCapabilities.register(ipcMain);
   serial.register(ipcMain);
+  ssh.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);
@@ -208,6 +210,7 @@ function cleanupRuntimeResources() {
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
   await serial.cleanup().catch(error => console.warn('[Serial] quit cleanup failed:', error.message));
+  await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
   cleanupRuntimeResources();
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
@@ -228,6 +231,7 @@ app.on('before-quit', async (event) => {
       return owner && !owner.isDestroyed() ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
     };
     if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { quitCleanupRunning = false; return; }
+    if (!await ssh.confirmQuit(ask)) { quitCleanupRunning = false; return; }
     const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });
     if (!proceed) { quitCleanupRunning = false; return; }
   } catch (error) {

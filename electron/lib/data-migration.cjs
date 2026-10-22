@@ -88,9 +88,13 @@ function register(ipcMain, { restart = () => {
     if (require('./screen-recording.cjs').listUnresolved().length) throw new Error('请先停止录屏并保存待恢复的录屏，再导入数据');
     if (!preview || preview.token !== token || preview.sender !== event.sender) throw new Error('备份预览已失效，请重新选择备份文件');
     const releaseSerialReservation = require('./serial.cjs').reserveForMigration();
+    let releaseSshReservation;
     let staged;
-    try { staged = await core.stageImport(directory(), preview.payload, preferences || {}); }
-    catch (error) { releaseSerialReservation(); throw error; }
+    try {
+      releaseSshReservation = require('./ssh.cjs').reserveForMigration();
+      staged = await core.stageImport(directory(), preview.payload, preferences || {});
+    }
+    catch (error) { releaseSerialReservation(); releaseSshReservation?.(); throw error; }
     preview = null;
     restarting = true;
     restartRequested = true;

@@ -1,5 +1,5 @@
-import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable } from 'lucide-react';
+import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -27,6 +27,7 @@ import { connectWirelessDevice, historyConnectionAddress } from './shared/wirele
 import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/deviceControlOptions';
 import { filterDeviceCards, readPinnedDevices, togglePinnedDevice } from './shared/deviceDiscovery';
 import SerialPanel from './components/SerialPanel';
+const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -45,7 +46,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
-  const [activeTab, setActiveTab] = useState('devices');
+  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false });
+  const { activeTab, sshVisited } = navigation;
+  const setActiveTab = useCallback(next => setNavigation(previous => {
+    const tab = typeof next === 'function' ? next(previous.activeTab) : next;
+    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh' };
+  }), []);
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [wifiIp, setWifiIp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
@@ -198,6 +204,7 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event) => {
       if (!globalCommandSettings.enabled) return;
+      if (event.defaultPrevented || event.target?.closest?.('[data-ssh-terminal-input]')) return;
       if (isCommandShortcutMatch(event, globalCommandSettings.shortcut)) {
         event.preventDefault();
         setCommandPaletteOpen(true);
@@ -395,6 +402,7 @@ function App() {
     const builtIns = [
       { id: 'cmd-devices', title: '设备列表', description: '查看已连接设备', action: 'tab:devices', group: '导航' },
       { id: 'cmd-serial', title: '串口 / RS232', description: '连接电脑串口并查看、发送数据', action: 'tab:serial', group: '导航' },
+      { id: 'cmd-ssh', title: 'SSH 工作区', description: '多主机终端、SFTP 文件传输与远端编辑', action: 'tab:ssh', group: '导航' },
       { id: 'cmd-environment', title: '环境自检', description: '检查 ADB、scrcpy 和设备授权', action: 'environmentCheck', group: '工具' },
       { id: 'cmd-troubleshoot', title: '问题排查', description: '按问题场景自动采集证据', action: 'tab:troubleshoot', group: '导航' },
       { id: 'cmd-artifacts', title: '产物中心', description: '查看报告、数据和证据目录', action: 'tab:artifacts', group: '导航' },
@@ -1634,6 +1642,14 @@ function App() {
             <span className="font-medium">串口 / RS232</span>
           </button>
           <button
+            onClick={() => setActiveTab('ssh')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ssh' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
+            style={{ WebkitAppRegion: 'no-drag' }}
+          >
+            <Server size={20} />
+            <span className="font-medium">SSH 工作区</span>
+          </button>
+          <button
             onClick={() => setActiveTab('troubleshoot')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'troubleshoot' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
@@ -1740,10 +1756,11 @@ function App() {
           <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
+              {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'ssh' ? 'SSH 工作区' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>设备连接状态每 5 秒自动更新</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>通过电脑串口线连接设备 · 端口列表每 2 秒自动更新</p>}
+            {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>多台主机 · 多个终端 · 文件与终端同屏操作</p>}
           </div>
 
           {activeTab === 'devices' && (
@@ -1799,7 +1816,7 @@ function App() {
               )}
             </div>
           )}
-          {error && activeTab !== 'serial' && (
+          {error && !['serial', 'ssh'].includes(activeTab) && (
             <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {error}
             </div>
@@ -1981,6 +1998,11 @@ function App() {
           )}
 
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} />}
+          {sshVisited && <div hidden={activeTab !== 'ssh'}>
+            <Suspense fallback={<div className={t.textMuted}>正在加载 SSH 工作区…</div>}>
+              <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} />
+            </Suspense>
+          </div>}
           {activeTab === 'troubleshoot' && (
             <TroubleshootingWizard
               devices={devices}

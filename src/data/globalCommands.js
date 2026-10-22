@@ -1,5 +1,6 @@
 export const COMMAND_ACTIONS = [
   { value: 'tab:devices', label: '打开设备列表' },
+  { value: 'tab:ssh', label: '打开 SSH 工作区' },
   { value: 'environmentCheck', label: '打开环境自检弹窗' },
   { value: 'tab:troubleshoot', label: '打开问题排查' },
   { value: 'tab:artifacts', label: '打开产物中心' },
