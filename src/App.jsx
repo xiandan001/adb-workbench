@@ -28,6 +28,13 @@ import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/
 import { filterDeviceCards, readPinnedDevices, togglePinnedDevice } from './shared/deviceDiscovery';
 import SerialPanel from './components/SerialPanel';
 const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
+const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspace'));
+
+async function requestAiTools(command, args = {}) {
+  const response = await window.electronAPI.aiToolsRequest({ command, args });
+  if (!response?.success) throw Object.assign(new Error(response?.error?.message || 'AI 工具操作未完成'), { code: response?.error?.code, backupId: response?.error?.backupId });
+  return response.result;
+}
 
 const getOperationErrorMessage = (error) => {
   const lines = String(error || '未知错误')
@@ -46,11 +53,11 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
-  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false });
-  const { activeTab, sshVisited } = navigation;
+  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false });
+  const { activeTab, sshVisited, aiToolsVisited } = navigation;
   const setActiveTab = useCallback(next => setNavigation(previous => {
     const tab = typeof next === 'function' ? next(previous.activeTab) : next;
-    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh' };
+    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools' };
   }), []);
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [wifiIp, setWifiIp] = useState('');
@@ -340,10 +347,7 @@ function App() {
     try {
       const nextDevices = window.electronAPI
         ? await window.electronAPI.getDevices()
-        : [
-          { id: 'emulator-5554', status: 'device', model: 'Pixel 6 Pro' },
-          { id: '192.168.1.100:5555', status: 'offline', model: 'Unknown' }
-        ];
+        : [];
       setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
       setActiveDeviceId(previous => resolveActiveDeviceId(previous, nextDevices));
       setError('');
@@ -403,6 +407,7 @@ function App() {
       { id: 'cmd-devices', title: '设备列表', description: '查看已连接设备', action: 'tab:devices', group: '导航' },
       { id: 'cmd-serial', title: '串口 / RS232', description: '连接电脑串口并查看、发送数据', action: 'tab:serial', group: '导航' },
       { id: 'cmd-ssh', title: 'SSH 工作区', description: '多主机终端、SFTP 文件传输与远端编辑', action: 'tab:ssh', group: '导航' },
+      { id: 'cmd-ai-tools', title: 'AI 工具管理', description: '供应商、额度、资源和本机路由', action: 'tab:ai-tools', group: '导航' },
       { id: 'cmd-environment', title: '环境自检', description: '检查 ADB、scrcpy 和设备授权', action: 'environmentCheck', group: '工具' },
       { id: 'cmd-troubleshoot', title: '问题排查', description: '按问题场景自动采集证据', action: 'tab:troubleshoot', group: '导航' },
       { id: 'cmd-artifacts', title: '产物中心', description: '查看报告、数据和证据目录', action: 'tab:artifacts', group: '导航' },
@@ -1691,13 +1696,10 @@ function App() {
             <span className="font-medium">产物中心</span>
           </button>
           <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">工具与设置</div>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Settings size={20} />
-            <span className="font-medium">偏好设置</span>
+          <button onClick={() => setActiveTab('ai-tools')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-tools' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
+            style={{ WebkitAppRegion: 'no-drag' }}>
+            <Bot size={20} /><span className="font-medium">AI 工具管理</span>
           </button>
           <button
             onClick={() => viewApplicationLogs()}
@@ -1717,6 +1719,14 @@ function App() {
           >
             <Crown size={20} />
             <span className="font-medium">会员中心</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
+            style={{ WebkitAppRegion: 'no-drag' }}
+          >
+            <Settings size={20} />
+            <span className="font-medium">偏好设置</span>
           </button>
         </nav>
 
@@ -1756,11 +1766,12 @@ function App() {
           <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'ssh' ? 'SSH 工作区' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
+              {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'ssh' ? 'SSH 工作区' : activeTab === 'ai-tools' ? 'AI 工具管理' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>设备连接状态每 5 秒自动更新</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>通过电脑串口线连接设备 · 端口列表每 2 秒自动更新</p>}
             {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>多台主机 · 多个终端 · 文件与终端同屏操作</p>}
+            {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>供应商配置 · 额度查询 · 安全切换与恢复</p>}
           </div>
 
           {activeTab === 'devices' && (
@@ -2001,6 +2012,11 @@ function App() {
           {sshVisited && <div hidden={activeTab !== 'ssh'}>
             <Suspense fallback={<div className={t.textMuted}>正在加载 SSH 工作区…</div>}>
               <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} />
+            </Suspense>
+          </div>}
+          {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
+            <Suspense fallback={<div className={t.textMuted}>正在加载 AI 工具管理…</div>}>
+              <AiToolsWorkspace active={activeTab === 'ai-tools'} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }} />
             </Suspense>
           </div>}
           {activeTab === 'troubleshoot' && (

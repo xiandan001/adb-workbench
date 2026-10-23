@@ -10,6 +10,7 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  aiToolsRequest: args => ipcRenderer.invoke('ai-tools:request', args),
   sshSnapshot: () => ipcRenderer.invoke('ssh:snapshot'),
   sshSubscribe: args => ipcRenderer.invoke('ssh:subscribe', args),
   sshConnect: args => ipcRenderer.invoke('ssh:connect', args),
@@ -124,7 +125,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadCustomThemes: () => ipcRenderer.invoke('themes:loadCustomThemes'),
   loadAllSettings: () => ipcRenderer.invoke('settings:loadAll'),
   migrationExport: (args) => ipcRenderer.invoke('migration:export', args),
-  migrationPreview: () => ipcRenderer.invoke('migration:preview'),
+  migrationPreview: (args) => ipcRenderer.invoke('migration:preview', args),
   migrationImport: (args) => ipcRenderer.invoke('migration:import', args),
   migrationBootstrap: () => ipcRenderer.invoke('migration:bootstrap'),
   migrationAcknowledge: (args) => ipcRenderer.invoke('migration:acknowledge', args),

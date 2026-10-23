@@ -2,6 +2,21 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.6.5': {
+    title: 'v4.6.5',
+    date: '2026-10-23',
+    items: [
+      { type: 'feature', text: '新增 AI 工具管理，沿用软件现有会员机制，支持供应商配置、模型列表和服务商额度查询' },
+      { type: 'feature', text: '支持多种 AI 工具配置应用，以及 MCP、Skills 和提示词管理，修改前可预览并保留恢复备份' },
+      { type: 'feature', text: '新增 AI 会话查看、本机用量统计、项目入口和 CLI 启动预览' },
+      { type: 'feature', text: '新增本地路由，支持同协议供应商、流式转发和可选故障切换' },
+      { type: 'feature', text: '偏好设置支持统一密码加密迁移，包含 AI 供应商及密钥、MCP、提示词、Skills、项目、路由和可选会话归档，兼容旧版备份' },
+      { type: 'improve', text: '侧边栏偏好设置移至会员中心下方' },
+      { type: 'improve', text: '优化应用性能' },
+      { type: 'improve', text: '优化用户体验' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '4.6.1': {
     title: 'v4.6.1',
     date: '2026-10-22',

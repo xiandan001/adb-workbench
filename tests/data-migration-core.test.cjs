@@ -220,3 +220,153 @@ test('invalid pending data never changes files; malformed backup blocks rollback
   assert.deepEqual(get(root, 'terminal_command_history.json'), ['imported']);
   assert.equal(core.hasPendingImport(root), true);
 });
+
+const AI_PROVIDER = 'ai-tools/ai-tools-store.v1.json';
+const AI_RESOURCE = 'ai-tools/ai-tools-resources.v1.json';
+const AI_SKILL = `ai-tools/skills/archives/${SESSION_ID}.json`;
+const AI_SESSION = `ai-tools/session-archives/${'a'.repeat(64)}.json`;
+const byteHash = bytes => createHash('sha256').update(bytes).digest('hex');
+const encryptedFixture = label => Buffer.from(`${JSON.stringify({ version: 1, encrypted: Buffer.from(`opaque-fixture-${label}`).toString('base64') })}\n`);
+function putBytes(root, name, bytes) { fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), bytes); }
+
+test('AI import stages only ciphertext and startup journal atomically includes legacy and fixed AI targets', async t => {
+  const root = temp(t); const old = encryptedFixture('old'); const next = encryptedFixture('new'); const skill = encryptedFixture('skill');
+  putBytes(root, AI_PROVIDER, old); put(root, 'terminal_command_history.json', '[ "original" ]\n');
+  const writes = [{ name: AI_PROVIDER, bytes: next, expectedHash: byteHash(old) }, { name: AI_SKILL, bytes: skill, expectedHash: null }, { name: AI_SESSION, bytes: encryptedFixture('session'), expectedHash: null }];
+  const staged = await core.stageImport(root, payload([{ name: 'terminal_command_history.json', data: ['imported'] }]), {}, { aiWrites: writes, aiGuards: [{ name: AI_PROVIDER, expectedHash: byteHash(old) }] });
+  assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), old);
+  const raw = gunzipSync(fs.readFileSync(path.join(root, 'data-migration-pending.gz'))).toString(); const pending = JSON.parse(raw).pending;
+  assert.equal(pending.schemaVersion, 2); assert.equal(raw.includes('opaque-fixture'), false); assert.equal(raw.includes(next.toString()), false);
+  assert.deepEqual(Buffer.from(pending.aiWrites[0].data, 'base64'), next);
+  const applied = await core.applyPendingImport(root); assert.equal(applied.status, 'applied');
+  assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), next); assert.deepEqual(fs.readFileSync(path.join(root, AI_SKILL)), skill);
+  const journal = get(root, 'data-migration-journal.json'); assert.equal(journal.schemaVersion, 2); assert.equal(journal.entries.length, 4);
+  assert.equal(journal.entries.find(entry => entry.name === AI_PROVIDER).beforeHash, byteHash(old)); assert.equal(journal.entries.find(entry => entry.name === AI_PROVIDER).afterHash, byteHash(next));
+  const recovered = await core.applyPendingImport(root); assert.equal(recovered.status, 'rolled-back');
+  assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), old); assert.equal(fs.existsSync(path.join(root, AI_SKILL)), false); assert.equal(fs.existsSync(path.join(root, AI_SESSION)), false);
+  assert.equal(fs.readFileSync(path.join(root, 'terminal_command_history.json'), 'utf8'), '[ "original" ]\n');
+  await core.finalizeStartupImport(root, staged.id);
+});
+
+test('AI write plan refuses unapproved paths, plaintext, malformed ciphertext, duplicate files and wrong expected hashes', async t => {
+  const root = temp(t); const bytes = encryptedFixture('new'); putBytes(root, AI_PROVIDER, encryptedFixture('old'));
+  const invalid = [
+    [{ name: '../ai-tools/ai-tools-store.v1.json', bytes, expectedHash: null }], [{ name: 'ai-tools/credentials.json', bytes, expectedHash: null }],
+    [{ name: 'ai-tools/skills/archives/not-a-uuid.json', bytes, expectedHash: null }], [{ name: 'ai-tools/session-archives/not-a-hash.json', bytes, expectedHash: null }],
+    [{ name: AI_PROVIDER, bytes: Buffer.from('{"apiKey":"PRIVATE-DO-NOT-STAGE"}'), expectedHash: null }],
+    [{ name: AI_PROVIDER, bytes: Buffer.from('{"version":1,"encrypted":"!!!!"}'), expectedHash: null }],
+    [{ name: AI_PROVIDER, bytes, expectedHash: null }], [{ name: AI_RESOURCE, bytes, expectedHash: undefined }],
+    [{ name: AI_RESOURCE, bytes, expectedHash: null }, { name: AI_RESOURCE, bytes, expectedHash: null }],
+  ];
+  for (const aiWrites of invalid) { await assert.rejects(core.stageImport(root, payload(), {}, { aiWrites })); assert.equal(core.hasPendingImport(root), false); }
+  await assert.rejects(core.stageImport(root, payload([{ name: AI_PROVIDER, data: { encrypted: 'no' } }]), {}), /不支持/);
+});
+
+test('AI read-only guards and write hashes are checked again on restart before any live mutation', async t => {
+  for (const changedName of [AI_PROVIDER, AI_SKILL]) {
+    const root = temp(t); const old = encryptedFixture('old'); const replacement = encryptedFixture('external');
+    putBytes(root, AI_PROVIDER, old); putBytes(root, AI_SKILL, old); put(root, 'terminal_command_history.json', ['old']);
+    await core.stageImport(root, payload([{ name: 'terminal_command_history.json', data: ['new'] }]), {}, { aiWrites: [{ name: AI_PROVIDER, bytes: encryptedFixture('new'), expectedHash: byteHash(old) }], aiGuards: [{ name: AI_SKILL, expectedHash: byteHash(old) }] });
+    putBytes(root, changedName, replacement); const rejected = await core.applyPendingImport(root);
+    assert.equal(rejected.status, 'failed'); assert.match(rejected.error, /变化|冲突/); assert.deepEqual(get(root, 'terminal_command_history.json'), ['old']);
+    assert.deepEqual(fs.readFileSync(path.join(root, changedName)), replacement);
+  }
+});
+
+test('AI apply failure rolls back both domains and new journals never overwrite later external changes', async t => {
+  const root = temp(t); const old = encryptedFixture('old'); putBytes(root, AI_PROVIDER, old); put(root, 'terminal_command_history.json', ['old']);
+  const writes = [{ name: AI_PROVIDER, bytes: encryptedFixture('new'), expectedHash: byteHash(old) }, { name: AI_RESOURCE, bytes: encryptedFixture('resource'), expectedHash: null }];
+  await core.stageImport(root, payload([{ name: 'terminal_command_history.json', data: ['new'] }]), {}, { aiWrites: writes });
+  const rename = fs.promises.rename; let failed = false;
+  t.mock.method(fs.promises, 'rename', async (source, target) => { if (!failed && target === path.join(root, AI_RESOURCE)) { failed = true; throw new Error('injected AI write failure'); } return rename(source, target); });
+  const result = await core.applyPendingImport(root); assert.equal(result.status, 'rolled-back'); assert.deepEqual(get(root, 'terminal_command_history.json'), ['old']); assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), old);
+  await core.finalizeStartupImport(root, result.id);
+  await core.stageImport(root, payload([{ name: 'terminal_command_history.json', data: ['new'] }]), {}, { aiWrites: writes }); const applied = await core.applyPendingImport(root);
+  const external = encryptedFixture('external'); putBytes(root, AI_PROVIDER, external);
+  await assert.rejects(core.rollbackStartupImport(root, applied.id), /变化|外部/);
+  assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), external); assert.deepEqual(get(root, 'terminal_command_history.json'), ['new']);
+  assert.equal(core.hasPendingImport(root), true);
+});
+
+test('legacy v1 pending and journals remain readable but cannot smuggle AI writes', async t => {
+  const root = temp(t); put(root, 'terminal_command_history.json', ['old']);
+  const pending = { schemaVersion: 1, id: SESSION_ID, payload: payload([{ name: 'terminal_command_history.json', data: ['new'] }]), previousPreferences: {} };
+  putBytes(root, 'data-migration-pending.gz', gzipSync(JSON.stringify({ pending, sha256: HASH(pending) })));
+  const applied = await core.applyPendingImport(root); assert.equal(applied.status, 'applied');
+  const journal = get(root, 'data-migration-journal.json'); journal.schemaVersion = 1; delete journal.aiGuards;
+  for (const entry of journal.entries) { delete entry.kind; delete entry.beforeHash; delete entry.afterHash; }
+  put(root, 'data-migration-journal.json', journal); assert.equal((await core.applyPendingImport(root)).status, 'rolled-back'); await core.finalizeStartupImport(root, applied.id);
+  pending.aiWrites = [{ name: AI_PROVIDER, data: encryptedFixture('forbidden').toString('base64'), expectedHash: null }];
+  putBytes(root, 'data-migration-pending.gz', gzipSync(JSON.stringify({ pending, sha256: HASH(pending) })));
+  const rejected = await core.applyPendingImport(root); assert.equal(rejected.status, 'failed'); assert.equal(fs.existsSync(path.join(root, AI_PROVIDER)), false);
+});
+
+test('a target changed while an apply temporary file is being written is never renamed over', async t => {
+  const root = temp(t); const target = path.join(root, AI_PROVIDER); const original = encryptedFixture('old'); const external = encryptedFixture('external-during-temp');
+  putBytes(root, AI_PROVIDER, original);
+  await core.stageImport(root, payload(), {}, { aiWrites: [{ name: AI_PROVIDER, bytes: encryptedFixture('imported'), expectedHash: byteHash(original) }] });
+  const open = fs.promises.open; let injected = false;
+  t.mock.method(fs.promises, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (!injected && String(args[0]).startsWith(`${target}.`) && String(args[0]).endsWith('.tmp')) {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async bytes => { await write(bytes); injected = true; fs.writeFileSync(target, external); };
+    }
+    return handle;
+  });
+  await assert.rejects(core.applyPendingImport(root), /变化|外部/);
+  assert.equal(injected, true); assert.deepEqual(fs.readFileSync(target), external); assert.equal(core.hasPendingImport(root), true);
+  assert.equal(get(root, 'data-migration-journal.json').phase, 'prepared');
+});
+
+test('rollback final rename also preserves an external change made during recovery temp write', async t => {
+  const root = temp(t); const target = path.join(root, AI_PROVIDER); const original = encryptedFixture('old'); const external = encryptedFixture('external-during-rollback');
+  putBytes(root, AI_PROVIDER, original);
+  await core.stageImport(root, payload(), {}, { aiWrites: [{ name: AI_PROVIDER, bytes: encryptedFixture('imported'), expectedHash: byteHash(original) }] });
+  const applied = await core.applyPendingImport(root); const open = fs.promises.open; let injected = false;
+  t.mock.method(fs.promises, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (!injected && String(args[0]).startsWith(`${target}.`) && String(args[0]).endsWith('.tmp')) {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async bytes => { await write(bytes); injected = true; fs.writeFileSync(target, external); };
+    }
+    return handle;
+  });
+  await assert.rejects(core.rollbackStartupImport(root, applied.id), /变化|外部/);
+  assert.deepEqual(fs.readFileSync(target), external); assert.equal(get(root, 'data-migration-journal.json').phase, 'applied');
+});
+
+test('temporary-path collision never deletes a file not created by the migration operation', async t => {
+  const root = temp(t); const open = fs.promises.open; let collision;
+  t.mock.method(fs.promises, 'open', async (...args) => {
+    if (!collision && args[1] === 'wx' && String(args[0]).includes('data-migration-pending.gz.')) {
+      collision = String(args[0]); fs.writeFileSync(collision, 'unowned fixture'); throw Object.assign(new Error('temporary collision'), { code: 'EEXIST' });
+    }
+    return open(...args);
+  });
+  await assert.rejects(core.stageImport(root, payload(), {}), /collision/);
+  assert.equal(fs.readFileSync(collision, 'utf8'), 'unowned fixture'); assert.equal(core.hasPendingImport(root), false);
+});
+
+test('read-only AI source changes during commit trigger rollback without rewriting the changed source', async t => {
+  const root = temp(t); const old = encryptedFixture('old'); const external = encryptedFixture('external-source');
+  putBytes(root, AI_PROVIDER, old); putBytes(root, AI_SKILL, old);
+  await core.stageImport(root, payload(), {}, { aiWrites: [{ name: AI_PROVIDER, bytes: encryptedFixture('new'), expectedHash: byteHash(old) }], aiGuards: [{ name: AI_SKILL, expectedHash: byteHash(old) }] });
+  const rename = fs.promises.rename; let changed = false;
+  t.mock.method(fs.promises, 'rename', async (...args) => { const result = await rename(...args); if (!changed && args[1] === path.join(root, AI_PROVIDER)) { changed = true; putBytes(root, AI_SKILL, external); } return result; });
+  const rolledBack = await core.applyPendingImport(root);
+  assert.equal(rolledBack.status, 'rolled-back'); assert.match(rolledBack.error, /变化/);
+  assert.deepEqual(fs.readFileSync(path.join(root, AI_PROVIDER)), old); assert.deepEqual(fs.readFileSync(path.join(root, AI_SKILL)), external);
+});
+
+test('corrupt pending ciphertext, unapproved guards and AI file limits fail without modifying live data', async t => {
+  const root = temp(t); const bytes = encryptedFixture('next');
+  await assert.rejects(core.stageImport(root, payload(), {}, { aiGuards: [{ name: 'ai-tools/oauth.json', expectedHash: null }] }));
+  await assert.rejects(core.stageImport(root, payload(), {}, { aiWrites: [{ name: AI_PROVIDER, bytes: Buffer.alloc(8 * 1024 * 1024 + 1), expectedHash: null }] }));
+  await assert.rejects(core.stageImport(root, payload(), {}, { aiWrites: Array.from({ length: 601 }, () => ({ name: AI_RESOURCE, bytes, expectedHash: null })) }));
+  await core.stageImport(root, payload([{ name: 'terminal_command_history.json', data: ['new'] }]), {}, { aiWrites: [{ name: AI_PROVIDER, bytes, expectedHash: null }] });
+  const envelope = JSON.parse(gunzipSync(fs.readFileSync(path.join(root, 'data-migration-pending.gz'))).toString());
+  envelope.pending.aiWrites[0].data = Buffer.from('not ciphertext').toString('base64'); envelope.sha256 = HASH(envelope.pending);
+  putBytes(root, 'data-migration-pending.gz', gzipSync(JSON.stringify(envelope)));
+  assert.equal((await core.applyPendingImport(root)).status, 'failed'); assert.equal(fs.existsSync(path.join(root, AI_PROVIDER)), false); assert.equal(fs.existsSync(path.join(root, 'terminal_command_history.json')), false);
+});

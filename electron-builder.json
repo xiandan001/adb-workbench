@@ -50,6 +50,12 @@
     "electron/lib/performance-worker.cjs",
     "electron/lib/task-center-worker.cjs",
     "electron/lib/task-run-manifest.cjs",
+    "electron/lib/ai-tools-sessions-worker.cjs",
+    "electron/lib/ai-tools-session-parser.cjs",
+    "electron/lib/ai-tools-session-archives.cjs",
+    "electron/lib/ai-tools-migration-common.cjs",
+    "electron/lib/ai-tools-router-worker.cjs",
+    "electron/lib/ai-tools-file-safety.cjs",
     "node_modules/@serialport/bindings-cpp/prebuilds/**/*"
   ],
   "compression": "maximum",

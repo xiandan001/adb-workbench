@@ -36,6 +36,7 @@ const screenRecording = require('./lib/screen-recording.cjs');
 const shortcutCapabilities = require('./lib/device-shortcut-capabilities.cjs');
 const serial = require('./lib/serial.cjs');
 const ssh = require('./lib/ssh.cjs');
+const aiTools = require('./lib/ai-tools.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -169,6 +170,7 @@ app.whenReady().then(async () => {
   shortcutCapabilities.register(ipcMain);
   serial.register(ipcMain);
   ssh.register(ipcMain);
+  aiTools.register(ipcMain);
   environmentCheck.register(ipcMain);
   regressionReport.register(ipcMain);
   acceptanceSuite.register(ipcMain);
@@ -208,9 +210,12 @@ function cleanupRuntimeResources() {
 }
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
+  // Invalidate pending AI dialogs/CLI launches immediately after quit confirmation.
+  const aiCleanup = aiTools.cleanup().catch(() => console.warn('[AI Tools] quit cleanup failed'));
   // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
   await serial.cleanup().catch(error => console.warn('[Serial] quit cleanup failed:', error.message));
   await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
+  await aiCleanup;
   cleanupRuntimeResources();
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
