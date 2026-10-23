@@ -43,6 +43,17 @@ test('expired membership can recover prior changes but cannot apply a new provid
   assert.equal((await h.run('config_apply', { token: preview.result.token })).success, true);
   assert.equal((await h.run('config_apply', { token: preview.result.token })).success, false);
 });
+
+test('configuration status obtains provider identities only from the vault and requires current membership', async t => {
+  const calls = []; const h = fixture(t);
+  h.store.snapshot = () => ({ providers: [{ id: 'owned', targetApps: ['claude'] }, { id: 'other', targetApps: ['codex'] }] });
+  h.config.status = args => { calls.push(args); return { toolId: args.toolId, providers: [] }; };
+  assert.equal((await h.run('config_status', { toolId: 'claude', providerIds: ['injected'], path: '/private' })).success, true);
+  assert.deepEqual(calls[0].providerIds, ['owned']); assert.equal(Object.hasOwn(calls[0], 'path'), false);
+  assert.ok(calls[0].signal instanceof AbortSignal);
+  h.member(false); assert.equal((await h.run('config_status', { toolId: 'claude' })).error.code, 'AI_TOOLS_MEMBERSHIP_REQUIRED');
+  assert.equal(calls.length, 1);
+});
 test('unknown commands, injected authority and malformed JSON never reach domain services', async t => {
   const h = fixture(t);
   assert.equal((await h.run('eval', { script: 'anything' })).success, false);

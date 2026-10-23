@@ -79,6 +79,57 @@ function createAiToolsConfig({ home, localAppData, paths = {}, backupDirectory, 
     });
     return issue({ kind: 'apply', toolId, providerId, providerHash: providerHash(provider), files, insecure: new URL(provider.baseUrl).protocol === 'http:' });
   }
+  async function status({ toolId, providerIds = [], signal } = {}) {
+    const tool = getAiToolsCatalog().find(row => row.id === toolId && row.configSupported);
+    if (!tool || !Array.isArray(providerIds) || providerIds.length > 200 || providerIds.some(id => typeof id !== 'string' || !ID.test(id)) || new Set(providerIds).size !== providerIds.length) throw fail('AI_TOOLS_CONFIG_STATUS', '配置状态查询参数无效');
+    const checkedAt = now();
+    const cancelled = () => { if (signal?.aborted) throw fail('AI_TOOLS_CANCELLED', '配置状态检查已取消'); };
+    cancelled();
+    if (!providerIds.length) return { toolId, checkedAt, providers: [] };
+    let beforeFiles;
+    try {
+      beforeFiles = toolFiles(toolId).map(target => ({ ...readSafe(target.path, io), role: target.role }));
+      if (toolId === 'claude-desktop') validateDesktopOwnership(beforeFiles, parseJsonc);
+    } catch { return { toolId, checkedAt, providers: providerIds.map(providerId => ({ providerId, state: 'unknown', message: '无法安全读取本机配置，请检查文件权限或配置格式' })) }; }
+    const selectsDefault = ['claude', 'codex', 'gemini', 'opencode', 'grokbuild'].includes(toolId);
+    const providers = [];
+    const providerHashes = new Map();
+    for (const providerId of providerIds) {
+      cancelled();
+      try {
+        const provider = getProvider(providerId);
+        providerHashes.set(providerId, providerHash(provider));
+        if (!tool.protocols.includes(provider.protocol) || !provider.targetApps.includes(toolId)) {
+          providers.push({ providerId, state: 'incompatible', message: '协议或目标工具不匹配' });
+        } else if (!provider.apiKey || !provider.model) {
+          providers.push({ providerId, state: 'incomplete', message: '请先填写 API 密钥和默认模型' });
+        } else if (beforeFiles.some(file => !file.exists)) {
+          providers.push({ providerId, state: 'inactive', message: '尚未配置到此工具' });
+        } else {
+          const matches = beforeFiles.every(before => {
+            const projection = projectConfig(toolId, before.role, decodeConfig(before.bytes), provider);
+            return projection.changes.length === 0 || checksum(Buffer.from(projection.content, 'utf8')) === before.hash;
+          });
+          providers.push({ providerId, state: matches ? selectsDefault ? 'active' : 'configured' : 'inactive',
+            message: matches ? selectsDefault ? '本机受管理配置一致；已运行的会话可能需要重启' : '已登记配置，仍需在工具内选择模型' : '尚未使用或本机配置已变化' });
+        }
+      } catch { providers.push({ providerId, state: 'unknown', message: '配置格式或供应商信息需要检查' }); }
+      // Keep large provider libraries from blocking the main-process UI event loop.
+      if (providers.length % 5 === 0) await new Promise(resolve => setImmediate(resolve));
+    }
+    cancelled();
+    try { for (const before of beforeFiles) checkHash(before.path, before.hash, io); }
+    catch { return { toolId, checkedAt, providers: providerIds.map(providerId => ({ providerId, state: 'unknown', message: '检查期间配置发生变化，请刷新确认' })) }; }
+    for (const row of providers) {
+      if (!providerHashes.has(row.providerId)) continue;
+      try {
+        if (providerHash(getProvider(row.providerId)) === providerHashes.get(row.providerId)) continue;
+      } catch { /* A removed or unreadable provider invalidates its previous result. */ }
+      row.state = 'unknown'; row.message = '检查期间供应商信息发生变化，请刷新确认';
+    }
+    cancelled();
+    return { toolId, checkedAt, providers };
+  }
   function backupPath(id) {
     if (typeof id !== 'string' || !ID.test(id)) throw fail('AI_TOOLS_BACKUP_INVALID', '备份标识无效');
     return path.join(backupDirectory, `${id}.json`);
@@ -169,7 +220,7 @@ function createAiToolsConfig({ home, localAppData, paths = {}, backupDirectory, 
       catch { /* Only remove the exact empty lock directory this operation created. */ }
     }
   }
-  return { preview, apply, listBackups, previewRestore, dispose() { tokens.clear(); } };
+  return { preview, status, apply, listBackups, previewRestore, dispose() { tokens.clear(); } };
 }
 
 module.exports = { createAiToolsConfig };

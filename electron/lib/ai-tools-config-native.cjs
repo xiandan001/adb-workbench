@@ -134,6 +134,8 @@ function openclaw(content, provider, helpers) {
   const index = matches[0] ?? models.length;
   models[index] = { ...(models[index] || {}), id: provider.model, name: provider.model, ...(provider.contextWindow === undefined ? {} : { contextWindow: provider.contextWindow }) };
   const next = { ...(old || {}), baseUrl: provider.baseUrl, apiKey: provider.apiKey, api: nativeApi[provider.protocol], models };
+  const warnings = ['OpenClaw 保留 agents 默认模型、工具、网关及工作区设置；只登记本次供应商与模型。'];
+  if (isDeepStrictEqual(old, next)) return { content, format: 'json5', changes: [], warnings };
   let result = content;
   if (value.models === undefined) result = setJson5Path(content, ['models'], { mode: 'merge', providers: { [id]: next } });
   else result = setJson5Path(content, ['models', 'providers', id], next);
@@ -142,7 +144,7 @@ function openclaw(content, provider, helpers) {
     helpers.change(`models.providers.${id}.api`, old?.api, nativeApi[provider.protocol]),
     helpers.change(`models.providers.${id}.apiKey`, old?.apiKey, provider.apiKey, true),
     helpers.change(`models.providers.${id}.models`, old?.models?.map(row => row?.id), models.map(row => row.id)),
-  ], warnings: ['OpenClaw 保留 agents 默认模型、工具、网关及工作区设置；只登记本次供应商与模型。'] };
+  ], warnings };
 }
 
 function projectNativeConfig(toolId, content, provider, helpers) {

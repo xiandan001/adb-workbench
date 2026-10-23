@@ -1,12 +1,14 @@
 import { parseQuotaTemplate, stringifyQuotaTemplate } from './aiQuotaTemplateModel.js';
+import { cloneClaudeModels, modelConfigurationInput } from './aiClaudeModelsModel.js';
 
 export const AI_PROTOCOLS = Object.freeze([
   { value: 'openai-chat', label: 'OpenAI Chat Completions' }, { value: 'openai-responses', label: 'OpenAI Responses' },
   { value: 'anthropic', label: 'Anthropic Messages' }, { value: 'gemini', label: 'Gemini Native' },
 ]);
-export function providerDraft(provider) {
-  return { id: provider?.id, name: provider?.name || '', protocol: provider?.protocol || 'openai-chat', baseUrl: provider?.baseUrl || '',
-    model: provider?.model || '', contextWindow: provider?.contextWindow === undefined ? '' : String(provider.contextWindow), targetApps: [...(provider?.targetApps || [])], apiKey: '', clearKey: false, quotaKey: '', clearQuotaKey: false,
+export function providerDraft(provider, { defaultToolId, tools = [] } = {}) {
+  const tool = !provider && tools.find(row => row.id === defaultToolId && (row.configSupported || row.launchSupported));
+  return { id: provider?.id, name: provider?.name || '', protocol: provider?.protocol || tool?.protocols?.[0] || 'openai-chat', baseUrl: provider?.baseUrl || '',
+    model: provider?.model || '', ...(provider?.claudeModels === undefined ? {} : { claudeModels: cloneClaudeModels(provider.claudeModels) }), contextWindow: provider?.contextWindow === undefined ? '' : String(provider.contextWindow), targetApps: [...(provider?.targetApps || (tool ? [tool.id] : []))], apiKey: '', clearKey: false, quotaKey: '', clearQuotaKey: false,
     quota: provider?.quota ? { ...provider.quota } : null, quotaTemplate: stringifyQuotaTemplate(provider?.quota?.adapter === 'custom' ? provider.quota : null) };
 }
 export function providerInput(draft, original) {
@@ -21,7 +23,7 @@ export function providerInput(draft, original) {
   if (original?.hasQuotaCredential && quotaIdentity(original.quota, new URL(original.baseUrl).origin) !== quotaIdentity(draft.quota, url.origin)
     && !quotaKey && !draft.clearQuotaKey) throw new Error('额度查询身份已变化，请填写新的额度密钥或明确移除原额度密钥');
   if (model.length > 256 || apiKey.length > 8192 || quotaKey.length > 8192) throw new Error('模型或密钥长度超过限制');
-  const result = { ...(draft.id ? { id: draft.id } : {}), name, protocol: draft.protocol, baseUrl: url.href.replace(/\/$/, ''), model,
+  const result = { ...(draft.id ? { id: draft.id } : {}), name, protocol: draft.protocol, baseUrl: url.href.replace(/\/$/, ''), ...modelConfigurationInput(draft),
     targetApps: [...new Set(draft.targetApps)] };
   if (draft.contextWindow?.trim()) {
     const contextWindow = Number(draft.contextWindow);

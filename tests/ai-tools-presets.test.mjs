@@ -9,7 +9,7 @@ test('provider templates only fill known endpoints/protocol and never invent a m
     const draft = applyProviderPreset(old, preset.value);
     assert.equal(draft.baseUrl, preset.baseUrl); assert.equal(draft.protocol, preset.protocol);
     assert.equal(draft.model, ''); assert.equal(draft.apiKey, ''); assert.equal(draft.quotaKey, ''); assert.equal(draft.contextWindow, '');
-    assert.deepEqual(draft.targetApps, old.targetApps);
+    assert.deepEqual(draft.targetApps, preset.targetApps);
   }
   assert.equal(old.apiKey, 'typed-secret'); assert.equal(old.model, 'old-model');
   assert.throws(() => applyProviderPreset(old, 'not-known'), /模板/);

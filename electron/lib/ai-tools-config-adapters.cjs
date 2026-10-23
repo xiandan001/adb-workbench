@@ -4,6 +4,7 @@ const toml = require('smol-toml');
 const { fail } = require('./ai-tools-file-safety.cjs');
 const { projectNativeConfig } = require('./ai-tools-config-native.cjs');
 const { projectDesktopConfig } = require('./ai-tools-config-desktop.cjs');
+const { claudeModelAssignments } = require('./ai-tools-claude-models.cjs');
 
 const MASK = '******';
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -51,6 +52,7 @@ function claude(content, provider) {
     { keys: ['env', 'ANTHROPIC_BASE_URL'], value: provider.baseUrl },
     { keys: ['env', 'ANTHROPIC_AUTH_TOKEN'], value: provider.apiKey, secret: true },
     { keys: ['env', 'ANTHROPIC_MODEL'], value: provider.model },
+    ...claudeModelAssignments(provider.claudeModels),
   ];
   // Both credentials can affect client auth selection. Remove only the explicitly managed alternate key.
   if (original.env?.ANTHROPIC_API_KEY !== undefined) assignments.push({ keys: ['env', 'ANTHROPIC_API_KEY'], value: undefined, secret: true });

@@ -2,7 +2,7 @@ const { validateArguments, validateCommandName } = require('./ai-tools-policy.cj
 
 const COMMANDS = Object.freeze([
   'snapshot', 'provider_save', 'provider_remove', 'provider_test', 'models_list', 'quota_query',
-  'config_preview', 'config_apply', 'backups_list', 'backup_preview_restore',
+  'config_status', 'config_preview', 'config_apply', 'backups_list', 'backup_preview_restore',
   'sessions_scan', 'sessions_list', 'sessions_open',
   'router_status', 'router_save', 'router_remove', 'router_start', 'router_stop', 'router_profile', 'router_copy_key',
   'resources_snapshot', 'resources_mcp_save', 'resources_mcp_remove', 'resources_prompt_save', 'resources_prompt_remove', 'resources_mcp_preview', 'resources_prompt_preview', 'resources_apply', 'resources_backups_list', 'resources_backup_preview_restore',
@@ -61,6 +61,11 @@ function createAiToolsController({ store, config, quota, models, sessions, route
           result = await models.list(await store.getProvider(args.providerId), { signal: abort.signal }); break;
         case 'quota_query':
           result = await quota.query(await store.getProvider(args.providerId), { signal: abort.signal, force: args.force === true }); break;
+        case 'config_status': {
+          const data = await store.snapshot();
+          const providerIds = data.providers.filter(provider => provider.targetApps?.includes(args.toolId)).map(provider => provider.id);
+          result = await config.status({ toolId: args.toolId, providerIds, signal: abort.signal }); break;
+        }
         case 'config_preview':
           result = await config.preview({ toolId: args.toolId, providerId: args.providerId }); break;
         case 'config_apply':

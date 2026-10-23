@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -1699,7 +1699,7 @@ function App() {
           <button onClick={() => setActiveTab('ai-tools')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-tools' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}>
-            <Bot size={20} /><span className="font-medium">AI 工具管理</span>
+            <SlidersHorizontal size={20} /><span className="font-medium">AI 工具管理</span>
           </button>
           <button
             onClick={() => viewApplicationLogs()}

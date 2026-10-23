@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectDraft, projectInput, projectLaunchProvider } from '../src/components/ai-tools/aiProjectsModel.js';
+import { projectDraft, projectInput, projectLaunchProvider, projectQuickStartAvailable, createProjectScope, projectPreviewFor } from '../src/components/ai-tools/aiProjectsModel.js';
 
 test('AI project saves carry native directory grants, never an arbitrary renderer path or command', () => {
   const tools = [{ id: 'codex', command: 'codex' }];
@@ -22,4 +22,27 @@ test('migrated project origin is informational and only a native directory grant
   const input = projectInput({ ...draft, directoryToken: 'native-relocation', path: 'C:/new-machine/project' }, [{ id: 'codex' }]);
   assert.deepEqual(input, { id: 'imported', name: 'Imported', toolId: 'codex', pinned: false, directoryToken: 'native-relocation' });
   assert.equal(Object.hasOwn(input, 'oldPath'), false); assert.equal(Object.hasOwn(input, 'needsRelocation'), false);
+});
+test('detected-tool quick start requires a real detected path, exact tool identity and every existing permission', () => {
+  const tools = [{ id: 'claude' }, { id: 'codex' }]; const detected = { id: 'codex', path: 'C:/fixture/codex.cmd' };
+  assert.equal(projectQuickStartAvailable(detected, tools, () => true), true);
+  assert.equal(projectDraft(null, detected.id).toolId, 'codex');
+  for (const path of [null, '', ' ']) assert.equal(projectQuickStartAvailable({ ...detected, path }, tools, () => true), false);
+  assert.equal(projectQuickStartAvailable({ ...detected, id: 'unknown' }, tools, () => true), false);
+  for (const denied of ['projects_pick', 'projects_save', 'projects_launch_preview', 'projects_launch']) assert.equal(projectQuickStartAvailable(detected, tools, command => command !== denied), false, denied);
+});
+test('project scopes discard old save/picker/preview replies even when the user leaves and returns before they finish', async () => {
+  const scope = createProjectScope(); const initial = scope.capture(); assert.equal(scope.current(initial), true);
+  let resolve; const calls = []; const pending = new Promise(done => { resolve = done; });
+  const continuation = pending.then(saved => { if (scope.current(initial)) calls.push(saved); });
+  scope.setActive(false); assert.equal(scope.capture(), null); assert.equal(scope.current(initial), false);
+  scope.setActive(true); resolve({ id: 'saved-on-background' }); await continuation; assert.deepEqual(calls, []);
+  const current = scope.capture(); scope.setActive(true); assert.equal(scope.current(current), true);
+  scope.setActive(false); assert.equal(scope.current(current), false);
+});
+test('launch preview belongs to the saved project and remains read-only until a separate explicit launch', () => {
+  const project = { id: 'saved-project', toolId: 'codex' };
+  const preview = { token: 'one-use', projectId: project.id, toolId: project.toolId, cwd: 'C:/fixture', executable: 'C:/fixture/codex.cmd', expiresAt: 100 };
+  assert.equal(projectPreviewFor(project, preview, 10), preview);
+  for (const change of [{ projectId: 'other' }, { toolId: 'agy' }, { token: '' }, { executable: '' }, { cwd: '' }, { expiresAt: 1 }, { expiresAt: undefined }]) assert.throws(() => projectPreviewFor(project, { ...preview, ...change }, 10), /预览/);
 });

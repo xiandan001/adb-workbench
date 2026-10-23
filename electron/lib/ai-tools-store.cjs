@@ -5,6 +5,7 @@ const { getAiToolsCatalog } = require('./ai-tools-catalog.cjs');
 const { readSafe, atomicReplace } = require('./ai-tools-file-safety.cjs');
 const { normalizeQuotaConfig } = require('./ai-tools-quota.cjs');
 const { prepareEncryptedMerge } = require('./ai-tools-portable-transaction.cjs');
+const { normalizeClaudeModels } = require('./ai-tools-claude-models.cjs');
 
 const FILE_NAME = 'ai-tools-store.v1.json';
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -31,7 +32,7 @@ function normalizeUrl(value) {
   return url.href.replace(/\/$/, '');
 }
 function validateProvider(value) {
-  if (!plain(value) || Object.keys(value).some(key => !['id', 'name', 'protocol', 'baseUrl', 'model', 'contextWindow', 'targetApps', 'quota', 'apiKey', 'quotaKey'].includes(key))) throw fail('AI_TOOLS_PROVIDER_INVALID', '供应商配置无效');
+  if (!plain(value) || Object.keys(value).some(key => !['id', 'name', 'protocol', 'baseUrl', 'model', 'claudeModels', 'contextWindow', 'targetApps', 'quota', 'apiKey', 'quotaKey'].includes(key))) throw fail('AI_TOOLS_PROVIDER_INVALID', '供应商配置无效');
   if (value.id !== undefined && (typeof value.id !== 'string' || !ID.test(value.id))) throw fail('AI_TOOLS_PROVIDER_INVALID', '供应商标识无效');
   if (!PROTOCOLS.has(value.protocol)) throw fail('AI_TOOLS_PROVIDER_INVALID', '供应商协议无效');
   if (!Array.isArray(value.targetApps) || value.targetApps.length > 12 || value.targetApps.some(id => !TOOL_IDS.has(id)) || new Set(value.targetApps).size !== value.targetApps.length) throw fail('AI_TOOLS_PROVIDER_INVALID', '目标工具无效');
@@ -40,6 +41,7 @@ function validateProvider(value) {
     baseUrl: normalizeUrl(value.baseUrl), model: text(value.model, '模型', 256, true), targetApps: [...value.targetApps],
   };
   if (['__proto__', 'prototype', 'constructor'].includes(result.model)) throw fail('AI_TOOLS_PROVIDER_INVALID', '模型名称不能使用保留字段名');
+  if (value.claudeModels !== undefined) result.claudeModels = normalizeClaudeModels(value.claudeModels);
   const quota = normalizeQuota(value.quota);
   if (quota) result.quota = quota;
   if (value.contextWindow !== undefined && value.contextWindow !== null) {
@@ -128,6 +130,7 @@ function createAiToolsStore({ directory, canEncrypt = () => false, encrypt, decr
     if (existing && new URL(existing.baseUrl).origin !== new URL(value.baseUrl).origin && existing.apiKey && value.apiKey === undefined) throw fail('AI_TOOLS_CREDENTIAL_ORIGIN', '服务地址已改变，请重新填写或明确移除凭据，不会转发旧地址的凭据');
     if (input.quota === undefined && existing?.quota) value.quota = clone(existing.quota);
     if (input.contextWindow === undefined && existing?.contextWindow !== undefined) value.contextWindow = existing.contextWindow;
+    if (input.claudeModels === undefined && existing?.claudeModels !== undefined) value.claudeModels = clone(existing.claudeModels);
     const quotaIdentity = row => JSON.stringify([row.quota?.adapter || null, row.quota?.credentialOrigin || new URL(row.baseUrl).origin]);
     if (existing?.quotaKey && value.quotaKey === undefined && quotaIdentity(existing) !== quotaIdentity(value)) throw fail('AI_TOOLS_CREDENTIAL_ORIGIN', '额度来源或地址已改变，请重新填写或明确移除独立额度凭据');
     for (const key of ['apiKey', 'quotaKey']) {
