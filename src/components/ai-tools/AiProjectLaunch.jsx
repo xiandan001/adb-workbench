@@ -36,7 +36,7 @@ export default function AiProjectLaunch({ project, providers, onRequest, theme, 
       const result = await onRequest('projects_launch', { token: validPreview.token });
       if (!scope.current(requestScope)) return;
       if (result?.launched !== true) throw new Error('未能确认外部终端已启动');
-      showToast?.('已在外部终端启动项目工具'); onClose();
+      showToast?.('交互终端已打开，CLI 的运行结果请查看终端'); onClose();
     } catch (failure) { if (scope.current(requestScope)) { setError(failure.message); setPreview(null); } }
     finally { pending.current = false; if (scope.current(requestScope)) setBusy(''); }
   };

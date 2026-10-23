@@ -85,7 +85,7 @@ test('legacy providers remain valid and mapping metadata survives a protocol cha
   assert.equal(Object.hasOwn(legacy, 'claudeModels'), false);
   assert.equal(Object.hasOwn(createAiToolsStore(f.options).getProvider(legacy.id), 'claudeModels'), false);
   f.store.saveProvider({ ...input(), id: legacy.id, claudeModels: mappings() });
-  const changed = f.store.saveProvider({ ...input(), id: legacy.id, protocol: 'openai-responses', targetApps: ['codex'] });
+  const changed = f.store.saveProvider({ ...input(), id: legacy.id, baseUrl: 'https://fixture.invalid/v1', protocol: 'openai-responses', targetApps: ['codex'] });
   assert.deepEqual(changed.claudeModels, mappings());
   assert.deepEqual(validateProvider({ ...input(), protocol: 'gemini', targetApps: ['gemini'], claudeModels: mappings() }).claudeModels, mappings());
 });

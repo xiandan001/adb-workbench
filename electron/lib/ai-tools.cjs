@@ -5,6 +5,7 @@ const { createAiToolsConfig } = require('./ai-tools-config.cjs');
 const { getAiToolsCatalog } = require('./ai-tools-catalog.cjs');
 const { createAiToolsQuota } = require('./ai-tools-quota.cjs');
 const { createAiToolsModels } = require('./ai-tools-models.cjs');
+const { createAiToolsProbe } = require('./ai-tools-probe.cjs');
 const { createAiToolsSessions } = require('./ai-tools-sessions.cjs');
 const { createAiToolsRouter } = require('./ai-tools-router.cjs');
 const { createAiToolsResources } = require('./ai-tools-resources.cjs');
@@ -13,7 +14,7 @@ const { createAiToolsPortable } = require('./ai-tools-portable.cjs');
 const { createAiToolsSkills } = require('./ai-tools-skills.cjs');
 const { readSafe, fail } = require('./ai-tools-file-safety.cjs');
 const { findExecutable, launchTerminal } = require('./ai-tools-launcher.cjs');
-const { requestJson } = require('./ai-tools-network.cjs');
+const { requestJson, createAiToolsNetwork } = require('./ai-tools-network.cjs');
 
 let controller;
 function register(ipcMain) {
@@ -30,8 +31,17 @@ function register(ipcMain) {
   const store = createAiToolsStore({ directory, ...encryption });
   const config = createAiToolsConfig({ home: app.getPath('home'), backupDirectory: path.join(directory, 'config-backups'), getProvider: store.getProvider, ...encryption });
   const router = createAiToolsRouter({ directory, ...encryption, getProvider: store.getProvider, saveProvider: store.saveProvider, getMembership: () => vip.getStatusAsync() });
+  const probeRequest = createAiToolsNetwork({ timeoutMs: 45000, maxBytes: 128 * 1024 }).requestJson;
+  const localProbeRequest = createAiToolsNetwork({ transport: require('node:http').request, allowLoopback: true, timeoutMs: 45000, maxBytes: 128 * 1024 }).requestJson;
   const resources = createAiToolsResources({ directory, home: app.getPath('home'), backupDirectory: path.join(directory, 'resource-backups'), ...encryption });
   controller = createAiToolsController({ store, config, quota: createAiToolsQuota(), models: createAiToolsModels({ request: requestJson, resolveLocal: router.localModels }), sessions: createAiToolsSessions({ home: app.getPath('home'), directory, ...encryption }),
+    probe: createAiToolsProbe({ request: probeRequest, requestLocal: localProbeRequest, resolveLocal: router.localProbe }),
+    confirmProbe: async plan => {
+      const answer = await dialog.showMessageBox(getMainWindow(), { type: 'question', title: '测试模型连接', message: `测试 ${plan.name} 的模型连接？`,
+        detail: `模型：${plan.model}\n接口：${plan.endpoint}\n\n模型调用测试仅发送固定短文本“Reply OK.”，输出上限 ${plan.maxOutputTokens} tokens，不发送项目文件，不自动重试，可能消耗少量服务商额度。\n\n也可选择只读接口检查；不提供模型列表不代表模型不能调用。`,
+        buttons: ['开始最小模型测试', '仅检查只读接口', '取消'], defaultId: 2, cancelId: 2, noLink: true });
+      return answer.response === 0 ? 'inference' : answer.response === 1 ? 'read-only' : 'cancel';
+    },
     skills: createAiToolsSkills({ directory: path.join(directory, 'skills'), home: app.getPath('home'), ...encryption }),
     projects: createAiToolsProjects({ directory, home: app.getPath('home'), ...encryption, getProvider: store.getProvider, findExecutable, launchTerminal, openDirectory: async target => { const error = await shell.openPath(target); if (error) throw new Error('打开项目文件夹失败'); } }),
     pickDirectory: async title => { const result = await dialog.showOpenDialog(getMainWindow(), { title, properties: ['openDirectory'] }); return result.canceled ? null : result.filePaths[0] || null; },

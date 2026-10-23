@@ -1,5 +1,6 @@
 import { parseQuotaTemplate, stringifyQuotaTemplate } from './aiQuotaTemplateModel.js';
 import { cloneClaudeModels, modelConfigurationInput } from './aiClaudeModelsModel.js';
+import { cliConfigDraft, cliConfigInput, cliEndpointError } from './aiCliConfigModel.js';
 
 export const AI_PROTOCOLS = Object.freeze([
   { value: 'openai-chat', label: 'OpenAI Chat Completions' }, { value: 'openai-responses', label: 'OpenAI Responses' },
@@ -9,6 +10,7 @@ export function providerDraft(provider, { defaultToolId, tools = [] } = {}) {
   const tool = !provider && tools.find(row => row.id === defaultToolId && (row.configSupported || row.launchSupported));
   return { id: provider?.id, name: provider?.name || '', protocol: provider?.protocol || tool?.protocols?.[0] || 'openai-chat', baseUrl: provider?.baseUrl || '',
     model: provider?.model || '', ...(provider?.claudeModels === undefined ? {} : { claudeModels: cloneClaudeModels(provider.claudeModels) }), contextWindow: provider?.contextWindow === undefined ? '' : String(provider.contextWindow), targetApps: [...(provider?.targetApps || (tool ? [tool.id] : []))], apiKey: '', clearKey: false, quotaKey: '', clearQuotaKey: false,
+    ...(provider?.cliConfig === undefined ? {} : { cliConfig: cliConfigDraft(provider.cliConfig) }),
     quota: provider?.quota ? { ...provider.quota } : null, quotaTemplate: stringifyQuotaTemplate(provider?.quota?.adapter === 'custom' ? provider.quota : null) };
 }
 export function providerInput(draft, original) {
@@ -18,6 +20,7 @@ export function providerInput(draft, original) {
   let url;
   try { url = new URL(draft.baseUrl.trim()); } catch { throw new Error('请填写完整的 HTTP 或 HTTPS 服务地址'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('服务地址不能包含登录信息、查询参数或片段');
+  const endpointError = cliEndpointError(draft.protocol, url.href, draft.targetApps); if (endpointError) throw new Error(endpointError);
   if (original?.hasCredential && new URL(original.baseUrl).origin !== url.origin && !apiKey && !draft.clearKey) throw new Error('服务地址已变化，请填写新密钥或明确移除原密钥');
   const quotaIdentity = (quota, origin) => JSON.stringify([quota?.adapter || null, quota?.credentialOrigin?.trim() || origin]);
   if (original?.hasQuotaCredential && quotaIdentity(original.quota, new URL(original.baseUrl).origin) !== quotaIdentity(draft.quota, url.origin)
@@ -25,6 +28,7 @@ export function providerInput(draft, original) {
   if (model.length > 256 || apiKey.length > 8192 || quotaKey.length > 8192) throw new Error('模型或密钥长度超过限制');
   const result = { ...(draft.id ? { id: draft.id } : {}), name, protocol: draft.protocol, baseUrl: url.href.replace(/\/$/, ''), ...modelConfigurationInput(draft),
     targetApps: [...new Set(draft.targetApps)] };
+  if (draft.cliConfig !== undefined) result.cliConfig = cliConfigInput(draft.cliConfig);
   if (draft.contextWindow?.trim()) {
     const contextWindow = Number(draft.contextWindow);
     if (!Number.isSafeInteger(contextWindow) || contextWindow < 1 || contextWindow > 2147483647) throw new Error('模型上下文上限必须是 1–2147483647 的整数');

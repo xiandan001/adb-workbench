@@ -19,7 +19,7 @@ test('model drafts round-trip existing role definitions without secrets or unint
   const original = { ...saved, claudeModels: mapping() }; const draft = providerDraft(original);
   assert.deepEqual(providerInput(draft, original).claudeModels, mapping());
   draft.claudeModels.sonnet.model = 'changed'; assert.equal(original.claudeModels.sonnet.model, 'fixture-sonnet');
-  const changedProtocol = providerInput({ ...providerDraft(original), protocol: 'openai-responses', targetApps: ['codex'] }, original);
+  const changedProtocol = providerInput({ ...providerDraft(original), baseUrl: 'https://fixture.invalid/v1', protocol: 'openai-responses', targetApps: ['codex'] }, original);
   assert.deepEqual(changedProtocol.claudeModels, mapping());
   assert.deepEqual(modelConfigurationInput({ model: 'manual', claudeModels: {} }), { model: 'manual', claudeModels: {} });
 });

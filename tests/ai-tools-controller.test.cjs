@@ -54,6 +54,23 @@ test('configuration status obtains provider identities only from the vault and r
   h.member(false); assert.equal((await h.run('config_status', { toolId: 'claude' })).error.code, 'AI_TOOLS_MEMBERSHIP_REQUIRED');
   assert.equal(calls.length, 1);
 });
+
+test('inference needs native confirmation, revalidates membership/provider and ignores renderer prompt/approval', async t => {
+  let mode = 'cancel'; let calls = 0; let modal;
+  const h = fixture(t, { probe: { describe: () => ({ endpoint: 'https://fixture.invalid/v1/messages', model: 'fixture', maxOutputTokens: 16 }), run: async () => { calls++; return { inferenceVerified: true }; } }, confirmProbe: async plan => { modal = plan; return mode; } });
+  assert.equal((await h.run('provider_probe', { providerId: 'p', confirmed: true, prompt: 'injected', maxOutputTokens: 999 })).result.cancelled, true);
+  assert.equal(calls, 0); assert.equal(Object.hasOwn(modal, 'apiKey'), false); assert.equal(Object.hasOwn(modal, 'prompt'), false);
+  mode = 'inference'; assert.equal((await h.run('provider_probe', { providerId: 'p' })).result.inferenceVerified, true); assert.equal(calls, 1);
+  mode = 'read-only'; assert.equal((await h.run('provider_probe', { providerId: 'p' })).result.reachable, true); assert.equal(calls, 1);
+});
+
+test('provider/key or membership changes during a native prompt prevent a paid probe', async t => {
+  let calls = 0; let version = 0; let loseMembership = false;
+  const h = fixture(t, { probe: { describe: () => ({ model: 'fixture' }), run: async () => { calls++; } }, confirmProbe: async () => { if (loseMembership) h.member(false); else version++; return 'inference'; } });
+  h.store.getProvider = () => ({ id: 'p', apiKey: `fixture-${version}` });
+  assert.equal((await h.run('provider_probe', { providerId: 'p' })).error.code, 'AI_TOOLS_PROVIDER_CHANGED');
+  loseMembership = true; assert.equal((await h.run('provider_probe', { providerId: 'p' })).error.code, 'AI_TOOLS_MEMBERSHIP_REQUIRED'); assert.equal(calls, 0);
+});
 test('unknown commands, injected authority and malformed JSON never reach domain services', async t => {
   const h = fixture(t);
   assert.equal((await h.run('eval', { script: 'anything' })).success, false);

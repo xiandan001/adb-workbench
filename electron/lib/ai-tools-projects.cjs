@@ -7,7 +7,7 @@ const { exact, text, validatePortableList, portablePathHint, prepareStateWrite, 
 const TOOLS = Object.freeze({ claude: 'claude', codex: 'codex', gemini: 'gemini', grokbuild: 'grok', opencode: 'opencode', openclaw: 'openclaw', hermes: 'hermes', pi: 'pi', mcode: 'mcode', kimi: 'kimi', agy: 'agy' });
 const ID = /^[a-f0-9-]{36}$/i;
 function createAiToolsProjects({ directory, home, canEncrypt, encrypt, decrypt, findExecutable, launchTerminal, openDirectory, getProvider, now = Date.now }) {
-  const file = path.join(directory, 'projects.v1.json'); let state; let observed; let disposed = false; let generation = 0; const tokens = new Map(); const launches = new Map();
+  const file = path.join(directory, 'projects.v1.json'); let state; let observed; let disposed = false; let generation = 0; const tokens = new Map(); const launches = new Map(); const launchControllers = new Set();
   const active = () => { if (disposed) throw fail('AI_TOOLS_DISPOSED', '项目工作区已关闭，未继续启动 CLI'); };
   const current = epoch => { active(); if (epoch !== generation) throw fail('AI_TOOLS_CANCELLED', '项目操作已取消，请重新预览'); };
   function validDirectory(value) {
@@ -95,7 +95,12 @@ function createAiToolsProjects({ directory, home, canEncrypt, encrypt, decrypt, 
       atomicReplace(target, Buffer.from(`${JSON.stringify(settings, null, 2)}\n`), before.hash);
       args.push(`--gemini_dir=${isolated}`); env.GEMINI_API_KEY = plan.provider.apiKey; env.GOOGLE_GEMINI_BASE_URL = plan.provider.baseUrl;
     }
-    await launchTerminal({ executable: plan.executable, args, cwd: plan.cwd, env }); return { launched: true, projectId: plan.project.id };
+    const controller = new AbortController(); launchControllers.add(controller);
+    try {
+      const result = await launchTerminal({ executable: plan.executable, args, cwd: plan.cwd, env, signal: controller.signal });
+      current(epoch);
+      return { launched: true, projectId: plan.project.id, ...(result?.terminalReady === true ? { terminalReady: true, terminalPid: result.terminalPid, launcherPid: result.launcherPid } : {}) };
+    } finally { launchControllers.delete(controller); }
   }
   function exportPortable() {
     return { version: 1, projects: load().projects.map(row => ({ id: row.id, name: row.name, toolId: row.toolId, pinned: row.pinned, updatedAt: row.updatedAt, oldPath: row.needsRelocation ? row.oldPath : row.path })) };
@@ -117,8 +122,8 @@ function createAiToolsProjects({ directory, home, canEncrypt, encrypt, decrypt, 
     remove(id) { get(id); persist({ version: 1, projects: load().projects.filter(row => row.id !== id) }); return { id }; },
     async open(id) { const selected = validDirectory(usable(get(id)).path); await openDirectory(selected); return { opened: true }; },
     async environment() { active(); const epoch = generation; const tools = await Promise.all(Object.entries(TOOLS).map(async ([id, command]) => ({ id, command, path: await findExecutable(command) || null }))); current(epoch); return { tools }; },
-    cancelPending() { generation++; tokens.clear(); launches.clear(); },
-    dispose() { disposed = true; generation++; tokens.clear(); launches.clear(); } };
+    cancelPending() { generation++; tokens.clear(); launches.clear(); for (const controller of launchControllers) controller.abort(); },
+    dispose() { disposed = true; generation++; tokens.clear(); launches.clear(); for (const controller of launchControllers) controller.abort(); } };
 }
 
 module.exports = { createAiToolsProjects, PROJECT_TOOLS: TOOLS };

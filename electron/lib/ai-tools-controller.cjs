@@ -1,7 +1,7 @@
 const { validateArguments, validateCommandName } = require('./ai-tools-policy.cjs');
 
 const COMMANDS = Object.freeze([
-  'snapshot', 'provider_save', 'provider_remove', 'provider_test', 'models_list', 'quota_query',
+  'snapshot', 'provider_save', 'provider_remove', 'provider_test', 'provider_probe', 'models_list', 'quota_query',
   'config_status', 'config_preview', 'config_apply', 'backups_list', 'backup_preview_restore',
   'sessions_scan', 'sessions_list', 'sessions_open',
   'router_status', 'router_save', 'router_remove', 'router_start', 'router_stop', 'router_profile', 'router_copy_key',
@@ -12,9 +12,9 @@ const COMMANDS = Object.freeze([
 ]);
 const fail = (code, message) => Object.assign(new Error(message), { code });
 
-function createAiToolsController({ store, config, quota, models, sessions, router, resources, projects, portable, skills, pickBackup, pickDirectory, copyText, tools, getMembership, getOwner }) {
+function createAiToolsController({ store, config, quota, models, probe, confirmProbe, sessions, router, resources, projects, portable, skills, pickBackup, pickDirectory, copyText, tools, getMembership, getOwner }) {
   let disposed = false; let migrationReserved = false;
-  const capabilities = COMMANDS.filter(command => (!command.startsWith('sessions_') || sessions) && (!command.startsWith('router_') || router) && (!command.startsWith('resources_') || resources) && (!command.startsWith('projects_') || projects) && (!command.startsWith('portable_') || portable && pickBackup) && (!command.startsWith('skills_') || skills) && (!['projects_pick', 'skills_import'].includes(command) || pickDirectory) && (command !== 'router_copy_key' || copyText));
+  const capabilities = COMMANDS.filter(command => (!command.startsWith('sessions_') || sessions) && (!command.startsWith('router_') || router) && (!command.startsWith('resources_') || resources) && (!command.startsWith('projects_') || projects) && (!command.startsWith('portable_') || portable && pickBackup) && (!command.startsWith('skills_') || skills) && (!['projects_pick', 'skills_import'].includes(command) || pickDirectory) && (command !== 'router_copy_key' || copyText) && (command !== 'provider_probe' || probe && confirmProbe));
   const operations = new Set(); const tasks = new Set(); const restoreTokens = new Set(); const resourceRestoreTokens = new Set(); const skillRestoreTokens = new Set();
   function authorize(event) {
     const owner = getOwner();
@@ -57,6 +57,17 @@ function createAiToolsController({ store, config, quota, models, sessions, route
           result = await store.removeProvider(args.providerId); quota.invalidate(args.providerId); break;
         case 'provider_test':
           result = await models.test(await store.getProvider(args.providerId), { signal: abort.signal }); break;
+        case 'provider_probe': {
+          const provider = await store.getProvider(args.providerId);
+          const fingerprint = JSON.stringify(provider); const plan = probe.describe(provider);
+          const mode = await confirmProbe({ name: provider.name, ...plan }); authorize(event);
+          if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', '测试已取消');
+          if (!['inference', 'read-only'].includes(mode)) { result = { cancelled: true }; break; }
+          const membershipNow = await getMembership(); authorize(event);
+          if (membershipNow?.activated !== true || membershipNow.scope !== 'vip') throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', '会员状态已变化，未执行测试');
+          if (JSON.stringify(await store.getProvider(args.providerId)) !== fingerprint) throw fail('AI_TOOLS_PROVIDER_CHANGED', '供应商配置已变化，请重新确认测试');
+          result = mode === 'inference' ? await probe.run(provider, { signal: abort.signal }) : await models.test(provider, { signal: abort.signal }); break;
+        }
         case 'models_list':
           result = await models.list(await store.getProvider(args.providerId), { signal: abort.signal }); break;
         case 'quota_query':

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, KeyRound, Loader2, Pencil, Play, Plus, RefreshCw, SlidersHorizontal, Trash2, Wallet } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, Pencil, Play, Plus, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import SelectMenu from '../SelectMenu';
-import AiQuotaCard from './AiQuotaCard';
+import AiCompactQuota from './AiCompactQuota';
 import { AI_PROTOCOLS } from './aiToolsModel';
 import { providerFingerprint, providerHomeTool, providerStatusRows } from './aiProviderHomeModel';
 
 const STATUS = { active: '正在使用', configured: '已配置', inactive: '未使用', incomplete: '待完善', incompatible: '不兼容', unknown: '待确认' };
-export default function AiProviderHome({ active, revision, ready = true, choice, onToolChange, providers, tools, onRequest, can, theme, isDark, onPreview, onEdit, onModels, onRemove, onAdd, onProjects, networkAction, busy, feedback, quotaResults, quotaErrors }) {
+export default function AiProviderHome({ active, revision, ready = true, choice, onToolChange, providers, tools, onRequest, can, theme, isDark, onPreview, onEdit, onModels, onRemove, onAdd, onProjects, networkAction, busy, feedback, quotaResults, quotaErrors, quotaBusy, quotaRevision, quotaAutoRefresh, onQuotaAutoRefresh }) {
   const id = useId(); const [search, setSearch] = useState('');
   const [native, setNative] = useState(null); const [checking, setChecking] = useState(null); const [checkError, setCheckError] = useState(null);
-  const [using, setUsing] = useState(''); const [useError, setUseError] = useState(null); const [quotaOpen, setQuotaOpen] = useState('');
+  const [using, setUsing] = useState(''); const [useError, setUseError] = useState(null);
   const available = tools.filter(tool => tool.configSupported || tool.launchSupported);
   const selected = providerHomeTool(tools, providers, choice);
   const toolId = selected?.id || ''; const fingerprint = JSON.stringify(providers.map(providerFingerprint)); const key = `${toolId}:${revision}:${fingerprint}`;
@@ -67,8 +67,7 @@ export default function AiProviderHome({ active, revision, ready = true, choice,
           {compatible && selected?.launchSupported && <button type="button" onClick={onProjects} className={button}><Play size={13} />项目启动</button>}
           {!compatible && <button type="button" disabled={!can('provider_save')} onClick={() => onEdit(provider, toolId)} className={button}>关联此工具</button>}
           <button type="button" disabled={!can('provider_save')} onClick={() => onModels(provider)} className={button}><SlidersHorizontal size={13} />配置模型</button>
-          <button type="button" disabled={!can('provider_test') || Boolean(busy[provider.id])} title="只检查只读接口，不发送付费对话" onClick={() => networkAction(provider, 'provider_test')} className={button}>{busy[provider.id] === 'provider_test' ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}测试连接</button>
-          <button type="button" disabled={!can('quota_query')} onClick={() => setQuotaOpen(previous => previous === provider.id ? '' : provider.id)} className={button}><Wallet size={13} />额度</button>
+          <button type="button" disabled={!can('provider_probe') || Boolean(busy[provider.id])} title="确认后发送一次最小模型测试；也可选择只读检查" onClick={() => networkAction(provider, 'provider_probe')} className={button}>{busy[provider.id] === 'provider_probe' ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}测试连接</button>
           <button type="button" aria-label={`编辑 AI 供应商 ${provider.name}`} disabled={!can('provider_save') || Boolean(busy[provider.id])} onClick={() => onEdit(provider)} className={button}><Pencil size={13} /></button>
           <button type="button" aria-label={`删除 AI 供应商 ${provider.name}`} disabled={!can('provider_remove') || Boolean(busy[provider.id])} onClick={() => onRemove(provider)} className={button}><Trash2 size={13} /></button>
         </div>
@@ -76,7 +75,7 @@ export default function AiProviderHome({ active, revision, ready = true, choice,
         {configured && <p className={`mt-2 text-xs ${theme.textMuted}`}>{result.message}</p>}
         {useError?.context === context && useError.id === provider.id && <p role="alert" className="mt-2 text-xs text-red-500">{useError.message}</p>}
         {connection && <p role="status" className={`mt-3 rounded-lg border p-2 text-xs leading-5 ${connection.status === 'error' ? 'border-red-500/25 text-red-500' : connection.status === 'partial' ? 'border-amber-500/25 text-amber-500' : 'border-emerald-500/25 text-emerald-500'}`}>{connection.message}</p>}
-        {quotaOpen === provider.id && <div className="mt-3"><AiQuotaCard provider={provider} result={quotaResults[provider.id]} error={quotaErrors[provider.id]} busy={Boolean(busy[provider.id])} canQuery={can('quota_query')} onQuery={() => networkAction(provider, 'quota_query')} theme={theme} /></div>}
+        <AiCompactQuota provider={provider} result={quotaResults[provider.id]} error={quotaErrors[provider.id]} busy={Boolean(quotaBusy?.[provider.id])} canQuery={can('quota_query')} onQuery={() => networkAction(provider, 'quota_query')} theme={theme} active={active && ready} revision={quotaRevision} autoRefresh={quotaAutoRefresh?.[provider.id]} onAutoRefresh={value => onQuotaAutoRefresh?.(provider.id, value)} />
       </article>;
     })}</div>
     {!visible.length && <div className={`rounded-xl border border-dashed p-7 text-center ${theme.card}`}><h3 className="text-sm font-semibold">{providers.length ? '没有匹配的供应商' : '添加你的第一个供应商'}</h3><p className={`mt-2 text-xs ${theme.textMuted}`}>选择常用模板后填写密钥和模型；保存不会立即切换或发起付费请求。</p><button type="button" disabled={!can('provider_save')} onClick={() => onAdd(toolId)} className={`mt-4 rounded-lg px-4 py-2 text-xs ${theme.button.primary}`}>选择模板并添加</button></div>}

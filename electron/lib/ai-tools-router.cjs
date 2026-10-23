@@ -46,6 +46,13 @@ function createAiToolsRouter({ getMembership, saveProvider, ...options }) {
       if (!worker || starting || provider.apiKey !== config.getKey() || provider.baseUrl !== `http://127.0.0.1:${port}/${provider.protocol === 'gemini' ? 'v1beta' : 'v1'}`) return null;
       return { models: config.snapshot().routes.filter(route => route.protocol === provider.protocol).map(route => ({ id: route.model, name: route.name })), checkedAt: Date.now(), latencyMs: 0, source: 'local-router' };
     },
+    localProbe(provider) {
+      if (!worker || starting || provider.apiKey !== config.getKey() || provider.baseUrl !== `http://127.0.0.1:${port}/${provider.protocol === 'gemini' ? 'v1beta' : 'v1'}`) return null;
+      const route = config.snapshot().routes.find(row => row.protocol === provider.protocol && row.model === provider.model);
+      if (!route) throw fail('AI_TOOLS_PROBE_LOCAL_ROUTE', '当前模型不对应已运行的同协议本地路由，未发送测试请求');
+      if (route.failover !== false) throw fail('AI_TOOLS_PROBE_FAILOVER', '此本地路由启用了故障转移，无法保证只调用一次；请直接测试上游供应商，或停止路由并关闭故障转移后再测');
+      return { routeId: route.id, model: route.model, protocol: route.protocol };
+    },
     assertProviderMutable(id) { if (id && worker && config.snapshot().routes.some(route => route.providerIds.includes(id))) throw fail('AI_TOOLS_ROUTER_RUNNING', '该供应商正被本机路由使用，请先停止路由再修改或删除，避免旧密钥继续生效'); },
     save: value => { idle(); return config.save(value); }, remove: id => { idle(); return config.remove(id); },
     async dispose() { disposed = true; await stop(); } };

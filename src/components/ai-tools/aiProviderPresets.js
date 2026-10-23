@@ -14,5 +14,6 @@ export function applyProviderPreset(draft, value) {
   const next = { ...draft, name: preset.label, protocol: preset.protocol, baseUrl: preset.baseUrl, model: '', contextWindow: '', targetApps: [...preset.targetApps],
     apiKey: '', quotaKey: '', clearKey: false, clearQuotaKey: false, quotaTemplate: '', quota: preset.quota ? { adapter: preset.quota } : null };
   delete next.claudeModels;
+  delete next.cliConfig;
   return next;
 }

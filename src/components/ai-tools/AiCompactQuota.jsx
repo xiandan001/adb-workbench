@@ -1,0 +1,21 @@
+import { useRef } from 'react';
+import { Loader2, RefreshCw, Wallet } from 'lucide-react';
+import { quotaValue, quotaView } from './aiToolsModel';
+import { quotaMetricRatio } from './aiQuotaPolling';
+import useQuotaPolling from './useQuotaPolling';
+
+const time = value => Number.isFinite(new Date(value).getTime()) && value !== null && value !== undefined ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+export default function AiCompactQuota({ provider, result, error, busy, canQuery, onQuery, theme, active = true, revision, autoRefresh, onAutoRefresh }) {
+  const elementRef = useRef(null);
+  const poll = useQuotaPolling({ elementRef, provider, result, error, busy, canQuery, onQuery, active, revision, autoRefresh, onAutoRefresh });
+  const quota = quotaView(result, provider.id); const metrics = error ? [] : quota.metrics.slice(0, 2); const stale = quota.status === 'stale';
+  const reason = error || quota.reason || '未知不代表零或无限';
+  if (!poll.configured) return <section ref={elementRef} aria-label={`额度摘要 ${provider.name}`} className={`mt-3 flex items-center gap-1.5 border-t border-slate-400/15 pt-2 text-[11px] ${theme.textMuted}`}><Wallet size={12} />{provider.quota?.adapter ? '先保存额度查询凭据' : '未配置额度查询'}</section>;
+  return <section ref={elementRef} aria-label={`额度摘要 ${provider.name}`} className="mt-3 border-t border-slate-400/15 pt-2">
+    <div className="space-y-1">{metrics.map((metric, index) => {
+      const ratio = quotaMetricRatio(metric); const value = metric.remaining !== undefined ? `剩余 ${quotaValue(metric.remaining)}` : metric.used !== undefined ? `已用 ${quotaValue(metric.used)}` : '—';
+      return <div key={`${metric.label}-${index}`} className="flex min-w-0 items-center gap-2 text-xs"><span title={metric.label} className={`max-w-28 shrink-0 truncate ${theme.textMuted}`}>{quota.kind === 'balance' ? '余额' : metric.label || '额度'}</span><span className="shrink-0 font-medium">{value} {metric.unit || ''}</span>{ratio && <div role="progressbar" aria-label={`${metric.label || '额度'}${ratio.kind === 'remaining' ? '剩余' : '已用'}比例`} aria-valuenow={Math.round(ratio.value * 10) / 10} aria-valuemin={0} aria-valuemax={100} className="h-1 w-16 shrink-0 overflow-hidden rounded bg-slate-400/20"><div className="h-full rounded bg-emerald-500" style={{ width: `${ratio.value}%` }} /></div>}<span className={`min-w-0 flex-1 truncate text-right text-[10px] ${stale ? 'text-amber-500' : theme.textMuted}`} title={metric.resetAt ? `重置时间：${new Date(metric.resetAt).toLocaleString()}` : undefined}>{metric.resetAt ? `重置 ${time(metric.resetAt)}` : ratio ? `${quotaValue(Math.round(ratio.value * 10) / 10)}%` : ''}</span></div>;
+    })}{!metrics.length && <p title={reason} className={`truncate text-[11px] ${error || quota.status === 'error' ? 'text-amber-500' : theme.textMuted}`}><Wallet size={11} className="mr-1 inline" />{poll.pending ? '正在读取额度…' : error || quota.status === 'error' ? poll.automatic ? '额度查询失败，稍后自动重试' : '额度查询失败，可手动刷新' : result ? '额度暂不可用' : '额度尚未读取'}</p>}</div>
+    <div className={`mt-1 flex items-center gap-2 text-[10px] ${theme.textMuted}`}><span className={`min-w-0 flex-1 truncate ${stale ? 'text-amber-500' : ''}`} title={reason}>{poll.cooling ? `限流等待至 ${time(poll.retryAt)}` : `${stale ? '上次数据 · ' : ''}${quota.observedAt === null || quota.observedAt === undefined ? '尚无观测' : `${time(quota.observedAt)} 更新`}${quota.metrics.length > 2 ? ` · 另 ${quota.metrics.length - 2} 项见额度页` : ''}`}</span><label title="开启后每 60 秒刷新；页面、窗口或卡片不可见时暂停" className="inline-flex shrink-0 cursor-pointer items-center gap-1"><input type="checkbox" aria-label={`自动刷新 ${provider.name} 额度`} checked={poll.automatic} onChange={event => poll.setAutomatic(event.target.checked)} className="h-3 w-3 accent-emerald-600" />60s</label><button type="button" aria-label={`刷新 ${provider.name} 额度`} title={poll.cooling ? `请在 ${new Date(poll.retryAt).toLocaleString()} 后重试` : '刷新额度；不会强制绕过服务商缓存或限流'} disabled={!poll.canRefresh} onClick={() => { void poll.refresh(); }} className={`rounded p-1 disabled:opacity-40 ${theme.button.secondary}`}>{poll.pending || busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}</button></div>
+  </section>;
+}

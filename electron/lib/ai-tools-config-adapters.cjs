@@ -5,6 +5,8 @@ const { fail } = require('./ai-tools-file-safety.cjs');
 const { projectNativeConfig } = require('./ai-tools-config-native.cjs');
 const { projectDesktopConfig } = require('./ai-tools-config-desktop.cjs');
 const { claudeModelAssignments } = require('./ai-tools-claude-models.cjs');
+const { claudeCliAssignments, assertCliEndpoint } = require('./ai-tools-cli-config.cjs');
+const { projectCodexAdvanced } = require('./ai-tools-cli-config-projector.cjs');
 
 const MASK = '******';
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -47,15 +49,19 @@ function patchJson(content, assignments) {
 }
 
 function claude(content, provider) {
+  assertCliEndpoint(provider, 'claude');
   const original = parseJsonc(content);
+  const authField = provider.cliConfig?.claude?.authField || 'ANTHROPIC_AUTH_TOKEN';
+  const alternate = authField === 'ANTHROPIC_AUTH_TOKEN' ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN';
   const assignments = [
     { keys: ['env', 'ANTHROPIC_BASE_URL'], value: provider.baseUrl },
-    { keys: ['env', 'ANTHROPIC_AUTH_TOKEN'], value: provider.apiKey, secret: true },
+    { keys: ['env', authField], value: provider.apiKey, secret: true },
     { keys: ['env', 'ANTHROPIC_MODEL'], value: provider.model },
     ...claudeModelAssignments(provider.claudeModels),
+    ...claudeCliAssignments(provider.cliConfig?.claude),
   ];
   // Both credentials can affect client auth selection. Remove only the explicitly managed alternate key.
-  if (original.env?.ANTHROPIC_API_KEY !== undefined) assignments.push({ keys: ['env', 'ANTHROPIC_API_KEY'], value: undefined, secret: true });
+  if (original.env?.[alternate] !== undefined) assignments.push({ keys: ['env', alternate], value: undefined, secret: true });
   return patchJson(content, assignments);
 }
 
@@ -87,7 +93,14 @@ function scalarLine(line, value) {
     else if (line[i] === '"' || line[i] === "'") quoted = line[i];
     else if (line[i] === '#') { comment = i; break; }
   }
-  return `${line.slice(0, eq + 1)} ${JSON.stringify(value)}${comment < 0 ? '' : ` ${line.slice(comment).trimEnd()}`}\n`;
+  if (value === undefined) return comment < 0 ? '' : `${line.slice(comment).trimEnd()}\n`;
+  return `${line.slice(0, eq + 1)} ${tomlValue(value)}${comment < 0 ? '' : ` ${line.slice(comment).trimEnd()}`}\n`;
+}
+
+function tomlValue(value) {
+  if (!object(value)) return JSON.stringify(value);
+  if (Object.values(value).some(item => typeof item !== 'string')) throw fail('AI_TOOLS_CONFIG_TOML', '原有请求头不是字符串映射，未覆盖');
+  return `{ ${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)} = ${JSON.stringify(item)}`).join(', ')} }`;
 }
 
 function patchTomlSection(content, section, updates, parsed) {
@@ -115,8 +128,9 @@ function patchTomlSection(content, section, updates, parsed) {
   for (const key of Object.keys(updates)) {
     if (Object.hasOwn(parsed || {}, key) && !found.has(key)) throw fail('AI_TOOLS_CONFIG_COMPLEX', 'TOML 配置使用不支持的内联或复杂字段写法，未修改');
   }
-  const missing = Object.entries(updates).filter(([key]) => !found.has(key)).map(([key, value]) => `${key} = ${JSON.stringify(value)}\n`).join('');
+  const missing = Object.entries(updates).filter(([key, value]) => !found.has(key) && value !== undefined).map(([key, value]) => `${key} = ${tomlValue(value)}\n`).join('');
   if (sectionStart === -1) {
+    if (!missing) return content;
     return `${content}${content.endsWith('\n') || !content ? '' : '\n'}\n[${section}]\n${missing}`;
   }
   const insert = section === '' ? firstTable : sectionEnd;
@@ -126,6 +140,7 @@ function patchTomlSection(content, section, updates, parsed) {
 }
 
 function codex(content, provider) {
+  assertCliEndpoint(provider, 'codex');
   let parsed;
   try { parsed = toml.parse(content); } catch { throw fail('AI_TOOLS_CONFIG_TOML', 'TOML 配置格式无效，未修改'); }
   if (parsed.profile !== undefined) throw fail('AI_TOOLS_CONFIG_PROFILE', '当前 Codex 已选择 profile 配置档，可能覆盖全局模型；请先取消该配置档或单独配置它');
@@ -135,16 +150,19 @@ function codex(content, provider) {
   const originalSection = parsed.model_providers?.[id];
   if (originalSection !== undefined && !object(originalSection)) throw fail('AI_TOOLS_CONFIG_TOML', '供应商配置表格式无效');
   if (originalSection?.env_key !== undefined) throw fail('AI_TOOLS_CONFIG_AUTH', '此供应商表设置了 env_key，可能覆盖 API Key；请先明确凭据来源再应用');
+  if (originalSection?.auth !== undefined) throw fail('AI_TOOLS_CONFIG_AUTH', '此供应商表设置了命令式 auth，不能与直接 API Key 同时应用；请先在原生文件明确认证来源');
   let result = patchTomlSection(content, '', { model: provider.model, model_provider: id }, parsed);
   result = patchTomlSection(result, section, fields, originalSection);
   const expected = structuredClone(parsed);
   expected.model = provider.model; expected.model_provider = id; expected.model_providers ||= {};
   expected.model_providers[id] = { ...(expected.model_providers[id] || {}), ...fields };
+  const advanced = projectCodexAdvanced(result, provider, expected, { patchTomlSection, change }); result = advanced.content;
+  for (const key of ['http_headers', 'env_http_headers']) if (Object.keys(expected.model_providers[id][key] || {}).some(name => /^(?:authorization|proxy-authorization|cookie|x-api-key|api-key)$/i.test(name))) throw fail('AI_TOOLS_CONFIG_AUTH', '此供应商已有额外认证请求头，可能覆盖 API Key；请先明确移除静态头或在原生文件处理环境认证头');
   let actual;
   try { actual = toml.parse(result); } catch { throw fail('AI_TOOLS_CONFIG_COMPLEX', '此 TOML 布局暂不能安全保留，未修改'); }
   // smol-toml uses null-prototype maps. Compare cloned values, not parser-specific prototypes.
   if (!isDeepStrictEqual(structuredClone(actual), expected)) throw fail('AI_TOOLS_CONFIG_COMPLEX', '此 TOML 布局暂不能安全保留所有字段，未修改');
-  const changes = [change('model', parsed.model, provider.model), change('model_provider', parsed.model_provider, id), ...Object.entries(fields).map(([key, value]) => change(`${section}.${key}`, originalSection?.[key], value, key === 'experimental_bearer_token'))];
+  const changes = [change('model', parsed.model, provider.model), change('model_provider', parsed.model_provider, id), ...Object.entries(fields).map(([key, value]) => change(`${section}.${key}`, originalSection?.[key], value, key === 'experimental_bearer_token')), ...advanced.changes];
   return { content: result, format: 'toml', changes };
 }
 

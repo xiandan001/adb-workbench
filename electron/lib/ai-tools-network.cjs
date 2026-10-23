@@ -27,7 +27,7 @@ function normalizeHeaders(value) {
   return headers;
 }
 function createAiToolsNetwork({ transport, allowLoopback = false, timeoutMs = 10000, maxBytes = MAX_BYTES } = {}) {
-  if (allowLoopback && typeof transport !== 'function' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) throw fail('AI_TOOLS_NETWORK_CONFIG', '网络安全限制无效');
+  if (allowLoopback && typeof transport !== 'function' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) throw fail('AI_TOOLS_NETWORK_CONFIG', '网络安全限制无效');
   const send = transport || https.request;
   async function requestJson({ url: input, method = 'GET', headers: inputHeaders = {}, body, signal, credentialOrigins = [] } = {}) {
     const url = validateNetworkUrl(input, { allowLoopback });

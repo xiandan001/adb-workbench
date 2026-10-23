@@ -1,0 +1,22 @@
+{
+  "claude": [
+    { "key": "authField", "label": "认证字段", "type": "enum", "values": ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"], "hint": "前者发送 Bearer，后者发送 X-Api-Key；密钥仍从上方专用字段读取。" },
+    { "key": "timeoutMs", "label": "请求超时（毫秒）", "type": "integer", "min": 0, "max": 2147483647, "native": "env.API_TIMEOUT_MS", "hint": "0 表示不限制响应头等待，仅新版本支持；流式总时长不由此限制。" },
+    { "key": "maxOutputTokens", "label": "最大输出 Token", "type": "integer", "min": 1, "max": 2147483647, "native": "env.CLAUDE_CODE_MAX_OUTPUT_TOKENS" },
+    { "key": "maxThinkingTokens", "label": "思考 Token 预算", "type": "integer", "min": 0, "max": 2147483647, "native": "env.MAX_THINKING_TOKENS", "hint": "0 的效果和正值上限由模型决定；自适应思考模型可能忽略固定预算。" },
+    { "key": "contextTokens", "label": "上下文 Token 上限", "type": "integer", "min": 1, "max": 2147483647, "native": "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS", "hint": "按服务商真实能力填写，不代表模型实际支持该容量。" },
+    { "key": "autoCompactPercent", "label": "自动压缩阈值（%）", "type": "integer", "min": 1, "max": 100, "native": "env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" },
+    { "key": "effort", "label": "思考强度", "type": "enum", "values": ["auto", "low", "medium", "high", "xhigh", "max"], "native": "env.CLAUDE_CODE_EFFORT_LEVEL", "hint": "可用强度取决于模型与 Claude Code 版本。" },
+    { "key": "agentTeams", "label": "实验性 Agent Teams", "type": "boolean", "native": "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "hint": "不会默认启用；多代理可能增加请求量和费用。" },
+    { "key": "toolSearch", "label": "MCP 工具搜索", "type": "enum", "values": ["auto", "true", "false", "auto:5", "auto:10", "auto:20"], "native": "env.ENABLE_TOOL_SEARCH" },
+    { "key": "disableAutoupdater", "label": "禁用自动更新", "type": "boolean", "native": "env.DISABLE_AUTOUPDATER", "hint": "关闭自动更新后请自行维护客户端安全更新。" }
+  ],
+  "codex": [
+    { "key": "reasoningEffort", "label": "思考强度", "type": "enum", "values": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"], "native": "model_reasoning_effort", "hint": "可用强度取决于模型与 Codex 版本，不会替换您选择的模型。" },
+    { "key": "reasoningSummary", "label": "思考摘要", "type": "enum", "values": ["auto", "concise", "detailed", "none"], "native": "model_reasoning_summary" },
+    { "key": "contextWindow", "label": "上下文 Token 上限", "type": "integer", "min": 1, "max": 2147483647, "native": "model_context_window" },
+    { "key": "autoCompactTokenLimit", "label": "自动压缩 Token 阈值", "type": "integer", "min": 1, "max": 2147483647, "native": "model_auto_compact_token_limit" },
+    { "key": "personality", "label": "人格（旧版兼容）", "type": "enum", "values": ["none", "friendly", "pragmatic"], "native": "personality", "hint": "官方已弃用风格选择；新版本的 friendly / pragmatic 不再改变风格，none 可省略内置人格指令。" },
+    { "key": "verbosity", "label": "回答详细程度", "type": "enum", "values": ["low", "medium", "high"], "native": "model_verbosity", "hint": "仅在模型支持 Responses verbosity 时生效。" }
+  ]
+}
