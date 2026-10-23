@@ -5,6 +5,7 @@ import SshEditorTabs from './SshEditorTabs';
 import SshTerminal from './SshTerminal';
 import SshSplitPanels from './SshSplitPanels';
 import { MAX_SSH_DOCUMENTS, sshResult } from '../../shared/sshWorkspace';
+import { confirmAppMessage } from '../../shared/appMessageDialog';
 
 const EMPTY_VIEW = { documents: [], activeDocumentId: '', activeTerminalId: '', directory: '' };
 export default function SshSessionWorkspace({ session, view = EMPTY_VIEW, active, layout, onLayout, onCommitLayout, onAction, fileRevision, historyRevision, theme, isDark, showToast }) {
@@ -42,11 +43,19 @@ export default function SshSessionWorkspace({ session, view = EMPTY_VIEW, active
     } catch (failure) { if (alive.current) onAction({ type: 'save-failed', sessionId: session.id, documentId: document.documentId, error: failure.message, code: failure.code }); }
     finally { saving.current.delete(document.documentId); }
   };
-  const closeFile = document => {
-    if (document.saving || (document.dirty && !window.confirm(`${document.path}\n有未保存修改，确认放弃这些修改并关闭文件？`))) return;
+  const closeFile = async document => {
+    if (document.saving) return;
+    if (document.dirty && !await confirmAppMessage({ type: 'warning', title: '放弃未保存修改？', message: document.path, detail: '关闭文件会放弃本地未保存内容，不会写回远端。', confirmLabel: '放弃修改并关闭' })) return;
+    const current = stateRef.current.documents.find(item => item.documentId === document.documentId);
+    if (!alive.current || !current || current.saving || current.draft !== document.draft) { if (alive.current) setError('文件状态已变化，已保留当前草稿，请重新确认。'); return; }
     onAction({ type: 'close-document', sessionId: session.id, documentId: document.documentId, discard: true }); void closeToken(document.documentId);
   };
-  const reload = document => { if (!document.dirty || window.confirm(`${document.path}\n重新读取会放弃本地未保存修改，是否继续？`)) void openFile(document.path, true); };
+  const reload = async document => {
+    if (document.dirty && !await confirmAppMessage({ type: 'warning', title: '重新读取远端文件？', message: document.path, detail: '重新读取会放弃本地未保存修改。', confirmLabel: '放弃修改并重新读取' })) return;
+    const current = stateRef.current.documents.find(item => item.documentId === document.documentId);
+    if (!alive.current || !current || current.saving || current.draft !== document.draft) { if (alive.current) setError('文件状态已变化，已保留当前草稿，请重新确认。'); return; }
+    void openFile(document.path, true);
+  };
   const terminalAction = async terminalId => {
     if (terminalBusy) return; setTerminalBusy(terminalId || 'new'); setError('');
     try {

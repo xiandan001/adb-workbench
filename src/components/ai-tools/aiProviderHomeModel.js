@@ -4,6 +4,18 @@ export function providerFeedbackToken(provider, epoch) { return { providerId: pr
 export function providerFeedbackCurrent(token, provider, epoch) {
   return Boolean(provider && token && token.providerId === provider.id && token.epoch === epoch && token.fingerprint === providerFingerprint(provider));
 }
+export function retainProviderFeedback(records, providers, epoch, activated) {
+  if (!activated) return {};
+  return Object.fromEntries(providers.flatMap(provider => {
+    const entry = records[provider.id]; return providerFeedbackCurrent(entry?.token, provider, epoch) ? [[provider.id, entry]] : [];
+  }));
+}
+export function connectionCompletionNotice(result, feedback) {
+  if (result?.cancelled) return '已取消连接测试';
+  if (feedback?.status === 'error') return `连接测试失败：${feedback.message}`;
+  if (feedback?.status === 'partial') return '只读检查完成：接口已响应，模型调用尚未验证';
+  return result?.mode === 'inference' ? '模型连接测试成功，已收到有效响应' : '只读接口检查成功，尚未验证模型调用';
+}
 export function connectionFeedback(result) {
   if (result?.reachable !== true) throw new Error('未能确认接口响应，请核对地址、协议及密钥');
   if (result.mode === 'inference' && result.status === 'verified' && result.inferenceVerified === true) {

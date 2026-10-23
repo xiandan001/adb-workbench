@@ -1,6 +1,7 @@
 const { createSshProfileStore } = require('./ssh-profiles.cjs');
 const { createSshController } = require('./ssh-controller.cjs');
 const { createSshCommandHistory } = require('./ssh-command-history.cjs');
+const { ask } = require('./app-message-dialog.cjs');
 
 let controller;
 function register(ipcMain) {
@@ -10,11 +11,6 @@ function register(ipcMain) {
   const { createSshSessionService } = require('./ssh-session.cjs');
   const { createSshFiles } = require('./ssh-files.cjs');
   const getOwner = () => ctx.getMainWindow();
-  const ask = options => {
-    const owner = getOwner();
-    if (!owner || owner.isDestroyed()) return Promise.resolve({ response: options.cancelId ?? 0 });
-    return dialog.showMessageBox(owner, options);
-  };
   const encryptedStorage = { directory: app.getPath('userData'),
     canEncrypt: () => safeStorage.isEncryptionAvailable() && (!safeStorage.getSelectedStorageBackend || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
     encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value) };

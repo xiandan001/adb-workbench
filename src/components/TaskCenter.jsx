@@ -1,6 +1,6 @@
 // 任务中心：复现脚本、多设备批量执行和运行历史。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
@@ -167,6 +167,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const recorderRefreshTimerRef = useRef(null);
   const recorderActionInFlightRef = useRef(false);
   const recorderBackgroundRefreshInFlightRef = useRef(false);
+  const recorderContextRef = useRef({ deviceId: recorder.deviceId, generation: 0 });
 
   const panelClass = isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200';
   const softClass = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200';
@@ -184,6 +185,12 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setRecorder(prev => prev.backgroundLoading ? { ...prev, backgroundLoading: false } : prev);
     }
   };
+
+  useLayoutEffect(() => {
+    recorderContextRef.current = { deviceId: recorder.deviceId, generation: recorderContextRef.current.generation + 1 };
+    clearScheduledRecorderRefresh();
+    return () => { recorderContextRef.current = { deviceId: '', generation: recorderContextRef.current.generation + 1 }; };
+  }, [recorder.deviceId]);
 
   useEffect(() => {
     recorderMountedRef.current = true;
@@ -652,6 +659,9 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const refreshRecorderSnapshot = async ({ deviceId = recorder.deviceId, silent = false, background = false } = {}) => {
+    const context = recorderContextRef.current;
+    const isCurrent = () => recorderMountedRef.current && recorderContextRef.current === context && context.deviceId === deviceId;
+    if (!isCurrent()) return false;
     if (!deviceId) {
       showToast?.('请选择录制设备');
       return false;
@@ -667,7 +677,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     } : prev);
     try {
       const res = await window.electronAPI?.taskStressUiSnapshot?.({ deviceId });
-      if (!recorderMountedRef.current) return false;
+      if (!isCurrent()) return false;
       if (res?.ok) {
         const screenshotDataUrl = res.screenshotDataUrl || recorder.screenshotDataUrl;
         const screenshotWidth = res.screenshotWidth || recorder.screenshotWidth;
@@ -695,7 +705,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         return false;
       }
     } catch (error) {
-      if (!recorderMountedRef.current) return false;
+      if (!isCurrent()) return false;
       const message = error.message || '未知错误';
       setRecorder(prev => prev.deviceId === deviceId ? {
         ...prev,
@@ -707,12 +717,13 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const scheduleRecorderSnapshotRefresh = (deviceId) => {
-    if (!deviceId || !recorderMountedRef.current) return;
+    const context = recorderContextRef.current;
+    if (!deviceId || !recorderMountedRef.current || context.deviceId !== deviceId) return;
     clearScheduledRecorderRefresh();
     setRecorder(prev => prev.deviceId === deviceId ? { ...prev, backgroundLoading: true } : prev);
     recorderRefreshTimerRef.current = setTimeout(async () => {
       recorderRefreshTimerRef.current = null;
-      if (!recorderMountedRef.current) return;
+      if (!recorderMountedRef.current || recorderContextRef.current !== context) return;
       if (recorderActionInFlightRef.current || recorderBackgroundRefreshInFlightRef.current) {
         scheduleRecorderSnapshotRefresh(deviceId);
         return;
@@ -745,9 +756,11 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       showToast?.('录制设备已离线，请重新连接或主动选择另一台设备');
       return null;
     }
-    if (recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
+    if (recorderActionInFlightRef.current || recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
     clearScheduledRecorderRefresh({ clearVisual: true });
     const deviceId = recorder.deviceId;
+    const context = recorderContextRef.current;
+    const isCurrent = () => recorderMountedRef.current && recorderContextRef.current === context && context.deviceId === deviceId;
     const selectedNode = recorder.nodes.find(item => String(item.index) === String(recorder.selectedNodeIndex));
     const node = Object.prototype.hasOwnProperty.call(extra, 'node') ? extra.node : selectedNode;
     let shouldRefreshSnapshot = false;
@@ -761,6 +774,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         node,
         ...extra
       });
+      if (!isCurrent()) return null;
       if (res?.ok && res.step) {
         const recordingMode = workspaceView === 'recording' ? 'replay' : 'stress';
         appendRecordedStep(res.step, recordingMode);
@@ -775,10 +789,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         showToast?.(`录制失败：${res?.error || '未知错误'}`);
       }
     } catch (error) {
-      showToast?.(`录制失败：${error.message || '未知错误'}`);
+      if (isCurrent()) showToast?.(`录制失败：${error.message || '未知错误'}`);
     } finally {
       recorderActionInFlightRef.current = false;
-      if (recorderMountedRef.current) setRecorder(prev => ({ ...prev, recording: false }));
+      if (isCurrent()) setRecorder(prev => ({ ...prev, recording: false }));
     }
     if (shouldRefreshSnapshot) scheduleRecorderSnapshotRefresh(deviceId);
     return recordedStep;

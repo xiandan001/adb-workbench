@@ -1,6 +1,6 @@
 // 性能监控面板：设备指标实时采样、曲线、阈值、告警和会员导出。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, Cpu, Database, Download, FileText, FolderOpen, Gauge, Lock, Play, RefreshCw, Save, Smartphone, Square, Thermometer, Zap } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
@@ -34,13 +34,17 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const [loading, setLoading] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
   const [includeAiSummary, setIncludeAiSummary] = useState(true);
-  const [lastExportPath, setLastExportPath] = useState('');
-  const [lastReportPath, setLastReportPath] = useState('');
-  const [lastReportAiSummary, setLastReportAiSummary] = useState(null);
+  const [exportResult, setExportResult] = useState(null);
+  const [reportResult, setReportResult] = useState(null);
+  const lastExportPath = exportResult?.deviceId === selectedDeviceId ? exportResult.path : '';
+  const lastReportPath = reportResult?.deviceId === selectedDeviceId ? reportResult.path : '';
+  const lastReportAiSummary = reportResult?.deviceId === selectedDeviceId ? reportResult.aiSummary : null;
   const [reportTask, setReportTask] = useState(null);
   // 记录当前视图对应的后端运行设备；停止采样只由用户显式触发。
   const runningDeviceRef = useRef('');
   const selectedDeviceIdRef = useRef('');
+  const deviceContextRef = useRef({ deviceId: selectedDeviceId, generation: 0 });
+  const monitorActionRef = useRef(null);
   const stateRequestSeqRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
   const pendingUpdateRef = useRef(null);
@@ -101,14 +105,18 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const refreshPerformanceState = useCallback(async (deviceId, options = {}) => {
     if (!deviceId || !window.electronAPI?.perfState) return;
+    const context = deviceContextRef.current;
+    if (context.deviceId !== deviceId) return;
     const requestId = ++stateRequestSeqRef.current;
     const res = await window.electronAPI.perfState({ deviceId });
-    if (requestId !== stateRequestSeqRef.current || selectedDeviceIdRef.current !== deviceId) return;
+    if (requestId !== stateRequestSeqRef.current || selectedDeviceIdRef.current !== deviceId || deviceContextRef.current !== context) return;
     applyPerformanceState(deviceId, res, options);
   }, [applyPerformanceState]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     selectedDeviceIdRef.current = selectedDeviceId;
+    deviceContextRef.current = { deviceId: selectedDeviceId, generation: deviceContextRef.current.generation + 1 };
+    return () => { deviceContextRef.current = { deviceId: '', generation: deviceContextRef.current.generation + 1 }; };
   }, [selectedDeviceId]);
 
   useEffect(() => {
@@ -123,8 +131,9 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   useEffect(() => {
     if (!window.electronAPI?.onPerformanceUpdate) return undefined;
+    const context = deviceContextRef.current;
     const unsubscribe = window.electronAPI.onPerformanceUpdate((event) => {
-      if (event.deviceId !== selectedDeviceId || !event.ok) return;
+      if (event.deviceId !== selectedDeviceId || !event.ok || deviceContextRef.current !== context) return;
       const now = Date.now();
       const elapsed = now - lastUiUpdateRef.current;
       if (elapsed >= 900) {
@@ -135,6 +144,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
       pendingUpdateRef.current = event.snapshot;
       if (!uiUpdateTimerRef.current) {
         uiUpdateTimerRef.current = setTimeout(() => {
+          if (deviceContextRef.current !== context) return;
           uiUpdateTimerRef.current = null;
           if (!pendingUpdateRef.current) return;
           lastUiUpdateRef.current = Date.now();
@@ -162,11 +172,10 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   }, [refreshPerformanceState, selectedDeviceId]);
 
   const applyReportTask = useCallback((task) => {
-    if (!task || (selectedDeviceId && task.deviceId !== selectedDeviceId)) return;
+    if (!task || task.deviceId !== selectedDeviceId || selectedDeviceIdRef.current !== selectedDeviceId) return;
     setReportTask(task);
     if (task.result?.ok) {
-      setLastReportPath(task.result.path || '');
-      setLastReportAiSummary(task.result.aiSummary || null);
+      setReportResult({ deviceId: task.deviceId, path: task.result.path || '', aiSummary: task.result.aiSummary || null });
     }
   }, [selectedDeviceId]);
 
@@ -203,6 +212,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const startMonitor = async () => {
     const targetDeviceId = selectedDeviceId;
+    const context = deviceContextRef.current;
     if (!targetDeviceId || !selectedDeviceOnline) return;
     if (intervalMs < 5000 && !hasVipAccess) {
       if (isVipLoading) {
@@ -214,6 +224,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
       return;
     }
     stateRequestSeqRef.current += 1;
+    const action = {}; monitorActionRef.current = action;
     setLoading(true);
     try {
       const res = await window.electronAPI.perfStart({
@@ -221,6 +232,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         intervalMs,
         includeProcesses: hasVipAccess
       });
+      if (deviceContextRef.current !== context || selectedDeviceIdRef.current !== targetDeviceId) return;
       if (res.ok) {
         flushSync(() => {
           setRunning(true);
@@ -233,19 +245,22 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         showToast?.(`启动失败：${res.error || '未知错误'}`);
       }
     } catch (error) {
-      showToast?.(`启动失败：${error.message || '未知错误'}`);
+      if (deviceContextRef.current === context) showToast?.(`启动失败：${error.message || '未知错误'}`);
     } finally {
-      setLoading(false);
+      if (monitorActionRef.current === action) { monitorActionRef.current = null; setLoading(false); }
     }
   };
 
   const stopMonitor = async () => {
     const targetDeviceId = selectedDeviceId;
+    const context = deviceContextRef.current;
     if (!targetDeviceId) return;
     stateRequestSeqRef.current += 1;
+    const action = {}; monitorActionRef.current = action;
     setLoading(true);
     try {
       const res = await window.electronAPI.perfStop({ deviceId: targetDeviceId });
+      if (deviceContextRef.current !== context || selectedDeviceIdRef.current !== targetDeviceId) return;
       if (res.ok) {
         flushSync(() => setRunning(false));
         if (runningDeviceRef.current === targetDeviceId) runningDeviceRef.current = '';
@@ -256,10 +271,12 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         refreshPerformanceState(targetDeviceId, { replaceHistory: false });
       }
     } catch (error) {
-      showToast?.(`停止失败：${error.message || '未知错误'}`);
-      refreshPerformanceState(targetDeviceId, { replaceHistory: false });
+      if (deviceContextRef.current === context) {
+        showToast?.(`停止失败：${error.message || '未知错误'}`);
+        refreshPerformanceState(targetDeviceId, { replaceHistory: false });
+      }
     } finally {
-      setLoading(false);
+      if (monitorActionRef.current === action) { monitorActionRef.current = null; setLoading(false); }
     }
   };
 
@@ -275,25 +292,29 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const takeSnapshot = async () => {
     if (!selectedDeviceId || !selectedDeviceOnline) return;
+    const context = deviceContextRef.current;
+    const action = {}; monitorActionRef.current = action;
     setLoading(true);
     try {
       const res = await window.electronAPI.perfSnapshot({ deviceId: selectedDeviceId });
-      if (selectedDeviceIdRef.current !== selectedDeviceId) return;
+      if (selectedDeviceIdRef.current !== selectedDeviceId || deviceContextRef.current !== context) return;
       if (res.ok) {
         applyPerformanceSnapshot(res.snapshot);
       } else {
         showToast?.(`采样失败：${res.error || '未知错误'}`);
       }
     } finally {
-      setLoading(false);
+      if (monitorActionRef.current === action) { monitorActionRef.current = null; setLoading(false); }
     }
   };
 
   const exportHistory = async () => {
     if (!requireVip('性能数据导出')) return;
+    const context = deviceContextRef.current;
     const res = await window.electronAPI.perfExport({ deviceId: selectedDeviceId, outputBaseDir: performancePath || undefined });
+    if (deviceContextRef.current !== context) return;
     if (res.ok) {
-      setLastExportPath(res.path || '');
+      setExportResult({ deviceId: selectedDeviceId, path: res.path || '' });
       showToast?.(`已导出：${res.path}`);
     }
     else showToast?.(`导出失败：${res.error || '未知错误'}`);
@@ -301,15 +322,17 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const exportReport = async () => {
     if (!requireVip('性能分析报告')) return;
+    const context = deviceContextRef.current;
     try {
       const res = await window.electronAPI.perfReport({ deviceId: selectedDeviceId, outputBaseDir: performancePath || undefined, includeAiSummary });
+      if (deviceContextRef.current !== context) return;
       if (res.ok) {
         if (res.task) setReportTask(res.task);
         showToast?.('性能报告已在后台生成');
       }
       else showToast?.(`报告生成失败：${res.error || '未知错误'}`);
     } catch (e) {
-      showToast?.(`报告生成失败：${e.message || '未知错误'}`);
+      if (deviceContextRef.current === context) showToast?.(`报告生成失败：${e.message || '未知错误'}`);
     }
   };
 
@@ -344,7 +367,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const panelClass = isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const reportActive = reportTask?.status === 'running';
+  const reportActive = reportTask?.deviceId === selectedDeviceId && reportTask.status === 'running';
 
   return (
     <div className="space-y-6">

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -19,10 +19,20 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
   const isDark = isDarkTheme(theme);
   const [running, setRunning] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [result, setResult] = useState(null);
+  const [storedResult, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [checkError, setCheckError] = useState(null);
+  const deviceContextRef = useRef({ deviceId: activeDeviceId || '', generation: 0 });
+  const checkPendingRef = useRef(null);
+  const restartPendingRef = useRef(false);
 
   const selectedDeviceId = activeDeviceId || '';
+  const result = storedResult?.deviceId === selectedDeviceId ? storedResult.value : null;
+  const visibleError = error || (checkError?.deviceId === selectedDeviceId ? checkError.message : '');
+  useLayoutEffect(() => {
+    deviceContextRef.current = { deviceId: selectedDeviceId, generation: deviceContextRef.current.generation + 1 };
+    return () => { deviceContextRef.current = { deviceId: '', generation: deviceContextRef.current.generation + 1 }; };
+  }, [selectedDeviceId]);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const panel = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200';
@@ -35,29 +45,37 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
   }), [devices]);
 
   const runCheck = async () => {
+    if (checkPendingRef.current) return;
     if (!window.electronAPI?.envCheckRun) {
       showToast?.('环境自检需要 Electron 环境');
       return;
     }
+    const context = deviceContextRef.current; const operation = {}; checkPendingRef.current = operation;
     setRunning(true);
     setError('');
+    setCheckError(null);
     try {
       const res = await window.electronAPI.envCheckRun({ deviceId: selectedDeviceId });
-      setResult(res);
+      if (deviceContextRef.current !== context) return;
+      setResult({ deviceId: selectedDeviceId, value: res });
       if (!res.ok) throw new Error(res.error || '环境自检失败');
       showToast?.('环境自检完成');
     } catch (error) {
-      setError(error.message);
-      showToast?.(`环境自检失败：${error.message}`);
+      if (deviceContextRef.current === context) {
+        setCheckError({ deviceId: selectedDeviceId, message: error.message });
+        showToast?.(`环境自检失败：${error.message}`);
+      }
     } finally {
-      setRunning(false);
+      if (checkPendingRef.current === operation) { checkPendingRef.current = null; setRunning(false); }
     }
   };
 
   const restartAdb = async () => {
-    if (!window.electronAPI?.envCheckRestartAdb) return;
+    if (!window.electronAPI?.envCheckRestartAdb || restartPendingRef.current) return;
+    restartPendingRef.current = true;
     setRestarting(true);
     setError('');
+    setCheckError(null);
     try {
       const res = await window.electronAPI.envCheckRestartAdb();
       if (!res?.ok) throw new Error(res?.error || res?.message || 'ADB 服务重启失败');
@@ -67,6 +85,7 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
       setError(error.message);
       showToast?.(`ADB 服务重启失败：${error.message}`);
     } finally {
+      restartPendingRef.current = false;
       setRestarting(false);
     }
   };
@@ -149,10 +168,10 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
           </div>
 
           <div className="min-w-0 space-y-4">
-            {error && (
+            {visibleError && (
               <div className="rounded-lg border border-red-500/25 bg-red-500/10 text-red-400 px-4 py-3 text-sm flex items-start gap-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{error}</span>
+                <span>{visibleError}</span>
               </div>
             )}
 

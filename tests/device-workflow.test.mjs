@@ -2,12 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deviceStatusLabel, resolveActiveDeviceId, singleFlight, summarizePackageBatch } from '../src/shared/deviceWorkflow.js';
 
-test('active device survives disconnect and never falls back to another online device', () => {
-  const devices = [{ id: 'second', status: 'device' }];
-  assert.equal(resolveActiveDeviceId('first', devices), 'first');
-  assert.equal(resolveActiveDeviceId('', devices), 'second');
-  assert.equal(resolveActiveDeviceId('first', []), 'first');
+test('unavailable selection automatically switches to the first online device', () => {
+  for (const status of ['offline', 'unauthorized', 'disconnected']) {
+    const devices = [{ id: 'first', status }, { id: 'second', status: 'device' }, { id: 'third', status: 'device' }];
+    assert.equal(resolveActiveDeviceId('first', devices), 'second');
+    assert.equal(resolveActiveDeviceId('missing-wifi', devices), 'second');
+    assert.equal(resolveActiveDeviceId('', devices), 'second');
+  }
   assert.equal(deviceStatusLabel('unauthorized'), '未授权');
+});
+
+test('online selection stays stable across discovery order changes and reconnection', () => {
+  const devices = Object.freeze([Object.freeze({ id: 'first', status: 'device' }), Object.freeze({ id: 'second', status: 'device' })]);
+  assert.equal(resolveActiveDeviceId('second', devices), 'second');
+  assert.equal(resolveActiveDeviceId('second', [...devices].reverse()), 'second');
+  const afterDisconnect = resolveActiveDeviceId('first', [devices[1]]);
+  assert.equal(afterDisconnect, 'second');
+  assert.equal(resolveActiveDeviceId(afterDisconnect, devices), 'second');
+});
+
+test('no online device preserves the previous selection until one is available', () => {
+  const devices = [{ id: 'unauthorized', status: 'unauthorized' }, { id: 'offline', status: 'offline' }];
+  assert.equal(resolveActiveDeviceId('previous-wifi', devices), 'previous-wifi');
+  assert.equal(resolveActiveDeviceId('previous-wifi', []), 'previous-wifi');
+  assert.equal(resolveActiveDeviceId('', devices), 'unauthorized');
+  assert.equal(resolveActiveDeviceId('', []), '');
+  assert.equal(resolveActiveDeviceId('previous-wifi', [{ id: 'usb', status: 'device' }]), 'usb');
 });
 
 test('manual and automatic device refresh share the same in-flight request', async () => {

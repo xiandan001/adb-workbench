@@ -37,6 +37,7 @@ const shortcutCapabilities = require('./lib/device-shortcut-capabilities.cjs');
 const serial = require('./lib/serial.cjs');
 const ssh = require('./lib/ssh.cjs');
 const aiTools = require('./lib/ai-tools.cjs');
+const appMessageDialog = require('./lib/app-message-dialog.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -169,6 +170,7 @@ app.whenReady().then(async () => {
   deviceMedia.register(ipcMain);
   shortcutCapabilities.register(ipcMain);
   serial.register(ipcMain);
+  appMessageDialog.register(ipcMain);
   ssh.register(ipcMain);
   aiTools.register(ipcMain);
   environmentCheck.register(ipcMain);
@@ -210,6 +212,7 @@ function cleanupRuntimeResources() {
 }
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
+  appMessageDialog.cleanup();
   // Invalidate pending AI dialogs/CLI launches immediately after quit confirmation.
   const aiCleanup = aiTools.cleanup().catch(() => console.warn('[AI Tools] quit cleanup failed'));
   // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
@@ -231,17 +234,19 @@ app.on('before-quit', async (event) => {
 
   quitCleanupRunning = true;
   try {
-    const ask = options => {
-      const owner = ctx.getMainWindow();
-      return owner && !owner.isDestroyed() ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options);
-    };
+    const owner = ctx.getMainWindow();
+    if ((!owner || owner.isDestroyed()) && (serial.needsQuitConfirmation() || ssh.needsQuitConfirmation() || screenRecording.listUnresolved().length)) {
+      createWindow(); quitCleanupRunning = false; return;
+    }
+    const ask = options => appMessageDialog.ask(options);
     if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { quitCleanupRunning = false; return; }
     if (!await ssh.confirmQuit(ask)) { quitCleanupRunning = false; return; }
     const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });
     if (!proceed) { quitCleanupRunning = false; return; }
   } catch (error) {
     quitCleanupRunning = false;
-    dialog.showErrorBox('未能完成退出前保存', `应用尚未退出，请返回设备页面重试。\n${error.message}`);
+    await appMessageDialog.ask({ type: 'error', title: '未能完成退出前保存', message: '应用尚未退出，请返回相关页面重试。', detail: error.message,
+      buttons: ['返回应用'], defaultId: 0, cancelId: 0 });
     return;
   }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();

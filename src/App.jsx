@@ -14,6 +14,7 @@ import QualityCenter from './components/QualityCenter';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import DangerConfirmModal from './components/DangerConfirmModal';
+import AppMessageDialogHost from './components/AppMessageDialogHost';
 import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
@@ -49,6 +50,7 @@ function App() {
   const [deviceQuery, setDeviceQuery] = useState('');
   const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
   const [activeDeviceId, setActiveDeviceId] = useState(() => localStorage.getItem('activeDeviceId') || '');
+  const previousActiveDeviceIdRef = useRef(activeDeviceId);
   const [navigationContext, setNavigationContext] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -364,6 +366,16 @@ function App() {
   }, [activeDeviceId]);
 
   useEffect(() => {
+    const previousId = previousActiveDeviceIdRef.current;
+    previousActiveDeviceIdRef.current = activeDeviceId;
+    if (!previousId || previousId === activeDeviceId) return;
+    const nextDevice = devices.find(device => device.id === activeDeviceId && device.status === 'device');
+    if (nextDevice && !devices.some(device => device.id === previousId && device.status === 'device')) {
+      showToast(`已切换到在线设备：${deviceNames[activeDeviceId] || nextDevice.model || activeDeviceId}。设备状态已更新，进行中的操作仍绑定原设备。`);
+    }
+  }, [activeDeviceId, devices, deviceNames, showToast]);
+
+  useEffect(() => {
     let stopped = false;
     let timer;
     let generation = 0;
@@ -379,10 +391,12 @@ function App() {
     };
     timer = setTimeout(poll, 5000);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onVisibilityChange);
     return () => {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onVisibilityChange);
     };
   }, [fetchDevices]);
 
@@ -1353,7 +1367,7 @@ function App() {
   const hasOnlineDevice = devices.some(device => device.status === 'device');
   const showConnectionForm = connectionFormOpen || !hasOnlineDevice;
   const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
-  const eligibleDevices = isVipOrLoading ? devices : devices.slice(0, 1);
+  const eligibleDevices = isVipOrLoading ? devices : [activeDevice || devices[0]].filter(Boolean);
   const visibleDevices = filterDeviceCards(eligibleDevices, { query: deviceQuery, names: deviceNames, pinnedIds: pinnedDeviceIds });
   const lockedCount = devices.length - eligibleDevices.length;
   const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
@@ -1424,6 +1438,7 @@ function App() {
 
   return (
     <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
+      <AppMessageDialogHost theme={t} isDark={isDark} />
       {/* Toast 提示 */}
       {toast && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-[#2D2F33] text-white rounded-lg shadow-lg text-sm">
@@ -1768,7 +1783,7 @@ function App() {
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'ssh' ? 'SSH 工作区' : activeTab === 'ai-tools' ? 'AI 工具管理' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
             </h2>
-            {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>设备连接状态每 5 秒自动更新</p>}
+            {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>每 5 秒自动刷新 · 当前设备断开后自动选用在线设备</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>通过电脑串口线连接设备 · 端口列表每 2 秒自动更新</p>}
             {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>多台主机 · 多个终端 · 文件与终端同屏操作</p>}
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>供应商配置 · 额度查询 · 安全切换与恢复</p>}
@@ -1821,7 +1836,7 @@ function App() {
               {activeDeviceId && activeDevice?.status !== 'device' && (
                 <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
                   <AlertCircle size={14} />
-                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice?.status || 'disconnected')}，已保留选择，不会自动切换。{deviceConnectionHint(activeDevice?.status)}</span>
+                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice?.status || 'disconnected')}，正在等待可用的在线设备；发现后会自动选用并刷新。{deviceConnectionHint(activeDevice?.status)}</span>
                   <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">环境自检</button>
                 </div>
               )}

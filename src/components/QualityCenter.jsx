@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isDarkTheme } from '../shared/theme';
 import { getMatchingBaseline, getAcceptanceErrors, qualityErrorMessage, getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
@@ -47,6 +47,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const [lastStoppedGuard, setLastStoppedGuard] = useState(null);
   const [qualityTab, setQualityTab] = useState('regression');
   const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const deviceContextRef = useRef({ deviceId: activeDeviceId || '', generation: 0 });
+  const deviceOperationRef = useRef(null);
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -61,7 +63,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       const task = event?.task?.id === lastAcceptanceTask.id
         ? event.task
         : (event?.activeTasks || []).find(item => item.id === lastAcceptanceTask.id);
-      if (task) setLastAcceptanceTask(task);
+      if (task) setLastAcceptanceTask(previous => previous?.id === task.id ? task : previous);
     });
   }, [lastAcceptanceTask?.id]);
 
@@ -72,17 +74,22 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
         activeGuards: event?.activeGuards || [],
         history: event?.history || []
       });
-      if (event?.guard?.reportPath) setLastStoppedGuard(event.guard);
+      if (event?.guard?.reportPath && event.guard.deviceId === deviceContextRef.current.deviceId) setLastStoppedGuard(event.guard);
     });
   }, []);
 
   const selectedDeviceId = activeDeviceId || deviceId || onlineDevices[0]?.id || '';
+  useLayoutEffect(() => {
+    deviceContextRef.current = { deviceId: selectedDeviceId, generation: deviceContextRef.current.generation + 1 };
+    return () => { deviceContextRef.current = { deviceId: '', generation: deviceContextRef.current.generation + 1 }; };
+  }, [selectedDeviceId]);
   const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
   const selectedBaseline = getMatchingBaseline(baselines, selectedDeviceId, selectedBaselinePath);
   const effectiveBaselinePath = selectedBaseline?.path || '';
   const activeGuard = guardState.activeGuards.find(item => item.deviceId === selectedDeviceId);
   const matchingBaselines = useMemo(() => baselines.filter(item => item.deviceId === selectedDeviceId), [baselines, selectedDeviceId]);
   const acceptanceErrors = getAcceptanceErrors({ suiteId, apkPath, packageName, baselineImagePath, rounds, launchWaitMs, threshold });
+  const visibleAcceptanceTask = lastAcceptanceTask?.deviceRuns?.some(run => run.deviceId === selectedDeviceId) ? lastAcceptanceTask : null;
 
   async function loadBaselines() {
     setLoading(true);
@@ -130,6 +137,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       showToast?.('请先选择在线设备');
       return;
     }
+    const context = deviceContextRef.current; const operation = {}; deviceOperationRef.current = operation;
     setBusy('capture');
     setError('');
     const res = await window.electronAPI?.regressionCaptureBaseline?.({
@@ -137,6 +145,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       name: baselineName,
       includePerformance
     });
+    if (deviceContextRef.current !== context) { if (deviceOperationRef.current === operation) setBusy(''); return; }
     if (res?.ok) {
       setBaselineName('');
       setBaselines(prev => [res.baseline, ...prev.filter(item => item.path !== res.baseline.path)]);
@@ -145,7 +154,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     } else {
       setError(res?.error || '回归基线采集失败');
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   async function runRegression() {
@@ -157,6 +166,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       showToast?.('请先选择回归基线');
       return;
     }
+    const context = deviceContextRef.current; const operation = {}; deviceOperationRef.current = operation;
     setBusy('run');
     setError('');
     const res = await window.electronAPI?.regressionRun?.({
@@ -165,6 +175,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       name: reportName,
       includePerformance
     });
+    if (deviceContextRef.current !== context) { if (deviceOperationRef.current === operation) setBusy(''); return; }
     if (res?.ok) {
       setReportName('');
       setLastResult(res.result);
@@ -172,11 +183,12 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     } else {
       setError(res?.error || '回归差异报告生成失败');
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   async function deleteBaseline(path) {
     if (!path) return;
+    const operation = {}; deviceOperationRef.current = operation;
     setBusy(`delete:${path}`);
     setError('');
     const res = await window.electronAPI?.regressionDeleteBaseline?.({ baselinePath: path });
@@ -186,7 +198,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     } else {
       setError(res?.error || '回归基线删除失败');
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   async function openPath(targetPath) {
@@ -218,6 +230,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       setError(Object.values(acceptanceErrors).join('；'));
       return;
     }
+    const context = deviceContextRef.current; const operation = {}; deviceOperationRef.current = operation;
     setBusy('acceptance');
     setError('');
     const res = await window.electronAPI?.acceptanceRun?.({
@@ -230,13 +243,14 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       launchWaitMs,
       threshold
     });
+    if (deviceContextRef.current !== context) { if (deviceOperationRef.current === operation) setBusy(''); return; }
     if (res?.ok) {
       setLastAcceptanceTask(res.task);
       showToast?.('验收套餐已提交到任务中心');
     } else {
       setError(qualityErrorMessage(res?.error || '验收套餐启动失败'));
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   async function startGuard() {
@@ -244,27 +258,31 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       showToast?.('请先选择在线设备');
       return;
     }
+    const context = deviceContextRef.current; const operation = {}; deviceOperationRef.current = operation;
     setBusy('guard');
     setError('');
     const res = await window.electronAPI?.deviceGuardStart?.({
       deviceId: selectedDeviceId,
       intervalMs: guardIntervalMs
     });
+    if (deviceContextRef.current !== context) { if (deviceOperationRef.current === operation) setBusy(''); return; }
     if (res?.ok) {
       setGuardState(prev => ({ ...prev, activeGuards: res.activeGuards || prev.activeGuards }));
       showToast?.('设备守护已启动');
     } else {
       setError(res?.error || '设备守护启动失败');
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   async function stopGuard() {
     const guard = activeGuard;
     if (!guard) return;
+    const context = deviceContextRef.current; const operation = {}; deviceOperationRef.current = operation;
     setBusy('guard');
     setError('');
     const res = await window.electronAPI?.deviceGuardStop?.({ guardId: guard.id });
+    if (deviceContextRef.current !== context) { if (deviceOperationRef.current === operation) setBusy(''); return; }
     if (res?.ok) {
       setGuardState({ activeGuards: res.activeGuards || [], history: res.history || [] });
       setLastStoppedGuard(res.guard);
@@ -272,7 +290,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     } else {
       setError(res?.error || '设备守护停止失败');
     }
-    setBusy('');
+    if (deviceOperationRef.current === operation) setBusy('');
   }
 
   return (
@@ -426,7 +444,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
             )}
           </div>
 
-          {lastResult && (
+          {lastResult?.deviceId === selectedDeviceId && (
             <div className={`rounded-lg border p-4 ${soft}`}>
               <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -581,8 +599,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
 
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div className={`text-xs ${muted}`}>
-                  {lastAcceptanceTask ? (
-                    <button type="button" onClick={() => setShowTaskDetails(true)} className="text-left text-emerald-500 hover:underline">最近任务：{lastAcceptanceTask.scriptName || lastAcceptanceTask.id} · {getTaskStatusLabel(lastAcceptanceTask.status)} · 查看详情</button>
+                  {visibleAcceptanceTask ? (
+                    <button type="button" onClick={() => setShowTaskDetails(true)} className="text-left text-emerald-500 hover:underline">最近任务：{visibleAcceptanceTask.scriptName || visibleAcceptanceTask.id} · {getTaskStatusLabel(visibleAcceptanceTask.status)} · 查看详情</button>
                   ) : '验收结果会进入任务中心和产物中心'}
                   {Object.keys(acceptanceErrors).length > 0 && <p className="mt-2 text-amber-600">请先补齐上方标出的参数</p>}
                 </div>
@@ -670,7 +688,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                 </div>
               )}
 
-              {lastStoppedGuard?.reportPath && (
+              {lastStoppedGuard?.deviceId === selectedDeviceId && lastStoppedGuard.reportPath && (
                 <div className={`rounded-lg border p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                   <div className="min-w-0">
                     <div className={`text-sm font-medium ${text}`}>{lastStoppedGuard.name || '设备守护报告'}</div>
@@ -693,9 +711,9 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
           )}
         </div>
       </section>
-      {showTaskDetails && lastAcceptanceTask && (
+      {showTaskDetails && visibleAcceptanceTask && (
         <TaskCenterResultDrawer
-          task={lastAcceptanceTask}
+          task={visibleAcceptanceTask}
           theme={theme}
           onClose={() => setShowTaskDetails(false)}
           onOpenPath={openPath}

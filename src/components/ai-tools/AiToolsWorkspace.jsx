@@ -16,7 +16,7 @@ import AiSkillsPanel from './AiSkillsPanel';
 import AiPortablePanel from './AiPortablePanel';
 import AiProviderHome from './AiProviderHome';
 import { aiToolsCan, providerDraft, providerInput } from './aiToolsModel';
-import { connectionFeedback, providerFeedbackCurrent, providerFeedbackToken } from './aiProviderHomeModel';
+import { connectionCompletionNotice, connectionFeedback, providerFeedbackCurrent, providerFeedbackToken, retainProviderFeedback } from './aiProviderHomeModel';
 
 export default function AiToolsWorkspace({ active = true, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership }) {
   const [snapshot, setSnapshot] = useState(null); const snapshotRef = useRef(null); const requestRef = useRef(onRequest);
@@ -37,18 +37,20 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
   const accept = useCallback(data => {
     if (!data || typeof data.membership?.activated !== 'boolean' || !Array.isArray(data.providers) || !Array.isArray(data.tools) || !Array.isArray(data.capabilities)) throw new Error('AI 工具状态格式无效，请刷新后重试');
     const state = { ...data, membership: { ...data.membership, reason: typeof data.membership.reason === 'string' && /[\u3400-\u9fff]/.test(data.membership.reason) ? data.membership.reason : '会员状态尚未通过验证，请在已有会员中心检查。此功能沿用本软件 VIP，无需额外账号。' } };
+    if (snapshotRef.current && snapshotRef.current.membership.activated !== state.membership.activated) invalidateFeedback();
+    setFeedbackRecords(previous => retainProviderFeedback(previous, state.providers, feedbackEpoch.current, state.membership.activated));
     snapshotRef.current = state; setSnapshot(state); setSnapshotReady(true); setSnapshotRevision(value => value + 1);
     setQuotaResults(Object.fromEntries((Array.isArray(data.quota) ? data.quota : []).map(item => [item.providerId, item])));
-  }, []);
+  }, [invalidateFeedback]);
   const refresh = useCallback(async () => {
-    const ticket = ++loadTicket.current; invalidateFeedback(); setSnapshotReady(false); setLoading(true); setError('');
+    const ticket = ++loadTicket.current; setSnapshotReady(false); setLoading(true); setError('');
     try {
       if (typeof requestRef.current !== 'function') throw new Error('AI 工具接口尚未连接');
       const data = await requestRef.current('snapshot', {});
       if (alive.current && ticket === loadTicket.current) accept(data);
     } catch (failure) { if (alive.current && ticket === loadTicket.current) setError(failure.message); }
     finally { if (alive.current && ticket === loadTicket.current) setLoading(false); }
-  }, [accept, invalidateFeedback]);
+  }, [accept]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { if (active) void refresh(); }, [active, refresh]);
   useEffect(() => { const focus = () => { if (activeRef.current && !document.hidden) void refresh(); }; window.addEventListener('focus', focus); return () => window.removeEventListener('focus', focus); }, [refresh]);
@@ -86,22 +88,33 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
     const updateBusy = isQuota ? setQuotaBusy : setBusy;
     if (pending.current.has(pendingKey)) return { skipped: true };
     const token = providerFeedbackToken(provider, feedbackEpoch.current); pending.current.add(pendingKey); updateBusy(previous => ({ ...previous, [provider.id]: command }));
+    const previousFeedback = feedbackRecords[provider.id];
     const current = () => alive.current && providerFeedbackCurrent(token, snapshotRef.current?.providers.find(item => item.id === provider.id), feedbackEpoch.current);
     if (isQuota) setQuotaErrors(previous => ({ ...previous, [provider.id]: '' }));
-    else setFeedbackRecords(previous => { const next = { ...previous }; delete next[provider.id]; return next; });
+    else setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value: { status: 'pending', message: command === 'provider_probe' ? '正在等待确认或执行连接测试，请稍候…' : '正在检查只读接口，请稍候…' } } }));
     try {
       const result = await request(command, { providerId: provider.id });
       if (!current()) return { skipped: true };
-      if (result?.cancelled) return result;
+      if (result?.cancelled) {
+        if (!isQuota) {
+          setFeedbackRecords(previous => ({ ...previous, [provider.id]: providerFeedbackCurrent(previousFeedback?.token, provider, feedbackEpoch.current) ? previousFeedback : { token, value: { status: 'cancelled', message: '已取消连接测试，未发送模型测试请求。' } } }));
+          showToast?.(connectionCompletionNotice(result));
+        }
+        return result;
+      }
       if (command === 'quota_query') {
         if (result?.providerId !== provider.id) throw new Error('额度结果与当前供应商不一致，未显示数据');
         setQuotaResults(previous => ({ ...previous, [provider.id]: result }));
       } else {
-        const value = connectionFeedback(result); setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value } }));
+        const value = { ...connectionFeedback(result), completedAt: Date.now() }; setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value } }));
+        showToast?.(connectionCompletionNotice(result, value));
       }
       return result;
     } catch (failure) {
-      if (current()) { if (command === 'quota_query') setQuotaErrors(previous => ({ ...previous, [provider.id]: failure.message })); else setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value: { status: 'error', message: failure.message } } })); }
+      if (current()) {
+        if (command === 'quota_query') setQuotaErrors(previous => ({ ...previous, [provider.id]: failure.message }));
+        else { const value = { status: 'error', message: failure.message || '连接测试失败，请重试。', completedAt: Date.now() }; setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value } })); showToast?.(connectionCompletionNotice(null, value)); }
+      }
       return { status: 'error', reason: failure.message };
     } finally { pending.current.delete(pendingKey); if (alive.current) updateBusy(previous => { const next = { ...previous }; delete next[provider.id]; return next; }); }
   };
@@ -126,9 +139,9 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
   };
   const applyPreview = async token => {
     const result = await request(preview?.resourceMode ? 'resources_apply' : 'config_apply', { token }, { restoring: preview?.restoring === true });
-    if (alive.current) { setConfigurationRevision(value => value + 1); await refresh(); showToast?.(result.operation === 'restore' ? '配置已恢复' : '配置已应用，并已创建恢复备份'); }
+    if (alive.current) { invalidateFeedback(); setConfigurationRevision(value => value + 1); await refresh(); showToast?.(result.operation === 'restore' ? '配置已恢复' : '配置已应用，并已创建恢复备份'); }
   };
-  const imported = async () => { setConfigurationRevision(value => value + 1); await refresh(); };
+  const imported = async () => { invalidateFeedback(); setConfigurationRevision(value => value + 1); await refresh(); };
   const changeQuotaAutoRefresh = (id, enabled) => setQuotaAutoRefresh(previous => ({ ...previous, [id]: enabled }));
 
   return <section aria-label="AI 工具工作区" className={`min-w-0 space-y-4 ${theme.text}`}>

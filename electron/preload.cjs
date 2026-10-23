@@ -10,6 +10,13 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  appMessageDialogReady: () => ipcRenderer.invoke('app-message-dialog:ready'),
+  appMessageDialogUnready: () => ipcRenderer.invoke('app-message-dialog:unready'),
+  appMessageDialogReply: value => ipcRenderer.invoke('app-message-dialog:reply', value),
+  onAppMessageDialog: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('app-message-dialog:event', listener);
+    return () => ipcRenderer.off('app-message-dialog:event', listener);
+  },
   aiToolsRequest: args => ipcRenderer.invoke('ai-tools:request', args),
   sshSnapshot: () => ipcRenderer.invoke('ssh:snapshot'),
   sshSubscribe: args => ipcRenderer.invoke('ssh:subscribe', args),

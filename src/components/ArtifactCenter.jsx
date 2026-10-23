@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, useEffect } from 'react';
+import { confirmAppMessage } from '../shared/appMessageDialog';
 import {
   Activity,
   AlertCircle,
@@ -199,7 +200,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
       showConfirm(confirmOptions);
       return;
     }
-    if (window.confirm(confirmOptions.message)) await runDelete();
+    if (await confirmAppMessage({ type: 'warning', title: confirmOptions.title, message: confirmOptions.message, detail: `${confirmOptions.detail}\n\n${bullets.join('\n')}`, confirmLabel: confirmOptions.confirmLabel })) await runDelete();
   };
 
   return (

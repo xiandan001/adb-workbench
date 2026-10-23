@@ -15,6 +15,7 @@ const { createAiToolsSkills } = require('./ai-tools-skills.cjs');
 const { readSafe, fail } = require('./ai-tools-file-safety.cjs');
 const { findExecutable, launchTerminal } = require('./ai-tools-launcher.cjs');
 const { requestJson, createAiToolsNetwork } = require('./ai-tools-network.cjs');
+const appMessageDialog = require('./app-message-dialog.cjs');
 
 let controller;
 function register(ipcMain) {
@@ -37,7 +38,7 @@ function register(ipcMain) {
   controller = createAiToolsController({ store, config, quota: createAiToolsQuota(), models: createAiToolsModels({ request: requestJson, resolveLocal: router.localModels }), sessions: createAiToolsSessions({ home: app.getPath('home'), directory, ...encryption }),
     probe: createAiToolsProbe({ request: probeRequest, requestLocal: localProbeRequest, resolveLocal: router.localProbe }),
     confirmProbe: async plan => {
-      const answer = await dialog.showMessageBox(getMainWindow(), { type: 'question', title: '测试模型连接', message: `测试 ${plan.name} 的模型连接？`,
+      const answer = await appMessageDialog.ask({ type: 'question', title: '测试模型连接', message: `测试 ${plan.name} 的模型连接？`,
         detail: `模型：${plan.model}\n接口：${plan.endpoint}\n\n模型调用测试仅发送固定短文本“Reply OK.”，输出上限 ${plan.maxOutputTokens} tokens，不发送项目文件，不自动重试，可能消耗少量服务商额度。\n\n也可选择只读接口检查；不提供模型列表不代表模型不能调用。`,
         buttons: ['开始最小模型测试', '仅检查只读接口', '取消'], defaultId: 2, cancelId: 2, noLink: true });
       return answer.response === 0 ? 'inference' : answer.response === 1 ? 'read-only' : 'cancel';
