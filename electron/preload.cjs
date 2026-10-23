@@ -10,6 +10,14 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  feedbackContext: () => ipcRenderer.invoke('feedback:context'),
+  feedbackAuthStart: () => ipcRenderer.invoke('feedback:auth-start'),
+  feedbackAuthStatus: () => ipcRenderer.invoke('feedback:auth-status'),
+  feedbackAuthCancel: () => ipcRenderer.invoke('feedback:auth-cancel'),
+  feedbackAuthLogout: () => ipcRenderer.invoke('feedback:auth-logout'),
+  feedbackPreview: value => ipcRenderer.invoke('feedback:preview', value),
+  feedbackSubmit: value => ipcRenderer.invoke('feedback:submit', value),
+  feedbackOpenIssue: value => ipcRenderer.invoke('feedback:open-issue', value),
   startupPresentationPreferences: value => ipcRenderer.send('startup:prefs', value),
   startupPresentationReady: () => ipcRenderer.send('startup:ready'),
   startupPresentationFailed: () => ipcRenderer.send('startup:failed'),
@@ -429,3 +437,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   envCheckRun: (args) => ipcRenderer.invoke('env-check:run', args),
   envCheckRestartAdb: () => ipcRenderer.invoke('env-check:restartAdb')
 });
+
+// Observe only the occurrence, never error text, source paths, rejected values or user input.
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', () => ipcRenderer.send('feedback:renderer-error'));
+  window.addEventListener('unhandledrejection', () => ipcRenderer.send('feedback:renderer-error'));
+}

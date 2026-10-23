@@ -15,9 +15,10 @@ function validRectangle(value) {
 }
 
 function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow }) {
-  let ended = false; let preferences; let mainReady = false; let overlay; let playing = false;
+  let ended = false; let preferences; let mainReady = false; let nativeReady = false;
+  let overlay; let playing = false; let sceneFinished = false; let warmed = false; let fading = false;
   let loadTimer; let playTimer;
-  const listeners = [];
+  const listeners = []; const fadeTimers = [];
   const totalTimer = setTimeout(reveal, 10000);
   const listen = (source, name, handler) => { source.on(name, handler); listeners.push(() => source.removeListener(name, handler)); };
   function owns(event, window) {
@@ -26,21 +27,41 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
   }
   function cleanup() {
     clearTimeout(totalTimer); clearTimeout(loadTimer); clearTimeout(playTimer);
+    for (const timer of fadeTimers.splice(0)) clearTimeout(timer);
     for (const detach of listeners.splice(0)) detach();
     if (overlay && !overlay.isDestroyed()) overlay.destroy();
     overlay = undefined;
   }
   function reveal() {
     if (ended) return;
-    ended = true; cleanup();
-    if (!mainWindow.isDestroyed()) {
-      if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.setBackgroundThrottling(true);
-      mainWindow.show();
-    }
+    ended = true;
+    try { restoreMain(); if (!mainWindow.isDestroyed()) mainWindow.show(); }
+    finally { cleanup(); }
+  }
+  function restoreMain() {
+    if (mainWindow.isDestroyed()) return;
+    mainWindow.setOpacity(1); mainWindow.setIgnoreMouseEvents(false);
+    if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.setBackgroundThrottling(true);
   }
   function dispose() {
     if (ended) return;
-    ended = true; cleanup();
+    ended = true;
+    try {
+      // A warmed window is already shown at zero opacity; hide before restoring it during quit.
+      if (warmed && !mainWindow.isDestroyed()) mainWindow.hide();
+      restoreMain();
+    } finally { cleanup(); }
+  }
+  function handoff() {
+    if (ended || fading || !sceneFinished || !mainReady || !nativeReady) return;
+    fading = true;
+    // Fixed, bounded steps also remain bounded if the main process is briefly busy.
+    for (let step = 1; step <= 14; step++) fadeTimers.push(setTimeout(() => {
+      if (ended) return;
+      if (mainWindow.isDestroyed() || !overlay || overlay.isDestroyed()) { reveal(); return; }
+      mainWindow.setOpacity(step / 14); overlay.setOpacity(1 - step / 14);
+      if (step === 14) reveal();
+    }, step * 20));
   }
   function createOverlay() {
     try {
@@ -55,6 +76,8 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
         webPreferences: { preload: path.join(__dirname, '../startup/preload.cjs'), nodeIntegration: false,
           contextIsolation: true, sandbox: true, devTools: false, backgroundThrottling: false } });
       overlay.setIgnoreMouseEvents(true);
+      warmed = true;
+      mainWindow.setOpacity(0); mainWindow.setIgnoreMouseEvents(true); mainWindow.showInactive();
       overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       listen(overlay.webContents, 'will-navigate', event => event.preventDefault());
       listen(overlay.webContents, 'did-fail-load', reveal);
@@ -70,7 +93,8 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
         } catch { reveal(); }
       });
       listen(ipcMain, 'startup-overlay:finished', (event, ...args) => {
-        if (!args.length && playing && owns(event, overlay)) reveal();
+        if (args.length || !playing || !owns(event, overlay) || sceneFinished) return;
+        sceneFinished = true; clearTimeout(playTimer); handoff();
       });
       loadTimer = setTimeout(reveal, 2000);
       Promise.resolve(overlay.loadFile(path.join(__dirname, '../startup/scene.html'))).catch(reveal);
@@ -86,7 +110,9 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
     if (args.length || !owns(event, mainWindow)) return;
     mainReady = true;
     if (preferences && (!preferences.startupAnimation || preferences.reducedMotion)) reveal();
+    else handoff();
   });
+  listen(mainWindow, 'ready-to-show', () => { nativeReady = true; handoff(); });
   listen(ipcMain, 'startup:failed', (event, ...args) => { if (!args.length && owns(event, mainWindow)) reveal(); });
   listen(mainWindow, 'closed', dispose);
   listen(mainWindow.webContents, 'did-fail-load', reveal);

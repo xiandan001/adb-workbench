@@ -19,6 +19,7 @@ import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
 import StartupPreferences from './components/StartupPreferences';
+import FeedbackSection from './components/FeedbackSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
@@ -2746,6 +2747,7 @@ function App() {
               </section>
 
               <section id="settings-update" className={settingsSectionClass}>
+                <FeedbackSection theme={t} currentPage={activeTab} />
                 {/* 关于与更新 */}
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">

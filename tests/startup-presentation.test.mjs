@@ -148,7 +148,11 @@ test('React ready effect cancels abandoned first frames and survives strict-mode
     requestAnimationFrame: fn => { frames.set(++nextFrame, fn); return nextFrame; }, cancelAnimationFrame: id => frames.delete(id),
   });
   const firstCleanup = effect(); assert.equal(ready, 0); firstCleanup(); assert.equal(frames.size, 0);
-  const finalCleanup = effect(); frames.get(nextFrame)(); assert.equal(ready, 1); finalCleanup(); assert.equal(frames.size, 0);
+  const betweenFrames = effect(); const firstFrame = nextFrame; frames.get(firstFrame)();
+  assert.equal(ready, 0, 'first RAF runs before paint and must not announce readiness');
+  betweenFrames(); assert.equal(frames.size, 0, 'StrictMode cleanup must cancel both scheduled frames');
+  const finalCleanup = effect(); frames.get(nextFrame)(); assert.equal(ready, 0);
+  frames.get(nextFrame)(); assert.equal(ready, 1); finalCleanup(); assert.equal(frames.size, 0);
 });
 
 test('startup retry permits only a reload of the current main document, never arbitrary navigation', () => {

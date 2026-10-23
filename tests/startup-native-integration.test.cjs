@@ -38,6 +38,7 @@ function harness() {
   const ctx = { setMainWindow(win) { ctx.current = win; calls.push('context'); }, getMainWindow: () => ctx.current, getLogAnalyzerWindow: () => null };
   const cleanupModule = label => ({ cleanup: () => calls.push(label) });
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
+    feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
     startupPresentation: null, startupPresented: false, ipcMain: {}, screen: {}, console: { log() {} },
     createStartupPresentation({ mainWindow }) {
       assert.equal(ctx.current, mainWindow); calls.push('controller');
@@ -87,7 +88,7 @@ test('confirmed quit cancels animation before awaiting potentially slow device c
   });
   const pending = vm.runInContext(beforeQuitSource, h.context)();
   assert.equal(h.presentations[0].disposals, 1); assert.equal(h.context.startupPresentation, null);
-  assert.equal(h.presentations[0].reveals, 0); finish(); await pending;
+  assert.equal(h.presentations[0].reveals, 0); await Promise.resolve(); finish(); await pending;
   assert.equal(h.presentations[0].disposals, 1);
 });
 
@@ -100,4 +101,17 @@ test('regular preload exposes only fixed one-way startup signals, never overlay 
   api.startupPresentationPreferences(flags); api.startupPresentationReady('ignored'); api.startupPresentationFailed('ignored');
   assert.deepEqual(sent, [['startup:prefs', flags], ['startup:ready'], ['startup:failed']]);
   assert.ok(!Object.keys(api).some(key => /overlay/i.test(key)));
+});
+
+test('a stalled optional diagnostic flush cannot block starting device cleanup or hold exit forever', async () => {
+  const h = harness(); h.create(); let deadline; const cleaned = [];
+  Object.assign(h.context, { feedback: { record() {}, cleanup: () => new Promise(() => {}) }, appMessageDialog: { cleanup() {} },
+    aiTools: { cleanup: async () => cleaned.push('ai') }, serial: { cleanup: async () => cleaned.push('serial') }, ssh: { cleanup: async () => cleaned.push('ssh') },
+    cleanupRuntimeResources: h.cleanup, cleanupAndroidToolProcesses: async () => cleaned.push('android'),
+    setTimeout: (fn, ms) => { assert.equal(ms, 1000); deadline = fn; return 1; }, clearTimeout() {},
+  });
+  const pending = vm.runInContext(beforeQuitSource, h.context)();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(cleaned.includes('serial') && cleaned.includes('ssh') && cleaned.includes('ai'));
+  assert.equal(typeof deadline, 'function'); deadline(); await pending; assert.ok(cleaned.includes('android'));
 });

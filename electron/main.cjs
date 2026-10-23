@@ -39,6 +39,7 @@ const ssh = require('./lib/ssh.cjs');
 const aiTools = require('./lib/ai-tools.cjs');
 const appMessageDialog = require('./lib/app-message-dialog.cjs');
 const startupSettings = require('./lib/startup-settings.cjs');
+const feedback = require('./lib/feedback.cjs');
 const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
@@ -122,6 +123,9 @@ function createWindow() {
     presentation?.dispose();
     if (startupPresentation === presentation) startupPresentation = null;
   });
+  mainWindow.webContents.on('render-process-gone', () => feedback.record({ level: 'error', module: 'renderer', operation: 'renderer-error', outcome: 'failure', errorCode: 'UNKNOWN' }));
+  mainWindow.webContents.on('did-fail-load', () => feedback.record({ level: 'error', module: 'app', operation: 'failure', outcome: 'failure', errorCode: 'UNKNOWN' }));
+  mainWindow.webContents.once('did-finish-load', () => feedback.record({ level: 'info', module: 'app', operation: 'ready', outcome: 'success' }));
 
   // Permit retrying the current document, but never navigate to another URL.
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -163,37 +167,40 @@ app.whenReady().then(async () => {
 
   // 注册所有领域模块的 IPC handlers
   // 顺序无依赖（每个模块独立注册自己的 ipcMain.handle/on）
-  version.register(ipcMain);
-  updater.register(ipcMain);
-  adb.register(ipcMain);
-  window.register(ipcMain);
-  settings.register(ipcMain);
-  startupSettings.register(ipcMain);
-  history.register(ipcMain);
-  logAnalyzer.register(ipcMain);
-  mcp.register(ipcMain);
-  autoDiagnose.register(ipcMain);
-  aiAnalyze.register(ipcMain);
-  smartSearch.register(ipcMain);
-  vip.register(ipcMain);
+  feedback.register(ipcMain);
+  const diagnosticIpc = feedback.observedIpc(ipcMain);
+  feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
+  version.register(diagnosticIpc);
+  updater.register(diagnosticIpc);
+  adb.register(diagnosticIpc);
+  window.register(diagnosticIpc);
+  settings.register(diagnosticIpc);
+  startupSettings.register(diagnosticIpc);
+  history.register(diagnosticIpc);
+  logAnalyzer.register(diagnosticIpc);
+  mcp.register(diagnosticIpc);
+  autoDiagnose.register(diagnosticIpc);
+  aiAnalyze.register(diagnosticIpc);
+  smartSearch.register(diagnosticIpc);
+  vip.register(diagnosticIpc);
   // 注册设备巡检报告、App 包管理与性能监控模块
-  inspection.register(ipcMain);
-  troubleshooting.register(ipcMain);
-  packageManager.register(ipcMain);
-  performanceMonitor.register(ipcMain);
-  taskCenter.register(ipcMain);
-  artifactCenter.register(ipcMain);
-  dataMigration.register(ipcMain);
-  deviceMedia.register(ipcMain);
-  shortcutCapabilities.register(ipcMain);
-  serial.register(ipcMain);
-  appMessageDialog.register(ipcMain);
-  ssh.register(ipcMain);
-  aiTools.register(ipcMain);
-  environmentCheck.register(ipcMain);
-  regressionReport.register(ipcMain);
-  acceptanceSuite.register(ipcMain);
-  deviceGuard.register(ipcMain);
+  inspection.register(diagnosticIpc);
+  troubleshooting.register(diagnosticIpc);
+  packageManager.register(diagnosticIpc);
+  performanceMonitor.register(diagnosticIpc);
+  taskCenter.register(diagnosticIpc);
+  artifactCenter.register(diagnosticIpc);
+  dataMigration.register(diagnosticIpc);
+  deviceMedia.register(diagnosticIpc);
+  shortcutCapabilities.register(diagnosticIpc);
+  serial.register(diagnosticIpc);
+  appMessageDialog.register(diagnosticIpc);
+  ssh.register(diagnosticIpc);
+  aiTools.register(diagnosticIpc);
+  environmentCheck.register(diagnosticIpc);
+  regressionReport.register(diagnosticIpc);
+  acceptanceSuite.register(diagnosticIpc);
+  deviceGuard.register(diagnosticIpc);
 
   vip.preload();
 
@@ -237,6 +244,10 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   startupPresentation?.dispose();
   startupPresentation = null;
   appMessageDialog.cleanup();
+  feedback.record({ level: 'info', module: 'app', operation: 'shutdown', outcome: 'success' });
+  let feedbackCleanup;
+  try { feedbackCleanup = Promise.resolve(feedback.cleanup()).catch(() => {}); }
+  catch { feedbackCleanup = Promise.resolve(); }
   // Invalidate pending AI dialogs/CLI launches immediately after quit confirmation.
   const aiCleanup = aiTools.cleanup().catch(() => console.warn('[AI Tools] quit cleanup failed'));
   // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
@@ -244,6 +255,11 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
   await aiCleanup;
   cleanupRuntimeResources();
+  // Flush optional diagnostic records without delaying device cleanup or waiting indefinitely on disk IO.
+  await new Promise(resolve => {
+    const timer = setTimeout(resolve, 1000);
+    feedbackCleanup.then(() => { clearTimeout(timer); resolve(); });
+  });
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
   } else {

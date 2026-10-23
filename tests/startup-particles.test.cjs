@@ -40,13 +40,14 @@ test('native scene waits for play, preserves the 1000ms logo hold and finishes o
   h.play(); assert.equal(h.frames.size, 0); assert.equal(h.finished(), 1);
 });
 
-test('scene morphs to the exact received DIP target, including negative/off-display positions, and preserves end fade', () => {
+test('scene morphs to the exact DIP target and retains a dim final wireframe until native handoff', () => {
   const h = harness({ ratio: 2 }); h.play({ target: { x: -80, y: 45, width: 1600, height: 900 } }); h.frame(0);
   assert.equal(h.host.width, 2880); assert.equal(h.host.height, 1620);
   assert.deepEqual(h.frame(4180).strokes[0].segments.slice(0, 2), [['move', -80, 45], ['line', 1520, 45]]);
   assert.ok(Math.abs(h.strokes[0].alpha - .32) < 1e-9);
   const fade = h.frame(4290); assert.ok(Math.abs(fade.strokes[0].alpha - .16) < 1e-9);
-  const done = h.frame(4400); assert.equal(done.strokes[0].alpha, 0); assert.equal(h.finished(), 1);
+  const done = h.frame(4400); assert.ok(Math.abs(done.strokes[0].alpha - .096) < 1e-9); assert.equal(h.finished(), 1);
+  assert.ok(done.draws.some(draw => draw.name === 'sprite' && draw.alpha > 0)); assert.equal(h.frames.size, 0);
   assert.ok(h.labels.includes('卓控台'));
   assert.deepEqual(h.colors, [[0, '#e6fff9'], [.15, '#62f5d6'], [.4, '#20cbaa80'], [1, '#10b7d000']]);
 });

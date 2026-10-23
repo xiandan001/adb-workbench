@@ -61,7 +61,9 @@
         frame = undefined; if (disposed || finished) return;
         try {
           if (startTime === undefined) startTime = time;
-          const elapsed = time - startTime; const progress = Math.min(1, Math.max(0, (elapsed - holdExtraMs - 180) / morphMs)); const t = ease(progress); const endFade = Math.max(0, 1 - Math.max(0, elapsed - endFadeAt) / 220);
+          const elapsed = time - startTime; const progress = Math.min(1, Math.max(0, (elapsed - holdExtraMs - 180) / morphMs)); const t = ease(progress);
+          // Keep a quiet final wireframe until the native owner has painted and cross-faded in.
+          const endFade = Math.max(bridge ? .3 : 0, 1 - Math.max(0, elapsed - endFadeAt) / 220);
           context.clearRect(0, 0, width, height);
           if (elapsed < holdExtraMs + 230) {
             context.save(); context.globalAlpha = Math.min(1, Math.max(0, 1 - (elapsed - holdExtraMs) / 230)); context.shadowColor = '#00d3ab'; context.shadowBlur = 20;
