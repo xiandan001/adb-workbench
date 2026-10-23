@@ -11,6 +11,7 @@ const CHANGELOGS = {
       { type: 'feature', text: '支持勾选后自动附带最近的卓控台诊断日志，无需手动寻找文件，提交前可预览公开内容' },
       { type: 'feature', text: '侧边栏新增问题反馈快捷入口，无需切换页面即可反馈' },
       { type: 'improve', text: '顶部菜单默认收起，按 Alt 可唤出，原有快捷键保持可用' },
+      { type: 'improve', text: '设备断开后自动清空当前设备；有其他在线设备时自动切换，保留连接历史' },
       { type: 'improve', text: '粒子启动期间提前准备主界面，动画结束后渐入工作区' },
       { type: 'improve', text: '优化用户体验' },
       { type: 'fix', text: '修复部分错误' }

@@ -78,7 +78,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     });
   }, []);
 
-  const selectedDeviceId = activeDeviceId || deviceId || onlineDevices[0]?.id || '';
+  const selectedDeviceId = activeDeviceId ?? (deviceId || onlineDevices[0]?.id || '');
   useLayoutEffect(() => {
     deviceContextRef.current = { deviceId: selectedDeviceId, generation: deviceContextRef.current.generation + 1 };
     return () => { deviceContextRef.current = { deviceId: '', generation: deviceContextRef.current.generation + 1 }; };

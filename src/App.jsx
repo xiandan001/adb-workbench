@@ -366,7 +366,8 @@ function App() {
   }), []);
 
   useEffect(() => {
-    localStorage.setItem('activeDeviceId', activeDeviceId);
+    if (activeDeviceId) localStorage.setItem('activeDeviceId', activeDeviceId);
+    else localStorage.removeItem('activeDeviceId');
   }, [activeDeviceId]);
 
   useEffect(() => {
@@ -1824,25 +1825,24 @@ function App() {
               <label htmlFor="active-device" className="text-xs font-medium">当前设备</label>
               <SelectMenu
                 id="active-device"
-                value={activeDeviceId}
+                value={activeDevice?.id || ''}
                 onChange={setActiveDeviceId}
                 isDark={isDark}
                 placeholder="尚未发现设备"
                 emptyText="尚未发现设备"
                 className="min-w-0 max-w-full flex-1"
                 options={[
-                  ...(!activeDeviceId ? [{ value: '', label: '尚未发现设备' }] : []),
-                  ...(activeDeviceId && !activeDevice ? [{ value: activeDeviceId, label: `${activeDeviceId} · 已断开` }] : []),
+                  ...(!activeDevice ? [{ value: '', label: '尚未发现设备' }] : []),
                   ...devices.map(device => ({
                     value: device.id,
                     label: `${deviceNames[device.id] || device.model || device.id} · ${device.id} · ${deviceStatusLabel(device.status)}`
                   }))
                 ]}
               />
-              {activeDeviceId && activeDevice?.status !== 'device' && (
+              {activeDevice && activeDevice.status !== 'device' && (
                 <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
                   <AlertCircle size={14} />
-                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice?.status || 'disconnected')}，正在等待可用的在线设备；发现后会自动选用并刷新。{deviceConnectionHint(activeDevice?.status)}</span>
+                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice.status)}，正在等待可用的在线设备；发现后会自动选用并刷新。{deviceConnectionHint(activeDevice.status)}</span>
                   <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">环境自检</button>
                 </div>
               )}

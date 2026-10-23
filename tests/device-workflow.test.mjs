@@ -21,13 +21,22 @@ test('online selection stays stable across discovery order changes and reconnect
   assert.equal(resolveActiveDeviceId(afterDisconnect, devices), 'second');
 });
 
-test('no online device preserves the previous selection until one is available', () => {
+test('no online device only retains selections still present in discovery', () => {
   const devices = [{ id: 'unauthorized', status: 'unauthorized' }, { id: 'offline', status: 'offline' }];
-  assert.equal(resolveActiveDeviceId('previous-wifi', devices), 'previous-wifi');
-  assert.equal(resolveActiveDeviceId('previous-wifi', []), 'previous-wifi');
+  assert.equal(resolveActiveDeviceId('previous-wifi', devices), 'unauthorized');
+  assert.equal(resolveActiveDeviceId('previous-wifi', []), '');
+  assert.equal(resolveActiveDeviceId('offline', devices), 'offline');
+  assert.equal(resolveActiveDeviceId('unauthorized', devices), 'unauthorized');
   assert.equal(resolveActiveDeviceId('', devices), 'unauthorized');
   assert.equal(resolveActiveDeviceId('', []), '');
   assert.equal(resolveActiveDeviceId('previous-wifi', [{ id: 'usb', status: 'device' }]), 'usb');
+});
+
+test('cleared selection automatically adopts a reconnected device without resurrecting an old ID', () => {
+  const cleared = resolveActiveDeviceId('removed-wifi', []);
+  assert.equal(cleared, '');
+  assert.equal(resolveActiveDeviceId(cleared, []), '');
+  assert.equal(resolveActiveDeviceId(cleared, [{ id: 'new-usb', status: 'device' }]), 'new-usb');
 });
 
 test('manual and automatic device refresh share the same in-flight request', async () => {

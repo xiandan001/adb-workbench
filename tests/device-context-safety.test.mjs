@@ -79,6 +79,21 @@ test('late quality regression results are not displayed as results for the newly
   assert.equal(state.calls[0].deviceId, 'A'); assert.equal(state.calls.length, 1); assert.equal(state.result, null);
 });
 
+test('quality honors an explicitly cleared controlled device without restoring local or first-online IDs', () => {
+  for (const deviceId of ['old-local-device', '']) {
+    for (const onlineDevices of [[{ id: 'first-online-device' }], []]) {
+      assert.equal(handler('QualityCenter.jsx', 'selectedDeviceId', { activeDeviceId: '', deviceId, onlineDevices }), '');
+    }
+  }
+});
+
+test('quality retains standalone fallback only when no controlled device value is provided', () => {
+  assert.equal(handler('QualityCenter.jsx', 'selectedDeviceId', { activeDeviceId: undefined, deviceId: 'local-device', onlineDevices: [{ id: 'first-online-device' }] }), 'local-device');
+  assert.equal(handler('QualityCenter.jsx', 'selectedDeviceId', { activeDeviceId: undefined, deviceId: '', onlineDevices: [{ id: 'first-online-device' }] }), 'first-online-device');
+  assert.equal(handler('QualityCenter.jsx', 'selectedDeviceId', { activeDeviceId: undefined, deviceId: '', onlineDevices: [] }), '');
+  assert.equal(handler('QualityCenter.jsx', 'selectedDeviceId', { activeDeviceId: 'controlled-device', deviceId: 'local-device', onlineDevices: [{ id: 'first-online-device' }] }), 'controlled-device');
+});
+
 test('environment check results are hidden for a different device and late responses never repaint it', async () => {
   const pending = deferred(); const state = { result: null, error: '', calls: [] };
   const deviceContextRef = { current: { deviceId: 'A', generation: 1 } };

@@ -1,6 +1,6 @@
 export function resolveActiveDeviceId(currentId, devices) {
   if (devices.some(device => device.id === currentId && device.status === 'device')) return currentId;
-  return devices.find(device => device.status === 'device')?.id || currentId || devices[0]?.id || '';
+  return devices.find(device => device.status === 'device')?.id || devices.find(device => device.id === currentId)?.id || devices[0]?.id || '';
 }
 
 export function deviceStatusLabel(status) {
