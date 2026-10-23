@@ -9,6 +9,8 @@ const CHANGELOGS = {
       { type: 'feature', text: '新增问题反馈：首次通过浏览器授权 GitHub 后，可在软件内预览并提交问题到项目 Issues' },
       { type: 'feature', text: '问题反馈自动整理电脑、系统和软件环境信息，可按需取消附带' },
       { type: 'feature', text: '支持勾选后自动附带最近的卓控台诊断日志，无需手动寻找文件，提交前可预览公开内容' },
+      { type: 'feature', text: '侧边栏新增问题反馈快捷入口，无需切换页面即可反馈' },
+      { type: 'improve', text: '顶部菜单默认收起，按 Alt 可唤出，原有快捷键保持可用' },
       { type: 'improve', text: '粒子启动期间提前准备主界面，动画结束后渐入工作区' },
       { type: 'improve', text: '优化用户体验' },
       { type: 'fix', text: '修复部分错误' }

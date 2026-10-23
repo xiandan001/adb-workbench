@@ -25,11 +25,14 @@ function harness() {
   class Window extends EventEmitter {
     constructor(options) {
       super(); this.options = options; this.webContents = new EventEmitter(); windows.push(this);
+      this.menuVisible = true; this.menuVisibilityCalls = []; this.menuReplacements = [];
       this.webContents.getURL = () => 'file:///app/dist/index.html';
       this.webContents.openDevTools = () => calls.push('devtools');
     }
-    loadFile(file) { calls.push('load:' + file); return Promise.resolve(); }
-    loadURL(url) { calls.push('url:' + url); return Promise.resolve(); }
+    loadFile(file) { this.menuVisibleAtLoad = this.menuVisible; calls.push('load:' + file); return Promise.resolve(); }
+    loadURL(url) { this.menuVisibleAtLoad = this.menuVisible; calls.push('url:' + url); return Promise.resolve(); }
+    setMenuBarVisibility(value) { this.menuVisible = value; this.menuVisibilityCalls.push(value); }
+    setMenu(value) { this.menuReplacements.push(value); }
     isDestroyed() { return false; }
     isMinimized() { return false; }
     show() { calls.push('show'); }
@@ -65,6 +68,17 @@ test('subsequent created main windows do not replay native startup', () => {
   assert.equal(h.presentations[0].disposals, 1); assert.equal(h.context.startupPresentation, null);
   h.create(); assert.equal(h.presentations.length, 1);
   assert.equal(h.windows[1].options.show, true); assert.equal(h.windows[1].options.webPreferences.backgroundThrottling, true);
+});
+
+test('main windows hide the native menu before loading without removing its Alt access or accelerator menu', () => {
+  for (const isDev of [false, true]) {
+    const h = harness(); h.context.isDev = isDev; h.create(); h.windows[0].emit('closed'); h.create();
+    for (const window of h.windows) {
+      assert.equal(window.options.autoHideMenuBar, true);
+      assert.deepEqual(window.menuVisibilityCalls, [false]); assert.equal(window.menuVisibleAtLoad, false);
+      assert.deepEqual(window.menuReplacements, [], 'hiding must not remove the application menu or its accelerators');
+    }
+  }
 });
 
 test('second-instance activation reveals the existing main and cancels the presentation instead of replaying', () => {

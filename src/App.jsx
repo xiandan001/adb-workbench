@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -19,7 +19,7 @@ import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
 import StartupPreferences from './components/StartupPreferences';
-import FeedbackSection from './components/FeedbackSection';
+import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
@@ -65,6 +65,7 @@ function App() {
     return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools' };
   }), []);
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [wifiIp, setWifiIp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionFormOpen, setConnectionFormOpen] = useState(false);
@@ -1442,6 +1443,7 @@ function App() {
   return (
     <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
+      {feedbackOpen && <FeedbackDialog theme={t} currentPage={activeTab} onClose={() => setFeedbackOpen(false)} />}
       {/* Toast 提示 */}
       {toast && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-[#2D2F33] text-white rounded-lg shadow-lg text-sm">
@@ -1643,7 +1645,8 @@ function App() {
       <div className="w-56 lg:w-60 shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]">
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
-          <h1 className="text-xl font-bold tracking-wide">卓控台</h1>
+          <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">卓控台</h1>
+          <button type="button" aria-label="打开问题反馈" title="问题反馈" onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1">
@@ -2747,7 +2750,7 @@ function App() {
               </section>
 
               <section id="settings-update" className={settingsSectionClass}>
-                <FeedbackSection theme={t} currentPage={activeTab} />
+                <FeedbackSection theme={t} onOpen={() => setFeedbackOpen(true)} />
                 {/* 关于与更新 */}
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">

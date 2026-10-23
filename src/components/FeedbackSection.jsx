@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { CheckCircle2, Copy, ExternalLink, FileText, KeyRound, Loader2, MessageSquare, ShieldAlert, X } from 'lucide-react';
+import { CheckCircle2, Copy, FileText, KeyRound, Loader2, MessageSquare, ShieldAlert, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { isDarkTheme } from '../shared/theme';
 import { trapAppMessageFocus } from '../shared/appMessageDialog';
@@ -29,7 +29,10 @@ function ReportFields({ report, session, environment, theme, isDark, formId, cat
   const input = `mt-1 w-full rounded-lg border px-3 py-2 text-sm ${theme.input}`;
   const set = (field, value) => session.change(field, value);
   return <form id={formId} onSubmit={event => { event.preventDefault(); void session.preview(); }} className="space-y-3">
-    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]"><label className="min-w-0 text-xs">问题标题 <span className="text-red-500">*</span><input aria-label="问题标题" required maxLength={120} value={report.draft.title} onChange={event => set('title', event.target.value)} className={input} placeholder="一句话说明遇到的问题" /></label><div><label htmlFor={categoryId} className="text-xs">问题分类</label><SelectMenu id={categoryId} value={report.draft.category} options={FEEDBACK_CATEGORIES} onChange={value => set('category', value)} isDark={isDark} className="mt-1" /></div></div>
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+      <div className="min-w-0"><label htmlFor={`${formId}-title`} className="block text-xs leading-5">问题标题 <span className="text-red-500">*</span></label><input id={`${formId}-title`} aria-label="问题标题" required maxLength={120} value={report.draft.title} onChange={event => set('title', event.target.value)} className={`${input} h-10`} placeholder="一句话说明遇到的问题" /></div>
+      <div className="min-w-0"><label htmlFor={categoryId} className="block text-xs leading-5">问题分类</label><SelectMenu id={categoryId} value={report.draft.category} options={FEEDBACK_CATEGORIES} onChange={value => set('category', value)} isDark={isDark} className="mt-1 [&>button]:h-10" /></div>
+    </div>
     <label className="block text-xs">问题描述 <span className="text-red-500">*</span><textarea aria-label="问题描述" required maxLength={4000} rows={4} value={report.draft.description} onChange={event => set('description', event.target.value)} className={`${input} resize-y`} placeholder="发生了什么？是否稳定复现？请勿填写密码或密钥。" /></label>
     <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs">复现步骤（可选）<textarea aria-label="复现步骤" maxLength={4000} rows={3} value={report.draft.steps} onChange={event => set('steps', event.target.value)} className={`${input} resize-y`} placeholder="1. 打开…&#10;2. 点击…" /></label><label className="block text-xs">预期结果（可选）<textarea aria-label="预期结果" maxLength={2000} rows={3} value={report.draft.expected} onChange={event => set('expected', event.target.value)} className={`${input} resize-y`} placeholder="你期望软件怎样运行？" /></label></div>
     <div className="space-y-2 rounded-lg border border-slate-400/20 p-3"><label className="flex items-start gap-2 text-xs leading-5"><input type="checkbox" checked={report.draft.includeEnvironment} onChange={event => set('includeEnvironment', event.target.checked)} className="mt-1 accent-emerald-500" />包含电脑和系统信息</label><label className="flex items-start gap-2 text-xs leading-5"><input type="checkbox" checked={report.draft.includeLogs} onChange={event => set('includeLogs', event.target.checked)} className="mt-1 accent-emerald-500" />附带卓控台诊断日志</label><p className={`pl-5 text-[11px] leading-5 ${theme.textMuted}`}>日志默认不勾选。勾选后自动收集本软件的安全日志尾部，最多 16 KiB；不读取设备、串口或 SSH 日志，不需要选择文件。日志将作为 Issue 正文中的折叠文本公开。</p></div>
@@ -37,13 +40,12 @@ function ReportFields({ report, session, environment, theme, isDark, formId, cat
   </form>;
 }
 
-function FeedbackDialog({ theme, currentPage, onClose }) {
+export function FeedbackDialog({ theme, currentPage, onClose }) {
   const api = window.electronAPI; const isDark = isDarkTheme(theme); const id = useId(); const dialogRef = useRef(null);
   const [report, setReport] = useState(() => createFeedbackState(currentPage));
   const [session] = useState(() => createFeedbackReportSession({ api, initialState: report, onChange: setReport }));
   const [context, setContext] = useState(null); const [loading, setLoading] = useState(true); const [contextError, setContextError] = useState('');
   const [auth, setAuth] = useState(null); const [authBusy, setAuthBusy] = useState(''); const [authError, setAuthError] = useState(''); const [copied, setCopied] = useState(false);
-  const [opening, setOpening] = useState(false); const [openError, setOpenError] = useState('');
   const alive = useRef(true); const contextTicket = useRef(0); const authTicket = useRef(0); const authRef = useRef(null); const authAction = useRef(''); const closeCancelled = useRef(false);
   const acceptAuth = useCallback(value => { const next = publicFeedbackAuth(value); authRef.current = next; setAuth(next); return next; }, []);
   const loadContext = useCallback(async () => {
@@ -96,12 +98,6 @@ function FeedbackDialog({ theme, currentPage, onClose }) {
     try { await navigator.clipboard.writeText(code); if (alive.current && authRef.current?.pending && authRef.current.userCode === code) setCopied(true); }
     catch { if (alive.current) setAuthError('复制失败，请手动选择验证码复制'); }
   };
-  const openIssue = async () => {
-    if (!report.issue || opening) return; setOpening(true); setOpenError('');
-    try { feedbackResponse(await api.feedbackOpenIssue({ url: report.issue.url })); }
-    catch (failure) { if (alive.current) setOpenError(failure.message || '无法打开 Issue'); }
-    finally { if (alive.current) setOpening(false); }
-  };
   const submitting = report.busy === 'submit'; const button = `inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`;
   return <dialog ref={dialogRef} aria-labelledby={`${id}-title`} onKeyDown={trapAppMessageFocus} onCancel={event => { event.preventDefault(); close(); }} className={`m-auto max-h-[calc(100vh-32px)] w-[min(760px,calc(100vw-32px))] overflow-hidden rounded-2xl border p-0 shadow-2xl backdrop:bg-black/55 open:flex open:flex-col ${isDark ? 'border-[#3E4145] bg-[#202124] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-800'}`}>
     <div className="flex shrink-0 items-center gap-3 border-b border-slate-400/15 px-5 py-4"><MessageSquare size={20} className="text-emerald-500" /><h2 id={`${id}-title`} className="min-w-0 flex-1 text-base font-semibold">反馈问题</h2><button type="button" aria-label="关闭反馈问题" disabled={submitting} onClick={close} className={`rounded-lg p-1.5 disabled:opacity-40 ${theme.button.secondary}`}><X size={18} /></button></div>
@@ -110,18 +106,17 @@ function FeedbackDialog({ theme, currentPage, onClose }) {
       {contextError && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-amber-500"><span className="min-w-0 flex-1 break-words">{contextError}</span><button type="button" disabled={loading || submitting} onClick={loadContext} className={button}>重新读取状态</button></div>}
       {report.view === 'edit' && <ReportFields report={report} session={session} environment={context?.environment} theme={theme} isDark={isDark} formId={`${id}-form`} categoryId={`${id}-category`} />}
       {report.view === 'preview' && <section aria-label="提交前预览" className="space-y-3"><div><h3 className="break-words text-sm font-semibold">{report.preview.title}</h3><p className={`mt-1 text-[11px] leading-5 ${theme.textMuted}`}>{report.preview.log.included ? `已附带日志：${report.preview.log.bytes} 字节 · ${report.preview.log.lines} 行${report.preview.log.truncated ? ' · 已截取末尾内容' : ''}` : '未附带诊断日志'} · 预览有效期至 {new Date(report.preview.expiresAt).toLocaleTimeString()}</p></div><p className={`text-xs ${theme.textMuted}`}>以下是将发送的完整正文（纯文本显示，不会执行 HTML 或 Markdown）：</p><pre aria-label="反馈报告预览" className={`max-h-[45vh] select-text overflow-auto whitespace-pre-wrap break-words rounded-xl border p-3 font-mono text-xs leading-5 [overflow-wrap:anywhere] ${theme.input}`}>{report.preview.body}</pre>{report.uncertain && <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500">结果尚未确认。请使用“检查提交结果”核对原提交，不要重复新建报告；检查不会重新生成报告预览。</p>}</section>}
-      {report.view === 'success' && <section aria-label="反馈提交成功" className="py-6 text-center"><CheckCircle2 size={38} className="mx-auto text-emerald-500" /><h3 className="mt-3 text-lg font-semibold">问题已提交 · #{report.issue.number}</h3><p className={`mt-2 text-xs leading-5 ${theme.textMuted}`}>你可以在 GitHub Issue 中查看和补充信息。</p><button type="button" disabled={opening} onClick={openIssue} className={`mt-4 ${button}`}>{opening ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}打开 Issue #{report.issue.number}</button>{openError && <p role="alert" className="mt-3 text-xs text-amber-500">{openError}</p>}</section>}
+      {report.view === 'success' && <section aria-label="反馈提交成功" className="py-6 text-center"><CheckCircle2 size={38} className="mx-auto text-emerald-500" /><h3 className="mt-3 text-lg font-semibold">问题已提交 · #{report.issue.number}</h3><p className={`mt-2 text-xs leading-5 ${theme.textMuted}`}>感谢你的反馈，我们会认真查看。</p></section>}
       {report.error && <p role="alert" className="break-words rounded-lg border border-red-500/25 bg-red-500/5 p-3 text-xs leading-5 text-red-500">{report.error}</p>}
     </div>
     <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-400/15 px-5 py-4">
       <button type="button" disabled={submitting} onClick={close} className={button}>{report.view === 'success' ? '完成' : '取消'}</button>
       {report.view === 'edit' && <button type="submit" form={`${id}-form`} disabled={!context || loading || Boolean(report.busy)} className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${theme.button.primary}`}>{report.busy === 'preview' ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}生成报告预览</button>}
-      {report.view === 'preview' && <><button type="button" disabled={submitting || report.uncertain} onClick={() => session.back()} className={button}>返回修改</button><button type="button" disabled={submitting || !canSubmitFeedback(auth, authBusy)} onClick={() => { void session.submit(); }} className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${theme.button.primary}`}>{submitting && <Loader2 size={14} className="animate-spin" />}{submitting ? report.uncertain ? '检查中…' : '提交中…' : report.uncertain ? '检查提交结果' : '提交到 GitHub'}</button></>}
+      {report.view === 'preview' && <><button type="button" disabled={submitting || report.uncertain} onClick={() => session.back()} className={button}>返回修改</button><button type="button" disabled={submitting || !canSubmitFeedback(auth, authBusy)} onClick={() => { void session.submit(); }} className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${theme.button.primary}`}>{submitting && <Loader2 size={14} className="animate-spin" />}{submitting ? report.uncertain ? '检查中…' : '提交中…' : report.uncertain ? '检查提交结果' : '提交'}</button></>}
     </div>
   </dialog>;
 }
 
-export default function FeedbackSection({ theme, currentPage }) {
-  const [open, setOpen] = useState(false);
-  return <section aria-label="问题反馈" className={`rounded-xl border p-4 ${theme.card}`}><div className="flex flex-wrap items-center gap-3"><MessageSquare size={19} className="text-emerald-500" /><div className="min-w-0 flex-1"><h3 className={`text-sm font-semibold ${theme.text}`}>问题反馈</h3><p className={`mt-1 text-xs leading-5 ${theme.textMuted}`}>填写问题并核对预览，确认后提交到 GitHub。诊断日志仅在你勾选时附带。</p></div><button type="button" onClick={() => setOpen(true)} className={`rounded-lg px-4 py-2 text-sm ${theme.button.secondary}`}>反馈问题</button></div>{open && <FeedbackDialog theme={theme} currentPage={currentPage} onClose={() => setOpen(false)} />}</section>;
+export default function FeedbackSection({ theme, onOpen }) {
+  return <section aria-label="问题反馈" className={`rounded-xl border p-4 ${theme.card}`}><div className="flex flex-wrap items-center gap-3"><MessageSquare size={19} className="text-emerald-500" /><div className="min-w-0 flex-1"><h3 className={`text-sm font-semibold ${theme.text}`}>问题反馈</h3><p className={`mt-1 text-xs leading-5 ${theme.textMuted}`}>填写问题并核对预览，确认后提交到 GitHub。诊断日志仅在你勾选时附带。</p></div><button type="button" onClick={onOpen} className={`rounded-lg px-4 py-2 text-sm ${theme.button.secondary}`}>反馈问题</button></div></section>;
 }

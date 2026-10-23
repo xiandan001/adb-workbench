@@ -105,6 +105,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    autoHideMenuBar: true,
     show: !presentStartup,
     backgroundColor: '#081417',
     icon: path.join(__dirname, '../icon.png'),
@@ -115,6 +116,7 @@ function createWindow() {
       backgroundThrottling: !presentStartup,
     }
   });
+  mainWindow.setMenuBarVisibility(false);
   startupPresented = true;
   ctx.setMainWindow(mainWindow);
   const presentation = presentStartup ? createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow }) : null;
