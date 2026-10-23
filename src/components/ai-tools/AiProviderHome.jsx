@@ -6,7 +6,7 @@ import { AI_PROTOCOLS } from './aiToolsModel';
 import { providerFingerprint, providerHomeTool, providerStatusRows } from './aiProviderHomeModel';
 
 const STATUS = { active: '正在使用', configured: '已配置', inactive: '未使用', incomplete: '待完善', incompatible: '不兼容', unknown: '待确认' };
-export default function AiProviderHome({ active, revision, ready = true, choice, onToolChange, providers, tools, onRequest, can, theme, isDark, onPreview, onEdit, onModels, onRemove, onAdd, onProjects, networkAction, busy, feedback, quotaResults, quotaErrors, quotaBusy, quotaRevision, quotaAutoRefresh, onQuotaAutoRefresh }) {
+export default function AiProviderHome({ active, revision, ready = true, choice, onToolChange, providers, tools, onRequest, can, theme, isDark, onPreview, onEdit, onModels, onRemove, onAdd, onProjects, networkAction, busy, quotaResults, quotaErrors, quotaBusy, quotaRevision, quotaAutoRefresh, onQuotaAutoRefresh }) {
   const id = useId(); const [search, setSearch] = useState('');
   const [native, setNative] = useState(null); const [checking, setChecking] = useState(null); const [checkError, setCheckError] = useState(null);
   const [using, setUsing] = useState(''); const [useError, setUseError] = useState(null);
@@ -55,7 +55,7 @@ export default function AiProviderHome({ active, revision, ready = true, choice,
       const compatible = selected?.protocols.includes(provider.protocol) && provider.targetApps.includes(toolId);
       const result = compatible ? statuses.find(item => item.providerId === provider.id) : null;
       const inUse = result?.state === 'active'; const configured = result?.state === 'configured';
-      const connection = feedback[provider.id]; const blocked = !provider.hasCredential || !provider.model;
+      const blocked = !provider.hasCredential || !provider.model;
       return <article key={provider.id} aria-label={`AI 供应商 ${provider.name}`} className={`min-w-0 rounded-xl border p-4 ${theme.card} ${inUse ? 'ring-1 ring-emerald-500/50' : ''}`}>
         <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h3 className="truncate text-sm font-semibold">{provider.name}</h3><p className={`mt-1 text-[11px] ${theme.textMuted}`}>{AI_PROTOCOLS.find(item => item.value === provider.protocol)?.label || provider.protocol}</p></div>
           <span title={result?.message || (compatible ? '尚未完成本机状态检查' : '请编辑供应商，核对协议与关联工具')} className={`shrink-0 rounded-md px-2 py-1 text-[11px] ${inUse || configured ? isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-500/10 text-emerald-700' : 'bg-slate-400/10'}`}>{compatible ? selected?.launchSupported ? '项目启动' : STATUS[result?.state] || (isChecking ? '检查中' : '待确认') : '未关联此工具'}</span>
@@ -74,7 +74,6 @@ export default function AiProviderHome({ active, revision, ready = true, choice,
         {compatible && blocked && <p className="mt-2 text-xs text-amber-500">{provider.hasCredential ? '请先配置默认模型，再点击使用。' : '请先编辑并保存 API 密钥。'}</p>}
         {configured && <p className={`mt-2 text-xs ${theme.textMuted}`}>{result.message}</p>}
         {useError?.context === context && useError.id === provider.id && <p role="alert" className="mt-2 text-xs text-red-500">{useError.message}</p>}
-        {connection && <div role={connection.status === 'error' ? 'alert' : 'status'} aria-label={`连接测试反馈 ${provider.name}`} className={`mt-3 select-text rounded-lg border p-3 text-xs leading-5 ${connection.status === 'error' ? 'border-red-500/25 bg-red-500/5 text-red-500' : connection.status === 'partial' ? 'border-amber-500/25 bg-amber-500/5 text-amber-500' : connection.status === 'pending' ? 'border-cyan-500/25 bg-cyan-500/5 text-cyan-500' : connection.status === 'cancelled' ? `border-slate-400/25 ${theme.textMuted}` : 'border-emerald-500/25 bg-emerald-500/5 text-emerald-500'}`}><p className="font-medium">{connection.status === 'error' ? '连接测试失败' : connection.status === 'partial' ? '只读检查完成，尚未验证模型调用' : connection.status === 'pending' ? '连接测试进行中' : connection.status === 'cancelled' ? '连接测试已取消' : '连接检查成功'}</p><p className="mt-1 break-words">{connection.message}</p>{connection.completedAt && <p className="mt-1 text-[10px] opacity-75">完成于 {new Date(connection.completedAt).toLocaleTimeString()}</p>}</div>}
         <AiCompactQuota provider={provider} result={quotaResults[provider.id]} error={quotaErrors[provider.id]} busy={Boolean(quotaBusy?.[provider.id])} canQuery={can('quota_query')} onQuery={() => networkAction(provider, 'quota_query')} theme={theme} active={active && ready} revision={quotaRevision} autoRefresh={quotaAutoRefresh?.[provider.id]} onAutoRefresh={value => onQuotaAutoRefresh?.(provider.id, value)} />
       </article>;
     })}</div>

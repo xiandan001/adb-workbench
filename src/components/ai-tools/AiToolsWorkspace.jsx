@@ -16,7 +16,7 @@ import AiSkillsPanel from './AiSkillsPanel';
 import AiPortablePanel from './AiPortablePanel';
 import AiProviderHome from './AiProviderHome';
 import { aiToolsCan, providerDraft, providerInput } from './aiToolsModel';
-import { connectionCompletionNotice, connectionFeedback, providerFeedbackCurrent, providerFeedbackToken, retainProviderFeedback } from './aiProviderHomeModel';
+import { connectionCompletionNotice, connectionFeedback, providerFeedbackCurrent, providerFeedbackToken } from './aiProviderHomeModel';
 
 export default function AiToolsWorkspace({ active = true, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership }) {
   const [snapshot, setSnapshot] = useState(null); const snapshotRef = useRef(null); const requestRef = useRef(onRequest);
@@ -27,18 +27,17 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
   const [snapshotRevision, setSnapshotRevision] = useState(0); const [snapshotReady, setSnapshotReady] = useState(false); const [providerToolId, setProviderToolId] = useState('');
   const [busy, setBusy] = useState({}); const pending = useRef(new Set());
   const [quotaBusy, setQuotaBusy] = useState({});
-  const [feedbackRecords, setFeedbackRecords] = useState({}); const feedbackEpoch = useRef(0);
+  const feedbackEpoch = useRef(0);
   const [quotaResults, setQuotaResults] = useState({}); const [quotaErrors, setQuotaErrors] = useState({});
   const [quotaAutoRefresh, setQuotaAutoRefresh] = useState({});
   const alive = useRef(true); const activeRef = useRef(active); const loadTicket = useRef(0);
   const button = `inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.secondary}`;
   useLayoutEffect(() => { requestRef.current = onRequest; activeRef.current = active; }, [onRequest, active]);
-  const invalidateFeedback = useCallback(() => { feedbackEpoch.current++; setFeedbackRecords({}); setQuotaErrors({}); setQuotaResults({}); }, []);
+  const invalidateFeedback = useCallback(() => { feedbackEpoch.current++; setQuotaErrors({}); setQuotaResults({}); }, []);
   const accept = useCallback(data => {
     if (!data || typeof data.membership?.activated !== 'boolean' || !Array.isArray(data.providers) || !Array.isArray(data.tools) || !Array.isArray(data.capabilities)) throw new Error('AI 工具状态格式无效，请刷新后重试');
     const state = { ...data, membership: { ...data.membership, reason: typeof data.membership.reason === 'string' && /[\u3400-\u9fff]/.test(data.membership.reason) ? data.membership.reason : '会员状态尚未通过验证，请在已有会员中心检查。此功能沿用本软件 VIP，无需额外账号。' } };
     if (snapshotRef.current && snapshotRef.current.membership.activated !== state.membership.activated) invalidateFeedback();
-    setFeedbackRecords(previous => retainProviderFeedback(previous, state.providers, feedbackEpoch.current, state.membership.activated));
     snapshotRef.current = state; setSnapshot(state); setSnapshotReady(true); setSnapshotRevision(value => value + 1);
     setQuotaResults(Object.fromEntries((Array.isArray(data.quota) ? data.quota : []).map(item => [item.providerId, item])));
   }, [invalidateFeedback]);
@@ -60,7 +59,6 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
   }, []);
   const can = (command, options) => aiToolsCan(snapshot, command, options);
   const providers = snapshot?.providers || []; const tools = snapshot?.tools || [];
-  const feedback = Object.fromEntries(providers.flatMap(provider => { const entry = feedbackRecords[provider.id]; return providerFeedbackCurrent(entry?.token, provider, feedbackEpoch.current) ? [[provider.id, entry.value]] : []; }));
   const tabs = [{ id: 'providers', label: '供应商', enabled: true }, { id: 'projects', label: '项目启动', enabled: can('projects_snapshot') }, { id: 'sessions', label: '会话与本机用量', enabled: can('sessions_list') }, { id: 'quota', label: '额度与余额', enabled: can('quota_query') },
     { id: 'config', label: '配置应用', enabled: can('config_preview') }, { id: 'backups', label: '配置备份', enabled: can('backups_list') },
     { id: 'router', label: '本地路由', enabled: can('router_status') },
@@ -88,16 +86,13 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
     const updateBusy = isQuota ? setQuotaBusy : setBusy;
     if (pending.current.has(pendingKey)) return { skipped: true };
     const token = providerFeedbackToken(provider, feedbackEpoch.current); pending.current.add(pendingKey); updateBusy(previous => ({ ...previous, [provider.id]: command }));
-    const previousFeedback = feedbackRecords[provider.id];
     const current = () => alive.current && providerFeedbackCurrent(token, snapshotRef.current?.providers.find(item => item.id === provider.id), feedbackEpoch.current);
     if (isQuota) setQuotaErrors(previous => ({ ...previous, [provider.id]: '' }));
-    else setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value: { status: 'pending', message: command === 'provider_probe' ? '正在等待确认或执行连接测试，请稍候…' : '正在检查只读接口，请稍候…' } } }));
     try {
       const result = await request(command, { providerId: provider.id });
       if (!current()) return { skipped: true };
       if (result?.cancelled) {
         if (!isQuota) {
-          setFeedbackRecords(previous => ({ ...previous, [provider.id]: providerFeedbackCurrent(previousFeedback?.token, provider, feedbackEpoch.current) ? previousFeedback : { token, value: { status: 'cancelled', message: '已取消连接测试，未发送模型测试请求。' } } }));
           showToast?.(connectionCompletionNotice(result));
         }
         return result;
@@ -106,14 +101,14 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
         if (result?.providerId !== provider.id) throw new Error('额度结果与当前供应商不一致，未显示数据');
         setQuotaResults(previous => ({ ...previous, [provider.id]: result }));
       } else {
-        const value = { ...connectionFeedback(result), completedAt: Date.now() }; setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value } }));
+        const value = connectionFeedback(result);
         showToast?.(connectionCompletionNotice(result, value));
       }
       return result;
     } catch (failure) {
       if (current()) {
         if (command === 'quota_query') setQuotaErrors(previous => ({ ...previous, [provider.id]: failure.message }));
-        else { const value = { status: 'error', message: failure.message || '连接测试失败，请重试。', completedAt: Date.now() }; setFeedbackRecords(previous => ({ ...previous, [provider.id]: { token, value } })); showToast?.(connectionCompletionNotice(null, value)); }
+        else { const value = { status: 'error', message: failure.message || '连接测试失败，请重试。' }; showToast?.(connectionCompletionNotice(null, value)); }
       }
       return { status: 'error', reason: failure.message };
     } finally { pending.current.delete(pendingKey); if (alive.current) updateBusy(previous => { const next = { ...previous }; delete next[provider.id]; return next; }); }
@@ -151,7 +146,7 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
     {snapshot && !snapshot.membership.activated ? <><div className={`rounded-xl border p-6 text-center ${theme.card}`}><ShieldCheck size={30} className="mx-auto mb-3 text-emerald-500" /><h3 className="text-base font-semibold">使用现有会员权限</h3><p className={`mt-2 text-sm ${theme.textMuted}`}>{snapshot.membership.reason || '此功能沿用本软件 VIP，无需额外账号或购买服务。'}</p><button type="button" onClick={onOpenMembership} disabled={!onOpenMembership} className={`mt-4 rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${theme.button.primary}`}>打开会员中心</button>{can('backups_list') && <button type="button" onClick={() => setTab('backups')} className={`ml-2 mt-4 rounded-lg px-4 py-2 text-sm ${theme.button.secondary}`}>恢复此前配置</button>}{can('router_stop') && <button type="button" onClick={() => { void request('router_stop', {}).then(() => showToast?.('本地路由已停止'), failure => setError(failure.message)); }} className={`ml-2 mt-4 rounded-lg px-4 py-2 text-sm ${theme.button.secondary}`}>停止本地路由</button>}{can('resources_backups_list') && <button type="button" onClick={() => setTab('resourceBackups')} className={`ml-2 mt-4 rounded-lg px-4 py-2 text-sm ${theme.button.secondary}`}>恢复 MCP / 提示词配置</button>}</div>{selectedTab === 'backups' && can('backups_list') && <AiBackupsPanel refreshKey={configurationRevision} onRequest={request} onPreview={result => openPreview(result, true)} canRestore={can('backup_preview_restore') && aiToolsCan(snapshot, 'config_apply', { restoring: true })} theme={theme} />}{selectedTab === 'resourceBackups' && can('resources_backups_list') && <AiBackupsPanel resourceMode refreshKey={configurationRevision} onRequest={request} onPreview={result => openPreview(result, true, true)} canRestore={can('resources_backup_preview_restore') && aiToolsCan(snapshot, 'resources_apply', { restoring: true })} theme={theme} />}</> : snapshot && <>
       <div role="tablist" aria-label="AI 工具功能" className="flex flex-wrap gap-1">{primaryTabs.map(item => <button key={item.id} type="button" role="tab" aria-selected={selectedTab === item.id} onClick={() => setTab(item.id)} className={`rounded-lg px-4 py-2 text-sm ${selectedTab === item.id ? (isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-500/15 text-emerald-600') : theme.button.secondary}`}>{item.label}</button>)}</div>
       {advancedTabs.length > 0 && <details open={!primaryIds.includes(selectedTab) || undefined} className={`rounded-lg border px-3 py-2 ${theme.card}`}><summary className={`cursor-pointer text-xs ${theme.textMuted}`}>高级工具与恢复</summary><div role="tablist" aria-label="AI 高级工具" className="mt-2 flex flex-wrap gap-1">{advancedTabs.map(item => <button key={item.id} type="button" role="tab" aria-selected={selectedTab === item.id} onClick={() => setTab(item.id)} className={`rounded-lg px-3 py-2 text-xs ${selectedTab === item.id ? (isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-500/15 text-emerald-700') : theme.button.secondary}`}>{item.label}</button>)}</div></details>}
-      {selectedTab === 'providers' && <AiProviderHome active={active} ready={snapshotReady && !loading} revision={configurationRevision + snapshotRevision} choice={providerToolId} onToolChange={setProviderToolId} providers={providers} tools={tools} onRequest={request} can={can} theme={theme} isDark={isDark} onPreview={result => openPreview(result)} onEdit={(provider, toolId) => setForm({ provider, toolId })} onModels={provider => setModels({ provider, items: [] })} onRemove={setRemove} onAdd={toolId => setForm({ provider: null, toolId })} onProjects={() => setTab('projects')} networkAction={networkAction} busy={busy} feedback={feedback} quotaResults={quotaResults} quotaErrors={quotaErrors} quotaBusy={quotaBusy} quotaRevision={configurationRevision} quotaAutoRefresh={quotaAutoRefresh} onQuotaAutoRefresh={changeQuotaAutoRefresh} />}
+      {selectedTab === 'providers' && <AiProviderHome active={active} ready={snapshotReady && !loading} revision={configurationRevision + snapshotRevision} choice={providerToolId} onToolChange={setProviderToolId} providers={providers} tools={tools} onRequest={request} can={can} theme={theme} isDark={isDark} onPreview={result => openPreview(result)} onEdit={(provider, toolId) => setForm({ provider, toolId })} onModels={provider => setModels({ provider, items: [] })} onRemove={setRemove} onAdd={toolId => setForm({ provider: null, toolId })} onProjects={() => setTab('projects')} networkAction={networkAction} busy={busy} quotaResults={quotaResults} quotaErrors={quotaErrors} quotaBusy={quotaBusy} quotaRevision={configurationRevision} quotaAutoRefresh={quotaAutoRefresh} onQuotaAutoRefresh={changeQuotaAutoRefresh} />}
       {selectedTab === 'quota' && <><p className={`text-xs ${theme.textMuted}`}>服务商额度与余额，不等于本机调用量。默认每 60 秒自动刷新，可分别关闭；页面、窗口或卡片不可见时暂停。</p><div className="grid gap-3 md:grid-cols-2">{providers.map(provider => <AiQuotaCard key={provider.id} provider={provider} result={quotaResults[provider.id]} error={quotaErrors[provider.id]} busy={Boolean(quotaBusy[provider.id])} canQuery={can('quota_query')} onQuery={() => networkAction(provider, 'quota_query')} theme={theme} active={active && selectedTab === 'quota' && snapshotReady && !loading} revision={configurationRevision} autoRefresh={quotaAutoRefresh[provider.id]} onAutoRefresh={enabled => changeQuotaAutoRefresh(provider.id, enabled)} />)}{!providers.length && <p className={`rounded-lg border border-dashed border-slate-400/25 p-6 text-center text-xs ${theme.textMuted}`}>请先添加供应商并设置额度适配器。</p>}</div></>}
       {selectedTab === 'config' && <AiConfigPanel providers={providers} tools={tools} theme={theme} isDark={isDark} canPreview={can('config_preview')} onPreview={async args => openPreview(await request('config_preview', args))} />}
       {selectedTab === 'backups' && <AiBackupsPanel refreshKey={configurationRevision} onRequest={request} onPreview={result => openPreview(result, true)} canRestore={can('backup_preview_restore') && can('config_apply')} theme={theme} />}
