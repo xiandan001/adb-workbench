@@ -1,7 +1,7 @@
 // 瘦入口：app 生命周期 + createWindow + 注册所有领域模块
 // 各领域逻辑已拆分到 electron/lib/ 下的模块中
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -38,6 +38,8 @@ const serial = require('./lib/serial.cjs');
 const ssh = require('./lib/ssh.cjs');
 const aiTools = require('./lib/ai-tools.cjs');
 const appMessageDialog = require('./lib/app-message-dialog.cjs');
+const startupSettings = require('./lib/startup-settings.cjs');
+const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -72,6 +74,8 @@ function configureUserDataPath() {
 
 // 单实例锁定 - 确保只有一个应用实例在运行
 const gotTheLock = app.requestSingleInstanceLock();
+let startupPresentation = null;
+let startupPresented = false;
 
 if (!gotTheLock) {
   console.log('Another instance is already running. Quitting...');
@@ -82,6 +86,7 @@ if (!gotTheLock) {
     console.log('Second instance tried to launch');
     const mainWindow = ctx.getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
+      startupPresentation?.reveal();
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }
@@ -93,22 +98,35 @@ if (!gotTheLock) {
 
 // 主窗口创建（Log Analyzer 窗口的创建由 log-analyzer 模块负责）
 function createWindow() {
+  const presentStartup = !startupPresented;
   const mainWindow = new BrowserWindow({
     width: 1600,
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    show: !presentStartup,
+    backgroundColor: '#081417',
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: !presentStartup,
     }
   });
+  startupPresented = true;
+  ctx.setMainWindow(mainWindow);
+  const presentation = presentStartup ? createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow }) : null;
+  startupPresentation = presentation;
+  mainWindow.on('closed', () => {
+    presentation?.dispose();
+    if (startupPresentation === presentation) startupPresentation = null;
+  });
 
-  // Prevent navigation
-  mainWindow.webContents.on('will-navigate', (event) => {
-    event.preventDefault();
+  // Permit retrying the current document, but never navigate to another URL.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow.webContents.getURL();
+    if (!currentUrl || url !== currentUrl) event.preventDefault();
   });
   mainWindow.on('close', event => {
     if (!quitCleanupFinished && (screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
@@ -118,13 +136,11 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5173').catch(() => presentation?.reveal());
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html')).catch(() => presentation?.reveal());
   }
-
-  ctx.setMainWindow(mainWindow);
 }
 
 app.whenReady().then(async () => {
@@ -152,6 +168,7 @@ app.whenReady().then(async () => {
   adb.register(ipcMain);
   window.register(ipcMain);
   settings.register(ipcMain);
+  startupSettings.register(ipcMain);
   history.register(ipcMain);
   logAnalyzer.register(ipcMain);
   mcp.register(ipcMain);
@@ -181,6 +198,7 @@ app.whenReady().then(async () => {
   vip.preload();
 
   createWindow();
+  void startupSettings.initialize();
   mcp.initMcpServer();
 
   app.on('activate', () => {
@@ -194,6 +212,9 @@ let quitCleanupRunning = false;
 let quitCleanupFinished = false;
 
 function cleanupRuntimeResources() {
+  startupPresentation?.dispose();
+  startupPresentation = null;
+  startupSettings.cleanup();
   // 清理 AI 相关资源
   aiAnalyze.resetAiState();
   mcp.closeMcpServer();
@@ -212,6 +233,9 @@ function cleanupRuntimeResources() {
 }
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
+  // Quit is confirmed: late animation callbacks must not reveal a closing app.
+  startupPresentation?.dispose();
+  startupPresentation = null;
   appMessageDialog.cleanup();
   // Invalidate pending AI dialogs/CLI launches immediately after quit confirmation.
   const aiCleanup = aiTools.cleanup().catch(() => console.warn('[AI Tools] quit cleanup failed'));

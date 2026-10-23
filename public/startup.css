@@ -1,0 +1,118 @@
+body { margin: 0; background-color: #081417; }
+
+.startup-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+  box-sizing: border-box;
+  color: #eef9fa;
+  background: radial-gradient(ellipse at 50% 42%, #123238 0%, #0b1b22 38%, #081417 72%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  transition: opacity 180ms ease-out;
+}
+.startup-stage[data-state="leaving"] { opacity: 0; pointer-events: none; }
+.startup-stage[hidden], .startup-stage [hidden] { display: none; }
+html[data-startup-animation="false"] .startup-stage[data-state="loading"] { display: none; }
+html[data-startup-animation="false"] .startup-visual,
+html[data-startup-animation="false"] .startup-grid { display: none; }
+html[data-reduced-motion="true"] .startup-stage { transition: none; }
+html[data-reduced-motion="true"] .startup-visual * { animation: none; }
+html[data-reduced-motion="true"] .startup-scan { display: none; }
+html[data-native-desktop="true"] .startup-stage { transition: none; }
+html[data-native-desktop="true"] .startup-visual * { animation: none; }
+html[data-native-desktop="true"] .startup-scan { display: none; }
+.startup-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .16;
+  background-image: linear-gradient(#37636b 1px, transparent 1px), linear-gradient(90deg, #37636b 1px, transparent 1px);
+  background-size: 54px 54px;
+  mask-image: radial-gradient(ellipse at center, #000, transparent 68%);
+}
+.startup-panel { position: relative; width: min(380px, 100%); text-align: center; }
+.startup-visual { position: relative; width: 152px; height: 152px; margin: 0 auto 26px; }
+.startup-halo {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #35cfad24;
+  border-radius: 50%;
+  box-shadow: 0 0 54px #11bba412, inset 0 0 34px #11bba408;
+  animation: startup-halo 1100ms ease-out both;
+}
+.startup-orbit {
+  position: absolute;
+  inset: 11px;
+  border: 1px solid #5bebcf12;
+  border-top-color: #6ce6da;
+  border-right-color: #39b7d170;
+  border-radius: 50%;
+  animation: startup-orbit 1100ms cubic-bezier(.18, .7, .3, 1) both;
+}
+.startup-orbit::after {
+  content: '';
+  position: absolute;
+  top: 17px;
+  right: 15px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #8cf8df;
+  box-shadow: 0 0 12px #50ead0;
+}
+.startup-emblem {
+  position: absolute;
+  inset: 31px;
+  display: grid;
+  place-items: center;
+  color: #63f0cf;
+  border: 1px solid #60ead337;
+  border-radius: 24px;
+  background: linear-gradient(145deg, #1b4048, #10252d);
+  box-shadow: 0 12px 30px #0003, inset 0 1px 0 #c8fff315;
+  animation: startup-reveal 650ms ease-out both;
+}
+.startup-scan {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  top: 32px;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, #8bffe3, transparent);
+  animation: startup-scan 900ms ease-in-out both;
+}
+.startup-brand h1 { margin: 0; font-size: 30px; font-weight: 600; letter-spacing: .14em; text-indent: .14em; }
+.startup-brand p { margin: 10px 0 0; font-size: 12px; letter-spacing: .18em; color: #8eafb9; }
+.startup-feedback { margin-top: 30px; min-height: 48px; font-size: 12px; line-height: 1.7; }
+#startup-status { margin: 0; color: #a0c7cb; }
+#startup-detail { margin: 8px 0 0; color: #90abb7; overflow-wrap: anywhere; }
+#startup-detail:empty { display: none; }
+.startup-retry {
+  margin-top: 16px;
+  padding: 8px 20px;
+  border: 1px solid #4fe4c867;
+  border-radius: 9px;
+  color: #c3fff1;
+  background: #173b3d;
+  font: inherit;
+  cursor: pointer;
+}
+.startup-retry:hover { background: #21504f; }
+.startup-retry:focus-visible { outline: 2px solid #65efd6; outline-offset: 3px; }
+.startup-stage[data-state="error"] #startup-status { color: #f2c58a; }
+.startup-stage[data-state="error"] .startup-visual * { animation: none; }
+@keyframes startup-orbit { from { transform: rotate(-150deg); opacity: 0; } to { transform: rotate(50deg); opacity: 1; } }
+@keyframes startup-halo { from { transform: scale(.88); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes startup-reveal { from { transform: translateY(5px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes startup-scan { 0% { transform: translateY(0); opacity: 0; } 25% { opacity: .8; } 100% { transform: translateY(88px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .startup-stage { transition: none; }
+  .startup-visual * { animation: none; }
+  .startup-scan { display: none; }
+}

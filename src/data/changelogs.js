@@ -2,6 +2,17 @@
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.0': {
+    title: 'v4.7.0',
+    date: '2026-10-23',
+    items: [
+      { type: 'feature', text: '新增全屏透明粒子启动动画，标识化为粒子聚合成主界面轮廓，播放约 4.4 秒后进入工作区' },
+      { type: 'feature', text: '偏好设置新增减少动态效果、启动动画和开机自启开关，支持保存个人选择' },
+      { type: 'improve', text: '串口终端样式在重启后保留，数据迁移包含终端样式及动效偏好' },
+      { type: 'improve', text: '优化应用性能' },
+      { type: 'fix', text: '修复部分错误' }
+    ]
+  },
   '4.6.5': {
     title: 'v4.6.5',
     date: '2026-10-23',

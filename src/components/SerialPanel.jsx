@@ -7,6 +7,7 @@ import SelectMenu from './SelectMenu';
 import { appendSerialHistory, defaultSerialPreferences, normalizePreferences, readSerialHistory, readSerialPreferences, saveSerialPreferences } from '../shared/serialSettings';
 import { applySerialWorkspaceDelta, applySerialWorkspaceSnapshot, createSerialDiscovery, emptySerialWorkspaces, readSerialWorkspace, SERIAL_WORKSPACES, updateSerialWorkspace } from '../shared/serialWorkspace';
 import { isDarkTheme } from '../shared/theme';
+import { readSerialTerminalStyle, saveSerialTerminalStyle } from '../shared/serialTerminalStyle';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
 const WORKSPACE_LABELS = { rs232: 'RS232调试', terminal: '串口终端' };
@@ -15,10 +16,13 @@ const STATUS_LABELS = { disconnected: '未连接', connecting: '连接中', conn
 function initialSettings() {
   let preferences = defaultSerialPreferences();
   let history = [];
+  const workspace = readSerialWorkspace();
+  let terminalStyleError = '';
   const errors = [];
   try { preferences = readSerialPreferences(); } catch (error) { errors.push(error.message); }
   try { history = readSerialHistory(); } catch (error) { errors.push(error.message); }
-  return { preferences, history, error: errors.join('；') };
+  try { workspace.terminal.style = readSerialTerminalStyle(); } catch (error) { terminalStyleError = error.message; }
+  return { preferences, history, workspace, terminalStyleError, error: errors.join('；') };
 }
 
 export default function SerialPanel({ theme, showToast }) {
@@ -27,7 +31,8 @@ export default function SerialPanel({ theme, showToast }) {
   const [preferences, setPreferences] = useState(settings.preferences);
   const [history, setHistory] = useState(settings.history);
   const [persistenceError, setPersistenceError] = useState(settings.error);
-  const [workspace, setWorkspace] = useState(readSerialWorkspace);
+  const [terminalStyleError, setTerminalStyleError] = useState(settings.terminalStyleError);
+  const [workspace, setWorkspace] = useState(settings.workspace);
   const [snapshots, setSnapshots] = useState(emptySerialWorkspaces);
   const [terminalOpened, setTerminalOpened] = useState(workspace.mode === 'terminal');
   const [ports, setPorts] = useState([]);
@@ -54,6 +59,15 @@ export default function SerialPanel({ theme, showToast }) {
     if (changes.mode === 'terminal') setTerminalOpened(true);
     updateSerialWorkspace(changes);
     setWorkspace(previous => ({ ...previous, ...changes }));
+  };
+
+  const changeTerminalSettings = changes => {
+    if (Object.hasOwn(changes, 'style')) {
+      try { saveSerialTerminalStyle(changes.style); setTerminalStyleError(''); }
+      catch (failure) { setTerminalStyleError(`终端样式未能保存，已保留原样式：${failure.message}`); return false; }
+    }
+    updateWorkspace({ terminal: { ...workspace.terminal, ...changes } });
+    return true;
   };
 
   useEffect(() => {
@@ -231,7 +245,8 @@ export default function SerialPanel({ theme, showToast }) {
       {discoveryError ? <p role="alert" className="text-xs text-amber-500">{discoveryError}。已保留上次列表，可点击刷新重试。</p> : !ports.length && <p className={`text-xs ${theme.textMuted}`}>未发现串口，请连接串口线并检查驱动。串口工具独立于 ADB 设备连接。</p>}
       {(error || snapshot.error) && <p role="alert" className="break-words rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error || snapshot.error}</p>}
       {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{persistenceError}</p>}
-      {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>正在打开串口终端…</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changes => updateWorkspace({ terminal: { ...workspace.terminal, ...changes } })} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
+      {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{terminalStyleError}</p>}
+      {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>正在打开串口终端…</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
       {mode === 'rs232' && <>
         <SerialDataView theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
         <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />

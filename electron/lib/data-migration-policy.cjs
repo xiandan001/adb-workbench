@@ -8,7 +8,7 @@ const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
   'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
-  'adb-workbench.serial-preferences.v1'
+  'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1'
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json',
@@ -155,6 +155,8 @@ function normalizeDraft(value) {
 }
 function normalizePreference(key, raw) {
   text(raw, 16 * 1024 * 1024, `偏好 ${key}`);
+  if (key === 'adb-workbench.serial-terminal-style.v1' && raw.length > 64) invalid('串口终端样式数据过长');
+  if (key === 'adb-workbench.ui-motion.v1' && raw.length > 256) invalid('启动与动效偏好数据过长');
   if (key === 'currentTheme') {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(raw)) invalid('主题名称');
     return raw;
@@ -164,6 +166,10 @@ function normalizePreference(key, raw) {
   assertSafeJson(value);
   if (key === SHORTCUTS_KEY) value = normalizeDeviceShortcuts(value);
   if (key === 'adb-workbench.serial-preferences.v1') value = normalizeSerialPreferences(value);
+  if (key === 'adb-workbench.serial-terminal-style.v1' && !['current', 'classic'].includes(value)) invalid('串口终端样式');
+  if (key === 'adb-workbench.ui-motion.v1' && (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'reducedMotion,startupAnimation,version' || value.version !== 1
+    || typeof value.reducedMotion !== 'boolean' || typeof value.startupAnimation !== 'boolean')) invalid('启动与动效偏好');
   if (key === 'adb-workbench.pinned-devices.v1') {
     value = [...new Set(array(value, 1000, '常用设备').map(id => {
       text(id, 300, '常用设备 ID', false);

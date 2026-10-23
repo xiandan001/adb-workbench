@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
+import { preferredScrollBehavior } from '../shared/uiMotionPreferences';
 
 const TARGET_PADDING = 8;
 const TOOLTIP_GAP = 14;
@@ -40,7 +41,7 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
         || rect.left > window.innerWidth;
       if (!hasScrolled && outsideViewport) {
         hasScrolled = true;
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        target.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center', inline: 'nearest' });
         window.setTimeout(scheduleUpdate, 260);
       }
       const nextRect = {

@@ -10,6 +10,11 @@ const safeListener = (callback) => (event, ...args) => {
 };
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  startupPresentationPreferences: value => ipcRenderer.send('startup:prefs', value),
+  startupPresentationReady: () => ipcRenderer.send('startup:ready'),
+  startupPresentationFailed: () => ipcRenderer.send('startup:failed'),
+  startupSettingsGet: () => ipcRenderer.invoke('startup-settings:get'),
+  startupSettingsSet: value => ipcRenderer.invoke('startup-settings:set', value),
   appMessageDialogReady: () => ipcRenderer.invoke('app-message-dialog:ready'),
   appMessageDialogUnready: () => ipcRenderer.invoke('app-message-dialog:unready'),
   appMessageDialogReply: value => ipcRenderer.invoke('app-message-dialog:reply', value),

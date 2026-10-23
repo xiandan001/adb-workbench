@@ -18,6 +18,8 @@ import AppMessageDialogHost from './components/AppMessageDialogHost';
 import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
+import StartupPreferences from './components/StartupPreferences';
+import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
@@ -1385,7 +1387,7 @@ function App() {
     : 'border-emerald-500/35 bg-emerald-50 text-emerald-700 shadow-sm';
   const scrollToSettingsSection = (sectionId) => {
     setActiveSettingsSection(sectionId);
-    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
   };
   const settingsSections = useMemo(() => [
     { id: 'settings-commands', label: '快捷命令', icon: ClipboardList },
@@ -2653,6 +2655,7 @@ function App() {
               </section>
 
               <section id="settings-appearance" className={settingsSectionClass}>
+                <StartupPreferences theme={t} isDark={isDark} />
                 {/* Theme Selection */}
                 <div className="py-3">
                   <div className="flex items-center justify-between mb-3">

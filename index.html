@@ -1,13 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="/startup-preferences.js"></script>
+    <link rel="stylesheet" href="/startup.css" />
     <title>卓控台</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="app-startup" class="startup-stage" data-state="loading" role="status" aria-live="polite" aria-label="卓控台启动中">
+      <div class="startup-grid" aria-hidden="true"></div>
+      <div class="startup-panel">
+        <div class="startup-visual" aria-hidden="true">
+          <div class="startup-halo"></div>
+          <div class="startup-orbit"></div>
+          <div class="startup-emblem">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+              <rect x="20" y="10" width="24" height="44" rx="6" stroke="currentColor" stroke-width="2.5" />
+              <path d="M28 17h8M27 30h10M27 36h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <circle cx="32" cy="46" r="1.5" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="startup-scan"></div>
+        </div>
+        <div class="startup-brand">
+          <h1>卓控台</h1>
+          <p>连接设备 · 专注调试</p>
+        </div>
+        <div class="startup-feedback">
+          <p id="startup-status">正在准备工作区</p>
+          <p id="startup-detail"></p>
+          <button id="startup-retry" class="startup-retry" type="button" hidden>重新尝试</button>
+        </div>
+      </div>
+    </div>
+    <div id="root" inert aria-busy="true"></div>
+    <script src="/startup.js"></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
