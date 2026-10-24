@@ -1,7 +1,9 @@
+import { tr, useLocale } from '../../shared/i18n.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-export default function SshFileContextMenu({ x, y, items, theme, onAction, onClose, label = 'SSH 文件操作' }) {
+export default function SshFileContextMenu({ x, y, items, theme, onAction, onClose, label = tr("SSH 文件操作") }) {
+  useLocale();
   const menu = useRef(null); const previousFocus = useRef(null);
   const [active, setActive] = useState(() => items.findIndex(item => !item.disabled));
   const [position, setPosition] = useState(null);

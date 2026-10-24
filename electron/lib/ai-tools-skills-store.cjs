@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { readSafe, atomicReplace, checksum, fail } = require('./ai-tools-file-safety.cjs');
@@ -7,14 +8,14 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
 const MAX_ARCHIVE = 48 * 1024 * 1024;
 function createSkillsStore({ directory, canEncrypt = () => false, encrypt, decrypt, filesystem: io = fs }) {
-  if (typeof directory !== 'string' || !path.isAbsolute(directory) || directory.includes('\0')) throw fail('AI_TOOLS_SKILL_PATH', '技能库目录无效');
+  if (typeof directory !== 'string' || !path.isAbsolute(directory) || directory.includes('\0')) throw fail('AI_TOOLS_SKILL_PATH', tr("技能库目录无效"));
   let state; let observedHash = null;
   const encrypted = () => { try { return canEncrypt() && typeof encrypt === 'function' && typeof decrypt === 'function'; } catch { return false; } };
-  const requireEncryption = () => { if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', '系统安全加密不可用，不能保存、安装或恢复技能'); };
+  const requireEncryption = () => { if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', tr("系统安全加密不可用，不能保存、安装或恢复技能")); };
   function objectPath(kind, id) {
     if (kind === 'index') return path.join(directory, 'index.v1.json');
     if (kind === 'journal') return path.join(directory, 'pending.v1.json');
-    if (!['archive', 'backup'].includes(kind) || !UUID.test(id)) throw fail('AI_TOOLS_SKILL_ID', '技能数据标识无效');
+    if (!['archive', 'backup'].includes(kind) || !UUID.test(id)) throw fail('AI_TOOLS_SKILL_ID', tr("技能数据标识无效"));
     return path.join(directory, kind === 'archive' ? 'archives' : 'backups', `${id}.json`);
   }
   function readObject(kind, id) {
@@ -29,7 +30,7 @@ function createSkillsStore({ directory, canEncrypt = () => false, encrypt, decry
       const plain = decrypt(cipher);
       if (typeof plain !== 'string' || Buffer.byteLength(plain) > MAX_ARCHIVE) throw new Error('limit');
       return { value: JSON.parse(plain), hash: current.hash };
-    } catch { throw fail('AI_TOOLS_SKILL_DATA', '技能加密文件无法读取，已保留原文件'); }
+    } catch { throw fail('AI_TOOLS_SKILL_DATA', tr("技能加密文件无法读取，已保留原文件")); }
   }
   function writeObject(kind, id, value, expectedHash = null) {
     requireEncryption();
@@ -39,7 +40,7 @@ function createSkillsStore({ directory, canEncrypt = () => false, encrypt, decry
         const plain = JSON.stringify(value); if (Buffer.byteLength(plain) > MAX_ARCHIVE * 0.7) throw new Error('size');
         const cipher = encrypt(plain); if (!Buffer.isBuffer(cipher) || !cipher.length) throw new Error('cipher');
         bytes = Buffer.from(`${JSON.stringify({ version: 1, encrypted: cipher.toString('base64') })}\n`);
-      } catch { throw fail('AI_TOOLS_SKILL_ENCRYPT', '技能数据加密失败或超过容量限制'); }
+      } catch { throw fail('AI_TOOLS_SKILL_ENCRYPT', tr("技能数据加密失败或超过容量限制")); }
     } else bytes = null;
     atomicReplace(objectPath(kind, id), bytes, expectedHash, io, kind === 'index' ? 2 * 1024 * 1024 : MAX_ARCHIVE);
     return checksum(bytes);
@@ -68,13 +69,13 @@ function createSkillsStore({ directory, canEncrypt = () => false, encrypt, decry
     if (state) return state;
     const current = readObject('index'); observedHash = current.hash;
     try { state = current.value ? validate(current.value) : { version: 1, skills: [], installations: [], backups: [] }; }
-    catch { throw fail('AI_TOOLS_SKILL_DATA', '技能库索引无效，已保留原文件'); }
+    catch { throw fail('AI_TOOLS_SKILL_DATA', tr("技能库索引无效，已保留原文件")); }
     return state;
   }
-  function unchanged() { load(); if (readSafe(objectPath('index'), io, 2 * 1024 * 1024).hash !== observedHash) throw fail('AI_TOOLS_SKILL_CHANGED', '技能库索引已变化，请重新打开应用后操作'); }
+  function unchanged() { load(); if (readSafe(objectPath('index'), io, 2 * 1024 * 1024).hash !== observedHash) throw fail('AI_TOOLS_SKILL_CHANGED', tr("技能库索引已变化，请重新打开应用后操作")); }
   function persist(next) {
     unchanged();
-    try { validate(next); } catch { throw fail('AI_TOOLS_SKILL_LIMIT', '技能库或备份达到容量限制，未修改原数据'); }
+    try { validate(next); } catch { throw fail('AI_TOOLS_SKILL_LIMIT', tr("技能库或备份达到容量限制，未修改原数据")); }
     observedHash = writeObject('index', undefined, next, observedHash); state = next;
   }
   return { load, copy: () => structuredClone(load()), unchanged, persist, readObject, writeObject, requireEncryption, revision: () => { load(); return observedHash; } };

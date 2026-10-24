@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { checksum, readSafe, atomicReplace, fail } = require('./ai-tools-file-safety.cjs');
@@ -11,17 +12,17 @@ function createResourceStore({ directory, canEncrypt = () => false, encrypt, dec
   let state; let persistent = false; let warning = ''; let observedHash = null;
   const encrypted = () => { try { return Boolean(canEncrypt()) && typeof encrypt === 'function' && typeof decrypt === 'function'; } catch { return false; } };
   function encode(value, limit = MAX_BYTES) {
-    if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', '系统安全加密不可用，不能安全保存或备份资源');
+    if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', tr("系统安全加密不可用，不能安全保存或备份资源"));
     const content = JSON.stringify(value);
-    if (Buffer.byteLength(content) > limit) throw fail('AI_TOOLS_RESOURCE_LIMIT', '资源数据超过容量限制');
+    if (Buffer.byteLength(content) > limit) throw fail('AI_TOOLS_RESOURCE_LIMIT', tr("资源数据超过容量限制"));
     try {
       const cipher = encrypt(content);
       if (!Buffer.isBuffer(cipher) || !cipher.length || cipher.length > limit + 65536) throw new Error('Cipher output');
       return Buffer.from(`${JSON.stringify({ version: 1, encrypted: cipher.toString('base64') })}\n`);
-    } catch { throw fail('AI_TOOLS_ENCRYPTION_FAILED', '资源加密失败，未修改原数据'); }
+    } catch { throw fail('AI_TOOLS_ENCRYPTION_FAILED', tr("资源加密失败，未修改原数据")); }
   }
   function decode(bytes, limit = MAX_BYTES) {
-    if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', '系统安全加密不可用，无法读取加密资源');
+    if (!encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', tr("系统安全加密不可用，无法读取加密资源"));
     const envelope = JSON.parse(bytes.toString('utf8'));
     if (!plain(envelope) || envelope.version !== 1 || Object.keys(envelope).length !== 2 || typeof envelope.encrypted !== 'string') throw new Error('Envelope');
     const cipher = Buffer.from(envelope.encrypted, 'base64');
@@ -48,19 +49,19 @@ function createResourceStore({ directory, canEncrypt = () => false, encrypt, dec
     if (state) return state;
     try {
       const current = readSafe(file, io, MAX_BYTES * 2); observedHash = current.hash; persistent = encrypted();
-      if (!persistent) warning = '本机安全加密不可用，资源仅保存在本次内存中，退出后消失；不能应用到外部配置。';
+      if (!persistent) warning = tr("本机安全加密不可用，资源仅保存在本次内存中，退出后消失；不能应用到外部配置。");
       if (!current.bytes) { state = { version: 1, mcpServers: [], prompts: [], applications: [] }; return state; }
       const value = decodeState(current.bytes);
       state = value; return state;
-    } catch { throw fail('AI_TOOLS_RESOURCE_STORE_READ', '资源加密文件无法读取，已保留原文件，不会覆盖或自动恢复为空'); }
+    } catch { throw fail('AI_TOOLS_RESOURCE_STORE_READ', tr("资源加密文件无法读取，已保留原文件，不会覆盖或自动恢复为空")); }
   }
   function unchanged() {
     load();
-    if (readSafe(file, io, MAX_BYTES * 2).hash !== observedHash) throw fail('AI_TOOLS_RESOURCE_STORE_CHANGED', '资源库在外部已变化，未覆盖，请重新打开应用');
+    if (readSafe(file, io, MAX_BYTES * 2).hash !== observedHash) throw fail('AI_TOOLS_RESOURCE_STORE_CHANGED', tr("资源库在外部已变化，未覆盖，请重新打开应用"));
   }
   function persist(next) {
     load();
-    if (Buffer.byteLength(JSON.stringify(next)) > MAX_BYTES) throw fail('AI_TOOLS_RESOURCE_LIMIT', '资源库超过 4 MiB 容量限制');
+    if (Buffer.byteLength(JSON.stringify(next)) > MAX_BYTES) throw fail('AI_TOOLS_RESOURCE_LIMIT', tr("资源库超过 4 MiB 容量限制"));
     unchanged();
     if (!persistent) { state = next; return; }
     const bytes = encode(next); atomicReplace(file, bytes, observedHash, io, MAX_BYTES * 2);
@@ -69,15 +70,15 @@ function createResourceStore({ directory, canEncrypt = () => false, encrypt, dec
   function exportPortable() { const current = load(); return clone({ version: 1, mcpServers: current.mcpServers, prompts: current.prompts }); }
   function preparePortableImport(payload) {
     const current = load();
-    if (!persistent || !encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', '系统安全加密不可用，不能持久保存导入的资源');
-    if (!plain(payload) || payload.version !== 1 || Object.keys(payload).sort().join(',') !== 'mcpServers,prompts,version') throw fail('AI_TOOLS_PORTABLE_FORMAT', '资源备份结构无效');
+    if (!persistent || !encrypted()) throw fail('AI_TOOLS_ENCRYPTION_UNAVAILABLE', tr("系统安全加密不可用，不能持久保存导入的资源"));
+    if (!plain(payload) || payload.version !== 1 || Object.keys(payload).sort().join(',') !== 'mcpServers,prompts,version') throw fail('AI_TOOLS_PORTABLE_FORMAT', tr("资源备份结构无效"));
     const next = clone(current); const ids = new Set(); const existing = new Set([...current.mcpServers, ...current.prompts].map(row => row.id)); const counts = {};
     for (const [field, normalize] of [['mcpServers', normalizeMcp], ['prompts', normalizePrompt]]) {
-      if (!Array.isArray(payload[field]) || payload[field].length > 256) throw fail('AI_TOOLS_PORTABLE_FORMAT', '资源备份条目无效或超过数量限制');
+      if (!Array.isArray(payload[field]) || payload[field].length > 256) throw fail('AI_TOOLS_PORTABLE_FORMAT', tr("资源备份条目无效或超过数量限制"));
       let skipped = 0;
-      const incoming = payload[field].map(row => { const value = normalize(row); validateId(value.id); if (ids.has(value.id)) throw fail('AI_TOOLS_PORTABLE_FORMAT', '资源备份含重复标识'); ids.add(value.id); return value; })
+      const incoming = payload[field].map(row => { const value = normalize(row); validateId(value.id); if (ids.has(value.id)) throw fail('AI_TOOLS_PORTABLE_FORMAT', tr("资源备份含重复标识")); ids.add(value.id); return value; })
         .filter(row => { if (existing.has(row.id)) { skipped += 1; return false; } return true; });
-      if (current[field].length + incoming.length > 256) throw fail('AI_TOOLS_RESOURCE_LIMIT', '导入后资源会超过数量限制，未修改任何数据');
+      if (current[field].length + incoming.length > 256) throw fail('AI_TOOLS_RESOURCE_LIMIT', tr("导入后资源会超过数量限制，未修改任何数据"));
       next[field].push(...incoming); counts[field] = { added: incoming.length, skipped };
     }
     return prepareEncryptedMerge({ file, beforeState: current, nextState: next, getState: load, acceptState(value, checksum) { state = value; observedHash = checksum; },
@@ -85,9 +86,9 @@ function createResourceStore({ directory, canEncrypt = () => false, encrypt, dec
   }
   function preparePortableRecovery({ path: target, bytes, expectedHash } = {}) {
     const current = load();
-    if (target !== file || bytes !== null && (!Buffer.isBuffer(bytes) || bytes.length > MAX_BYTES * 2)) throw fail('AI_TOOLS_PORTABLE_FORMAT', '资源恢复目标无效');
+    if (target !== file || bytes !== null && (!Buffer.isBuffer(bytes) || bytes.length > MAX_BYTES * 2)) throw fail('AI_TOOLS_PORTABLE_FORMAT', tr("资源恢复目标无效"));
     let next;
-    try { next = decodeState(bytes); } catch { throw fail('AI_TOOLS_PORTABLE_FORMAT', '资源恢复内容无法验证，未修改数据'); }
+    try { next = decodeState(bytes); } catch { throw fail('AI_TOOLS_PORTABLE_FORMAT', tr("资源恢复内容无法验证，未修改数据")); }
     return prepareEncryptedMerge({ file, beforeState: current, nextState: next, getState: load, acceptState(value, checksum) { state = value; observedHash = checksum; }, after: bytes,
       expectedHash, counts: {}, available: encrypted, limit: MAX_BYTES * 2, filesystem: io });
   }

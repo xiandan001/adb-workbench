@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { singleFlight } from '../src/shared/deviceWorkflow.js';
+import { tr } from '../src/shared/i18n.js';
 
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser');
@@ -81,7 +82,7 @@ test('cleanup during refresh prevents a late response from restarting the poll t
 test('selection feedback is brief, once per unavailable selection change, never every refresh', () => {
   assert.ok(selectionEffect);
   const notices = [];
-  const scope = { previousActiveDeviceIdRef: { current: 'wifi' }, activeDeviceId: 'usb',
+  const scope = { tr, previousActiveDeviceIdRef: { current: 'wifi' }, activeDeviceId: 'usb',
     devices: [{ id: 'usb', status: 'device', model: 'Board' }], deviceNames: { usb: 'My device' }, showToast: message => notices.push(message) };
   const effect = runInNewContext(`(${selectionEffect})`, scope);
   effect(); effect();

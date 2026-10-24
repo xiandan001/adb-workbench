@@ -1,6 +1,7 @@
+import { tr } from './i18n.js';
 function hexPairs(hex) {
   if (typeof hex !== 'string' || hex.length % 2 !== 0 || /[^0-9a-f]/i.test(hex)) {
-    throw new Error('HEX 原始数据必须为连续、成对的十六进制字符');
+    throw new Error(tr("HEX 原始数据必须为连续、成对的十六进制字符"));
   }
   return hex.toUpperCase().match(/.{2}/g) || [];
 }

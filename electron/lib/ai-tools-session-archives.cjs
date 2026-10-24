@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -18,8 +19,8 @@ const sessionRoots = home => [
   { toolId: 'pi', root: path.join(home, '.pi', 'agent', 'sessions') },
 ];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const malformed = () => fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', '会话归档格式、原始内容或校验值无效，未导入');
-const limit = () => fail('AI_TOOLS_SESSION_ARCHIVE_LIMIT', '会话超过数量或容量限制（500 条 / 总计 96 MiB / 单条 16 MiB）；请取消包含会话或整理源数据，不会截断');
+const malformed = () => fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', tr("会话归档格式、原始内容或校验值无效，未导入"));
+const limit = () => fail('AI_TOOLS_SESSION_ARCHIVE_LIMIT', tr("会话超过数量或容量限制（500 条 / 总计 96 MiB / 单条 16 MiB）；请取消包含会话或整理源数据，不会截断"));
 function sessionArchiveId(toolId, format, raw) { return createHash('sha256').update(`${toolId}\0${format}\0`).update(raw).digest('hex'); }
 const isCredentialName = name => /^\.?(?:auth|oauth(?:_creds)?|credentials|accounts?|tokens?|secrets|env)(?:[._-]|$)/i.test(name);
 function isSessionCandidate(file, toolId) {
@@ -46,10 +47,10 @@ function validateRaw(raw, toolId, format) {
       try { found = recognized(JSON.parse(line), toolId); } catch { /* Preserve malformed trailing/original lines verbatim if this is a recognized session. */ }
     }
   }
-  if (!found) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', '发现无法识别的会话格式，未导出或截断；请检查源文件或取消包含会话');
+  if (!found) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', tr("发现无法识别的会话格式，未导出或截断；请检查源文件或取消包含会话"));
 }
 function normalizeRecord(record) {
-  exact(record, ['id', 'toolId', 'format', 'data', 'sourceName', 'modifiedAt', 'bytes'], '会话归档');
+  exact(record, ['id', 'toolId', 'format', 'data', 'sourceName', 'modifiedAt', 'bytes'], tr("会话归档"));
   if (Object.keys(record).length !== 7 || !HASH.test(record.id) || !TOOLS.has(record.toolId) || !['json', 'jsonl'].includes(record.format)
     || typeof record.sourceName !== 'string' || !record.sourceName || record.sourceName.length > 256 || ['.', '..'].includes(record.sourceName)
     || path.basename(record.sourceName) !== record.sourceName || path.win32.basename(record.sourceName) !== record.sourceName || Array.from(record.sourceName).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
@@ -62,9 +63,9 @@ function normalizeRecord(record) {
 }
 
 function createAiToolsSessionArchives({ directory, home, canEncrypt, encrypt, decrypt } = {}) {
-  if (typeof directory !== 'string' || !path.isAbsolute(directory) || typeof home !== 'string' || !path.isAbsolute(home) || directory.includes('\0') || home.includes('\0')) throw fail('AI_TOOLS_SESSION_PATH', '会话归档目录无效');
+  if (typeof directory !== 'string' || !path.isAbsolute(directory) || typeof home !== 'string' || !path.isAbsolute(home) || directory.includes('\0') || home.includes('\0')) throw fail('AI_TOOLS_SESSION_PATH', tr("会话归档目录无效"));
   const archiveDirectory = path.join(directory, 'session-archives'); const encryption = { canEncrypt, encrypt, decrypt }; let disposed = false;
-  const active = signal => { if (disposed || signal?.aborted) throw fail('AI_TOOLS_CANCELLED', '会话归档操作已取消'); };
+  const active = signal => { if (disposed || signal?.aborted) throw fail('AI_TOOLS_CANCELLED', tr("会话归档操作已取消")); };
   const archivePath = id => { if (typeof id !== 'string' || !HASH.test(id)) throw malformed(); return path.join(archiveDirectory, `${id}.json`); };
   async function archiveFiles(signal) {
     active(signal); assertSafeParents(path.join(archiveDirectory, '.scope')); let dir;
@@ -80,17 +81,17 @@ function createAiToolsSessionArchives({ directory, home, canEncrypt, encrypt, de
   }
   function readArchive(id, expectedHash) {
     active(); requireEncryption(encryption); const source = readSafe(archivePath(id), fs, MAX_ARCHIVE);
-    if (!source.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_MISSING', '会话归档已移走，请重新扫描');
-    if (expectedHash !== undefined && source.hash !== expectedHash) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', '会话归档在扫描后已变化，请重新扫描');
+    if (!source.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_MISSING', tr("会话归档已移走，请重新扫描"));
+    if (expectedHash !== undefined && source.hash !== expectedHash) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', tr("会话归档在扫描后已变化，请重新扫描"));
     try {
-      const envelope = JSON.parse(decodeConfig(source.bytes)); exact(envelope, ['version', 'encrypted'], '会话密文');
+      const envelope = JSON.parse(decodeConfig(source.bytes)); exact(envelope, ['version', 'encrypted'], tr("会话密文"));
       if (envelope.version !== 1 || Object.keys(envelope).length !== 2 || typeof envelope.encrypted !== 'string') throw malformed();
       const cipher = Buffer.from(envelope.encrypted, 'base64'); if (!cipher.length || cipher.toString('base64') !== envelope.encrypted) throw malformed();
       const decoded = decrypt(cipher); if (typeof decoded !== 'string' || Buffer.byteLength(decoded) > MAX_ARCHIVE) throw malformed();
-      const value = JSON.parse(decoded); exact(value, ['version', 'record'], '会话密文内容'); if (value.version !== 1 || Object.keys(value).length !== 2) throw malformed();
+      const value = JSON.parse(decoded); exact(value, ['version', 'record'], tr("会话密文内容")); if (value.version !== 1 || Object.keys(value).length !== 2) throw malformed();
       const validated = normalizeRecord(value.record); if (validated.record.id !== id) throw malformed();
       return { ...validated, hash: source.hash, path: source.path };
-    } catch { throw fail('AI_TOOLS_SESSION_ARCHIVE_READ', '会话加密归档无法读取或校验失败，原文件已保留'); }
+    } catch { throw fail('AI_TOOLS_SESSION_ARCHIVE_READ', tr("会话加密归档无法读取或校验失败，原文件已保留")); }
   }
   async function visitArchives(visitor, { signal } = {}) {
     let bytes = 0; let count = 0;
@@ -103,16 +104,16 @@ function createAiToolsSessionArchives({ directory, home, canEncrypt, encrypt, de
   async function nativeFiles() {
     const files = []; let entries = 0;
     const walk = async (folder, toolId, depth) => {
-      active(); if (depth > 8) throw fail('AI_TOOLS_SESSION_ARCHIVE_LIMIT', '会话目录层级超过扫描限制，未导出或截断');
+      active(); if (depth > 8) throw fail('AI_TOOLS_SESSION_ARCHIVE_LIMIT', tr("会话目录层级超过扫描限制，未导出或截断"));
       assertSafeParents(path.join(folder, '.scope')); let dir;
       try { dir = await fs.promises.opendir(folder); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
       for await (const entry of dir) {
         active(); if (++entries > 20000) throw limit(); const file = path.join(folder, entry.name);
         if (isCredentialName(entry.name)) continue;
-        if (entry.isSymbolicLink()) throw fail('AI_TOOLS_SESSION_PATH', '会话目录包含链接，未跟随或导出');
+        if (entry.isSymbolicLink()) throw fail('AI_TOOLS_SESSION_PATH', tr("会话目录包含链接，未跟随或导出"));
         if (entry.isDirectory()) await walk(file, toolId, depth + 1);
         else if (entry.isFile() && isSessionCandidate(file, toolId)) {
-          const stat = await fs.promises.lstat(file); if (stat.nlink !== 1) throw fail('AI_TOOLS_SESSION_PATH', '会话文件包含硬链接，未导出'); if (stat.size > MAX_RAW) throw limit();
+          const stat = await fs.promises.lstat(file); if (stat.nlink !== 1) throw fail('AI_TOOLS_SESSION_PATH', tr("会话文件包含硬链接，未导出")); if (stat.size > MAX_RAW) throw limit();
           files.push({ file, toolId, modifiedAt: stat.mtimeMs, format: file.endsWith('.json') ? 'json' : 'jsonl' }); if (files.length > 2000) throw limit();
         }
       }
@@ -126,7 +127,7 @@ function createAiToolsSessionArchives({ directory, home, canEncrypt, encrypt, de
     const rows = new Map(); let bytes = 0; let readBytes = 0;
     const add = record => { if (rows.has(record.id)) return; bytes += record.bytes; if (bytes > MAX_TOTAL || rows.size >= MAX_RECORDS) throw limit(); rows.set(record.id, record); };
     for (const source of await nativeFiles()) {
-      active(); const saved = readSafe(source.file, fs, MAX_RAW); if (!saved.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', '会话文件在导出时已移走，请重试');
+      active(); const saved = readSafe(source.file, fs, MAX_RAW); if (!saved.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', tr("会话文件在导出时已移走，请重试"));
       readBytes += saved.bytes.length; if (readBytes > MAX_TOTAL * 2) throw limit(); validateRaw(saved.bytes, source.toolId, source.format);
       add({ id: sessionArchiveId(source.toolId, source.format, saved.bytes), toolId: source.toolId, format: source.format, data: saved.bytes.toString('base64'), sourceName: path.basename(source.file), modifiedAt: source.modifiedAt, bytes: saved.bytes.length });
       await new Promise(resolve => setImmediate(resolve));
@@ -135,7 +136,7 @@ function createAiToolsSessionArchives({ directory, home, canEncrypt, encrypt, de
     active(); return { version: 1, included: true, records: [...rows.values()] };
   }
   async function preparePortableImport(payload) {
-    active(); exact(payload, ['version', 'included', 'records'], '会话迁移');
+    active(); exact(payload, ['version', 'included', 'records'], tr("会话迁移"));
     if (Object.keys(payload).length !== 3 || payload.version !== 1 || typeof payload.included !== 'boolean' || !Array.isArray(payload.records) || payload.records.length > MAX_RECORDS || !payload.included && payload.records.length) throw malformed();
     if (!payload.included) return { targets: [], guards: [], counts: { added: 0, skipped: 0 } };
     requireEncryption(encryption); const incoming = new Map(); let incomingBytes = 0;

@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 
@@ -10,20 +11,20 @@ const MAX_DEPTH = 64;
 
 function fail(code, message) { return Object.assign(new Error(message), { code }); }
 function remotePath(value) {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.includes('\0') || value.length > 8192 || value.split('/').includes('..')) throw fail('SFTP_PATH_INVALID', '远端路径无效，请使用绝对路径且不要包含 ..');
+  if (typeof value !== 'string' || !value.startsWith('/') || value.includes('\0') || value.length > 8192 || value.split('/').includes('..')) throw fail('SFTP_PATH_INVALID', tr("远端路径无效，请使用绝对路径且不要包含 .."));
   return path.posix.normalize(value);
 }
 function remoteName(value) {
-  if (typeof value !== 'string' || !value || value === '.' || value === '..' || /[/\0]/.test(value) || Buffer.byteLength(value) > 255) throw fail('SFTP_NAME_INVALID', '文件名称无效');
+  if (typeof value !== 'string' || !value || value === '.' || value === '..' || /[/\0]/.test(value) || Buffer.byteLength(value) > 255) throw fail('SFTP_NAME_INVALID', tr("文件名称无效"));
   return value;
 }
 function localName(value) {
   remoteName(value);
-  if (/[<>:"/\\|?*]/.test(value) || Array.from(value).some(character => character.charCodeAt(0) < 32) || /[. ]$/.test(value) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)) throw fail('SFTP_LOCAL_NAME_INVALID', `本地系统不支持文件名称：${value}`);
+  if (/[<>:"/\\|?*]/.test(value) || Array.from(value).some(character => character.charCodeAt(0) < 32) || /[. ]$/.test(value) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)) throw fail('SFTP_LOCAL_NAME_INVALID', tr("本地系统不支持文件名称：{0}", { 0: value }));
   return value;
 }
 function localPath(value) {
-  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) throw fail('SFTP_LOCAL_PATH_INVALID', '本地路径无效，请重新选择文件或目录');
+  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) throw fail('SFTP_LOCAL_PATH_INVALID', tr("本地路径无效，请重新选择文件或目录"));
   return path.resolve(value);
 }
 function within(parent, child) {
@@ -43,7 +44,7 @@ function digest(bytes) { return createHash('sha256').update(bytes).digest('hex')
 function revision(stat, hash) { return digest(JSON.stringify({ ...metadata(stat), hash })); }
 function isMissing(error) { return error?.code === 2 || error?.code === 'ENOENT'; }
 function textBytes(text) {
-  if (typeof text !== 'string' || Buffer.byteLength(text) > EDIT_BYTES || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(text)) throw fail('SFTP_TEXT_INVALID', '文本内容无效或超过 2 MiB 编辑限制');
+  if (typeof text !== 'string' || Buffer.byteLength(text) > EDIT_BYTES || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(text)) throw fail('SFTP_TEXT_INVALID', tr("文本内容无效或超过 2 MiB 编辑限制"));
   return Buffer.from(text, 'utf8');
 }
 function decodeText(bytes) {

@@ -1,0 +1,17 @@
+name: Localization coverage
+on:
+  pull_request:
+  push:
+    branches: [develop-vip, main]
+jobs:
+  localization:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:i18n
+      - run: npm run check:i18n

@@ -147,16 +147,16 @@ test('real auth action supports explicit reauthorization but ignores a response 
 });
 
 test('dialog contract renders exact preview as text and has no file picker, persistent draft or raw credential UI', () => {
-  assert.match(component, /<pre[^>]*aria-label="反馈报告预览"[\s\S]*?\{report\.preview\.body\}/);
+  assert.match(component, /<pre[^>]*aria-label=\{tr\(["']反馈报告预览["']\)\}[\s\S]*?\{report\.preview\.body\}/);
   assert.match(component, /onKeyDown=\{trapAppMessageFocus\}/);
-  assert.match(component, /aria-label="关闭反馈问题" disabled=\{submitting\}/);
+  assert.match(component, /aria-label=\{tr\(["']关闭反馈问题["']\)\} disabled=\{submitting\}/);
   assert.doesNotMatch(component, /dangerouslySetInnerHTML|type="file"|localStorage|sessionStorage|console\./);
 });
 
 test('feedback receipt has no external action and ordinary submission has a concise label', () => {
-  assert.match(component, /问题已提交 · #\{report\.issue\.number\}/);
+  assert.match(component, /tr\(["']问题已提交 · #\{0\}["'], \{ 0: report\.issue\.number \}\)/);
   assert.doesNotMatch(component, /打开 Issue|openIssue|openError|setOpening|ExternalLink|提交到 GitHub'<\/|: '提交到 GitHub'/);
-  assert.match(component, /report\.uncertain \? '检查提交结果' : '提交'/);
+  assert.match(component, /report\.uncertain \? tr\(["']检查提交结果["']\) : tr\(["']提交["']\)/);
 });
 
 test('one App-owned dialog is shared by settings and the sidebar without changing the current page', () => {
@@ -166,13 +166,13 @@ test('one App-owned dialog is shared by settings and the sidebar without changin
   assert.match(component, /onClick=\{onOpen\}/);
   assert.equal((app.match(/<FeedbackDialog\b/g) || []).length, 1);
   assert.match(app, /feedbackOpen && <FeedbackDialog theme=\{t\} currentPage=\{activeTab\}/);
-  assert.match(app, /aria-label="打开问题反馈"[\s\S]*?onClick=\{\(\) => setFeedbackOpen\(true\)\}/);
+  assert.match(app, /aria-label=\{tr\(["']打开问题反馈["']\)\}[\s\S]*?onClick=\{\(\) => setFeedbackOpen\(true\)\}/);
   assert.match(app, /<FeedbackSection theme=\{t\} onOpen=\{\(\) => setFeedbackOpen\(true\)\}/);
 });
 
 test('title and category use equal block label metrics and control heights', () => {
   assert.match(component, /htmlFor=\{`\$\{formId\}-title`\} className="block text-xs leading-5"/);
   assert.match(component, /htmlFor=\{categoryId\} className="block text-xs leading-5"/);
-  assert.match(component, /aria-label="问题标题"[^\n]*className=\{`\$\{input\} h-10`\}/);
+  assert.match(component, /aria-label=\{tr\(["']问题标题["']\)\}[^\n]*className=\{`\$\{input\} h-10`\}/);
   assert.match(component, /<SelectMenu[^\n]*className="mt-1 \[&>button\]:h-10"/);
 });

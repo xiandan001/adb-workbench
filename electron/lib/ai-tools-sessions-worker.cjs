@@ -1,3 +1,4 @@
+const { tr, setLocale } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
@@ -31,7 +32,7 @@ function candidates(root, toolId, budget, depth = 0) {
 }
 function parseFile(row) {
   const source = readSafe(row.file, fs, MAX_FILE);
-  if (!source.exists) throw fail('AI_TOOLS_SESSION_MISSING', '会话文件已移走，请重新扫描');
+  if (!source.exists) throw fail('AI_TOOLS_SESSION_MISSING', tr("会话文件已移走，请重新扫描"));
   const parsed = parseSession(decodeConfig(source.bytes), row.toolId, row.file.endsWith('.json') ? 'json' : 'jsonl');
   return { ...parsed, toolId: row.toolId, id: row.id, contentId: sessionArchiveId(row.toolId, row.file.endsWith('.json') ? 'json' : 'jsonl', source.bytes), path: row.file, modifiedAt: row.modifiedAt, size: source.bytes.length };
 }
@@ -66,16 +67,16 @@ function list(args) {
   return { ...lastScan, count: selected.length, sessions: selected.slice(offset, offset + 50), offset, hasMore: selected.length > offset + 50 };
 }
 function parseArchive(row, buffer) {
-  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > MAX_FILE || buffer.byteLength !== row.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', '归档读取数据无效');
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > MAX_FILE || buffer.byteLength !== row.bytes) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', tr("归档读取数据无效"));
   const raw = Buffer.from(buffer);
-  if (sessionArchiveId(row.toolId, row.format, raw) !== row.id) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', '归档内容与扫描身份不一致，请重新扫描');
+  if (sessionArchiveId(row.toolId, row.format, raw) !== row.id) throw fail('AI_TOOLS_SESSION_ARCHIVE_CHANGED', tr("归档内容与扫描身份不一致，请重新扫描"));
   return { ...parseSession(decodeConfig(raw), row.toolId, row.format), id: row.id, contentId: row.id, toolId: row.toolId,
-    imported: true, archived: true, readOnly: true, source: 'migration-archive', sourceName: row.sourceName, path: `迁移归档/${row.sourceName}`, modifiedAt: row.modifiedAt, size: raw.length };
+    imported: true, archived: true, readOnly: true, source: 'migration-archive', sourceName: row.sourceName, path: tr("迁移归档/{0}", { 0: row.sourceName }), modifiedAt: row.modifiedAt, size: raw.length };
 }
 function indexArchive(args) {
-  if (!lastScan) throw fail('AI_TOOLS_SESSION_MISSING', '请先扫描会话');
+  if (!lastScan) throw fail('AI_TOOLS_SESSION_MISSING', tr("请先扫描会话"));
   const row = args.metadata;
-  if (!row || typeof row.id !== 'string' || !/^[a-f0-9]{64}$/.test(row.id) || !Number.isSafeInteger(row.bytes) || row.bytes < 1 || row.bytes > MAX_FILE) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', '归档元数据无效');
+  if (!row || typeof row.id !== 'string' || !/^[a-f0-9]{64}$/.test(row.id) || !Number.isSafeInteger(row.bytes) || row.bytes < 1 || row.bytes > MAX_FILE) throw fail('AI_TOOLS_SESSION_ARCHIVE_FORMAT', tr("归档元数据无效"));
   if (contentIds.has(row.id)) return { indexed: false, duplicate: true };
   if (indexed.size >= 1000 || lastScan.archivedCount >= 500 || archivedBytes + row.bytes > MAX_SCAN) { lastScan.incomplete = true; return { indexed: false, limited: true }; }
   const parsed = parseArchive(row, args.raw); const { messages, usage, ...summary } = parsed;
@@ -85,16 +86,17 @@ function indexArchive(args) {
 }
 function finishScan() { if (lastScan) lastScan.usage = summarizeUsage([...indexed.values()].map(row => ({ toolId: row.toolId, usage: row.usage }))); return lastScan; }
 function open(args) {
-  const row = indexed.get(args.id); if (!row) throw fail('AI_TOOLS_SESSION_MISSING', '请先扫描并从列表选择会话');
+  const row = indexed.get(args.id); if (!row) throw fail('AI_TOOLS_SESSION_MISSING', tr("请先扫描并从列表选择会话"));
   const parsed = row.archived ? parseArchive(row, args.raw) : parseFile(row); const offset = Number.isSafeInteger(args.offset) && args.offset >= 0 ? args.offset : 0;
   const messages = parsed.messages.slice(offset, offset + 50);
   return { ...parsed, messages, messageCount: parsed.messages.length, offset, hasMore: parsed.messages.length > offset + 50 };
 }
 parentPort.on('message', request => {
+  setLocale(request.locale === 'en-US' ? 'en-US' : 'zh-CN');
   try {
     const result = request.command === 'scan' ? scan() : request.command === 'list' ? list(request.args || {}) : request.command === 'open' ? open(request.args || {})
       : request.command === 'archive-index' ? indexArchive(request.args || {}) : request.command === 'scan-finish' ? finishScan() : null;
-    if (result === null) throw fail('AI_TOOLS_SESSION_COMMAND', '会话操作无效');
+    if (result === null) throw fail('AI_TOOLS_SESSION_COMMAND', tr("会话操作无效"));
     parentPort.postMessage({ id: request.id, result });
-  } catch (error) { parentPort.postMessage({ id: request.id, error: { code: error.code?.startsWith('AI_TOOLS_') ? error.code : 'AI_TOOLS_SESSION_FAILED', message: error.code?.startsWith('AI_TOOLS_') ? error.message : '读取会话未完成；源文件未修改' } }); }
+  } catch (error) { parentPort.postMessage({ id: request.id, error: { code: error.code?.startsWith('AI_TOOLS_') ? error.code : 'AI_TOOLS_SESSION_FAILED', message: error.code?.startsWith('AI_TOOLS_') ? error.message : tr("读取会话未完成；源文件未修改") } }); }
 });

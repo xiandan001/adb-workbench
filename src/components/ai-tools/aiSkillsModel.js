@@ -1,3 +1,4 @@
+import { tr } from '../../shared/i18n.js';
 export function skillActionEnabled(can, command, { recoveryOnly = false, restoring = false } = {}) {
   if (recoveryOnly && !['skills_backups_list', 'skills_backup_preview_restore'].includes(command) && !(command === 'skills_apply' && restoring)) return false;
   return Boolean(can?.(command, { restoring }));
@@ -6,8 +7,8 @@ export function skillInstallation(skill, toolId) {
   return skill.installations?.find(row => row.toolId === toolId) || null;
 }
 export function skillApplyRequest(preview, now = Date.now()) {
-  if (!preview || typeof preview.token !== 'string' || !preview.token || !['install', 'uninstall', 'restore'].includes(preview.operation)) throw new Error('技能预览无效，请重新预览');
-  if (!Number.isFinite(preview.expiresAt) || preview.expiresAt <= now) throw new Error('技能预览已过期，请关闭后重新预览');
+  if (!preview || typeof preview.token !== 'string' || !preview.token || !['install', 'uninstall', 'restore'].includes(preview.operation)) throw new Error(tr("技能预览无效，请重新预览"));
+  if (!Number.isFinite(preview.expiresAt) || preview.expiresAt <= now) throw new Error(tr("技能预览已过期，请关闭后重新预览"));
   return { command: 'skills_apply', args: { token: preview.token }, options: { restoring: preview.operation === 'restore' } };
 }
 export function skillChangeSummary(preview) {
@@ -29,5 +30,5 @@ export async function executeSkillMutation(onRequest, command, args, options, re
   const result = await onRequest(command, args, options);
   if (result?.cancelled) return { result, data: null, refreshError: '' };
   try { return { result, data: await refresh(), refreshError: '' }; }
-  catch (error) { return { result, data: null, refreshError: error.message || '列表刷新失败' }; }
+  catch (error) { return { result, data: null, refreshError: error.message || tr("列表刷新失败") }; }
 }

@@ -129,5 +129,5 @@ test('shared model editor and dialogs use manual inputs/custom menus without mou
   assert.match(editor, /useState\(focusModels\)/); assert.match(editor, /仅是向客户端声明上下文能力/);
   assert.match(form, /providerModelReadBlockReason\(draft, provider\)/); assert.match(form, /<AiClaudeModelsEditor/);
   assert.match(dialog, /models = \[\]/); assert.match(dialog, /onSave\(modelConfigurationInput\(value/);
-  assert.match(dialog, /保存模型配置/); assert.match(editor, /label="AI 默认模型"/);
+  assert.match(dialog, /保存模型配置/); assert.match(editor, /label=\{tr\("AI 默认模型"\)\}/);
 });

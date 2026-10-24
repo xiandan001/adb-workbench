@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
@@ -68,7 +69,7 @@ function createScreenRecordingService({
 
   function failed(session, error) {
     Object.assign(session, { status: 'needs-save', error: error.message || String(error) });
-    try { persist(); } catch (persistError) { session.error += `；恢复记录保存失败：${persistError.message}`; }
+    try { persist(); } catch (persistError) { session.error += tr("；恢复记录保存失败：{0}", { 0: persistError.message }); }
     notify();
     return { success: false, error: session.error, session: publicSession(session) };
   }
@@ -76,15 +77,15 @@ function createScreenRecordingService({
   function restore() {
     if (!fs.existsSync(statePath)) return;
     const stored = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    if (stored.version !== 1 || !Array.isArray(stored.sessions)) throw new Error('录屏恢复记录格式无效');
+    if (stored.version !== 1 || !Array.isArray(stored.sessions)) throw new Error(tr("录屏恢复记录格式无效"));
     const validated = [];
     for (const item of stored.sessions) {
       if (!UUID.test(item?.id) || !validDeviceId(item.deviceId) || !Number.isFinite(item.startedAt) || !Number.isFinite(new Date(item.startedAt).getTime())
-        || item.remotePath !== remotePathFor(item.id) || ![...ACTIVE, 'needs-save', 'saved', 'error'].includes(item.status)) throw new Error('录屏恢复记录包含无效会话');
-      if (item.pid !== undefined && (!Number.isSafeInteger(item.pid) || item.pid <= 1)) throw new Error('录屏恢复进程标识无效');
-      if (item.localPath !== undefined && (typeof item.localPath !== 'string' || !path.isAbsolute(item.localPath) || path.normalize(item.localPath) !== item.localPath || path.basename(item.localPath) !== localNameFor(item))) throw new Error('录屏恢复路径无效');
-      if (item.path !== undefined && item.path !== item.localPath || item.status === 'saved' && !item.localPath) throw new Error('录屏恢复文件无效');
-      if (item.logPath !== undefined && (!item.localPath || item.logPath !== item.localPath.replace(/\.mp4$/i, '.log'))) throw new Error('录屏日志恢复路径无效');
+        || item.remotePath !== remotePathFor(item.id) || ![...ACTIVE, 'needs-save', 'saved', 'error'].includes(item.status)) throw new Error(tr("录屏恢复记录包含无效会话"));
+      if (item.pid !== undefined && (!Number.isSafeInteger(item.pid) || item.pid <= 1)) throw new Error(tr("录屏恢复进程标识无效"));
+      if (item.localPath !== undefined && (typeof item.localPath !== 'string' || !path.isAbsolute(item.localPath) || path.normalize(item.localPath) !== item.localPath || path.basename(item.localPath) !== localNameFor(item))) throw new Error(tr("录屏恢复路径无效"));
+      if (item.path !== undefined && item.path !== item.localPath || item.status === 'saved' && !item.localPath) throw new Error(tr("录屏恢复文件无效"));
+      if (item.logPath !== undefined && (!item.localPath || item.logPath !== item.localPath.replace(/\.mp4$/i, '.log'))) throw new Error(tr("录屏日志恢复路径无效"));
       const session = {
         id: item.id, deviceId: item.deviceId, startedAt: item.startedAt, remotePath: item.remotePath,
         status: item.status, pid: item.pid, localPath: item.localPath, path: item.path,
@@ -95,14 +96,14 @@ function createScreenRecordingService({
       for (const key of ['error', 'logError', 'mediaId']) if (typeof item[key] === 'string') session[key] = item[key].slice(0, 4096);
       if (ACTIVE.has(session.status)) {
         session.status = 'needs-save';
-        session.error = '上次录屏未完成保存，请连接原设备后重新保存';
+        session.error = tr("上次录屏未完成保存，请连接原设备后重新保存");
       }
       validated.push(session);
     }
     for (const session of validated) sessions.set(session.id, session);
     persist();
   }
-  try { restore(); } catch (error) { initializationError = `录屏恢复记录无法读取，已保留原文件：${error.message}`; }
+  try { restore(); } catch (error) { initializationError = tr("录屏恢复记录无法读取，已保留原文件：{0}", { 0: error.message }); }
 
   async function adb(session, args, timeoutMs = 5000) {
     return runAdb(['-s', session.deviceId, ...args], { timeoutMs, queue: false });
@@ -112,10 +113,10 @@ function createScreenRecordingService({
     if (Number.isInteger(session.pid) && session.pid > 1) return session.pid;
     const result = await adb(session, ['shell', `cat ${session.remotePath}.pid`]);
     if (!result.ok || !/^\d+\s*$/.test(String(result.stdout))) {
-      throw new Error(errorText(result, '无法确认录屏进程，请连接原设备后重新保存'));
+      throw new Error(errorText(result, tr("无法确认录屏进程，请连接原设备后重新保存")));
     }
     const pid = Number(String(result.stdout).trim());
-    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error('录屏进程标识无效');
+    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error(tr("录屏进程标识无效"));
     update(session, { pid });
     return pid;
   }
@@ -123,7 +124,7 @@ function createScreenRecordingService({
   async function processState(session) {
     const pid = await resolvePid(session);
     const result = await adb(session, ['shell', `if [ -d /proc/${pid} ]; then cat /proc/${pid}/cmdline; else printf '${GONE_MARKER}'; fi`]);
-    if (!result.ok) throw new Error(errorText(result, '无法确认录屏是否已停止'));
+    if (!result.ok) throw new Error(errorText(result, tr("无法确认录屏是否已停止")));
     const command = String(result.stdout || '').trim();
     if (command === GONE_MARKER || !command) return 'gone';
     const args = command.split('\0').filter(Boolean);
@@ -141,20 +142,20 @@ function createScreenRecordingService({
       await delay(pollMs);
       state = await processState(session);
     }
-    if (state === 'starting') throw new Error('录屏进程尚未就绪，请稍后重试');
+    if (state === 'starting') throw new Error(tr("录屏进程尚未就绪，请稍后重试"));
     if (state === 'owned') {
       const command = `cmdline=$(tr '\\000' ' ' < /proc/${session.pid}/cmdline 2>/dev/null); case "$cmdline" in 'screenrecord --verbose ${session.remotePath} '|'/system/bin/screenrecord --verbose ${session.remotePath} ') kill -2 ${session.pid} ;; *) printf 'recording_process_changed'; exit 3 ;; esac`;
       const signal = await adb(session, ['shell', command]);
       if (!signal.ok) {
         state = await processState(session);
-        if (state !== 'gone') throw new Error(errorText(signal, '停止录屏失败，请重试'));
+        if (state !== 'gone') throw new Error(errorText(signal, tr("停止录屏失败，请重试")));
       }
       const deadline = now() + stopTimeoutMs;
       while (state !== 'gone' && now() < deadline) {
         await delay(pollMs);
         state = await processState(session);
       }
-      if (state !== 'gone') throw new Error('录屏尚未完成封装，未强制终止；请稍后重新保存');
+      if (state !== 'gone') throw new Error(tr("录屏尚未完成封装，未强制终止；请稍后重新保存"));
     }
     update(session, { remoteStopped: true, endedAt: session.endedAt || now(), durationMs: Math.max(0, (session.endedAt || now()) - session.startedAt) });
   }
@@ -186,7 +187,7 @@ function createScreenRecordingService({
       } else {
         await fs.promises.mkdir(path.dirname(session.localPath), { recursive: true });
         const pulled = await adb(session, ['pull', session.remotePath, temporary], 120000);
-        if (!pulled.ok) throw new Error(errorText(pulled, '录屏保存失败，设备上的原文件已保留'));
+        if (!pulled.ok) throw new Error(errorText(pulled, tr("录屏保存失败，设备上的原文件已保留")));
         await validateRecordingMp4(temporary);
         await fs.promises.rename(temporary, session.localPath);
       }
@@ -227,7 +228,7 @@ function createScreenRecordingService({
       // Early startup failure without a video is not an unsaved recording.
       const exists = await adb(session, ['shell', `if [ -f ${session.remotePath} ]; then printf exists; else printf absent; fi`]).catch(() => null);
       if (exists?.ok && String(exists.stdout).trim() === 'absent') {
-        try { update(session, { status: 'error', endedAt: now(), error: runtime.output.replace(/__AW_SCREENRECORD_PID__=\d+/g, '').trim() || '设备无法启动录屏' }); } catch (error) { failed(session, error); }
+        try { update(session, { status: 'error', endedAt: now(), error: runtime.output.replace(/__AW_SCREENRECORD_PID__=\d+/g, '').trim() || tr("设备无法启动录屏") }); } catch (error) { failed(session, error); }
         return;
       }
     }
@@ -236,9 +237,9 @@ function createScreenRecordingService({
 
   async function start({ deviceId, withLogs = false } = {}) {
     if (initializationError) return { success: false, error: initializationError };
-    if (!validDeviceId(deviceId)) return { success: false, error: '请选择有效设备' };
+    if (!validDeviceId(deviceId)) return { success: false, error: tr("请选择有效设备") };
     const pending = [...sessions.values()].find(session => session.deviceId === deviceId && (ACTIVE.has(session.status) || session.status === 'needs-save' && !session.remoteStopped));
-    if (pending) return { success: false, error: '当前设备仍有正在进行或尚未确认停止的录屏，请先停止并保存', session: publicSession(pending) };
+    if (pending) return { success: false, error: tr("当前设备仍有正在进行或尚未确认停止的录屏，请先停止并保存"), session: publicSession(pending) };
     const id = randomUUID();
     const session = { id, deviceId, status: 'starting', startedAt: now(), remotePath: remotePathFor(id), withLogs: withLogs === true };
     const runtime = { output: '', pidOutput: '', closed: false, ready: false, finishing: null };
@@ -291,7 +292,7 @@ function createScreenRecordingService({
                   runtime.logger = logger;
                   const log = logger.info();
                   update(session, { logPath: log.path, logTruncated: Boolean(log.truncated), logError: log.error || undefined });
-                }).catch(error => { update(session, { logError: `视频已开始，但日志抓取失败：${error.message}` }); });
+                }).catch(error => { update(session, { logError: tr("视频已开始，但日志抓取失败：{0}", { 0: error.message }) }); });
               await runtime.loggerPromise;
               if (runtime.closed) await finish(session);
             }
@@ -304,7 +305,7 @@ function createScreenRecordingService({
       if (ACTIVE.has(session.status)) {
         await finish(session);
       }
-      return { success: false, session: publicSession(session), error: session.error || '录屏未能正常启动，请检查设备是否支持录屏' };
+      return { success: false, session: publicSession(session), error: session.error || tr("录屏未能正常启动，请检查设备是否支持录屏") };
     } catch (error) {
       runtime.resolveLaunched();
       if (!runtime.proc) {
@@ -319,14 +320,14 @@ function createScreenRecordingService({
     if (initializationError) return { success: false, error: initializationError };
     const session = [...sessions.values()].filter(item => item.deviceId === deviceId && (ACTIVE.has(item.status) || item.status === 'needs-save'))
       .sort((left, right) => right.startedAt - left.startedAt)[0];
-    if (!session) return { success: false, error: '当前设备没有待保存的录屏' };
+    if (!session) return { success: false, error: tr("当前设备没有待保存的录屏") };
     return finish(session);
   }
 
   async function retry({ id } = {}) {
     if (initializationError) return { success: false, error: initializationError };
     const session = sessions.get(id);
-    if (!session || session.status !== 'needs-save' && !runtimes.get(id)?.finishing) return { success: false, error: '没有找到待重新保存的录屏' };
+    if (!session || session.status !== 'needs-save' && !runtimes.get(id)?.finishing) return { success: false, error: tr("没有找到待重新保存的录屏") };
     return finish(session);
   }
 

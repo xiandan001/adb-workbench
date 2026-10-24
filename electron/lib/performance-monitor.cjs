@@ -1,3 +1,4 @@
+const { tr, getLocale } = require('./localization.cjs');
 // 性能监控后端：采集设备 CPU/内存/磁盘/电池/温度/FPS/进程快照，并通过 IPC 推送给渲染进程。
 
 const { app } = require('electron');
@@ -54,7 +55,7 @@ function register(ipcMain) {
     const isVip = status.activated === true;
     const requestedIntervalMs = Number(args?.intervalMs) || DEFAULT_INTERVAL_MS;
     if (!isVip && requestedIntervalMs < FREE_MIN_INTERVAL_MS) {
-      return { ok: false, code: 'vip_required', error: '3 秒及更高频性能采样为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("3 秒及更高频性能采样为会员专属功能，请先开通会员") };
     }
     const intervalMs = normalizeInterval(args?.intervalMs, isVip);
     await stopMonitor(deviceId);
@@ -78,7 +79,7 @@ function register(ipcMain) {
     }, 3000);
     if (!workerResult.ok) {
       monitors.delete(deviceId);
-      return { ok: false, error: workerResult.error || '性能采样 Worker 启动失败' };
+      return { ok: false, error: workerResult.error || tr("性能采样 Worker 启动失败") };
     }
     return { ok: true, deviceId, intervalMs, vip: isVip };
   });
@@ -131,7 +132,7 @@ function register(ipcMain) {
 
   ipcMain.handle('perf:report', async (event, args) => withVip(async () => {
     if (currentReportTask) {
-      return { ok: false, error: '已有性能报告正在生成，请等待完成' };
+      return { ok: false, error: tr("已有性能报告正在生成，请等待完成") };
     }
     const deviceId = normalizeDeviceId(args?.deviceId);
     if (!deviceId) return { ok: false, error: 'device_required' };
@@ -143,7 +144,7 @@ function register(ipcMain) {
       sender: event.sender,
       status: 'running',
       startedAt: new Date().toISOString(),
-      progress: { percent: 5, message: '准备性能报告' },
+      progress: { percent: 5, message: tr("准备性能报告") },
       result: null
     };
     currentReportTask = task;
@@ -186,7 +187,7 @@ function register(ipcMain) {
 async function withVip(action) {
   const status = await vip.getStatusAsync();
   if (!status.activated) {
-    return { ok: false, code: 'vip_required', error: 'VIP 会员专属功能，请先开通会员' };
+    return { ok: false, code: 'vip_required', error: tr("VIP 会员专属功能，请先开通会员") };
   }
   try {
     return await action(status);
@@ -207,14 +208,14 @@ async function runReportTask(task, options) {
     );
     const payload = { ok: true, path: result.path, aiSummary: result.aiSummary, count: options.history.length };
     task.status = 'success';
-    task.progress = { percent: 100, message: '性能报告已生成' };
+    task.progress = { percent: 100, message: tr("性能报告已生成") };
     task.result = payload;
     lastReportTask = publicReportTask(task);
     sendReportDone(task, payload);
   } catch (error) {
-    const payload = { ok: false, error: error.message || '性能报告生成失败' };
+    const payload = { ok: false, error: error.message || tr("性能报告生成失败") };
     task.status = 'failed';
-    task.progress = { percent: 100, message: '性能报告生成失败' };
+    task.progress = { percent: 100, message: tr("性能报告生成失败") };
     task.result = payload;
     lastReportTask = publicReportTask(task);
     sendReportDone(task, payload);
@@ -226,7 +227,7 @@ async function runReportTask(task, options) {
 function updateReportProgress(task, progress) {
   task.progress = {
     percent: Math.max(0, Math.min(100, Number(progress?.percent) || 0)),
-    message: String(progress?.message || '正在生成性能报告')
+    message: String(progress?.message || tr("正在生成性能报告"))
   };
   task.status = 'running';
   lastReportTask = publicReportTask(task);
@@ -694,11 +695,11 @@ function clearDeviceFpsState(deviceId) {
 function buildWarnings(snapshot, thresholds) {
   const warnings = [];
   if (snapshot.cpu.usage != null && snapshot.cpu.usage >= thresholds.cpu) warnings.push({ type: 'cpu', label: `CPU ${snapshot.cpu.usage}%` });
-  if (snapshot.memory.usage != null && snapshot.memory.usage >= thresholds.memory) warnings.push({ type: 'memory', label: `内存 ${snapshot.memory.usage}%` });
+  if (snapshot.memory.usage != null && snapshot.memory.usage >= thresholds.memory) warnings.push({ type: 'memory', label: tr("内存 {0}%", { 0: snapshot.memory.usage }) });
   const temperature = snapshot.battery.temperature ?? snapshot.thermal.hottest;
-  if (temperature != null && temperature >= thresholds.batteryTemp) warnings.push({ type: 'batteryTemp', label: `温度 ${temperature}°C` });
+  if (temperature != null && temperature >= thresholds.batteryTemp) warnings.push({ type: 'batteryTemp', label: tr("温度 {0}°C", { 0: temperature }) });
   const highDisk = snapshot.disk.find(item => item.mount === '/data' && item.usage >= thresholds.dataUsed);
-  if (highDisk) warnings.push({ type: 'disk', label: `存储空间 ${highDisk.usage}%` });
+  if (highDisk) warnings.push({ type: 'disk', label: tr("存储空间 {0}%", { 0: highDisk.usage }) });
   return warnings;
 }
 
@@ -719,6 +720,7 @@ function ensurePerformanceWorker() {
   if (performanceWorker) return performanceWorker;
   performanceWorker = new Worker(getPerformanceWorkerPath(), {
     workerData: {
+      locale: getLocale(),
       adbPath: getAdbCommand(),
       thresholds: readThresholds()
     }
@@ -726,7 +728,7 @@ function ensurePerformanceWorker() {
   performanceWorker.on('message', handleWorkerMessage);
   performanceWorker.on('error', handleWorkerFailure);
   performanceWorker.on('exit', (code) => {
-    if (code !== 0) handleWorkerFailure(new Error(`性能采样 Worker 已退出：${code}`));
+    if (code !== 0) handleWorkerFailure(new Error(tr("性能采样 Worker 已退出：{0}", { 0: code })));
     performanceWorker = null;
   });
   return performanceWorker;
@@ -754,14 +756,14 @@ function handleWorkerMessage(message) {
     return;
   }
   if (message?.type === 'monitorError' && message.deviceId) {
-    broadcastUpdate(message.deviceId, { ok: false, error: message.error || '性能采样失败', timestamp: message.timestamp || Date.now() });
+    broadcastUpdate(message.deviceId, { ok: false, error: message.error || tr("性能采样失败"), timestamp: message.timestamp || Date.now() });
   }
 }
 
 function handleWorkerFailure(error) {
   workerRequests.forEach(pending => {
     clearTimeout(pending.timer);
-    pending.resolve({ ok: false, error: error.message || '性能采样 Worker 异常' });
+    pending.resolve({ ok: false, error: error.message || tr("性能采样 Worker 异常") });
   });
   workerRequests.clear();
   monitors.forEach(monitor => {
@@ -785,7 +787,7 @@ function requestWorker(action, payload = {}, timeoutMs = 5000) {
     }, timeoutMs);
     workerRequests.set(id, { resolve, timer });
     try {
-      worker.postMessage({ id, action, ...payload });
+      worker.postMessage({ id, action, ...payload, locale: getLocale() });
     } catch (error) {
       clearTimeout(timer);
       workerRequests.delete(id);
@@ -796,7 +798,7 @@ function requestWorker(action, payload = {}, timeoutMs = 5000) {
 
 function postWorker(action, payload = {}) {
   try {
-    ensurePerformanceWorker().postMessage({ action, ...payload, adbPath: getAdbCommand() });
+    ensurePerformanceWorker().postMessage({ action, ...payload, adbPath: getAdbCommand(), locale: getLocale() });
   } catch {}
 }
 
@@ -904,15 +906,15 @@ async function writeExport(deviceId, history, outputPath, outputBaseDir) {
 }
 
 async function writeReport(deviceId, history, outputPath, outputBaseDir, includeAiSummary, onProgress) {
-  onProgress?.({ percent: 15, message: '统计性能采样数据' });
+  onProgress?.({ percent: 15, message: tr("统计性能采样数据") });
   const filePath = await resolvePerformanceFile(deviceId, outputPath, outputBaseDir, 'performance-report', 'md');
   const summary = summarizeHistory(history);
   const warningRows = history
     .flatMap(item => (item.warnings || []).map(warning => ({ at: item.timestamp, ...warning })))
     .slice(-50);
-  onProgress?.({ percent: includeAiSummary ? 45 : 75, message: includeAiSummary ? '生成 AI 分析' : '写入性能报告' });
+  onProgress?.({ percent: includeAiSummary ? 45 : 75, message: includeAiSummary ? tr("生成 AI 分析") : tr("写入性能报告") });
   const aiSummary = includeAiSummary ? await buildPerformanceAiSummary(deviceId, history, summary, warningRows) : { ok: false, skipped: true, summary: '' };
-  onProgress?.({ percent: 85, message: '写入性能报告' });
+  onProgress?.({ percent: 85, message: tr("写入性能报告") });
   await fs.promises.writeFile(filePath, buildPerformanceReport(deviceId, history, aiSummary), 'utf8');
   return { path: filePath, aiSummary };
 }
@@ -935,58 +937,58 @@ function buildPerformanceReport(deviceId, history, aiSummary) {
     .flatMap(item => (item.warnings || []).map(warning => ({ at: item.timestamp, ...warning })))
     .slice(-50);
   const lines = [
-    '# 性能分析报告',
+    tr("# 性能分析报告"),
     '',
-    '## 概要',
+    tr("## 概要"),
     '',
-    `- 设备 ID：${deviceId}`,
-    `- 生成时间：${new Date().toISOString()}`,
-    `- 样本数量：${history.length}`,
-    `- 时间范围：${formatIso(summary.startedAt)} ~ ${formatIso(summary.endedAt)}`,
+    tr("- 设备 ID：{0}", { 0: deviceId }),
+    tr("- 生成时间：{0}", { 0: new Date().toISOString() }),
+    tr("- 样本数量：{0}", { 0: history.length }),
+    tr("- 时间范围：{0} ~ {1}", { 0: formatIso(summary.startedAt), 1: formatIso(summary.endedAt) }),
     '',
-    '## 指标统计',
+    tr("## 指标统计"),
     '',
-    '| 指标 | 平均 | 峰值 | 最近一次 |',
+    tr("| 指标 | 平均 | 峰值 | 最近一次 |"),
     '| --- | ---: | ---: | ---: |',
     `| CPU | ${formatPercent(summary.cpu.avg)} | ${formatPercent(summary.cpu.max)} | ${formatPercent(latest.cpu?.usage)} |`,
-    `| 内存 | ${formatPercent(summary.memory.avg)} | ${formatPercent(summary.memory.max)} | ${formatPercent(latest.memory?.usage)} |`,
-    `| 存储空间 | ${formatPercent(summary.data.avg)} | ${formatPercent(summary.data.max)} | ${formatPercent(getDataDisk(latest)?.usage)} |`,
-    `| 温度 | ${formatTemp(summary.temperature.avg)} | ${formatTemp(summary.temperature.max)} | ${formatTemp(getDeviceTemperature(latest))} |`,
-    `| 前台 FPS | ${formatFps(summary.foregroundFps.avg)} | ${formatFps(summary.foregroundFps.max)} | ${formatFps(latest.fps?.foreground?.fps)} |`,
-    `| 合成 FPS | ${formatFps(summary.surfaceFps.avg)} | ${formatFps(summary.surfaceFps.max)} | ${formatFps(latest.fps?.surfaceFlinger?.fps)} |`,
+    tr("| 内存 | {0} | {1} | {2} |", { 0: formatPercent(summary.memory.avg), 1: formatPercent(summary.memory.max), 2: formatPercent(latest.memory?.usage) }),
+    tr("| 存储空间 | {0} | {1} | {2} |", { 0: formatPercent(summary.data.avg), 1: formatPercent(summary.data.max), 2: formatPercent(getDataDisk(latest)?.usage) }),
+    tr("| 温度 | {0} | {1} | {2} |", { 0: formatTemp(summary.temperature.avg), 1: formatTemp(summary.temperature.max), 2: formatTemp(getDeviceTemperature(latest)) }),
+    tr("| 前台 FPS | {0} | {1} | {2} |", { 0: formatFps(summary.foregroundFps.avg), 1: formatFps(summary.foregroundFps.max), 2: formatFps(latest.fps?.foreground?.fps) }),
+    tr("| 合成 FPS | {0} | {1} | {2} |", { 0: formatFps(summary.surfaceFps.avg), 1: formatFps(summary.surfaceFps.max), 2: formatFps(latest.fps?.surfaceFlinger?.fps) }),
     '',
-    '## 告警',
+    tr("## 告警"),
     ''
   ];
 
   if (warningRows.length === 0) {
-    lines.push('- 采样窗口内未触发阈值告警');
+    lines.push(tr("- 采样窗口内未触发阈值告警"));
   } else {
     warningRows.forEach(item => lines.push(`- ${formatIso(item.at)}：${item.label}`));
   }
 
-  lines.push('', '## 最近进程占用', '');
+  lines.push('', tr("## 最近进程占用"), '');
   const processes = latest.processes || [];
   if (processes.length === 0) {
-    lines.push('- 无进程明细数据');
+    lines.push(tr("- 无进程明细数据"));
   } else {
-    lines.push('| PID | 进程 | CPU | 内存 |', '| --- | --- | ---: | ---: |');
+    lines.push(tr("| PID | 进程 | CPU | 内存 |"), '| --- | --- | ---: | ---: |');
     processes.slice(0, 12).forEach(proc => {
       lines.push(`| ${proc.pid || '-'} | ${escapeTable(proc.name || '-')} | ${formatPercent(proc.cpu)} | ${formatPercent(proc.memory)} |`);
     });
   }
 
-  lines.push('', '## 结论', '', buildPerformanceConclusion(summary, warningRows), '', '## AI 分析', '', ...formatAiAnalysisLines(aiSummary), '');
+  lines.push('', tr("## 结论"), '', buildPerformanceConclusion(summary, warningRows), '', tr("## AI 分析"), '', ...formatAiAnalysisLines(aiSummary), '');
   return lines.join('\n');
 }
 
 function formatAiAnalysisLines(aiSummary) {
-  if (!aiSummary || aiSummary.skipped) return ['- 未勾选 AI 分析'];
-  if (!aiSummary.ok) return [`- AI 分析未生成：${aiSummary.error || '未知错误'}`];
+  if (!aiSummary || aiSummary.skipped) return [tr("- 未勾选 AI 分析")];
+  if (!aiSummary.ok) return [tr("- AI 分析未生成：{0}", { 0: aiSummary.error || tr("未知错误") })];
   const lines = String(aiSummary.summary || '')
     .split(/\r?\n/)
     .map(line => line.trimEnd());
-  return lines.some(Boolean) ? lines : ['- AI 分析为空'];
+  return lines.some(Boolean) ? lines : [tr("- AI 分析为空")];
 }
 
 async function buildPerformanceAiSummary(deviceId, history, summary, warnings) {
@@ -994,34 +996,34 @@ async function buildPerformanceAiSummary(deviceId, history, summary, warnings) {
   const processes = (latest.processes || [])
     .slice(0, 8)
     .map(item => `- ${item.name || '-'} pid=${item.pid || '-'} cpu=${formatPercent(item.cpu)} mem=${formatPercent(item.memory)}`)
-    .join('\n') || '- 无';
+    .join('\n') || tr("- 无");
   const warningText = warnings
     .slice(-20)
     .map(item => `- ${formatIso(item.at)} ${item.label}`)
-    .join('\n') || '- 无';
+    .join('\n') || tr("- 无");
   const prompt = [
-    `设备 ID: ${deviceId}`,
-    `样本数: ${history.length}`,
-    `时间范围: ${formatIso(summary.startedAt)} ~ ${formatIso(summary.endedAt)}`,
+    tr("设备 ID: {0}", { 0: deviceId }),
+    tr("样本数: {0}", { 0: history.length }),
+    tr("时间范围: {0} ~ {1}", { 0: formatIso(summary.startedAt), 1: formatIso(summary.endedAt) }),
     '',
-    '指标统计:',
-    `- CPU 平均 ${formatPercent(summary.cpu.avg)} 峰值 ${formatPercent(summary.cpu.max)}`,
-    `- 内存 平均 ${formatPercent(summary.memory.avg)} 峰值 ${formatPercent(summary.memory.max)}`,
-    `- 存储空间 平均 ${formatPercent(summary.data.avg)} 峰值 ${formatPercent(summary.data.max)}`,
-    `- 温度 平均 ${formatTemp(summary.temperature.avg)} 峰值 ${formatTemp(summary.temperature.max)}`,
-    `- 前台 FPS 平均 ${formatFps(summary.foregroundFps.avg)} 峰值 ${formatFps(summary.foregroundFps.max)}`,
-    `- 合成 FPS 平均 ${formatFps(summary.surfaceFps.avg)} 峰值 ${formatFps(summary.surfaceFps.max)}`,
+    tr("指标统计:"),
+    tr("- CPU 平均 {0} 峰值 {1}", { 0: formatPercent(summary.cpu.avg), 1: formatPercent(summary.cpu.max) }),
+    tr("- 内存 平均 {0} 峰值 {1}", { 0: formatPercent(summary.memory.avg), 1: formatPercent(summary.memory.max) }),
+    tr("- 存储空间 平均 {0} 峰值 {1}", { 0: formatPercent(summary.data.avg), 1: formatPercent(summary.data.max) }),
+    tr("- 温度 平均 {0} 峰值 {1}", { 0: formatTemp(summary.temperature.avg), 1: formatTemp(summary.temperature.max) }),
+    tr("- 前台 FPS 平均 {0} 峰值 {1}", { 0: formatFps(summary.foregroundFps.avg), 1: formatFps(summary.foregroundFps.max) }),
+    tr("- 合成 FPS 平均 {0} 峰值 {1}", { 0: formatFps(summary.surfaceFps.avg), 1: formatFps(summary.surfaceFps.max) }),
     '',
-    '告警:',
+    tr("告警:"),
     warningText,
     '',
-    '最近进程占用:',
+    tr("最近进程占用:"),
     processes,
     '',
-    '请输出一段面向 Android 性能排查的中文 AI 总结，包含：总体判断、风险点、建议验证动作。不要编造未提供的数据。'
+    tr("请输出一段面向 Android 性能排查的中文 AI 总结，包含：总体判断、风险点、建议验证动作。不要编造未提供的数据。")
   ].join('\n');
   return aiAnalyze.generateAiSummary({
-    systemPrompt: '你是 Android 性能分析报告助手，只根据给定性能指标输出简洁、可执行的中文结论。',
+    systemPrompt: tr("你是 Android 性能分析报告助手，只根据给定性能指标输出简洁、可执行的中文结论。"),
     userContent: prompt,
     timeoutMs: 60000,
     temperature: 0.2
@@ -1060,12 +1062,12 @@ function summarizeNumbers(values) {
 
 function buildPerformanceConclusion(summary, warnings) {
   const items = [];
-  if (summary.cpu.max != null && summary.cpu.max >= readThresholds().cpu) items.push(`CPU 峰值达到 ${formatPercent(summary.cpu.max)}`);
-  if (summary.memory.max != null && summary.memory.max >= readThresholds().memory) items.push(`内存峰值达到 ${formatPercent(summary.memory.max)}`);
-  if (summary.temperature.max != null && summary.temperature.max >= readThresholds().batteryTemp) items.push(`温度峰值达到 ${formatTemp(summary.temperature.max)}`);
-  if (summary.data.max != null && summary.data.max >= readThresholds().dataUsed) items.push(`存储空间使用率峰值达到 ${formatPercent(summary.data.max)}`);
-  if (warnings.length > 0) items.push(`采样期间触发 ${warnings.length} 条阈值告警`);
-  return items.length === 0 ? '- 采样窗口内未发现明确性能风险。' : items.map(item => `- ${item}`).join('\n');
+  if (summary.cpu.max != null && summary.cpu.max >= readThresholds().cpu) items.push(tr("CPU 峰值达到 {0}", { 0: formatPercent(summary.cpu.max) }));
+  if (summary.memory.max != null && summary.memory.max >= readThresholds().memory) items.push(tr("内存峰值达到 {0}", { 0: formatPercent(summary.memory.max) }));
+  if (summary.temperature.max != null && summary.temperature.max >= readThresholds().batteryTemp) items.push(tr("温度峰值达到 {0}", { 0: formatTemp(summary.temperature.max) }));
+  if (summary.data.max != null && summary.data.max >= readThresholds().dataUsed) items.push(tr("存储空间使用率峰值达到 {0}", { 0: formatPercent(summary.data.max) }));
+  if (warnings.length > 0) items.push(tr("采样期间触发 {0} 条阈值告警", { 0: warnings.length }));
+  return items.length === 0 ? tr("- 采样窗口内未发现明确性能风险。") : items.map(item => `- ${item}`).join('\n');
 }
 
 function getDataDisk(snapshot) {

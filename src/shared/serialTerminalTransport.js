@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 import { MAX_TERMINAL_INPUT_BYTES, TERMINAL_BATCH_BYTES, splitTerminalInput, terminalInputBytes } from './serialTerminalInput.js';
 
 export function createSerialTerminalWriter({ sessionId, write, canWrite = () => true, onError = () => {}, onSent = () => {}, delayMs = 8 }) {
@@ -18,7 +19,7 @@ export function createSerialTerminalWriter({ sessionId, write, canWrite = () => 
   function fail(message) {
     clearPending();
     paused = true;
-    if (!disposed) onError(`${message}；已停止发送并清除未发送输入，不会自动重试`);
+    if (!disposed) onError(tr("{0}；已停止发送并清除未发送输入，不会自动重试", { 0: message }));
   }
   function flush() {
     clearTimeout(timer);
@@ -33,10 +34,10 @@ export function createSerialTerminalWriter({ sessionId, write, canWrite = () => 
         try {
           const result = await write({ sessionId, content: next.content });
           if (disposed) break;
-          if (!result?.success || result.bytes !== next.bytes) throw new Error(result?.error || '终端写入结果无法确认');
+          if (!result?.success || result.bytes !== next.bytes) throw new Error(result?.error || tr("终端写入结果无法确认"));
           onSent(next.content);
         } catch (error) {
-          if (!disposed) fail(error.message || '终端写入失败');
+          if (!disposed) fail(error.message || tr("终端写入失败"));
         } finally {
           queuedBytes = Math.max(0, queuedBytes - inFlightBytes);
           inFlightBytes = 0;
@@ -53,7 +54,7 @@ export function createSerialTerminalWriter({ sessionId, write, canWrite = () => 
     let size;
     try { size = terminalInputBytes(content); } catch (error) { fail(error.message); return false; }
     if (!size) return true;
-    if (queuedBytes + size > MAX_TERMINAL_INPUT_BYTES) { fail('终端发送队列已达到 64 KiB 上限'); return false; }
+    if (queuedBytes + size > MAX_TERMINAL_INPUT_BYTES) { fail(tr("终端发送队列已达到 64 KiB 上限")); return false; }
     // Each input event has independent UTF-8 replacement semantics; joining two
     // isolated surrogates must not silently create a different character.
     for (const piece of splitTerminalInput(content.toWellFormed())) {
@@ -76,14 +77,14 @@ export function createSerialTerminalWriter({ sessionId, write, canWrite = () => 
 }
 
 function decodeRead(result, sessionId, offset) {
-  if (!result?.success) throw new Error(result?.error || '终端输出读取失败');
-  if (result.sessionId !== sessionId) throw new Error('串口会话已变化，请重新打开终端');
+  if (!result?.success) throw new Error(result?.error || tr("终端输出读取失败"));
+  if (result.sessionId !== sessionId) throw new Error(tr("串口会话已变化，请重新打开终端"));
   const { startOffset, endOffset, nextOffset, hex } = result;
   if (![startOffset, endOffset, nextOffset].every(value => Number.isSafeInteger(value) && value >= 0)
     || startOffset > endOffset || nextOffset < Math.max(offset, startOffset) || nextOffset > endOffset
     || typeof hex !== 'string' || hex.length % 2 || !/^[0-9a-f]*$/i.test(hex)
     || hex.length / 2 !== nextOffset - Math.max(offset, startOffset) || hex.length > 128 * 1024) {
-    throw new Error('终端输出游标或数据无效，已暂停读取');
+    throw new Error(tr("终端输出游标或数据无效，已暂停读取"));
   }
   return Uint8Array.from(hex.match(/.{2}/g) || [], byte => Number.parseInt(byte, 16));
 }
@@ -113,7 +114,7 @@ export function createSerialTerminalReader({ sessionId, read, write, onTruncated
       offset = result.nextOffset;
       if (requestedGeneration === generation && replaying && offset >= replayEnd) { replaying = false; onReplayChange(false); }
     } catch (error) {
-      if (!disposed && requestedGeneration === generation) { active = false; onError(error.message || '终端输出读取失败'); }
+      if (!disposed && requestedGeneration === generation) { active = false; onError(error.message || tr("终端输出读取失败")); }
     } finally {
       running = false;
       if (active && !disposed) timer = schedule(() => { void poll(); }, intervalMs);

@@ -41,6 +41,7 @@ function harness() {
   const ctx = { setMainWindow(win) { ctx.current = win; calls.push('context'); }, getMainWindow: () => ctx.current, getLogAnalyzerWindow: () => null };
   const cleanupModule = label => ({ cleanup: () => calls.push(label) });
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
+    localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
     feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
     startupPresentation: null, startupPresented: false, ipcMain: {}, screen: {}, console: { log() {} },
     createStartupPresentation({ mainWindow }) {

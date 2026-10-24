@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { StringDecoder } = require('node:string_decoder');
 const { splitSerialResponses } = require('./serial-response-framer.cjs');
 
@@ -162,7 +163,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
     let mayReorder = false;
     if (old) {
       const index = rows.indexOf(old.entry, head);
-      if (index < 0) throw new Error('串口待接收记录状态无效');
+      if (index < 0) throw new Error(tr("串口待接收记录状态无效"));
       mayReorder = index !== rows.length - 1;
       replacement = { id: old.entry.id, index };
       rows.splice(index, 1);

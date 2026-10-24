@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -11,13 +12,13 @@ function isWithin(parent, candidate) {
 async function collectArtifactFiles(item) {
   const requestedSource = path.resolve(item.deletePath || item.rootPath);
   const stat = await fs.promises.lstat(requestedSource);
-  if (stat.isSymbolicLink()) throw new Error('不支持导出指向其他位置的产物链接');
+  if (stat.isSymbolicLink()) throw new Error(tr("不支持导出指向其他位置的产物链接"));
   const source = await fs.promises.realpath(requestedSource);
   const files = [];
   const root = stat.isDirectory() ? source : path.dirname(source);
   async function visit(target) {
     const entry = await fs.promises.lstat(target);
-    if (entry.isSymbolicLink()) throw new Error('产物中包含文件链接，请移除链接后再导出');
+    if (entry.isSymbolicLink()) throw new Error(tr("产物中包含文件链接，请移除链接后再导出"));
     if (entry.isDirectory()) {
       const names = await fs.promises.readdir(target);
       for (const name of names.sort()) await visit(path.join(target, name));
@@ -26,7 +27,7 @@ async function collectArtifactFiles(item) {
     }
   }
   await visit(source);
-  if (!files.length) throw new Error('产物中没有可导出的文件');
+  if (!files.length) throw new Error(tr("产物中没有可导出的文件"));
   return { source, directory: stat.isDirectory(), files };
 }
 
@@ -49,16 +50,16 @@ async function exportArtifact(item, destination) {
     throw error;
   });
   if (targetStat && (!targetStat.isFile() || targetStat.isSymbolicLink() || targetStat.nlink > 1)) {
-    throw new Error('保存位置不是普通文件，请选择新的 ZIP 文件名');
+    throw new Error(tr("保存位置不是普通文件，请选择新的 ZIP 文件名"));
   }
   const realTarget = targetStat ? await fs.promises.realpath(target)
     : path.join(await fs.promises.realpath(path.dirname(target)), path.basename(target));
   if (path.relative(selected.source, realTarget) === '' || (selected.directory && isWithin(selected.source, realTarget))) {
-    throw new Error('请将证据包保存在原产物目录之外');
+    throw new Error(tr("请将证据包保存在原产物目录之外"));
   }
   // 从当前原始证据重新打包，避免把旧的或失败遗留的 ZIP 当作有效证据。
   if (item.type === 'inspection') selected.files = selected.files.filter(file => file.name !== 'evidence-package.zip');
-  if (!selected.files.length) throw new Error('没有可导出的原始证据文件');
+  if (!selected.files.length) throw new Error(tr("没有可导出的原始证据文件"));
 
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'adb-workbench-evidence-'));
   try {

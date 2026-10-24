@@ -7,13 +7,13 @@ const { parse } = require('@babel/parser'); const traverse = require('@babel/tra
 const source = name => readFileSync(new URL(`../src/components/ai-tools/${name}.jsx`, import.meta.url), 'utf8');
 const ast = name => parse(source(name), { sourceType: 'module', plugins: ['jsx'] });
 const attribute = (node, name) => node.openingElement.attributes.find(value => value.type === 'JSXAttribute' && value.name.name === name)?.value;
-const text = node => node.type === 'JSXText' ? node.value : (node.children || []).map(text).join('');
+const text = node => node.type === 'JSXText' ? node.value : node.type === 'JSXExpressionContainer' && node.expression?.callee?.name === 'tr' ? node.expression.arguments[0].value : (node.children || []).map(text).join('');
 
 test('detected CLI entry passes the exact tool identity and explicit launch intent into the existing form', () => {
   let entry; let form;
   traverse(ast('AiProjectsPanel'), { JSXElement(element) {
     const node = element.node; const label = attribute(node, 'aria-label')?.expression;
-    if (node.openingElement.name.name === 'button' && label?.type === 'TemplateLiteral' && label.quasis[0].value.raw === '创建项目并启动 ') entry = node;
+    if (node.openingElement.name.name === 'button' && label?.callee?.name === 'tr' && label.arguments[0]?.value === '创建项目并启动 {0}') entry = node;
     if (node.openingElement.name.name === 'AiProjectForm') form = node;
   } });
   assert.ok(entry); const click = attribute(entry, 'onClick').expression.body;

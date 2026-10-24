@@ -1,9 +1,10 @@
+import { tr } from '../shared/i18n.js';
 // 主题配置（6 套内置主题 + 字段说明）
 // 每套主题包含：name/preview/primary/card/header/button{textMuted/input/terminal 等
 
 const themes = {
   default: {
-    name: '简约默认',
+    get name() { return tr("简约默认"); },
     preview: 'bg-slate-50 border-slate-200',
     primary: 'emerald',
     card: 'bg-white border-slate-200',
@@ -24,7 +25,7 @@ const themes = {
       }
   },
   cute: {
-    name: '可爱甜心',
+    get name() { return tr("可爱甜心"); },
     preview: 'bg-pink-50 border-pink-200',
     primary: 'pink',
     card: 'bg-white border-pink-100',
@@ -45,7 +46,7 @@ const themes = {
     }
   },
   tech: {
-    name: '科技未来',
+    get name() { return tr("科技未来"); },
     preview: 'bg-[#202124] border-[#3E4145]',
     primary: 'cyan',
     card: 'bg-slate-800/80 border-[#3E4145]',
@@ -66,7 +67,7 @@ const themes = {
     }
   },
   ocean: {
-    name: '清新海洋',
+    get name() { return tr("清新海洋"); },
     preview: 'bg-gradient-to-br from-blue-50 to-teal-50 border-blue-200',
     primary: 'blue',
     card: 'bg-white/90 border-blue-100 backdrop-blur',
@@ -87,7 +88,7 @@ const themes = {
     }
   },
   forest: {
-    name: '自然森林',
+    get name() { return tr("自然森林"); },
     preview: 'bg-green-50 border-green-200',
     primary: 'green',
     card: 'bg-white border-green-100',
@@ -108,7 +109,7 @@ const themes = {
     }
   },
   sunset: {
-    name: '落日余晖',
+    get name() { return tr("落日余晖"); },
     preview: 'bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200',
     primary: 'orange',
     card: 'bg-white border-orange-100',

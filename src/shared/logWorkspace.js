@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export const LOG_PRESETS_KEY = 'logFilterPresets.v1';
 export const MAX_LOG_PRESETS = 20;
 export const MAX_EVIDENCE_ENTRIES = 100000;
@@ -20,15 +21,15 @@ export function normalizeLogBuffers(value) {
 
 export function readLogPresets(storage) {
   const data = JSON.parse(storage.getItem(LOG_PRESETS_KEY) || '[]');
-  if (!Array.isArray(data)) throw new Error('过滤预设格式无效');
+  if (!Array.isArray(data)) throw new Error(tr("过滤预设格式无效"));
   return data.filter(item => item && typeof item.id === 'string' && typeof item.name === 'string')
     .map(item => ({ id: item.id, name: item.name, filter: normalizeLogFilter(item.filter), buffers: normalizeLogBuffers(item.buffers) }));
 }
 
 export function saveLogPreset(storage, presets, { name, filter, buffers }, id) {
   const title = name.trim();
-  if (!title || title.length > 40) throw new Error('请输入 1–40 字的预设名称');
-  if (presets.length >= MAX_LOG_PRESETS) throw new Error('最多保存 20 个预设，请先删除不再使用的预设');
+  if (!title || title.length > 40) throw new Error(tr("请输入 1–40 字的预设名称"));
+  if (presets.length >= MAX_LOG_PRESETS) throw new Error(tr("最多保存 20 个预设，请先删除不再使用的预设"));
   const next = [...presets, { id, name: title, filter: normalizeLogFilter(filter), buffers: normalizeLogBuffers(buffers) }];
   storage.setItem(LOG_PRESETS_KEY, JSON.stringify(next));
   return next;
@@ -51,7 +52,7 @@ export function captureLogEvidence(entries, previous = [], deviceId = '') {
     const identity = identityOf(entry, deviceId);
     let saved = byIdentity.get(identity);
     if (!saved) {
-      if (evidence.length >= MAX_EVIDENCE_ENTRIES) throw new Error('证据已达 100,000 条上限，请保存本次会话后清空 AI 对话再开始新分析；未丢弃任何证据');
+      if (evidence.length >= MAX_EVIDENCE_ENTRIES) throw new Error(tr("证据已达 100,000 条上限，请保存本次会话后清空 AI 对话再开始新分析；未丢弃任何证据"));
       saved = { ...entry, ref: `L${nextNumber++}`, deviceId };
       evidence.push(saved);
       byIdentity.set(identity, saved);

@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export const MAX_LOG_MARKERS = 500;
 
 // IDs can repeat after capture restarts; preserve the captured raw/time/source/device tuple.
@@ -7,7 +8,7 @@ export function logEntryIdentity(entry, deviceId = '') {
 
 export function captureLogMarker(entry, entries, deviceId, note, id, createdAt = Date.now()) {
   const title = note.trim();
-  if (!title || title.length > 240) throw new Error('请输入 1–240 字的问题备注');
+  if (!title || title.length > 240) throw new Error(tr("请输入 1–240 字的问题备注"));
   const savedEntry = { ...entry, deviceId: entry.deviceId || deviceId || '' };
   const identity = logEntryIdentity(savedEntry);
   const index = entries.findIndex(item => item.id === savedEntry.id && logEntryIdentity(item, deviceId) === identity);

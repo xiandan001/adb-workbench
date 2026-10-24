@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -32,9 +33,11 @@ function TaskCenterOnboarding({
   onRestartRecording,
   onCancelTask,
   onRetryStateLoad,
-  dismissLabel = '跳过',
+  dismissLabel = tr("跳过"),
+  dismissMode = 'skip',
   initialError = ''
 }) {
+  useLocale();
   const [savingStatus, setSavingStatus] = useState(false);
   const [refreshingState, setRefreshingState] = useState(false);
   const [error, setError] = useState(initialError);
@@ -63,7 +66,7 @@ function TaskCenterOnboarding({
     setError('');
     try {
       const saved = await onPersistStatus('completed');
-      if (!saved) setError('教程状态保存失败，请重试保存');
+      if (!saved) setError(tr("教程状态保存失败，请重试保存"));
     } finally {
       setSavingStatus(false);
     }
@@ -74,7 +77,7 @@ function TaskCenterOnboarding({
     setRefreshingState(true);
     try {
       const loaded = await onRetryStateLoad?.();
-      if (!loaded) setError(initialError || '教程状态读取失败，请重试');
+      if (!loaded) setError(initialError || tr("教程状态读取失败，请重试"));
     } finally {
       setRefreshingState(false);
     }
@@ -86,7 +89,7 @@ function TaskCenterOnboarding({
         <section className={`relative w-full max-w-lg rounded-2xl border p-6 shadow-2xl ${panelClass}`}>
           <button
             type="button"
-            aria-label={`${dismissLabel}新手教程`}
+            aria-label={tr("{0}新手教程", { 0: dismissLabel })}
             onClick={onRequestSkip}
             className={`absolute right-4 top-4 rounded-lg border p-2 ${secondaryButton}`}
           >
@@ -95,19 +98,15 @@ function TaskCenterOnboarding({
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-500">
             <HelpCircle size={24} />
           </div>
-          <h3 className="mt-5 text-xl font-semibold">跟着操作，录制一次真实点击</h3>
-          <p className={`mt-3 text-sm leading-7 ${mutedClass}`}>
-            教程会引导你选择一台在线设备、读取真实画面，并在你确认安全的位置录制一次点击后回放。整个过程使用任务中心的真实功能。
-          </p>
-          <div className={`mt-4 rounded-xl border p-4 text-sm leading-6 ${softClass}`}>
-            设备画面上的点击会真实发送到设备。教程不会替你选择位置，请点击不会造成删除、提交或付款等操作的安全区域。
-          </div>
+          <h3 className="mt-5 text-xl font-semibold">{tr("跟着操作，录制一次真实点击")}</h3>
+          <p className={`mt-3 text-sm leading-7 ${mutedClass}`}>{tr("教程会引导你选择一台在线设备、读取真实画面，并在你确认安全的位置录制一次点击后回放。整个过程使用任务中心的真实功能。")}</p>
+          <div className={`mt-4 rounded-xl border p-4 text-sm leading-6 ${softClass}`}>{tr("设备画面上的点击会真实发送到设备。教程不会替你选择位置，请点击不会造成删除、提交或付款等操作的安全区域。")}</div>
           {error && (
             <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">
-              <span>{error}</span>
+              <span>{tr(error)}</span>
               {initialError && error === initialError && (
                 <button type="button" disabled={refreshingState} onClick={retryStateLoad} className="shrink-0 rounded-md border border-red-500/30 px-3 py-1.5 disabled:opacity-50">
-                  {refreshingState ? '正在重试...' : '重试读取'}
+                  {refreshingState ? tr("正在重试...") : tr("重试读取")}
                 </button>
               )}
             </div>
@@ -116,9 +115,7 @@ function TaskCenterOnboarding({
             <button type="button" onClick={onRequestSkip} className={`rounded-lg border px-4 py-2 text-sm ${secondaryButton}`}>
               {dismissLabel}
             </button>
-            <button type="button" onClick={onStart} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-              开始教程
-            </button>
+            <button type="button" onClick={onStart} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">{tr("开始教程")}</button>
           </div>
         </section>
       </div>,
@@ -131,16 +128,12 @@ function TaskCenterOnboarding({
       <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4">
         <section className={`w-full max-w-md rounded-2xl border p-6 text-center shadow-2xl ${panelClass}`}>
           <Loader2 size={34} className="mx-auto animate-spin text-emerald-500" />
-          <h3 className="mt-4 text-lg font-semibold">正在回放刚才的点击</h3>
-          <p className={`mt-2 text-sm ${mutedClass}`}>请保持设备连接，任务完成后会自动显示结果。</p>
-          <div className={`mt-4 rounded-lg border p-3 text-sm ${softClass}`}>
-            当前状态：{taskStatusLabel(task?.status || 'queued')}
-          </div>
+          <h3 className="mt-4 text-lg font-semibold">{tr("正在回放刚才的点击")}</h3>
+          <p className={`mt-2 text-sm ${mutedClass}`}>{tr("请保持设备连接，任务完成后会自动显示结果。")}</p>
+          <div className={`mt-4 rounded-lg border p-3 text-sm ${softClass}`}>{tr("当前状态：{0}", { 0: taskStatusLabel(task?.status || 'queued') })}</div>
           {!isTerminalTask(task) && (
             <button type="button" onClick={onCancelTask} className="mt-5 inline-flex items-center gap-2 rounded-lg border border-red-500/30 px-4 py-2 text-sm text-red-500 hover:bg-red-500/10">
-              <Square size={14} />
-              取消回放
-            </button>
+              <Square size={14} />{tr("取消回放")}</button>
           )}
         </section>
       </div>,
@@ -156,33 +149,23 @@ function TaskCenterOnboarding({
           <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${succeeded ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
             <CheckCircle2 size={24} />
           </div>
-          <div className="mt-4 text-xs font-medium text-emerald-500">第 6/6 步</div>
-          <h3 className="mt-1 text-xl font-semibold">你已经完成一次真实录制和回放</h3>
-          <p className={`mt-2 text-sm leading-6 ${mutedClass}`}>
-            本次回放状态：{taskStatusLabel(task?.status)}。即使设备环境导致失败或取消，你仍可以完成教程或重新尝试。
-          </p>
+          <div className="mt-4 text-xs font-medium text-emerald-500">{tr("第 6/6 步")}</div>
+          <h3 className="mt-1 text-xl font-semibold">{tr("你已经完成一次真实录制和回放")}</h3>
+          <p className={`mt-2 text-sm leading-6 ${mutedClass}`}>{tr("本次回放状态：{0}。即使设备环境导致失败或取消，你仍可以完成教程或重新尝试。", { 0: taskStatusLabel(task?.status) })}</p>
           <div className={`mt-4 rounded-xl border p-4 text-sm ${softClass}`}>
-            <div>录制步骤：1 个点击</div>
-            {task?.error && <div className="mt-2 text-red-500">{task.error}</div>}
+            <div>{tr("录制步骤：1 个点击")}</div>
+            {task?.error && <div className="mt-2 text-red-500">{tr(task.error)}</div>}
           </div>
-          {error && <div className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">{error}</div>}
+          {error && <div className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">{tr(error)}</div>}
           <div className="mt-6 flex flex-wrap justify-end gap-2">
             <button type="button" onClick={onRestartRecording} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${secondaryButton}`}>
-              <RotateCcw size={14} />
-              重新录制
-            </button>
+              <RotateCcw size={14} />{tr("重新录制")}</button>
             <button type="button" onClick={onReplay} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${secondaryButton}`}>
-              <Play size={14} />
-              重新回放
-            </button>
+              <Play size={14} />{tr("重新回放")}</button>
             <button type="button" disabled={savingStatus} onClick={completeTutorial} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
-              {savingStatus ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-              完成教程
-            </button>
+              {savingStatus ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}{tr("完成教程")}</button>
           </div>
-          <button type="button" onClick={onTemporaryClose} className={`mt-4 w-full text-center text-xs ${mutedClass} hover:underline`}>
-            暂时关闭，下次继续从头开始
-          </button>
+          <button type="button" onClick={onTemporaryClose} className={`mt-4 w-full text-center text-xs ${mutedClass} hover:underline`}>{tr("暂时关闭，下次继续从头开始")}</button>
         </section>
       </div>,
       document.body
@@ -194,18 +177,18 @@ function TaskCenterOnboarding({
       guide={getOnboardingGuide(stage)}
       theme={theme}
       onSkip={onRequestSkip}
-      skipLabel={dismissLabel === '关闭' ? '退出教程' : '跳过教程'}
+      skipLabel={dismissMode === 'close' ? tr("退出教程") : tr("跳过教程")}
     />
   );
 }
 
 function taskStatusLabel(status) {
-  if (status === 'success') return '成功';
-  if (status === 'failed') return '失败';
-  if (status === 'cancelled') return '已取消';
-  if (status === 'running') return '执行中';
-  if (status === 'queued') return '等待中';
-  return '等待结果';
+  if (status === 'success') return tr("成功");
+  if (status === 'failed') return tr("失败");
+  if (status === 'cancelled') return tr("已取消");
+  if (status === 'running') return tr("执行中");
+  if (status === 'queued') return tr("等待中");
+  return tr("等待结果");
 }
 
 export default TaskCenterOnboarding;

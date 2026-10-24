@@ -20,6 +20,8 @@ function panelFunction(name, context) {
     FunctionDeclaration({ node }) { if (node.id?.name === name) target = node; },
     VariableDeclarator({ node }) { if (node.id.name === name) target = node.init; },
   });
+  const tr = (message, params = {}) => message.replace(/\{(\d+)\}/g, (token, index) => Object.hasOwn(params, index) ? String(params[index] ?? '') : token);
+  context.tr = tr;
   assert.ok(target, `missing ${name}`); return runInNewContext(`(${source.slice(target.start, target.end)})`, context);
 }
 function initialSettings(saved, workspaceModule = workspace) {

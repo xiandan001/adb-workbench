@@ -1,0 +1,2353 @@
+[
+  {
+    "file": "src/App.jsx",
+    "id": "7917149e494941ae07217c09",
+    "kind": "brand",
+    "reason": "The product brand remains identical in both interface languages."
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "b7b03d3c7d6d93d31f5dd93c",
+    "kind": "raw",
+    "reason": "Language names are intentionally displayed in their native language."
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "3c650c1a4cad14f5e8c9660a",
+    "kind": "raw",
+    "reason": "This bilingual selector heading must be recognizable in either language."
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "d68276b6a11dbeab512a3bbb",
+    "kind": "raw",
+    "reason": "This bilingual accessible label must be recognizable in either language."
+  },
+  {
+    "file": "src/components/ai-tools/AiCliConfigEditor.jsx",
+    "id": "15cbe8d3ebdba82bfe65f0a7",
+    "kind": "raw",
+    "reason": "Editable native JSON example; the language value is configuration data, not application text."
+  },
+  {
+    "file": "src/components/ai-tools/AiProviderForm.jsx",
+    "id": "888335a1d7a0b0c43da97125",
+    "kind": "machine",
+    "reason": "Example API URL is an unchanged technical endpoint, not translatable prose."
+  },
+  {
+    "file": "src/components/ai-tools/AiResourceForm.jsx",
+    "id": "aa417dcdd2b34b1be663a343",
+    "kind": "machine",
+    "reason": "Example MCP URL is an unchanged technical endpoint, not translatable prose."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "4b4072d0e4a8bcc29e736f77",
+    "kind": "catalog-source",
+    "reason": "Canonical model-role descriptor is translated by AiClaudeModelsEditor when rendered."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "09593a17e56da9d34830b70d",
+    "kind": "catalog-source",
+    "reason": "Canonical preset name seeds user-owned provider data; AiProviderForm translates only the option label."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "dfb2b528b5ed992af7db62cc",
+    "kind": "catalog-source",
+    "reason": "Canonical preset name seeds user-owned provider data; AiProviderForm translates only the option label."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "3945c4fa4acb015f59a39201",
+    "kind": "catalog-source",
+    "reason": "Canonical preset name seeds user-owned provider data; AiProviderForm translates only the option label."
+  },
+  {
+    "file": "src/components/DeviceCard.jsx",
+    "id": "fe8a3d51a4279008e307d86f",
+    "kind": "machine",
+    "reason": "Literal Android filesystem path used as a destination example; translation would change the path."
+  },
+  {
+    "file": "src/components/DeviceCard.jsx",
+    "id": "69b5e522c295a65b766ec675",
+    "kind": "machine",
+    "reason": "Literal Android system application directory used for navigation; its exact path must remain unchanged."
+  },
+  {
+    "file": "src/components/DeviceCard.jsx",
+    "id": "fe26e6c878989f489081c590",
+    "kind": "machine",
+    "reason": "Literal Android system extension directory used for navigation; its exact path must remain unchanged."
+  },
+  {
+    "file": "src/components/DeviceCard.jsx",
+    "id": "489426af4dd0cf65e4d0bb21",
+    "kind": "machine",
+    "reason": "Literal Android application data directory used for navigation; its exact path must remain unchanged."
+  },
+  {
+    "file": "src/components/FeedbackSection.jsx",
+    "id": "1d5b44eff737c7e0d290bae7",
+    "kind": "machine",
+    "reason": "The actual GitHub device authorization URL is shown verbatim for user verification."
+  },
+  {
+    "file": "src/components/PackageManagerPanel.jsx",
+    "id": "67ff2f62bd9e41daa3034d2f",
+    "kind": "machine",
+    "reason": "Literal Android filesystem path used as a destination example; translation would change the path."
+  },
+  {
+    "file": "src/components/QualityCenter.jsx",
+    "id": "5068e6a6ebaf3618c2ab3caa",
+    "kind": "machine",
+    "reason": "Illustrative Android package identifier; package syntax must not be translated."
+  },
+  {
+    "file": "src/components/QualityCenter.jsx",
+    "id": "fb4ef1cc09b6197004cc7f58",
+    "kind": "brand",
+    "reason": "Android is a platform brand followed by its version, not a natural-language status."
+  },
+  {
+    "file": "src/components/SerialTerminal.jsx",
+    "id": "0eaf09e56a2d84faaea662ee",
+    "kind": "machine",
+    "reason": "Literal keyboard shortcut notation; key names must remain consistent with the actual accelerator."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "05038fb2036a550bfa29e87d",
+    "kind": "machine",
+    "reason": "Illustrative Android package identifier; package syntax must not be translated."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "9b60c831042b36639d8aedc0",
+    "kind": "machine",
+    "reason": "Executable argument example includes a machine placeholder and must retain exact command syntax."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "a5a0e08605313e6cef311046",
+    "kind": "machine",
+    "reason": "Android KeyCode identifier labels the numeric protocol field rather than an application status."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "fd4bd1c97b5d0be2a74aef57",
+    "kind": "machine",
+    "reason": "Literal example Windows APK path; translating path segments would obscure the expected path syntax."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "02f8369e173c1fb89e5faf96",
+    "kind": "machine",
+    "reason": "Literal example Windows file path; its path syntax is intentionally preserved."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "913c2c21457a7bad13c18cc8",
+    "kind": "machine",
+    "reason": "Literal Android filesystem path used as a destination example; translation would change the path."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "50919ec72e7df769cac44e90",
+    "kind": "machine",
+    "reason": "Literal example Windows baseline image path; its path syntax is intentionally preserved."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "698e33e7aaf5d46d1af3d5ad",
+    "kind": "machine",
+    "reason": "UIAutomator selector field identifier must match the actual protocol property."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "a91faf48415a1719ed34a6b3",
+    "kind": "machine",
+    "reason": "Illustrative Android resource identifier must retain its exact namespace syntax."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "dc10e58e3212c289f75f261c",
+    "kind": "machine",
+    "reason": "UIAutomator selector field identifier must match the actual protocol property."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "363a147880ed5ea69f8d1fe2",
+    "kind": "machine",
+    "reason": "Selector property identifier must remain aligned with the underlying className field."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "89b97b0ae637480fcdae414e",
+    "kind": "machine",
+    "reason": "Fully qualified Android class name is a selector value, not translatable UI prose."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "ebbb50c153a49df07bb74c06",
+    "kind": "machine",
+    "reason": "Supported external adapter identifiers are machine values and established tool names."
+  },
+  {
+    "file": "src/components/TaskCenter.jsx",
+    "id": "c9d7200374ec90d7d2107ea3",
+    "kind": "machine",
+    "reason": "Literal command substitution tokens must remain unchanged for scripts to resolve them."
+  },
+  {
+    "file": "src/components/TroubleshootingWizard.jsx",
+    "id": "cb6a8a4a5395f39c1c928513",
+    "kind": "machine",
+    "reason": "Illustrative Android package identifier; package syntax must not be translated."
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "6b79a10ab7e5ba9a6cfc6ea6",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "基础冒烟验收"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "dc45e7a68311514d287a950e",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "回到桌面、采集截图和性能快照，并检查 Crash/ANR 日志。"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "c13dc3f3243232310408d279",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "安装后启动验收"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "d36dc3a6bdac46e9b79764a4",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "安装 APK、清理日志、启动目标应用并采集首屏与性能证据。"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "025be45998ca2eb938879ec6",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "启动稳定性验收"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "cde8e9abfbc4e995b008827b",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "按设定轮次反复启动应用，自动生成压测验收报告。"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "39acf86c4401396c3347010e",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "页面截图比对验收"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "085fa19548d0e6d7a9988b63",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集当前页面截图，与基准图比对相似度并生成结果。"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "9432b59d0aff4558684c270a",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "file_not_found:{0}"
+  },
+  {
+    "file": "electron/lib/acceptance-suite.cjs",
+    "id": "614ec42fe6b0127b49cd59cc",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "package_name_invalid"
+  },
+  {
+    "file": "electron/lib/ai-tools-config-desktop.cjs",
+    "id": "c7df72627af401fe1b349f34",
+    "reason": "Persisted Desktop profile ownership marker; changing it by locale would invalidate ownership checks and could replace foreign configuration.",
+    "source": "卓控台 AI 工具"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "44056e610cc942183f28f24d",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Missing backup"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "5797d56c47dc48a696d8930f",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Envelope"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "149310f208a40b85575cd7af",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Ciphertext"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "0fe56d3e50e80f81e0589274",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Backup too large"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "0f56ca915733abf1a23280d7",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid backup"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "8abe6e5d7bdbc0791e1521db",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid target"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "c36c50c28fb244654ec77ebe",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid original"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "b3c9ec60ce374a82cdd8884c",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid checksum"
+  },
+  {
+    "file": "electron/lib/ai-tools-config.cjs",
+    "id": "ca896f14f82977585ecc5f3f",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid ciphertext"
+  },
+  {
+    "file": "electron/lib/ai-tools-migration-common.cjs",
+    "id": "26920da72f2b26b8bd2b48ad",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Cipher"
+  },
+  {
+    "file": "electron/lib/ai-tools-models.cjs",
+    "id": "2d986f7c6e443c4056b7dff9",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "已收到服务响应，但该接口不提供模型列表；尚未验证密钥/模型调用，可手动配置模型"
+  },
+  {
+    "file": "electron/lib/ai-tools-models.cjs",
+    "id": "ecba28c1d2010c8dadb12dd7",
+    "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
+    "source": "request is required"
+  },
+  {
+    "file": "electron/lib/ai-tools-probe.cjs",
+    "id": "4f02688dd3eece94c6d04b6d",
+    "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
+    "source": "request is required"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "29cfd074379e6090e7df6de1",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Cipher output"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "fe75caa8355c004fc582b4f5",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Envelope"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "8764d014513fb772c86cd0ce",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Cipher"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "fa3ad162ab02909820dc3856",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Plaintext"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "730106837f5c9cb3f924a5df",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Schema"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "d0389d1faa80ce6eeb040717",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Duplicate"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "143f84786695c35cfe08a92c",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Application"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources-store.cjs",
+    "id": "9dcd8a82c1068af177211b56",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Duplicate application"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources.cjs",
+    "id": "9f428d6cd374c508968662a2",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Missing"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources.cjs",
+    "id": "93222d6e37c3d4a4c9a93f5d",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Backup"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources.cjs",
+    "id": "2c882c53aeea99e0a880a1a3",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Hash"
+  },
+  {
+    "file": "electron/lib/ai-tools-resources.cjs",
+    "id": "11ec9b28085704db60e4c5c9",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Application"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "d6503bf7fc3e5673dbda913b",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "envelope"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "ef8de152e0dc0d38cce13048",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "cipher"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "53a307385cf5ff065fac5bf8",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "limit"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "2ab46d112e21f4746ac15c5a",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "size"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "114e74a326a56766ddc04612",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "index"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "bcd03bc2692e77968f6852d5",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "skill"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "55261f6f61a82684916349ab",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "installation"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "e2311608b7ad184129f490f9",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "backup"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-store.cjs",
+    "id": "bf40ab83dc9f7e2531a0126c",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "quota"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-transactions.cjs",
+    "id": "32df88eacf7e1d7f1c85b182",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "External change"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-tree.cjs",
+    "id": "3661ee61e42666f461a93f3c",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Stage replaced"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-tree.cjs",
+    "id": "f51e48111a33ee52e3a5a064",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Unexpected staged entry"
+  },
+  {
+    "file": "electron/lib/ai-tools-skills-tree.cjs",
+    "id": "c435310e4f6fa5e341a66d84",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "External staged edit"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "867d1c4737206bada4edc4d5",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Encryption unavailable"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "938f8050dee280ee59cbad2a",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Envelope"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "3ea0273d17a5712329332917",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Ciphertext"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "1d96df8bcd748195543a203c",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Plaintext limit"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "e6922bca8357785727b97d35",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Schema"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "68379d86e130e5e97c683136",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Duplicate id"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "1b656e129c22a629067a0f21",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Encryption unavailable for existing store"
+  },
+  {
+    "file": "electron/lib/ai-tools-store.cjs",
+    "id": "010a9467e835e24effa42af2",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Encryption output"
+  },
+  {
+    "file": "electron/lib/app-diagnostic-log.cjs",
+    "id": "19bcc36e346b2c9317b2f2b7",
+    "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
+    "source": "Invalid diagnostic log configuration"
+  },
+  {
+    "file": "electron/lib/application-menu.cjs",
+    "id": "3eb1be34d576f53445901f76",
+    "reason": "Fixed product brand/logo, identical in both supported languages.",
+    "source": "卓控台"
+  },
+  {
+    "file": "electron/lib/auto-diagnose.cjs",
+    "id": "c231cd45f439be708b05d71d",
+    "reason": "Stable serialization of original log evidence timestamps, not UI date presentation; retain historical reference format.",
+    "source": "zh-CN"
+  },
+  {
+    "file": "electron/lib/data-migration-policy.cjs",
+    "id": "f0528a0b4c15255bc45c922b",
+    "reason": "Canonical custom-command group persisted in portable settings; presentation translates the group without rewriting user data.",
+    "source": "自定义"
+  },
+  {
+    "file": "electron/lib/device-media.cjs",
+    "id": "40ab968ad3738a1e77fd186a",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Storage root unavailable"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "c517a70fbd0342a006abcd52",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid record"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "e67967f30d87a60ff3721160",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Unsafe storage"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "04a28a6515458e564cf94a6b",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid encryption"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "cb9053e68f3025ba1e9461de",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid token response"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "ed194f57b2e4ec9e34f830b0",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid token expiry"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "da458fece25099407698ff9e",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid refresh token"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "b8155c3b0a0632203a7aa743",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid user response"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "dc5b6d6dd91ae10ace0fce80",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid device response"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "fa0b5df584ecc44b1866c64d",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Refresh rejected"
+  },
+  {
+    "file": "electron/lib/feedback-auth.cjs",
+    "id": "01fff0dbf95d5d8a6066e384",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Account changed"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "8059ae35cff3366ff8210567",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "其他问题"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "46a935cadb8f8402a978a9fb",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "启动与更新"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "f18e529cd8f3d65b36dcda68",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "设备与投屏"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "f2ef18f0e8ada6627a2e577c",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "串口 / RS232"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "6bdfb3f9ad8b540a17da3e10",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "SSH 工作区"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "be8ee85b35ee612c6549e1ab",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "AI 工具"
+  },
+  {
+    "file": "electron/lib/feedback-policy.cjs",
+    "id": "3d0d0e42d09e45df294a8d01",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "界面与交互"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "1834e6a4e57b1e031e2f586a",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "检查 ADB 设备列表"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "d773c965f55372154ac93514",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集系统属性"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "b89537852e259eca3f13c334",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "检查 Root 身份"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "18b9884c3310b64893e61852",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集屏幕参数"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "760ee1827b3fdc545c430c88",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集运行时间"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "384a43e6b6529cddf587195a",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集磁盘空间"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "bdfc8f6bb2af8c220ebddb57",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集内存信息"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "a7321ba8ebdf0d348c77c55e",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集进程快照"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "a5c6d0b531f170aa056deae1",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集电池信息"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "90b207e12de899c10a25678a",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集温度信息"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "20f58e992dbffd16ff16fff9",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集 Activity 状态"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "a68e30a6740ea9b7a1289962",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集窗口状态"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "33e811bae7168859c11c36b6",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集应用列表"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "53254f490bca299aaead46d6",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集包管理快照"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "6c7bcf58a481d09a0f3b85f9",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "导出 main 日志"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "6e01875f4d30dc70b9e8528d",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "导出 crash 日志"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "d6c1407b346095176e8c95db",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "导出 events 日志"
+  },
+  {
+    "file": "electron/lib/inspection.cjs",
+    "id": "eebd790684b781c1740f7fdc",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "采集屏幕截图"
+  },
+  {
+    "file": "electron/lib/localization.cjs",
+    "id": "b52caa218aa8a4ded0b597cf",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "language_owner_closed"
+  },
+  {
+    "file": "electron/lib/performance-monitor.cjs",
+    "id": "322e2dcf5a77aad50e5bdc67",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "device_required"
+  },
+  {
+    "file": "electron/lib/performance-worker.cjs",
+    "id": "d9aa5c1a006e13ea05678382",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "device_required"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "04b8e450528e7e0cd1c6de25",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "baseline_invalid"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "b1806625cc4bc688be1363a9",
+    "kind": "catalog-source",
+    "reason": "Canonical metric identity controls severity; only the returned display label is translated with tr(label).",
+    "source": "内存"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "b00143d02d4d0db83a02a78c",
+    "kind": "catalog-source",
+    "reason": "Canonical metric identity controls severity; only the returned display label is translated with tr(label).",
+    "source": "存储空间"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "5ac26345534fb8fe2e7f759d",
+    "kind": "catalog-source",
+    "reason": "Canonical metric identity controls severity; only the returned display label is translated with tr(label).",
+    "source": "温度"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "77747b62da4d5cf99112bf11",
+    "kind": "catalog-source",
+    "reason": "Canonical metric identity controls severity; only the returned display label is translated with tr(label).",
+    "source": "前台 FPS"
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "838f1fa0fb9c57f27128a168",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "device_offline:{0}"
+  },
+  {
+    "file": "electron/lib/serial-workspaces.cjs",
+    "id": "02b1b5b8b12045eb53b5b0dd",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "RS232 调试"
+  },
+  {
+    "file": "electron/lib/serial-workspaces.cjs",
+    "id": "f91a99a15a43cd59d94c5de8",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "串口终端"
+  },
+  {
+    "file": "electron/lib/settings.cjs",
+    "id": "614489436af34ec2444bbf4e",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "invalid_task_center_onboarding"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "685a3dd613fde28978c46c58",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "timeout"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fe34fd2c3f49b0c7d4787f66",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "的"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2fe8360c4bbc391a9b723cd9",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "了"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "3a3b83e9117fe9ffdf2ed485",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "是"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "03b51ecc5c694d71fcfcda16",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "在"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ca389450e5e50506d014b7fa",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "和"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "922393cdaca3eb80a7463fa2",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "就"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1886749e2086da2b70bd2087",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "不"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0347675f4983533bb4752fea",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "也"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2306153691665ec5b1edc7e6",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "都"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "e123ff6bb64be4c976a7a244",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "着"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "3d810b458cf474fc9070e9c2",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "过"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "9192c943311e1cb238dcc980",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "吧"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f171857c5923fbdd96011742",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "呢"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "9e61334ede0b63baf073d672",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "啊"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "faf74bc1840d3f939b3ccb68",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "吗"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "89ab55badd1514a6f65c8b34",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "我"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "85c6728b4e80f39a883db7ff",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "你"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "396d7f0a703856cb40088efd",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "他"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0ec1a9d78e80030bf96b527a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "她"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a92c0dbad112d12ffa9bfc05",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "它"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2eef84e8476482df92d697dd",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "我们"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "5c4690eeb9f724986ff42f8e",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "你们"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "49a6e5255d56683bb4e9c628",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "他们"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "7e7b5a8a65ba915b08e13a62",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "自己"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "cbc959b0668cc3ff31f7a5cd",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "这"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "df7f2e8a83938b1036c7cfc9",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "那"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d5bc36cf5cf33144f3dcfa3f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "这个"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "9966a5617d6060a6178cda6a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "那个"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1f80dda7f78eff108f6207eb",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "这些"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "4ad76f9c29a91432d992899d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "那些"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fcf3b00688823085de8ec7fe",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "一"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "6a5c165befa640f35009e47d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "一个"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "bfb995f5c58cd32d1a2a7f06",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "一些"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "88b999ab1c7e0dc8688574ed",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "上"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "8b0f5d8c73e3465f02864b7b",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "下"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d20f4bf44fbd09135a94b78d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "里"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "acdc0d3609835e3be1fc03e0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "中"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "5358ddaa4dcfb393bc37e997",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "什么"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "14775377eee0183de0667f12",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "怎么"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "cecf828cdd59d56a0657aa36",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "如何"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0c51db6ff6d1afc5f3e2f648",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "哪些"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2b0cb19ae65849471583cf52",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "哪个"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0c4d65bdf3899bb5e1b1326f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "为什么"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ee2815ccfbbb4ccdfaebf0d4",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "何时"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "7cf957b8f4424015736e4970",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "何地"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "418eea168bee4fd2a120ff01",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "谁"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ae804aafa72f73ce9017af82",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "查看"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "b63b0fbe3e32cbce3763edd5",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "看"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "82577a8ec00b8278f7f63b23",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "找"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "627aa6710bc2c07bcde7793e",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "查找"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d3533706bdcdfd372bfbcede",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "搜索"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "da0c1b05aa503ba4e7c920b0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "搜"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "b2632f949db2734f05d236a3",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "查"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "6a51f1605b824b24801cc063",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "显示"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "5d6894c5054400878370672f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "出现"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f6112be3ad909b658d68fa09",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "发生"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d03c761c5eced45a7342f24f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "存在"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fb5894e7b3a1cb58288ce51a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "有"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f03232d6cf511854c481ddfc",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "没有"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "093635cc04c01a3a9e8c4769",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "无"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1541c1f32d958ec73780acee",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "找出"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a2eb6a02dce730ab7eb74697",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "获取"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fb96e102242ea2666e7d1f53",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "得到"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "06ef5e8371d052c624260751",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "列出"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "776105fa23fbb70447ad7ae4",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "列举"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "319cd5ddcb870ac4b9e67823",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "筛选"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c2968b119b15f229fe058d46",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "过滤"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "48763b90ec0fbf99f71b81e3",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "匹配"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "5acc3ecc968ef818e82b78f5",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "当前"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "3a907cb9e890d10697e2c31e",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "现在"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c8e683865f5fe3f429b4f53d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "今天"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d9fc1ff0b9ecc781e9df0a93",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "昨天"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "12c78e96a4eceb0dab97eeea",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "最近"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f8d478b661cbd773a4593839",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "之前"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c77fc99b04d211b382801291",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "之后"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c20f83f60d2fcb660e5f787f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "刚才"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "9dafb137c8d80047e3c742a6",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "此时"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1030c5f58af2727c768572b2",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "此时此刻"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "6a1c6fda2754e1d86615afed",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "很"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1125a7af3eac29697b38c88f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "非常"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "039487b59b89c964853d1ef7",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "特别"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "3dc9b02acd323605b86d16a7",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "比较"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f7fded74c6fa21b6d386fd5d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "最"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d20d519532ab24aef994911c",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "更"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0e04f317f2b9599f461054ef",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "太"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2b959ba463cfd4940e1c4c8d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "极"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "83a5e9b90ba9ae4e21c4935a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "与"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "8a47a75e79b15766fa61b98c",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "及"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a885340479f799b4bba2e53b",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "或"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "adff057e7563ba80da348a43",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "或者"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "8b99d0e2af2146aa8a07de4d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "以及"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c06e36c583b108b7763a117e",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "并"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fc2d0322716cbca149e212d3",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "并且"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "958c5c4c018a5d03d052643a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "但是"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "953a42aa2e214d7bbe3b6747",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "但"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d1b097d8a63333cc31a6f3af",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "然而"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ba3f7e0f6008e0d6278da4eb",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "虽然"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d4d95334cf442165c8f8dfb7",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "尽管"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "42c4b1173821c3d5e95402a9",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "所有"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "680c6efc787a78fb631207e6",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "相关"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "75012580001b8b978e2c7ca0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "全部"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "d0289cec7a9409c691a9112a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "全"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "070017944e0ba6461020a055",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "整个"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "3d47c93128f80d378412f651",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "整体"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "28c99c3c284c2d30feacbe63",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "日志"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f2dd36c3768090a1212311be",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "记录"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0f46fda30aae867a9684bdd1",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "内容"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "2161a264da6150022f256a52",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "信息"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a6a0c358ec7e186327ee0e6d",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "数据"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a859c702a75dc3e7d5ad37a9",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "情况"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "62033cfa968e3f31b1d56bca",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "问题"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ab932d10d3319fbf888080b0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "东西"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "1ffb25c1bef967145d727ac1",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "到"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fec237afa5852eaba96053c5",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "去"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ef15d86ce5b79e6c3eae5882",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "来"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "f74abb5dfa1fb7633d578f44",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "向"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "ada542ec6afbbbada794f0d1",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "往"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fab3f395692d294cf333b4b7",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "从"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "c902da26249623805c8367c8",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "给"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "599a6ad9a906e1106553bbf0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "对"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "029149609cbff58e682851a0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "关于"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a2433390b0500e7ab2076627",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "对于"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "94c2b024c74ad21893046d75",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "要"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "9aae7e786a0d225881696fc3",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "会"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "0a2dfccd86fdaef4d1419cf2",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "能"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "8e48cfde8dcec9b6ca26725a",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "可以"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "aea8848e61a419227b1c56c6",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "应该"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "017ea51643e738416dd40cc0",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "需要"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "b538802c62a1bd7afdebeca9",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "希望"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fc32b8487abb4b4cd209837f",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "想"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "a3c127f38dd06ff6da145364",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "请"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "6829bee398b7d8952f6f0052",
+    "reason": "Chinese stop-word matching data for original queries; translation would change search results and is forbidden.",
+    "source": "麻烦"
+  },
+  {
+    "file": "electron/lib/smart-search.cjs",
+    "id": "fea6609aac2f78cf90061f5a",
+    "reason": "Stable serialization of original log evidence timestamps, not UI date presentation; retain historical reference format.",
+    "source": "zh-CN"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "873601f82d9e74eef4fc3114",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "本机安全加密不可用，SSH 命令历史仅保留在本次会话内存中，退出即消失；不会写入明文。"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "9cf7819394366726a2120119",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "无法读取已保存历史及暂停设置，本次默认暂停。可手动恢复仅本次会话记录；不会修改已有加密历史。"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "811bcb3aac9bb27f8f3029f3",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "schema"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "e949e49209577ec9ed740a81",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "host"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "51541d6d7d0b4a43ae514d16",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "identity"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "3507acf9edda4720ffb98689",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "entry"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "b36b3c82a06938241cb7ccbf",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "invalid history file"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "a6e64c554e0c44d0508c7ed0",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "history changed"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "11eb0acda578fe4ef31ab6dd",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "incomplete history"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "a976dd102f26176e5f09eab8",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "envelope"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "9164f2a699b6828bcc468ae9",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "ciphertext"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "8a33a7aed52b8d4e3009e693",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "plaintext limit"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "7672f608728931fe573e5720",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "changed"
+  },
+  {
+    "file": "electron/lib/ssh-command-history.cjs",
+    "id": "424f280b34178b45da6f3c20",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "encryption unavailable"
+  },
+  {
+    "file": "electron/lib/ssh-files-transfers.cjs",
+    "id": "7abd85bd6eef4ef7d4b5e1bf",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "not ordinary directory"
+  },
+  {
+    "file": "electron/lib/ssh-files-transfers.cjs",
+    "id": "cdd06c6ac5550634d3a8d205",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "destination redirected"
+  },
+  {
+    "file": "electron/lib/ssh-files.cjs",
+    "id": "e05cf9480545800e2270cebf",
+    "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
+    "source": "getSftp is required"
+  },
+  {
+    "file": "electron/lib/ssh-session.cjs",
+    "id": "82431641c0e414cce4e3b00b",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid profile"
+  },
+  {
+    "file": "electron/lib/startup-settings-policy.cjs",
+    "id": "037b32f9c6c84eb43b7f131a",
+    "reason": "Exact operating-system login-item ownership name; must not change with language.",
+    "source": "卓控台"
+  },
+  {
+    "file": "electron/lib/task-center-onboarding-state.cjs",
+    "id": "d91d7dbf9d6b18ad9d304dbe",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "invalid_onboarding_status"
+  },
+  {
+    "file": "electron/lib/task-center-onboarding-state.cjs",
+    "id": "c3d553e983eafbba77f0cbfc",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "invalid_onboarding_timestamp"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "3afea542bf67d8243c0b9dab",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "基础复现脚本"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "782db1bd0bf3801fb196021c",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "采集设备型号、截图和一次性能快照，用于快速验证设备链路。"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "99dab128ae7526d583c1e40a",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "读取设备型号"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "dac08d5d127f848861c2424c",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "保存当前截图"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "ad0599ce01d888bbe6c4a17f",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "采集性能快照"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "350f80e68b82e0f856739ecb",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "not_png"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "049d99c1a2c7f2261639bbfa",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "invalid_png_chunk"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "13410bf95ecaae0ecd31557f",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "unsupported_png"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "e7751fac833e72d10aea8fbc",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "unsupported_png_filter"
+  },
+  {
+    "file": "electron/lib/task-center-worker.cjs",
+    "id": "38bb5f9f53be3f0225c4e0a8",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "file_required"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "9a44d3a42db37ff2569cc158",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "基础复现脚本"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "11a88627b79e8589420949a7",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "采集设备型号、截图和一次性能快照，用于快速验证设备链路。"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "163344a7efb3343be8032fb1",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "读取设备型号"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "d1791788937c9730824f52b1",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "保存当前截图"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "820409445c463f9b3a967347",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in script metadata retained for fingerprints and storage; translated only for the unchanged built-in template at rendering.",
+    "source": "采集性能快照"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "56796b760eeed10ef7589233",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "not_png"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "1fc89a125b580e6b0f224d84",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "invalid_png_chunk"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "b47236940a4fd63c5dc0a88f",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "unsupported_png"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "90be544589e9992c2db9487c",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "unsupported_png_filter"
+  },
+  {
+    "file": "electron/lib/task-center.cjs",
+    "id": "5b4d3a011c87fecaf8d495fc",
+    "reason": "Stable machine error identifier consumed by application error mapping; translating it would break error classification.",
+    "source": "file_required"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "6530e2860f3edd2cbe8e9c48",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "应用闪退/崩溃"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "cbd2895323ec8d28582b7d41",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "卡顿/无响应"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "58cbbe42e1ce5e19753b9521",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "安装/启动失败"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "bf63e914c8eb47804cf41871",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "发热/性能异常"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "9241fd58d3927dccae15a02e",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "设备连接异常"
+  },
+  {
+    "file": "electron/lib/troubleshooting.cjs",
+    "id": "f5b585a7f5c5121878474958",
+    "kind": "catalog-source",
+    "reason": "Canonical built-in message metadata translated with tr() at its display/use boundary, never at module initialization.",
+    "source": "通用问题排查"
+  },
+  {
+    "file": "electron/main.cjs",
+    "id": "b4522780a437ffa12e13cc78",
+    "reason": "Exact legacy data directory name used for migration; not a display label.",
+    "source": "卓控台"
+  },
+  {
+    "file": "electron/startup/particles.js",
+    "id": "9307ee0082a4efaf9268be33",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Canvas is unavailable"
+  },
+  {
+    "file": "electron/startup/particles.js",
+    "id": "aa4e25a89ecf152a1abb0fb5",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Invalid target rectangle"
+  },
+  {
+    "file": "electron/startup/particles.js",
+    "id": "aef66b75e7a5b67d0a8e59fc",
+    "reason": "Fixed product brand/logo, identical in both supported languages.",
+    "source": "卓控台"
+  },
+  {
+    "file": "electron/startup/particles.js",
+    "id": "9d7a7d67fc3de36b454d7080",
+    "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
+    "source": "Startup artwork is unavailable"
+  },
+  {
+    "file": "electron/startup/preload.cjs",
+    "id": "cdf8578fe99b8df859801272",
+    "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
+    "source": "callback must be a function"
+  },
+  {
+    "file": "electron/locales/en-backend.json",
+    "id": "8c9847baecb0f82a96d66158",
+    "kind": "catalog-sample",
+    "reason": "The translated prompt explicitly preserves the three original Chinese search-keyword examples, since translating them would change search semantics."
+  },
+  {
+    "file": "electron/lib/ai-tools-quota.cjs",
+    "id": "66dce4b554605810039d80bc",
+    "kind": "machine",
+    "source": "DeepSeek {0}",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "electron/lib/ai-tools-quota.cjs",
+    "id": "703d05e91bd3d0414a14cc79",
+    "kind": "machine",
+    "source": "OpenRouter",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "electron/lib/ai-tools-quota.cjs",
+    "id": "2d39dbcbd8f7479e1b86aa59",
+    "kind": "machine",
+    "source": "SiliconFlow",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "electron/lib/ai-tools-quota.cjs",
+    "id": "8bdd2ec3e176ccb612e9dd24",
+    "kind": "machine",
+    "source": "StepFun",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "electron/lib/ai-tools-quota.cjs",
+    "id": "575a60fba82be2ac199bdbda",
+    "kind": "machine",
+    "source": "Novita AI",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "electron/lib/auto-diagnose.cjs",
+    "id": "65a9268514730d6fdb75c0cf",
+    "kind": "machine",
+    "source": "Java Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/auto-diagnose.cjs",
+    "id": "460a82cc96ab5fbbd476146a",
+    "kind": "machine",
+    "source": "Native Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/auto-diagnose.cjs",
+    "id": "e21d3bcdecce2d151e9bf1b6",
+    "kind": "machine",
+    "source": "Watchdog",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/auto-diagnose.cjs",
+    "id": "d49c28597a8a3499bc1a97b6",
+    "kind": "machine",
+    "source": "Kernel Panic",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/device-guard.cjs",
+    "id": "9dfdbcc4f7df86703b8edbfe",
+    "kind": "machine",
+    "source": "Java Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/device-guard.cjs",
+    "id": "687132528d2accf7c422d044",
+    "kind": "machine",
+    "source": "Native Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/device-guard.cjs",
+    "id": "23dd35f9c6475a4d5c3cf854",
+    "kind": "machine",
+    "source": "Watchdog",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/performance-monitor.cjs",
+    "id": "284ef8c87ac14fbd5a1d1c34",
+    "kind": "machine",
+    "source": "CPU {0}%",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/performance-worker.cjs",
+    "id": "0e35baab2fc9c47ab52e676c",
+    "kind": "machine",
+    "source": "CPU {0}%",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "6752da2af99a0acc061ef799",
+    "kind": "machine",
+    "source": "Java Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "b9e8aae6feb023cccfd4f64a",
+    "kind": "machine",
+    "source": "Native Crash",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/lib/regression-report.cjs",
+    "id": "ae503301050ba825538ae721",
+    "kind": "machine",
+    "source": "Watchdog",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "electron/startup/particles.js",
+    "id": "5958e109eb1c498d4bd00a27",
+    "kind": "machine",
+    "source": "Starting Workbench",
+    "reason": "Explicit English branch of the fixed startup document title, selected by the validated initialLanguage value before painting."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "3f7aeed929dfe2955e81654e",
+    "kind": "machine",
+    "source": "V Verbose",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "acb2ebc1e8504b38658823f1",
+    "kind": "machine",
+    "source": "D Debug",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "e9abc59cd2f01f80a33ad0f6",
+    "kind": "machine",
+    "source": "I Info",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "51d9eebb3eecdc269ce0529a",
+    "kind": "machine",
+    "source": "W Warn",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "ea097a3a8dfa8724e93f8db9",
+    "kind": "machine",
+    "source": "E Error",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "37c08a2147bfe6a11f312280",
+    "kind": "machine",
+    "source": "F Fatal",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "abf6c2c252f6a45368b4a8f2",
+    "kind": "machine",
+    "source": "A Assert",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/LogAnalyzer.jsx",
+    "id": "7944a758c29aeed8db812b83",
+    "kind": "machine",
+    "source": "Trae / Cursor",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/SerialDataView.jsx",
+    "id": "7852f91f20fdd72b6e299aa4",
+    "kind": "machine",
+    "source": "ASCII（7-bit）",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/SerialSendPanel.jsx",
+    "id": "6f7ba9546072be1ddfca8482",
+    "kind": "machine",
+    "source": "ASCII（7-bit）",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/AiProviderForm.jsx",
+    "id": "474e6edd3cb5c0a24ff4c3c8",
+    "kind": "machine",
+    "source": "Kimi Coding Plan",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/AiProviderForm.jsx",
+    "id": "5b816a650da2932dd5dba395",
+    "kind": "machine",
+    "source": "MiniMax Coding Plan",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "04cbe5e246b68b1e7e5f6b7c",
+    "kind": "machine",
+    "source": "Sonnet",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "d64cd1cecbecf9a0bbb4a9f6",
+    "kind": "machine",
+    "source": "Opus",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "dcc06be1ff01a1608e309dc9",
+    "kind": "machine",
+    "source": "Fable",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "3dd5cea37900e285babb37fb",
+    "kind": "machine",
+    "source": "Haiku",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiClaudeModelsModel.js",
+    "id": "ef65d345351da0e524c1440f",
+    "kind": "machine",
+    "source": "Subagent",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "37c7c05ea78464e43cbfc099",
+    "kind": "machine",
+    "source": "OpenAI / Codex API",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "5d53ea7ff4365fe20c7ae618",
+    "kind": "machine",
+    "source": "Google Gemini",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "6a5ccd7206ae29b03fd90487",
+    "kind": "machine",
+    "source": "DeepSeek",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiProviderPresets.js",
+    "id": "105c0d6cf33341b769b7730d",
+    "kind": "machine",
+    "source": "OpenRouter",
+    "reason": "Established provider, product or plan name; its identity is intentionally unchanged in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiToolsModel.js",
+    "id": "a4bf3a658783e5bc79b22d6f",
+    "kind": "machine",
+    "source": "OpenAI Chat Completions",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiToolsModel.js",
+    "id": "e4fd1e7166a563763f914eba",
+    "kind": "machine",
+    "source": "OpenAI Responses",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiToolsModel.js",
+    "id": "0a8f5d30b520aab7fa6c1fa1",
+    "kind": "machine",
+    "source": "Anthropic Messages",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  },
+  {
+    "file": "src/components/ai-tools/aiToolsModel.js",
+    "id": "5ad26753bd56450926cc7464",
+    "kind": "machine",
+    "source": "Gemini Native",
+    "reason": "Standard protocol, model-role, log-level or metric notation; preserve its established technical identifier in both languages."
+  }
+]

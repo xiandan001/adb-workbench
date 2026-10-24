@@ -1,10 +1,11 @@
+import { tr } from './i18n.js';
 export const PERFORMANCE_METRICS = [
   { key: 'cpu', label: 'CPU', color: '#22c55e', group: 'percent', unit: '%' },
-  { key: 'memory', label: '内存', color: '#38bdf8', group: 'percent', unit: '%' },
-  { key: 'data', label: '存储空间', color: '#f59e0b', group: 'percent', unit: '%' },
-  { key: 'temp', label: '温度', color: '#ef4444', group: 'temperature', unit: '°C' },
-  { key: 'foregroundFps', label: '前台 FPS', color: '#a78bfa', group: 'fps', unit: 'FPS' },
-  { key: 'surfaceFps', label: '合成 FPS', color: '#14b8a6', group: 'fps', unit: 'FPS' }
+  { key: 'memory', get label() { return tr("内存"); }, color: '#38bdf8', group: 'percent', unit: '%' },
+  { key: 'data', get label() { return tr("存储空间"); }, color: '#f59e0b', group: 'percent', unit: '%' },
+  { key: 'temp', get label() { return tr("温度"); }, color: '#ef4444', group: 'temperature', unit: '°C' },
+  { key: 'foregroundFps', get label() { return tr("前台 FPS"); }, color: '#a78bfa', group: 'fps', unit: 'FPS' },
+  { key: 'surfaceFps', get label() { return tr("合成 FPS"); }, color: '#14b8a6', group: 'fps', unit: 'FPS' }
 ];
 
 export function performanceAxisMax(group, points, metrics) {

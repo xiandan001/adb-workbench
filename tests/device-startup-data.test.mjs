@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { resolveActiveDeviceId } from '../src/shared/deviceWorkflow.js';
+import { tr } from '../src/shared/i18n.js';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
@@ -30,6 +31,7 @@ async function fetchState(api, previous = [], active = '') {
   assert.ok(fetchCallback);
   const state = { devices: previous, active, error: '', loading: false };
   const callback = runInNewContext(`(${source.slice(fetchCallback.start, fetchCallback.end)})`, {
+    tr,
     window: { electronAPI: api },
     setLoading: value => { state.loading = value; },
     setDevices: update => { state.devices = update(state.devices); },

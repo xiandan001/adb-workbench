@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { validateArguments, validateCommandName } = require('./ai-tools-policy.cjs');
 
 const COMMANDS = Object.freeze([
@@ -18,20 +19,20 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
   const operations = new Set(); const tasks = new Set(); const restoreTokens = new Set(); const resourceRestoreTokens = new Set(); const skillRestoreTokens = new Set();
   function authorize(event) {
     const owner = getOwner();
-    if (!owner || owner.isDestroyed() || !owner.webContents.mainFrame || event?.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) throw fail('AI_TOOLS_OWNER_REQUIRED', '请在卓控台主窗口操作 AI 工具');
-    if (disposed) throw fail('AI_TOOLS_DISPOSED', 'AI 工具工作区正在退出');
-    if (migrationReserved) throw fail('AI_TOOLS_MIGRATION_PENDING', '数据迁移已准备开始，请等待重启后继续操作 AI 工具');
+    if (!owner || owner.isDestroyed() || !owner.webContents.mainFrame || event?.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) throw fail('AI_TOOLS_OWNER_REQUIRED', tr("请在卓控台主窗口操作 AI 工具"));
+    if (disposed) throw fail('AI_TOOLS_DISPOSED', tr("AI 工具工作区正在退出"));
+    if (migrationReserved) throw fail('AI_TOOLS_MIGRATION_PENDING', tr("数据迁移已准备开始，请等待重启后继续操作 AI 工具"));
   }
   async function perform(event, raw) {
     const abort = new AbortController();
     try {
       authorize(event);
       const request = validateArguments(raw);
-      if (Object.keys(request).some(key => !['command', 'args'].includes(key))) throw fail('AI_TOOLS_INVALID_REQUEST', 'AI 工具请求格式无效');
+      if (Object.keys(request).some(key => !['command', 'args'].includes(key))) throw fail('AI_TOOLS_INVALID_REQUEST', tr("AI 工具请求格式无效"));
       const command = validateCommandName(request.command);
-      if (!capabilities.includes(command)) throw fail('AI_TOOLS_COMMAND_UNKNOWN', '此 AI 工具功能尚未接通');
+      if (!capabilities.includes(command)) throw fail('AI_TOOLS_COMMAND_UNKNOWN', tr("此 AI 工具功能尚未接通"));
       const args = validateArguments(request.args === undefined ? {} : request.args);
-      if (operations.size >= 16) throw fail('AI_TOOLS_BUSY', 'AI 工具操作过多，请等待当前操作完成');
+      if (operations.size >= 16) throw fail('AI_TOOLS_BUSY', tr("AI 工具操作过多，请等待当前操作完成"));
       operations.add(abort);
       const status = await getMembership(); authorize(event);
       const activated = status?.activated === true && status.scope === 'vip';
@@ -44,7 +45,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
         const data = activated ? await store.snapshot() : { providers: [], persistent: null, warning: '' };
         return { success: true, result: { ...data, membership, tools, capabilities, quota: activated ? quota.list() : [] } };
       }
-      if (!activated && !recovery) throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', 'AI 工具管理使用卓控台现有会员权益，请前往会员中心激活');
+      if (!activated && !recovery) throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("AI 工具管理使用卓控台现有会员权益，请前往会员中心激活"));
       let result;
       switch (command) {
         case 'provider_save': {
@@ -61,11 +62,11 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
           const provider = await store.getProvider(args.providerId);
           const fingerprint = JSON.stringify(provider); const plan = probe.describe(provider);
           const mode = await confirmProbe({ name: provider.name, ...plan }); authorize(event);
-          if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', '测试已取消');
+          if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', tr("测试已取消"));
           if (!['inference', 'read-only'].includes(mode)) { result = { cancelled: true }; break; }
           const membershipNow = await getMembership(); authorize(event);
-          if (membershipNow?.activated !== true || membershipNow.scope !== 'vip') throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', '会员状态已变化，未执行测试');
-          if (JSON.stringify(await store.getProvider(args.providerId)) !== fingerprint) throw fail('AI_TOOLS_PROVIDER_CHANGED', '供应商配置已变化，请重新确认测试');
+          if (membershipNow?.activated !== true || membershipNow.scope !== 'vip') throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("会员状态已变化，未执行测试"));
+          if (JSON.stringify(await store.getProvider(args.providerId)) !== fingerprint) throw fail('AI_TOOLS_PROVIDER_CHANGED', tr("供应商配置已变化，请重新确认测试"));
           result = mode === 'inference' ? await probe.run(provider, { signal: abort.signal }) : await models.test(provider, { signal: abort.signal }); break;
         }
         case 'models_list':
@@ -112,7 +113,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
           resourceRestoreTokens.add(result.token); break;
         case 'projects_snapshot': result = projects.snapshot(); break;
         case 'projects_pick': {
-          const selected = await pickDirectory('选择 AI 项目文件夹'); authorize(event);
+          const selected = await pickDirectory(tr("选择 AI 项目文件夹")); authorize(event);
           result = selected ? projects.offerDirectory(selected) : { cancelled: true }; break;
         }
         case 'projects_save': result = projects.save(args.project); break;
@@ -135,7 +136,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
         case 'skills_list': result = { skills: skills.list(), tools: tools.filter(tool => ['claude', 'codex', 'gemini', 'opencode'].includes(tool.id)).map(({ id, label }) => ({ id, label })) }; break;
         case 'skills_read': result = skills.read({ id: args.id }); break;
         case 'skills_import': {
-          const selected = await pickDirectory('选择包含 SKILL.md 的技能文件夹'); authorize(event);
+          const selected = await pickDirectory(tr("选择包含 SKILL.md 的技能文件夹")); authorize(event);
           result = selected ? skills.importDirectory({ sourceDirectory: selected }) : { cancelled: true }; break;
         }
         case 'skills_remove': result = skills.remove({ id: args.id }); break;
@@ -149,11 +150,11 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
           skillRestoreTokens.add(result.token); break;
       }
       authorize(event);
-      if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', 'AI 工具操作已取消');
+      if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', tr("AI 工具操作已取消"));
       return { success: true, result: result ?? {} };
     } catch (error) {
       const known = typeof error?.code === 'string' && error.code.startsWith('AI_TOOLS_');
-      return { success: false, error: { code: known ? error.code : 'AI_TOOLS_OPERATION_FAILED', message: known ? String(error.message).slice(0, 1000) : 'AI 工具操作未完成，请检查配置或本地存储后重试',
+      return { success: false, error: { code: known ? error.code : 'AI_TOOLS_OPERATION_FAILED', message: known ? String(error.message).slice(0, 1000) : tr("AI 工具操作未完成，请检查配置或本地存储后重试"),
         ...(known && typeof error.backupId === 'string' && /^[a-f0-9-]{36}$/i.test(error.backupId) ? { backupId: error.backupId } : {}) } };
     } finally { operations.delete(abort); }
   }
@@ -163,7 +164,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
   }
   return { execute, register(ipcMain) { ipcMain.handle('ai-tools:request', execute); },
     async reserveForMigration() {
-      if (disposed || migrationReserved) throw fail('AI_TOOLS_MIGRATION_PENDING', 'AI 工具正在退出或已有待完成的数据迁移');
+      if (disposed || migrationReserved) throw fail('AI_TOOLS_MIGRATION_PENDING', tr("AI 工具正在退出或已有待完成的数据迁移"));
       migrationReserved = true;
       try {
         for (const operation of operations) operation.abort();

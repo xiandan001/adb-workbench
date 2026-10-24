@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
@@ -19,9 +20,9 @@ function comparable(file) { return process.platform === 'win32' ? file.toLowerCa
 async function safeRoot(directory) {
   const root = path.resolve(directory);
   const stat = await fs.promises.lstat(root);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('数据目录不能是链接或普通文件');
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(tr("数据目录不能是链接或普通文件"));
   const real = await fs.promises.realpath(root);
-  if (comparable(real) !== comparable(root)) throw new Error('数据目录不能经过符号链接');
+  if (comparable(real) !== comparable(root)) throw new Error(tr("数据目录不能经过符号链接"));
   return root;
 }
 
@@ -29,7 +30,7 @@ async function safeRoot(directory) {
 async function safePath(root, relative, { createParents = false } = {}) {
   if (typeof relative !== 'string' || !relative || relative.includes('\\') || path.isAbsolute(relative)
     || relative.split('/').some(part => !part || part === '.' || part === '..' || !/^[a-zA-Z0-9._-]+$/.test(part))) {
-    throw new Error('备份路径无效');
+    throw new Error(tr("备份路径无效"));
   }
   const parts = relative.split('/');
   let current = root;
@@ -44,11 +45,11 @@ async function safePath(root, relative, { createParents = false } = {}) {
         stat = await fs.promises.lstat(current);
       } else continue;
     }
-    if (stat.isSymbolicLink() || (index < parts.length - 1 && !stat.isDirectory())) throw new Error('数据路径包含链接或无效目录');
-    if (index === parts.length - 1 && !stat.isFile()) throw new Error('数据路径不是普通文件');
+    if (stat.isSymbolicLink() || (index < parts.length - 1 && !stat.isDirectory())) throw new Error(tr("数据路径包含链接或无效目录"));
+    if (index === parts.length - 1 && !stat.isFile()) throw new Error(tr("数据路径不是普通文件"));
     const real = await fs.promises.realpath(current);
     const within = path.relative(root, real);
-    if (within.startsWith('..') || path.isAbsolute(within)) throw new Error('数据路径超出允许目录');
+    if (within.startsWith('..') || path.isAbsolute(within)) throw new Error(tr("数据路径超出允许目录"));
   }
   return current;
 }
@@ -56,9 +57,9 @@ async function safePath(root, relative, { createParents = false } = {}) {
 async function boundedRead(root, relative, limit = MAX_FILE_BYTES) {
   const target = await safePath(root, relative);
   const stat = await fs.promises.lstat(target);
-  if (stat.size > limit) throw new Error(`数据文件超过大小限制：${relative}`);
+  if (stat.size > limit) throw new Error(tr("数据文件超过大小限制：{0}", { 0: relative }));
   const bytes = await fs.promises.readFile(target);
-  if (bytes.length > limit) throw new Error(`数据文件超过大小限制：${relative}`);
+  if (bytes.length > limit) throw new Error(tr("数据文件超过大小限制：{0}", { 0: relative }));
   return bytes;
 }
 
@@ -66,19 +67,19 @@ function validatePayload(input) {
   if (!plainObject(input) || input.schemaVersion !== 1 || typeof input.appVersion !== 'string'
     || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(input.appVersion)
     || typeof input.createdAt !== 'string' || !Number.isFinite(Date.parse(input.createdAt))
-    || !Array.isArray(input.files) || input.files.length > MAX_FILES) throw new Error('备份版本或结构不受支持');
+    || !Array.isArray(input.files) || input.files.length > MAX_FILES) throw new Error(tr("备份版本或结构不受支持"));
   const preferences = policy.normalizePreferences(input.preferences);
   const names = new Set();
   let totalBytes = Buffer.byteLength(JSON.stringify(preferences));
   const files = input.files.map(file => {
     if (!plainObject(file) || typeof file.name !== 'string' || !policy.isAllowedFile(file.name)
-      || names.has(file.name.toLowerCase()) || !Object.hasOwn(file, 'data')) throw new Error('备份包含不支持或重复的数据文件');
+      || names.has(file.name.toLowerCase()) || !Object.hasOwn(file, 'data')) throw new Error(tr("备份包含不支持或重复的数据文件"));
     names.add(file.name.toLowerCase());
     const originalBytes = Buffer.byteLength(JSON.stringify(file.data));
-    if (originalBytes > MAX_FILE_BYTES) throw new Error('单个数据文件超过 64 MB，未导入或截断');
+    if (originalBytes > MAX_FILE_BYTES) throw new Error(tr("单个数据文件超过 64 MB，未导入或截断"));
     const data = policy.sanitizeFile(file.name, file.data);
     totalBytes += Buffer.byteLength(JSON.stringify(data));
-    if (totalBytes > MAX_EXPANDED_BYTES) throw new Error('备份展开后超过 256 MB，未导入或截断');
+    if (totalBytes > MAX_EXPANDED_BYTES) throw new Error(tr("备份展开后超过 256 MB，未导入或截断"));
     return { name: file.name, data };
   });
   const payload = { schemaVersion: 1, appVersion: input.appVersion, createdAt: input.createdAt, files, preferences };
@@ -95,24 +96,24 @@ function validatePayload(input) {
 function archiveBytes(input) {
   const { payload } = validatePayload(input);
   const encoded = Buffer.from(JSON.stringify({ format: FORMAT, sha256: digest(payload), payload }));
-  if (encoded.length > MAX_EXPANDED_BYTES) throw new Error('备份展开后超过 256 MB，未导出或截断');
+  if (encoded.length > MAX_EXPANDED_BYTES) throw new Error(tr("备份展开后超过 256 MB，未导出或截断"));
   return encoded;
 }
 
 function checkCompressedSize(archive) {
-  if (archive.length > MAX_COMPRESSED_BYTES) throw new Error('备份超过 128 MB，未导出或截断');
+  if (archive.length > MAX_COMPRESSED_BYTES) throw new Error(tr("备份超过 128 MB，未导出或截断"));
   return archive;
 }
 
 function encodeArchive(input) { return checkCompressedSize(gzipSync(archiveBytes(input))); }
 
 function readArchive(buffer) {
-  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_COMPRESSED_BYTES) throw new Error('备份为空或超过 128 MB');
+  if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_COMPRESSED_BYTES) throw new Error(tr("备份为空或超过 128 MB"));
   let envelope;
   try { envelope = JSON.parse(gunzipSync(buffer, { maxOutputLength: MAX_EXPANDED_BYTES }).toString('utf8')); }
-  catch { throw new Error('备份损坏或展开后超过 256 MB'); }
+  catch { throw new Error(tr("备份损坏或展开后超过 256 MB")); }
   if (!plainObject(envelope) || envelope.format !== FORMAT || typeof envelope.sha256 !== 'string'
-    || envelope.sha256 !== digest(envelope.payload)) throw new Error('备份校验失败，文件已损坏或被修改');
+    || envelope.sha256 !== digest(envelope.payload)) throw new Error(tr("备份校验失败，文件已损坏或被修改"));
   return validatePayload(envelope.payload);
 }
 
@@ -123,23 +124,23 @@ async function createArchive(userData, preferences, appVersion) {
   for (const entry of entries) {
     if (policy.isAllowedFile(entry.name)) names.push(entry.name);
     if (entry.name !== 'log-analysis-sessions') continue;
-    if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('日志会话目录不能是链接或普通文件');
+    if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error(tr("日志会话目录不能是链接或普通文件"));
     const directory = path.join(root, entry.name);
     for (const child of await fs.promises.readdir(directory, { withFileTypes: true })) {
       const name = `${entry.name}/${child.name}`;
       if (policy.isAllowedFile(name)) names.push(name);
     }
   }
-  if (names.length > MAX_FILES) throw new Error('数据文件超过 2000 个，未导出或截断');
+  if (names.length > MAX_FILES) throw new Error(tr("数据文件超过 2000 个，未导出或截断"));
   const files = [];
   let bytes = 0;
   for (const name of names.sort()) {
     const raw = await boundedRead(root, name);
     bytes += raw.length;
-    if (bytes > MAX_EXPANDED_BYTES) throw new Error('数据超过 256 MB，未导出或截断');
+    if (bytes > MAX_EXPANDED_BYTES) throw new Error(tr("数据超过 256 MB，未导出或截断"));
     let data;
     try { data = JSON.parse(raw.toString('utf8')); }
-    catch { throw new Error(`数据文件损坏，未导出：${name}`); }
+    catch { throw new Error(tr("数据文件损坏，未导出：{0}", { 0: name })); }
     files.push({ name, data });
   }
   const encoded = archiveBytes({ schemaVersion: 1, appVersion, createdAt: new Date().toISOString(), files, preferences });

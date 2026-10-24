@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 const MAX_ROWS = 5000;
 export const SERIAL_WORKSPACES = Object.freeze(['rs232', 'terminal']);
 
@@ -58,10 +59,10 @@ export function createSerialDiscovery({ list, onResult }) {
       pending = (async () => {
         try {
           const result = await list();
-          if (!result?.success) throw new Error(result?.error || '无法读取串口，请检查驱动后刷新');
+          if (!result?.success) throw new Error(result?.error || tr("无法读取串口，请检查驱动后刷新"));
           if (!disposed) onResult({ ports: result.ports || [], error: '' });
         } catch (error) {
-          if (!disposed) onResult({ error: error.message || '无法读取串口，请检查驱动后刷新' });
+          if (!disposed) onResult({ error: error.message || tr("无法读取串口，请检查驱动后刷新") });
         }
       })().finally(() => { pending = null; });
       return pending;

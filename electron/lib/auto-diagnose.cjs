@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // AI 自动诊断引擎：实时检测 logcat 中的崩溃/ANR/OOM 等关键问题
 // 触发后向渲染进程推送 onAutoDiagnose 事件，由用户确认是否调用 AI 分析
 //
@@ -411,7 +412,7 @@ function register(ipcMain) {
       return { ok: true, rules: publicRules() };
     }
     if (!(await ensureVipForRules())) {
-      return { ok: false, code: 'vip_required', error: '自定义诊断规则为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("自定义诊断规则为会员专属功能，请先开通会员") };
     }
     const normalized = normalizeRuleInput(raw);
     if (!normalized.ok) return { ok: false, error: normalized.error };
@@ -425,7 +426,7 @@ function register(ipcMain) {
 
   ipcMain.handle('auto-diagnose:rules:delete', async (event, args) => {
     if (!(await ensureVipForRules())) {
-      return { ok: false, code: 'vip_required', error: '删除自定义规则为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("删除自定义规则为会员专属功能，请先开通会员") };
     }
     const id = String(args?.id || '').trim();
     if (!id || AUTO_DIAGNOSE_BUILTIN_IDS.has(id)) return { ok: false, error: 'builtin_rule_cannot_delete' };
@@ -458,14 +459,14 @@ function register(ipcMain) {
 
   ipcMain.handle('auto-diagnose:rules:export', async () => {
     if (!(await ensureVipForRules())) {
-      return { ok: false, code: 'vip_required', error: '导出诊断规则为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("导出诊断规则为会员专属功能，请先开通会员") };
     }
     return { ok: true, rules: publicRules(), exportedAt: new Date().toISOString() };
   });
 
   ipcMain.handle('auto-diagnose:rules:import', async (event, args) => {
     if (!(await ensureVipForRules())) {
-      return { ok: false, code: 'vip_required', error: '导入诊断规则为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("导入诊断规则为会员专属功能，请先开通会员") };
     }
     const incoming = Array.isArray(args?.rules) ? args.rules : [];
     const state = readRuleState();
@@ -490,15 +491,15 @@ function register(ipcMain) {
     try {
       const { issues, summary } = args || {};
       if (!issues || issues.length === 0) {
-        return { ok: false, error: '没有可分析的问题' };
+        return { ok: false, error: tr("没有可分析的问题") };
       }
 
       // 构造给 AI 的提示：将所有检测到的问题及上下文合并
       const issueBlocks = issues.map((issue, idx) => {
-        return `### 问题 ${idx + 1}：${issue.label}（严重程度：${issue.severity}）\n\n\`\`\`log\n${issue.context}\n\`\`\``;
+        return tr("### 问题 {0}：{1}（严重程度：{2}）\n\n```log\n{3}\n```", { 0: idx + 1, 1: issue.label, 2: issue.severity, 3: issue.context });
       }).join('\n\n---\n\n');
 
-      const autoPrompt = `请分析以下 Android logcat 日志中检测到的 ${issues.length} 个关键问题，逐一分析根因并给出修复建议：\n\n${issueBlocks}\n\n请重点关注：\n1. 每个问题的根本原因\n2. 问题之间的关联性\n3. 优先级排序\n4. 具体的修复方向`;
+      const autoPrompt = tr("请分析以下 Android logcat 日志中检测到的 {0} 个关键问题，逐一分析根因并给出修复建议：\n\n{1}\n\n请重点关注：\n1. 每个问题的根本原因\n2. 问题之间的关联性\n3. 优先级排序\n4. 具体的修复方向", { 0: issues.length, 1: issueBlocks });
 
       // 复用 AI 分析流程，但使用自动诊断的 prompt
       // 不传 filterContext，避免"自动诊断"字样误导 AI 的安全判断
@@ -574,7 +575,7 @@ function register(ipcMain) {
                 return;
               }
               if (!sender.isDestroyed()) {
-                sender.send('ai:streamError', { error: `API返回 ${res.statusCode}: ${errBody.slice(0, 500)}` });
+                sender.send('ai:streamError', { error: tr("API返回 {0}: {1}", { 0: res.statusCode, 1: errBody.slice(0, 500) }) });
               }
               // 重试耗尽/不可重试：清空 controller（通过 abort + 置 null）
               aiAnalyze.abortAiRequest();
@@ -739,7 +740,7 @@ function register(ipcMain) {
   // args.source: 日志源标识（'realtime' | 'file' | 'search'）
   ipcMain.handle('auto-diagnose:rescan', async (event, args) => {
     if (!autoDiagnoseEnabled) {
-      return { ok: false, error: '自动诊断未开启' };
+      return { ok: false, error: tr("自动诊断未开启") };
     }
     const { entries: passedEntries, source: passedSource } = args || {};
     const source = passedSource || 'file';
@@ -760,7 +761,7 @@ function register(ipcMain) {
     }
 
     if (!entriesToScan || entriesToScan.length === 0) {
-      return { ok: false, error: '无日志可扫描' };
+      return { ok: false, error: tr("无日志可扫描") };
     }
 
     // 清空去抖时间戳，确保重新扫描时能立即触发各类问题

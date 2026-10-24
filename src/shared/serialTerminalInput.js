@@ -1,19 +1,20 @@
+import { tr } from './i18n.js';
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
 export const TERMINAL_BATCH_BYTES = 512;
 const encoder = new TextEncoder();
 const ENDINGS = { cr: '\r', lf: '\n', crlf: '\r\n' };
 
 export function terminalInputBytes(content) {
-  if (typeof content !== 'string') throw new Error('终端输入必须是文本');
-  if (content.length > MAX_TERMINAL_INPUT_BYTES) throw new Error('单次终端输入不能超过 64 KiB');
+  if (typeof content !== 'string') throw new Error(tr("终端输入必须是文本"));
+  if (content.length > MAX_TERMINAL_INPUT_BYTES) throw new Error(tr("单次终端输入不能超过 64 KiB"));
   const size = encoder.encode(content).length;
-  if (size > MAX_TERMINAL_INPUT_BYTES) throw new Error('单次终端输入不能超过 64 KiB');
+  if (size > MAX_TERMINAL_INPUT_BYTES) throw new Error(tr("单次终端输入不能超过 64 KiB"));
   return size;
 }
 
 export function splitTerminalInput(content, maxBytes = TERMINAL_BATCH_BYTES) {
   terminalInputBytes(content);
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 4 || maxBytes > TERMINAL_BATCH_BYTES) throw new Error('终端输入分批上限无效');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 4 || maxBytes > TERMINAL_BATCH_BYTES) throw new Error(tr("终端输入分批上限无效"));
   const chunks = [];
   let chunk = '';
   let size = 0;

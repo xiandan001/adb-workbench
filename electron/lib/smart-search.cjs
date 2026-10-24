@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // 智能日志搜索：AI 分块搜索引擎
 // 用户输入自然语言查询 → 日志分块 → AI 逐块搜索 → 合并匹配结果
 //
@@ -30,14 +31,14 @@ function register(ipcMain) {
   ipcMain.handle('smart-search:search', async (event, args) => {
     const { query, source } = args || {};
     if (!query || !query.trim()) {
-      return { ok: false, error: '查询不能为空' };
+      return { ok: false, error: tr("查询不能为空") };
     }
 
     const logStore = logAnalyzer.getLogStore();
     const currentLogSource = logAnalyzer.getCurrentLogSource();
     const entries = logStore[source || currentLogSource] || [];
     if (entries.length === 0) {
-      return { ok: false, error: '没有可搜索的日志' };
+      return { ok: false, error: tr("没有可搜索的日志") };
     }
 
     // 中止上一次搜索
@@ -79,20 +80,7 @@ function register(ipcMain) {
     }
 
     async function extractKeywordsWithAI(query) {
-      const prompt = `从以下用户查询中提取用于日志搜索的关键词。
-
-只返回 JSON，不要其他内容：
-{"keywords":["关键词1","关键词2"]}
-
-规则：
-1. 只提取有实际搜索意义的关键词（技术术语、模块名、错误类型、组件名等）
-2. 过滤掉动词（查看、查找、显示）、时间词（当前、最近）、范围词（所有、相关）、通用名词（日志、记录）
-3. 英文关键词保留原样（如 ANR、Backlight、OOM）
-4. 中文关键词保留原样（如 亮度、背光、崩溃）
-5. 如果查询是纯英文技术术语，直接返回该术语
-6. 最多返回 5 个关键词
-
-用户查询：${query}`;
+      const prompt = tr("从以下用户查询中提取用于日志搜索的关键词。\n\n只返回 JSON，不要其他内容：\n{\"keywords\":[\"关键词1\",\"关键词2\"]}\n\n规则：\n1. 只提取有实际搜索意义的关键词（技术术语、模块名、错误类型、组件名等）\n2. 过滤掉动词（查看、查找、显示）、时间词（当前、最近）、范围词（所有、相关）、通用名词（日志、记录）\n3. 英文关键词保留原样（如 ANR、Backlight、OOM）\n4. 中文关键词保留原样（如 亮度、背光、崩溃）\n5. 如果查询是纯英文技术术语，直接返回该术语\n6. 最多返回 5 个关键词\n\n用户查询：{0}", { 0: query });
 
       const requestBody = JSON.stringify({
         model: AGNES_MODEL,
@@ -165,20 +153,7 @@ function register(ipcMain) {
     }
 
     // 构造系统 prompt - 优化 prompt 提高准确性
-    const systemPrompt = `你是 Android 日志分析专家。用户会用自然语言描述想查找的日志内容，你需要在提供的日志块中找到所有匹配的行。
-
-任务：
-1. 仔细阅读每一行日志
-2. 找出所有与用户查询语义相关的行（包括同义词、关联词、错误堆栈等）
-3. 宁可多匹配也不要漏匹配
-
-返回严格的 JSON 格式（只返回 JSON，不要 markdown 代码块，不要其他文字）：
-{"matchedLines":[行号1,行号2],"explanation":"说明"}
-
-注意：
-- matchedLines 中的行号必须是日志行开头方括号中的数字，例如 [123] 则行号为 123
-- 如果没有匹配，返回 {"matchedLines":[],"explanation":"未找到匹配"}
-- 行号必须是整数，不要带引号`;
+    const systemPrompt = tr("你是 Android 日志分析专家。用户会用自然语言描述想查找的日志内容，你需要在提供的日志块中找到所有匹配的行。\n\n任务：\n1. 仔细阅读每一行日志\n2. 找出所有与用户查询语义相关的行（包括同义词、关联词、错误堆栈等）\n3. 宁可多匹配也不要漏匹配\n\n返回严格的 JSON 格式（只返回 JSON，不要 markdown 代码块，不要其他文字）：\n{\"matchedLines\":[行号1,行号2],\"explanation\":\"说明\"}\n\n注意：\n- matchedLines 中的行号必须是日志行开头方括号中的数字，例如 [123] 则行号为 123\n- 如果没有匹配，返回 {\"matchedLines\":[],\"explanation\":\"未找到匹配\"}\n- 行号必须是整数，不要带引号");
 
     // 本地精确匹配：从查询中提取关键词，本地保证 100% 准确匹配
     // 即使 AI 漏掉，本地匹配也能兜底
@@ -259,7 +234,7 @@ function register(ipcMain) {
         return `[${globalLine}] ${ts} ${e.level || 'V'}/${e.tag || ''}(${e.pid || 0}): ${e.message || e.raw || ''}`;
       }).join('\n');
 
-      const userContent = `用户查询：${query}\n\n日志内容（第 ${chunk.index + 1}/${totalChunks} 块，全局行号 ${chunk.start}-${chunk.end - 1}）：\n${logText}`;
+      const userContent = tr("用户查询：{0}\n\n日志内容（第 {1}/{2} 块，全局行号 {3}-{4}）：\n{5}", { 0: query, 1: chunk.index + 1, 2: totalChunks, 3: chunk.start, 4: chunk.end - 1, 5: logText });
 
       const requestBody = JSON.stringify({
         model: AGNES_MODEL,
@@ -353,7 +328,7 @@ function register(ipcMain) {
           });
 
           req.on('timeout', () => {
-            req.destroy(new Error('请求超时'));
+            req.destroy(new Error(tr("请求超时")));
           });
 
           req.on('error', (e) => {

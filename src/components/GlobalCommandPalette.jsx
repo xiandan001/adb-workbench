@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Command, Keyboard, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
@@ -11,6 +12,7 @@ import {
 } from '../data/globalCommands';
 
 function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
+  const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -18,12 +20,13 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
 
   const filtered = useMemo(() => {
+    void locale;
     const keyword = query.trim().toLowerCase();
     return commands.filter(command => {
       if (!keyword) return true;
       return [command.title, command.description, command.group].some(value => String(value || '').toLowerCase().includes(keyword));
     });
-  }, [commands, query]);
+  }, [commands, query, locale]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -74,7 +77,7 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
                 setActiveIndex(0);
               }}
               onKeyDown={onInputKeyDown}
-              placeholder="搜索命令"
+              placeholder={tr("搜索命令")}
               className={`w-full pl-7 pr-3 py-2 bg-transparent outline-none text-sm ${text}`}
             />
           </div>
@@ -85,7 +88,7 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
 
         <div className="max-h-[56vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
-            <div className={`py-10 text-center text-sm ${muted}`}>未找到命令</div>
+            <div className={`py-10 text-center text-sm ${muted}`}>{tr("未找到命令")}</div>
           ) : filtered.map((command, index) => (
             <button
               key={command.id}
@@ -103,7 +106,7 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
                 <span className={`block text-xs mt-0.5 truncate ${muted}`}>{command.description || actionLabel(command.action)}</span>
               </span>
               <span className={`shrink-0 text-[11px] px-2 py-1 rounded-full ${isDark ? 'bg-[#202124] text-[#9AA0A6]' : 'bg-white text-slate-500 border border-slate-200'}`}>
-                {command.group || '命令'}
+                {tr(command.group) || tr("命令")}
               </span>
             </button>
           ))}
@@ -114,6 +117,7 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
 }
 
 export function GlobalCommandSettings({ settings, theme, onChange }) {
+  useLocale();
   const isDark = isDarkTheme(theme);
   const [draft, setDraft] = useState({ title: '', description: '', action: COMMAND_ACTIONS[0].value });
   const [recordingShortcut, setRecordingShortcut] = useState(false);
@@ -132,7 +136,7 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
       title,
       description: draft.description.trim(),
       action: draft.action,
-      group: '自定义'
+      group: tr("自定义")
     };
     update({ customCommands: [...customCommands, next] });
     setDraft({ title: '', description: '', action: COMMAND_ACTIONS[0].value });
@@ -168,8 +172,8 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
     <div className={`mb-6 p-4 rounded-xl border ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className={`font-semibold ${text}`}>全局命令面板</div>
-          <div className={`text-xs mt-1 ${muted}`}>通过自定义快捷键打开，可添加常用命令</div>
+          <div className={`font-semibold ${text}`}>{tr("全局命令面板")}</div>
+          <div className={`text-xs mt-1 ${muted}`}>{tr("通过自定义快捷键打开，可添加常用命令")}</div>
         </div>
         <label className="relative inline-flex items-center cursor-pointer">
           <input
@@ -186,10 +190,8 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className={`text-sm font-medium flex items-center gap-2 ${text}`}>
-              <Keyboard size={15} className="text-emerald-400" />
-              打开快捷键
-            </div>
-            <div className={`mt-1 text-xs ${muted}`}>需要包含 Ctrl / Alt / Shift / Win 中至少一个组合键；录制时 Esc 取消，Backspace 清除。</div>
+              <Keyboard size={15} className="text-emerald-400" />{tr("打开快捷键")}</div>
+            <div className={`mt-1 text-xs ${muted}`}>{tr("需要包含 Ctrl / Alt / Shift / Win 中至少一个组合键；录制时 Esc 取消，Backspace 清除。")}</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -197,13 +199,13 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
               onClick={() => setRecordingShortcut(true)}
               className={`min-w-[132px] px-3 py-2 rounded-lg border text-sm font-medium ${recordingShortcut ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
             >
-              {recordingShortcut ? '按下组合键...' : shortcutLabel}
+              {recordingShortcut ? tr("按下组合键...") : shortcutLabel}
             </button>
             <button
               type="button"
               onClick={() => update({ shortcut: { ...DEFAULT_COMMAND_SHORTCUT } })}
               className={`p-2 rounded-lg border ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
-              title="恢复默认 Ctrl+K"
+              title={tr("恢复默认 Ctrl+K")}
             >
               <RotateCcw size={15} />
             </button>
@@ -211,9 +213,7 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
               type="button"
               onClick={() => update({ shortcut: null })}
               className={`px-3 py-2 rounded-lg border text-sm ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
-            >
-              清除
-            </button>
+            >{tr("清除")}</button>
           </div>
         </div>
       </div>
@@ -222,16 +222,16 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
         <input
           value={draft.title}
           onChange={(event) => setDraft(prev => ({ ...prev, title: event.target.value }))}
-          placeholder="命令名称"
+          placeholder={tr("命令名称")}
           className={`px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${field}`}
         />
         <input
           value={draft.description}
           onChange={(event) => setDraft(prev => ({ ...prev, description: event.target.value }))}
-          placeholder="描述"
+          placeholder={tr("描述")}
           className={`px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${field}`}
         />
-        <div><label htmlFor="global-command-action" className="sr-only">命令操作</label><SelectMenu
+        <div><label htmlFor="global-command-action" className="sr-only">{tr("命令操作")}</label><SelectMenu
           id="global-command-action"
           value={draft.action}
           onChange={action => setDraft(prev => ({ ...prev, action }))}
@@ -243,8 +243,7 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
           onClick={addCommand}
           className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium flex items-center justify-center gap-1.5"
         >
-          <Plus size={15} />添加
-        </button>
+          <Plus size={15} />{tr("添加")}</button>
       </div>
 
       {customCommands.length > 0 && (
@@ -256,7 +255,7 @@ export function GlobalCommandSettings({ settings, theme, onChange }) {
                 <div className={`text-xs truncate ${muted}`}>{command.description || actionLabel(command.action)}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-emerald-400 flex items-center gap-1"><Check size={13} />已启用</span>
+                <span className="text-xs text-emerald-400 flex items-center gap-1"><Check size={13} />{tr("已启用")}</span>
                 <button onClick={() => removeCommand(command.id)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-[#3E4145] text-[#9AA0A6]' : 'hover:bg-slate-100 text-slate-500'}`}>
                   <Trash2 size={15} />
                 </button>

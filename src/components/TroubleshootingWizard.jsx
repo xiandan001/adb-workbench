@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -23,26 +24,26 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
 import { nextTroubleshootingContext } from '../shared/troubleshootingContext';
 
-const ISSUE_OPTIONS = [
-  { id: 'crash', label: '应用闪退/崩溃', icon: ShieldAlert },
-  { id: 'freeze', label: '卡顿/无响应', icon: AlertCircle },
-  { id: 'install', label: '安装/启动失败', icon: Package },
-  { id: 'performance', label: '发热/性能异常', icon: Zap },
-  { id: 'connection', label: '设备连接异常', icon: Smartphone },
-  { id: 'generic', label: '通用问题排查', icon: Search }
-];
+const ISSUE_OPTIONS = () => ([
+  { id: 'crash', label: tr("应用闪退/崩溃"), icon: ShieldAlert },
+  { id: 'freeze', label: tr("卡顿/无响应"), icon: AlertCircle },
+  { id: 'install', label: tr("安装/启动失败"), icon: Package },
+  { id: 'performance', label: tr("发热/性能异常"), icon: Zap },
+  { id: 'connection', label: tr("设备连接异常"), icon: Smartphone },
+  { id: 'generic', label: tr("通用问题排查"), icon: Search }
+]);
 
-const DEFAULT_STEPS = [
-  { id: 'device', label: '设备连接', status: 'pending', detail: '' },
-  { id: 'package', label: '应用信息', status: 'pending', detail: '' },
-  { id: 'performance', label: '性能快照', status: 'pending', detail: '' },
-  { id: 'logs', label: '关键日志', status: 'pending', detail: '' },
-  { id: 'inspection', label: '巡检证据', status: 'pending', detail: '' },
-  { id: 'aiSummary', label: 'AI 总结', status: 'pending', detail: '' }
-];
+const DEFAULT_STEPS = () => ([
+  { id: 'device', label: tr("设备连接"), status: 'pending', detail: '' },
+  { id: 'package', label: tr("应用信息"), status: 'pending', detail: '' },
+  { id: 'performance', label: tr("性能快照"), status: 'pending', detail: '' },
+  { id: 'logs', label: tr("关键日志"), status: 'pending', detail: '' },
+  { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' },
+  { id: 'aiSummary', label: tr("AI 总结"), status: 'pending', detail: '' }
+]);
 
 function filterProgressSteps(sourceSteps, options) {
-  const list = Array.isArray(sourceSteps) && sourceSteps.length > 0 ? sourceSteps : DEFAULT_STEPS;
+  const list = Array.isArray(sourceSteps) && sourceSteps.length > 0 ? sourceSteps : DEFAULT_STEPS();
   return list.filter(step => {
     if (step.id === 'inspection') return options.includeInspection === true;
     if (step.id === 'aiSummary') return options.includeAiSummary === true;
@@ -51,9 +52,10 @@ function filterProgressSteps(sourceSteps, options) {
 }
 
 function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMemberCenter, activeDeviceId, onActiveDeviceChange, navigationContext }) {
+  const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
-  const onlineDevices = useMemo(() => devices.filter(device => device.status === 'device'), [devices]);
+  const onlineDevices = useMemo(() => { void locale; return devices.filter(device => device.status === 'device'); }, [devices, locale]);
   const [runningDeviceId, setRunningDeviceId] = useState('');
   const [issueType, setIssueType] = useState('crash');
   const [packageName, setPackageName] = useState('');
@@ -65,7 +67,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const [packageDeviceId, setPackageDeviceId] = useState('');
   const [includeInspection, setIncludeInspection] = useState(true);
   const [includeAiSummary, setIncludeAiSummary] = useState(true);
-  const [steps, setSteps] = useState(DEFAULT_STEPS);
+  const [steps, setSteps] = useState(DEFAULT_STEPS());
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -81,16 +83,17 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const selectedDeviceId = running ? runningDeviceId || activeDeviceId : activeDeviceId;
   const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
   const deviceOptions = useMemo(() => {
+    void locale;
     const options = devices.map(device => ({
       value: device.id,
       label: device.model || device.name || device.id,
       description: `${device.id} · ${deviceStatusLabel(device.status)}`
     }));
     if (selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)) {
-      options.unshift({ value: selectedDeviceId, label: `${selectedDeviceId} · 已断开`, description: '已保留选择，请重新连接' });
+      options.unshift({ value: selectedDeviceId, label: tr("{0} · 已断开", { 0: selectedDeviceId }), description: tr("已保留选择，请重新连接") });
     }
-    return options.length ? options : [{ value: '', label: '暂无设备', description: '请连接设备后刷新', disabled: true }];
-  }, [devices, selectedDeviceId]);
+    return options.length ? options : [{ value: '', label: tr("暂无设备"), description: tr("请连接设备后刷新"), disabled: true }];
+  }, [devices, selectedDeviceId, locale]);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const panel = isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200';
@@ -115,11 +118,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     setPackageLoading(false);
     setResult(null);
     setError('');
-    setSteps(DEFAULT_STEPS);
+    setSteps(DEFAULT_STEPS());
     setEvidenceDeviceId(next.deviceId);
   }, [activeDeviceId, navigationContext, running, taskStateLoaded]);
 
   const filteredPackages = useMemo(() => {
+    void locale;
     const keyword = packageSearch.trim().toLowerCase();
     if (!keyword) return packageItems.slice(0, 80);
     return packageItems
@@ -128,7 +132,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         return values.some(value => value.includes(keyword));
       })
       .slice(0, 80);
-  }, [packageItems, packageSearch]);
+  }, [packageItems, packageSearch, locale]);
 
   useEffect(() => {
     if (!window.electronAPI?.onTroubleshootingProgress) {
@@ -154,10 +158,10 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       if (typeof event.includeAiSummary === 'boolean') setIncludeAiSummary(event.includeAiSummary);
       if (Array.isArray(event.steps)) setSteps(event.steps);
       setResult(event.result || null);
-      if (!event.result?.ok && !event.result?.cancelled) setError(event.result?.error || '排查失败，请查看执行步骤');
-      if (event.result?.ok) showToast?.('一键问题排查完成');
-      else if (event.result?.cancelled) showToast?.('一键问题排查已取消');
-      else showToast?.(`一键问题排查失败：${event.result?.error || '未知错误'}`);
+      if (!event.result?.ok && !event.result?.cancelled) setError(event.result?.error || tr("排查失败，请查看执行步骤"));
+      if (event.result?.ok) showToast?.(tr("一键问题排查完成"));
+      else if (event.result?.cancelled) showToast?.(tr("一键问题排查已取消"));
+      else showToast?.(tr("一键问题排查失败：{0}", { 0: event.result?.error || tr("未知错误") }));
     });
     Promise.resolve(window.electronAPI.troubleshootingState?.()).then(res => {
       if (!alive || receivedUpdate) return;
@@ -177,7 +181,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       if (Array.isArray(task.steps)) setSteps(task.steps);
       if (task.result) setResult(task.result);
     }).catch(() => {
-      if (alive) setError('排查状态读取失败，请刷新页面后确认是否有运行中的任务');
+      if (alive) setError(tr("排查状态读取失败，请刷新页面后确认是否有运行中的任务"));
     }).finally(() => {
       if (alive) setTaskStateLoaded(true);
     });
@@ -214,18 +218,18 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
 
   const startTroubleshooting = async () => {
     if (!window.electronAPI?.troubleshootingStart) {
-      showToast?.('一键问题排查需要 Electron 环境');
+      showToast?.(tr("一键问题排查需要 Electron 环境"));
       return;
     }
     if (!taskStateLoaded || running) return;
     setEvidenceDeviceId(selectedDeviceId);
     if (!selectedDevice) {
-      setError('当前设备不可用，请重新连接或明确选择另一台在线设备。');
+      setError(tr("当前设备不可用，请重新连接或明确选择另一台在线设备。"));
       return;
     }
     setError('');
     setResult(null);
-    setSteps(DEFAULT_STEPS);
+    setSteps(DEFAULT_STEPS());
     setPackagePickerOpen(false);
     setRunning(true);
     setRunningDeviceId(selectedDeviceId);
@@ -238,12 +242,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         includeInspection: hasVip && includeInspection,
         includeAiSummary
       });
-      if (!res.ok) throw new Error(res.error || '启动失败');
+      if (!res.ok) throw new Error(res.error || tr("启动失败"));
       if (res.task?.steps) setSteps(res.task.steps);
     } catch (error) {
       setRunning(false);
       setError(error.message);
-      showToast?.(`一键问题排查启动失败：${error.message}`);
+      showToast?.(tr("一键问题排查启动失败：{0}", { 0: error.message }));
     }
   };
 
@@ -256,12 +260,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     setPackageSearch(packageName.trim());
     if (!selectedDevice) {
       setPackagePickerOpen(false);
-      showToast?.('请先选择在线设备');
+      showToast?.(tr("请先选择在线设备"));
       return;
     }
     if (!window.electronAPI?.packageList) {
       setPackagePickerOpen(false);
-      showToast?.('应用列表需要 Electron 环境');
+      showToast?.(tr("应用列表需要 Electron 环境"));
       return;
     }
     setPackagePickerOpen(true);
@@ -278,13 +282,13 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       } else {
         setPackageItems([]);
         setPackageDeviceId('');
-        setPackageError(res?.error || '应用列表读取失败');
+        setPackageError(res?.error || tr("应用列表读取失败"));
       }
     } catch (error) {
       if (requestId !== packageRequestRef.current) return;
       setPackageItems([]);
       setPackageDeviceId('');
-      setPackageError(error.message || '应用列表读取失败');
+      setPackageError(error.message || tr("应用列表读取失败"));
     } finally {
       if (requestId === packageRequestRef.current) setPackageLoading(false);
     }
@@ -299,12 +303,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const openPath = async (targetPath) => {
     if (!targetPath) return;
     const res = await window.electronAPI?.troubleshootingOpenFolder?.(targetPath);
-    if (res && !res.ok) showToast?.(`打开失败：${res.error || '未知错误'}`);
+    if (res && !res.ok) showToast?.(tr("打开失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
   const visibleSteps = useMemo(
-    () => filterProgressSteps(evidenceDeviceId === selectedDeviceId ? steps : DEFAULT_STEPS, { includeInspection: hasVip && includeInspection, includeAiSummary }),
-    [steps, evidenceDeviceId, selectedDeviceId, hasVip, includeInspection, includeAiSummary]
+    () => { void locale; return filterProgressSteps(evidenceDeviceId === selectedDeviceId ? steps : DEFAULT_STEPS(), { includeInspection: hasVip && includeInspection, includeAiSummary }); },
+    [steps, evidenceDeviceId, selectedDeviceId, hasVip, includeInspection, includeAiSummary, locale]
   );
   const completedCount = visibleSteps.filter(step => ['success', 'failed', 'skipped'].includes(step.status)).length;
   const progressTotal = visibleSteps.length;
@@ -321,12 +325,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                 <ClipboardCheck size={22} className="text-emerald-400" />
               </div>
               <div>
-                <h3 className={`text-base font-semibold ${text}`}>采集诊断证据</h3>
-                <p className={`text-xs mt-0.5 ${muted}`}>{running ? `正在排查：${runningDeviceId}` : '选择场景后开始；不会因切换页面自动执行'}</p>
+                <h3 className={`text-base font-semibold ${text}`}>{tr("采集诊断证据")}</h3>
+                <p className={`text-xs mt-0.5 ${muted}`}>{running ? tr("正在排查：{0}", { 0: runningDeviceId }) : tr("选择场景后开始；不会因切换页面自动执行")}</p>
               </div>
             </div>
             <div className={`text-xs px-3 py-1.5 rounded-full border ${soft}`}>
-              {running ? '排查中' : result ? '已有结果' : '待开始'}
+              {running ? tr("排查中") : result ? tr("已有结果") : tr("待开始")}
             </div>
           </div>
         </div>
@@ -334,7 +338,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         <div className="p-5 grid xl:grid-cols-[360px_1fr] gap-5">
           <div className="space-y-4">
             <div>
-              <FieldLabel label="目标设备" isDark={isDark} />
+              <FieldLabel label={tr("目标设备")} isDark={isDark} />
               <DeviceSelect
                 value={selectedDeviceId}
                 options={deviceOptions}
@@ -344,13 +348,13 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                   onActiveDeviceChange?.(value);
                 }}
               />
-              {selectedDeviceId && !selectedDevice && <p role="status" className="mt-2 text-xs text-amber-500">当前设备不可用，已保留选择。恢复连接后才能开始排查。</p>}
+              {selectedDeviceId && !selectedDevice && <p role="status" className="mt-2 text-xs text-amber-500">{tr("当前设备不可用，已保留选择。恢复连接后才能开始排查。")}</p>}
             </div>
 
             <div>
-              <FieldLabel label="问题类型" isDark={isDark} />
+              <FieldLabel label={tr("问题类型")} isDark={isDark} />
               <div className="grid grid-cols-2 gap-2">
-                {ISSUE_OPTIONS.map(option => {
+                {ISSUE_OPTIONS().map(option => {
                   const Icon = option.icon;
                   const active = issueType === option.id;
                   return (
@@ -374,7 +378,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
             </div>
 
             <div>
-              <FieldLabel label="目标包名" isDark={isDark} optional />
+              <FieldLabel label={tr("目标包名")} isDark={isDark} optional />
               <div ref={packagePickerRef}>
                 <div className="flex gap-2">
                   <input
@@ -396,9 +400,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                     disabled={running || packageLoading || !selectedDevice}
                     className={`shrink-0 px-3 py-2.5 rounded-lg border text-sm flex items-center justify-center gap-1.5 disabled:opacity-60 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                   >
-                    {packageLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-                    搜索
-                  </button>
+                    {packageLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}{tr("搜索")}</button>
                 </div>
 
                 {packagePickerOpen && (
@@ -408,22 +410,20 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                         autoFocus
                         value={packageSearch}
                         onChange={(event) => setPackageSearch(event.target.value)}
-                        placeholder="搜索包名或 APK 名"
+                        placeholder={tr("搜索包名或 APK 名")}
                         className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
                       />
                     </div>
                     <div className="max-h-56 overflow-y-auto p-2">
                       {packageLoading ? (
                         <div className={`py-8 text-center text-sm ${muted}`}>
-                          <Loader2 size={18} className="mx-auto mb-2 animate-spin" />
-                          正在读取应用列表...
-                        </div>
+                          <Loader2 size={18} className="mx-auto mb-2 animate-spin" />{tr("正在读取应用列表...")}</div>
                       ) : packageError ? (
                         <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                          {packageError}
+                          {tr(packageError)}
                         </div>
                       ) : filteredPackages.length === 0 ? (
-                        <div className={`py-8 text-center text-sm ${muted}`}>未找到匹配应用</div>
+                        <div className={`py-8 text-center text-sm ${muted}`}>{tr("未找到匹配应用")}</div>
                       ) : filteredPackages.map(item => (
                         <PackageOption
                           key={item.packageName}
@@ -434,14 +434,12 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                       ))}
                     </div>
                     <div className={`border-t px-3 py-2 flex items-center justify-between gap-2 text-xs ${isDark ? 'border-[#3E4145]' : 'border-slate-100'} ${muted}`}>
-                      <span>{packageItems.length > 0 ? `共 ${packageItems.length} 个应用` : '也可以直接手动输入包名'}</span>
+                      <span>{packageItems.length > 0 ? tr("共 {0} 个应用", { 0: packageItems.length }) : tr("也可以直接手动输入包名")}</span>
                       <button
                         type="button"
                         onClick={() => setPackagePickerOpen(false)}
                         className={isDark ? 'text-[#E8EAED] hover:text-emerald-300' : 'text-slate-700 hover:text-emerald-600'}
-                      >
-                        收起
-                      </button>
+                      >{tr("收起")}</button>
                     </div>
                   </div>
                 )}
@@ -457,9 +455,9 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                 className="mt-1 w-4 h-4 accent-emerald-500"
               />
               <span className="flex-1">
-                <span className={`block text-sm font-medium ${text}`}>包含巡检证据包</span>
+                <span className={`block text-sm font-medium ${text}`}>{tr("包含巡检证据包")}</span>
                 <span className={`block text-xs mt-1 ${muted}`}>
-                  {hasVip ? '生成完整巡检报告和证据包' : isVipLoading ? '正在加载会员状态' : '会员版可用'}
+                  {hasVip ? tr("生成完整巡检报告和证据包") : isVipLoading ? tr("正在加载会员状态") : tr("会员版可用")}
                 </span>
               </span>
               {!hasVip && !isVipLoading && (
@@ -468,8 +466,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                   onClick={onOpenMemberCenter}
                   className="text-xs text-amber-400 flex items-center gap-1"
                 >
-                  <Lock size={12} />会员
-                </button>
+                  <Lock size={12} />{tr("会员")}</button>
               )}
             </label>
 
@@ -482,8 +479,8 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                 className="mt-1 w-4 h-4 accent-emerald-500"
               />
               <span className="flex-1">
-                <span className={`block text-sm font-medium ${text}`}>报告包含 AI 总结</span>
-                <span className={`block text-xs mt-1 ${muted}`}>勾选后会在问题排查报告末尾追加 AI 总结</span>
+                <span className={`block text-sm font-medium ${text}`}>{tr("报告包含 AI 总结")}</span>
+                <span className={`block text-xs mt-1 ${muted}`}>{tr("勾选后会在问题排查报告末尾追加 AI 总结")}</span>
               </span>
               <Sparkles size={15} className="mt-0.5 text-emerald-400" />
             </label>
@@ -495,8 +492,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                   onClick={cancelTroubleshooting}
                   className="flex-1 px-4 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium flex items-center justify-center gap-2"
                 >
-                  <Square size={16} />取消排查
-                </button>
+                  <Square size={16} />{tr("取消排查")}</button>
               ) : (
                 <button
                   type="button"
@@ -504,8 +500,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
                   disabled={!selectedDevice || !taskStateLoaded}
                   className="flex-1 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium flex items-center justify-center gap-2"
                 >
-                  <Play size={16} />开始排查
-                </button>
+                  <Play size={16} />{tr("开始排查")}</button>
               )}
             </div>
           </div>
@@ -514,8 +509,8 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
             <div className={`rounded-xl border p-4 ${soft}`}>
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className={`font-semibold ${text}`}>执行进度</div>
-                  <div className={`text-xs mt-1 ${muted}`}>{completedCount}/{progressTotal} 项完成</div>
+                  <div className={`font-semibold ${text}`}>{tr("执行进度")}</div>
+                  <div className={`text-xs mt-1 ${muted}`}>{tr("{0}/{1} 项完成", { 0: completedCount, 1: progressTotal })}</div>
                 </div>
                 <div className={`text-sm font-semibold ${running ? 'text-emerald-400' : muted}`}>{progressPercent}%</div>
               </div>
@@ -533,7 +528,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
               {error && evidenceDeviceId === selectedDeviceId && (
               <div className="rounded-lg border border-red-500/25 bg-red-500/10 text-red-400 px-4 py-3 text-sm flex items-start gap-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{error}</span>
+                <span>{tr(error)}</span>
               </div>
             )}
 
@@ -548,6 +543,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
 }
 
 function StepTile({ step, isDark }) {
+  useLocale();
   const statusClass = {
     pending: isDark ? 'border-[#3E4145] bg-[#202124] text-[#9AA0A6]' : 'border-slate-200 bg-slate-50 text-slate-500',
     running: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
@@ -567,6 +563,7 @@ function StepTile({ step, isDark }) {
 }
 
 function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
+  useLocale();
   const ok = result.ok && !result.cancelled;
   return (
     <div className={`rounded-xl border p-4 ${soft}`}>
@@ -576,18 +573,18 @@ function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
             {ok ? <CheckCircle2 size={21} /> : <AlertCircle size={21} />}
           </div>
           <div>
-            <div className={`font-semibold ${text}`}>{result.title || (ok ? '排查完成' : '排查未完成')}</div>
-            <div className={`text-sm mt-1 ${muted}`}>{result.message || result.error || '已生成排查结果'}</div>
+            <div className={`font-semibold ${text}`}>{result.title || (ok ? tr("排查完成") : tr("排查未完成"))}</div>
+            <div className={`text-sm mt-1 ${muted}`}>{result.message || result.error || tr("已生成排查结果")}</div>
           </div>
         </div>
         <div className={`px-2.5 py-1 rounded-full text-xs ${ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
-          {result.cancelled ? '已取消' : ok ? '完成' : '需关注'}
+          {result.cancelled ? tr("已取消") : ok ? tr("完成") : tr("需关注")}
         </div>
       </div>
 
       {Array.isArray(result.suggestions) && result.suggestions.length > 0 && (
         <div className="mt-4">
-          <div className={`text-xs font-semibold mb-2 ${text}`}>建议</div>
+          <div className={`text-xs font-semibold mb-2 ${text}`}>{tr("建议")}</div>
           <div className="space-y-1.5">
             {result.suggestions.map((item, index) => (
               <div key={`${item}-${index}`} className={`text-xs ${muted}`}>{index + 1}. {item}</div>
@@ -599,13 +596,11 @@ function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
       <div className="mt-4 flex flex-wrap gap-2">
         {result.reportPath && (
           <button onClick={() => onOpenPath(result.reportPath)} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}>
-            <FileText size={15} />打开报告
-          </button>
+            <FileText size={15} />{tr("打开报告")}</button>
         )}
         {result.outputDir && (
           <button onClick={() => onOpenPath(result.outputDir)} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}>
-            <FolderOpen size={15} />打开目录
-          </button>
+            <FolderOpen size={15} />{tr("打开目录")}</button>
         )}
       </div>
     </div>
@@ -613,12 +608,13 @@ function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
 }
 
 function DeviceSelect({ value, options, isDark, disabled, onChange }) {
+  useLocale();
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
   const selectedIndex = Math.max(0, options.findIndex(option => option.value === value));
-  const selected = options[selectedIndex] || options[0] || { value: '', label: '暂无在线设备', description: '' };
+  const selected = options[selectedIndex] || options[0] || { value: '', label: tr("暂无在线设备"), description: '' };
   const allDisabled = disabled || options.length === 0 || options.every(option => option.disabled);
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
 
@@ -752,6 +748,7 @@ function DeviceSelect({ value, options, isDark, disabled, onChange }) {
 }
 
 function PackageOption({ item, isDark, onSelect }) {
+  useLocale();
   return (
     <button
       type="button"
@@ -762,7 +759,7 @@ function PackageOption({ item, isDark, onSelect }) {
         <Package size={15} className={`mt-0.5 shrink-0 ${item.system ? 'text-slate-400' : 'text-emerald-400'}`} />
         <div className="min-w-0 flex-1">
           <div className={`truncate font-mono text-xs ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{item.packageName}</div>
-          <div className={`mt-1 truncate text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{item.apkName || item.path || '应用'}</div>
+          <div className={`mt-1 truncate text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{item.apkName || item.path || tr("应用")}</div>
         </div>
         {item.system && (
           <span className="shrink-0 rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] text-slate-400">SYS</span>
@@ -782,19 +779,20 @@ function findEnabledIndex(options, currentIndex, direction) {
 }
 
 function FieldLabel({ label, isDark, optional }) {
+  useLocale();
   return (
     <div className={`text-xs font-medium mb-1.5 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>
-      {label}{optional ? <span className="ml-1 opacity-60">可选</span> : null}
+      {label}{optional ? <span className="ml-1 opacity-60">{tr("可选")}</span> : null}
     </div>
   );
 }
 
 function statusText(status) {
-  if (status === 'pending') return '等待执行';
-  if (status === 'running') return '正在执行';
-  if (status === 'success') return '已完成';
-  if (status === 'failed') return '执行失败';
-  if (status === 'skipped') return '已跳过';
+  if (status === 'pending') return tr("等待执行");
+  if (status === 'running') return tr("正在执行");
+  if (status === 'success') return tr("已完成");
+  if (status === 'failed') return tr("执行失败");
+  if (status === 'skipped') return tr("已跳过");
   return '';
 }
 

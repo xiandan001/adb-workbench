@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import { tr } from '../src/shared/i18n.js';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser'); const traverse = require('@babel/traverse').default;
 function handler(file, name, context) {
+  context.tr = tr;
   const source = readFileSync(new URL(`../src/components/${file}`, import.meta.url), 'utf8');
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] }); let target;
   traverse(ast, { VariableDeclarator({ node }) { if (node.id.name === name) target = node.init; }, FunctionDeclaration({ node }) { if (node.id?.name === name) target = node; } });

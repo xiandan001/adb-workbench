@@ -1,13 +1,14 @@
+const { tr } = require('./localization.cjs');
 const { types } = require('node:util');
 
 const DEFAULT_LIMITS = Object.freeze({ maxBytes: 256 * 1024, maxDepth: 20, maxNodes: 10000, maxStringBytes: 128 * 1024, maxArrayLength: 2048, maxObjectKeys: 256 });
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype', '__TAURI_CHANNEL_MARKER__', '__TAURI_TO_IPC_KEY__']);
 const failure = (code, message) => Object.assign(new Error(message), { code });
-const invalidArguments = () => failure('AI_TOOLS_INVALID_ARGUMENTS', 'AI 工具参数必须是无特殊对象、访问器或传输占位符的普通 JSON');
-const argumentLimit = () => failure('AI_TOOLS_ARGUMENT_LIMIT', 'AI 工具参数超过安全限制，请缩小请求范围');
+const invalidArguments = () => failure('AI_TOOLS_INVALID_ARGUMENTS', tr("AI 工具参数必须是无特殊对象、访问器或传输占位符的普通 JSON"));
+const argumentLimit = () => failure('AI_TOOLS_ARGUMENT_LIMIT', tr("AI 工具参数超过安全限制，请缩小请求范围"));
 
 function validateCommandName(name) {
-  if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,95}$/.test(name) || FORBIDDEN_KEYS.has(name)) throw failure('AI_TOOLS_INVALID_COMMAND', 'AI 工具命令名称无效');
+  if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,95}$/.test(name) || FORBIDDEN_KEYS.has(name)) throw failure('AI_TOOLS_INVALID_COMMAND', tr("AI 工具命令名称无效"));
   return name;
 }
 
@@ -28,11 +29,11 @@ function recordDescriptors(value, allowedKeys) {
 function normalizeLimits(overrides) {
   let descriptors;
   try { descriptors = recordDescriptors(overrides, Object.keys(DEFAULT_LIMITS)); }
-  catch { throw failure('AI_TOOLS_INVALID_LIMITS', 'AI 工具参数限制配置无效'); }
+  catch { throw failure('AI_TOOLS_INVALID_LIMITS', tr("AI 工具参数限制配置无效")); }
   const result = { ...DEFAULT_LIMITS };
   for (const [key, descriptor] of Object.entries(descriptors)) {
     const value = descriptor.value;
-    if (!Number.isSafeInteger(value) || value < 1 || value > DEFAULT_LIMITS[key]) throw failure('AI_TOOLS_INVALID_LIMITS', 'AI 工具参数限制只能收紧，不能关闭或超过上限');
+    if (!Number.isSafeInteger(value) || value < 1 || value > DEFAULT_LIMITS[key]) throw failure('AI_TOOLS_INVALID_LIMITS', tr("AI 工具参数限制只能收紧，不能关闭或超过上限"));
     result[key] = value;
   }
   return result;

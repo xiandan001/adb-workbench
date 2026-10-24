@@ -1,3 +1,4 @@
+import { tr, useLocale, getLocale } from '../shared/i18n';
 // H5: 导入 memo 用于 LogRow 性能优化
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
 import { FolderOpen, Play, Square, Trash2, Download, Copy, RefreshCw, Terminal, Filter, BarChart3, HelpCircle, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, AlertTriangle, Zap, ShieldCheck, Search, Brain, CheckCircle, Layers, ChevronDown, Smartphone, Lock, BookmarkPlus } from 'lucide-react';
@@ -74,6 +75,7 @@ function fmtTs(ts) {
 }
 
 export default function LogAnalyzer({ theme, vipStatus }) {
+  const locale = useLocale();
   const t = theme || {
     primary: 'tech',
     button: {
@@ -104,9 +106,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [markers, setMarkers] = useState([]);
   const [markerDraft, setMarkerDraft] = useState(null);
   const [locatedMarkerIdentity, setLocatedMarkerIdentity] = useState('');
-  const markerIdentities = useMemo(() => new Set(markers.map(marker => logEntryIdentity(marker.entry))), [markers]);
-  const markerEntryIds = useMemo(() => new Set(markers.map(marker => marker.entry.id)), [markers]);
-  const evidenceByRef = useMemo(() => new Map(evidence.map(entry => [entry.ref, entry])), [evidence]);
+  const markerIdentities = useMemo(() => { void locale; return new Set(markers.map(marker => logEntryIdentity(marker.entry))); }, [markers, locale]);
+  const markerEntryIds = useMemo(() => { void locale; return new Set(markers.map(marker => marker.entry.id)); }, [markers, locale]);
+  const evidenceByRef = useMemo(() => { void locale; return new Map(evidence.map(entry => [entry.ref, entry])); }, [evidence, locale]);
   const [aiHistoryReadOnly, setAiHistoryReadOnly] = useState(false);
   const [restoredSessionName, setRestoredSessionName] = useState('');
   const [filter, setFilter] = useState(emptyFilter);
@@ -181,12 +183,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   // 多缓冲区抓取：默认仅 main（与原行为一致）
   // 可选项：main / system / radio / events / crash / kernel
   const LOG_BUFFERS = [
-    { id: 'main', label: '主日志', desc: '应用与大部分系统日志（默认）' },
-    { id: 'system', label: '系统日志', desc: 'SystemServer、系统服务' },
-    { id: 'radio', label: '通信日志', desc: 'Telephony / Wi-Fi / Bluetooth' },
-    { id: 'events', label: '事件日志', desc: '二进制事件统计' },
-    { id: 'crash', label: '崩溃日志', desc: '应用 crash 栈' },
-    { id: 'kernel', label: '内核日志', desc: 'Linux kernel 日志' }
+    { id: 'main', label: tr("主日志"), desc: tr("应用与大部分系统日志（默认）") },
+    { id: 'system', label: tr("系统日志"), desc: tr("SystemServer、系统服务") },
+    { id: 'radio', label: tr("通信日志"), desc: 'Telephony / Wi-Fi / Bluetooth' },
+    { id: 'events', label: tr("事件日志"), desc: tr("二进制事件统计") },
+    { id: 'crash', label: tr("崩溃日志"), desc: tr("应用 crash 栈") },
+    { id: 'kernel', label: tr("内核日志"), desc: tr("Linux kernel 日志") }
   ];
   const [buffers, setBuffers] = useState(['main']);
   const [bufferDropdownOpen, setBufferDropdownOpen] = useState(false);
@@ -210,14 +212,14 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     const applyContext = (context) => {
       if (!context?.deviceId) return;
       if (runningRef.current || aiAnalyzingRef.current) {
-        setNote('日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后再从应用详情打开日志');
+        setNote(tr("日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后再从应用详情打开日志"));
         return;
       }
       clearTimeout(filterDebounceRef.current);
       setDeviceId(context.deviceId);
       setFilter(context.packageName ? { pkg: context.packageName } : {});
       setFilterTextInput('');
-      setNote(`已选择 ${context.deviceId}${context.packageName ? ` / ${context.packageName}` : ''}，未自动抓取；现有日志保持不变`);
+      setNote(tr("已选择 {0}{1}，未自动抓取；现有日志保持不变", { 0: context.deviceId, 1: context.packageName ? ` / ${context.packageName}` : '' }));
     };
     const unsubscribe = window.electronAPI?.onLogAnalyzerContext?.(applyContext);
     window.electronAPI?.logAnalyzerGetContext?.().then(applyContext).catch(() => {});
@@ -258,7 +260,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setAiHistoryReadOnly(true);
     setRestoredSessionName(session.name);
     setAiPanelOpen(session.aiTurns.length > 0);
-    setNote(`已恢复“${session.name}”，没有启动采集或 AI 请求`);
+    setNote(tr("已恢复“{0}”，没有启动采集或 AI 请求", { 0: session.name }));
   };
 
   // 日志列表列宽可拖拽调整（每列有 min/max 限制）
@@ -350,6 +352,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, []);
 
   const filtered = useMemo(() => {
+    void locale;
     // 智能搜索模式：搜索中显示增量结果，搜索完成显示最终结果
     if (smartSearching && smartSearchIncremental.length > 0) {
       return smartSearchIncremental;
@@ -358,9 +361,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       return smartSearchResult.matchedEntries;
     }
     return filterEntries(entries, deferredFilter);
-  }, [entries, deferredFilter, smartSearchResult, smartSearching, smartSearchIncremental]);
+  }, [entries, deferredFilter, smartSearchResult, smartSearching, smartSearchIncremental, locale]);
 
-  const counts = useMemo(() => countByLevel(filtered), [filtered]);
+  const counts = useMemo(() => { void locale; return countByLevel(filtered); }, [filtered, locale]);
 
   useLayoutEffect(() => {
     markerContextRef.current = { entries, deviceId: captureDeviceId, count: markers.length };
@@ -369,18 +372,18 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const addMarker = useCallback((entry) => {
     const context = markerContextRef.current;
     if (context.count >= MAX_LOG_MARKERS) {
-      setNote('问题标记已达 500 个上限，请保存会话后再整理标记；未丢弃任何标记');
+      setNote(tr("问题标记已达 500 个上限，请保存会话后再整理标记；未丢弃任何标记"));
       return;
     }
-    setMarkerDraft(captureLogMarker(entry, context.entries, context.deviceId, '问题标记', crypto.randomUUID()));
+    setMarkerDraft(captureLogMarker(entry, context.entries, context.deviceId, tr("问题标记"), crypto.randomUUID()));
   }, []);
 
   function locateMarker(marker) {
     const identity = logEntryIdentity(marker.entry);
     const index = filtered.findIndex(entry => entry.id === marker.entry.id && logEntryIdentity(entry, captureDeviceId) === identity);
-    if (index < 0) return '原日志不在当前视图中，可能被过滤或已超过显示上限。下方仍保留标记时的上下文；可关闭窗口调整过滤条件后再定位。';
+    if (index < 0) return tr("原日志不在当前视图中，可能被过滤或已超过显示上限。下方仍保留标记时的上下文；可关闭窗口调整过滤条件后再定位。");
     const scroll = logScrollRef.current;
-    if (!scroll) return '日志视图尚未就绪，请稍后再试。';
+    if (!scroll) return tr("日志视图尚未就绪，请稍后再试。");
     autoScrollRef.current = false;
     if (logAutoScrollRafRef.current != null) cancelAnimationFrame(logAutoScrollRafRef.current);
     logAutoScrollRafRef.current = null;
@@ -404,6 +407,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }, []);
 
   const virtualLogRows = useMemo(() => {
+    void locale;
     const total = filtered.length;
     if (total === 0) {
       return { entries: [], start: 0, topOffset: 0, totalHeight: 0 };
@@ -419,7 +423,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       topOffset: start * LOG_ROW_HEIGHT,
       totalHeight: total * LOG_ROW_HEIGHT
     };
-  }, [filtered, logViewport]);
+  }, [filtered, logViewport, locale]);
 
   useEffect(() => {
     // L1: 仅在用户已处于底部时自动滚动，避免打断用户浏览；直接滚容器减少虚拟列表额外 DOM。
@@ -615,7 +619,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       }
       if (window.electronAPI && window.electronAPI.onAiStreamError) {
         const offErr = window.electronAPI.onAiStreamError((payload) => {
-          setAiError(payload.error || '分析失败');
+          setAiError(payload.error || tr("分析失败"));
           setAiAnalyzing(false);
           setMapReduceProgress(null);
         });
@@ -817,12 +821,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   async function onStart() {
     const targetDeviceId = deviceId || (devices.length === 1 ? devices[0].id : '');
     if (!targetDeviceId || !devices.some(item => item.id === targetDeviceId)) {
-      setNote('请明确选择一台在线设备；所选设备离线时不会自动切换到其他设备');
+      setNote(tr("请明确选择一台在线设备；所选设备离线时不会自动切换到其他设备"));
       return;
     }
     // M13: 加载状态
     setLoading(true);
-    setNote('启动中…');
+    setNote(tr("启动中…"));
     if (window.electronAPI && window.electronAPI.adbStartLog) {
       try {
         // 传递用户选择的缓冲区（默认 ['main']）
@@ -835,7 +839,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           setRunning(true);
           setSource('realtime');
           setCaptureDeviceId(targetDeviceId);
-          setSourceLabel(`设备 ${targetDeviceId}`);
+          setSourceLabel(tr("设备 {0}", { 0: targetDeviceId }));
           setRestoredSessionName('');
           setNote(undefined);
           // 开始抓取时重置自动滚动，确保新日志自动跟随到底部
@@ -850,10 +854,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             });
           }
         } else {
-          setNote('启动失败（请确认已安装 adb 且设备已授权）');
+          setNote(tr("启动失败（请确认已安装 adb 且设备已授权）"));
         }
       } catch (e) {
-        setNote('启动失败: ' + e.message);
+        setNote(tr('启动失败：{0}', { 0: e.message }));
       }
     }
     // M13: 加载状态
@@ -867,7 +871,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     logBatchBufferRef.current?.flush();
     setRunning(false);
     // UX1: 操作反馈，3 秒后自动清除
-    setNote('已停止抓取');
+    setNote(tr("已停止抓取"));
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
     noteTimerRef.current = setTimeout(() => setNote(undefined), 3000);
     // 停止抓取后：若当前处于"监控中"（无问题），切换到"扫描完成（无异常）"状态
@@ -891,7 +895,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     // M13: 加载状态
     setLoading(true);
     setRunning(false);
-    setNote('读取文件中…');
+    setNote(tr("读取文件中…"));
     if (window.electronAPI && window.electronAPI.logOpenFile) {
       try {
         const res = await window.electronAPI.logOpenFile();
@@ -900,7 +904,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           setCaptureDeviceId('');
           setSourceLabel(res.filePath || '');
           setRestoredSessionName('');
-          setNote(`已加载：${res.shown?.toLocaleString?.() ?? ''}/${res.total?.toLocaleString?.() ?? ''}`);
+          setNote(tr("已加载：{0}/{1}", { 0: res.shown?.toLocaleString?.() ?? '', 1: res.total?.toLocaleString?.() ?? '' }));
           // 文件加载完成：切换到"监控中"（主进程会扫描文件，扫描完成后通过
           // scan-complete 事件自动切换到"扫描完成（无异常）"或"检测到问题"）
           if (autoDiagnoseEnabled) {
@@ -915,7 +919,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           setNote(undefined);
         }
       } catch (e) {
-        setNote('打开文件失败: ' + e.message);
+        setNote(tr('打开文件失败：{0}', { 0: e.message }));
       }
     }
     // M13: 加载状态
@@ -931,7 +935,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       await window.electronAPI.logClear({ source });
     }
     // UX1: 操作反馈，3 秒后自动清除
-    setNote(markers.length ? '已清空日志；问题标记及冻结的上下文仍保留，可保存到会话' : '已清空日志');
+    setNote(markers.length ? tr("已清空日志；问题标记及冻结的上下文仍保留，可保存到会话") : tr("已清空日志"));
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
     noteTimerRef.current = setTimeout(() => setNote(undefined), 3000);
     // UX2: 清空日志后同步重置自动诊断状态，避免 toast 残留旧诊断结果
@@ -976,7 +980,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       if (window.electronAPI && window.electronAPI.logExportToFile) {
         const res = await window.electronAPI.logExportToFile({ content: lines, defaultName: `log_export_${source}.txt` });
         if (res.ok) {
-          setNote(`已导出 ${total.toLocaleString()} 条日志`);
+          setNote(tr("已导出 {0} 条日志", { 0: total.toLocaleString(getLocale()) }));
         }
       }
     } finally {
@@ -987,12 +991,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   async function onCopyAll() {
     const lines = filtered.map((e) => formatEntry(e)).join('\n');
     await navigator.clipboard.writeText(lines);
-    setNote(`已复制 ${filtered.length.toLocaleString()} 条日志到剪贴板`);
+    setNote(tr("已复制 {0} 条日志到剪贴板", { 0: filtered.length.toLocaleString(getLocale()) }));
   }
 
   async function onToggleMcp() {
     if (!isVip) {
-      setNote('MCP 服务为会员专属功能，请在会员中心开通');
+      setNote(tr("MCP 服务为会员专属功能，请在会员中心开通"));
       return;
     }
     if (window.electronAPI && window.electronAPI.mcpStop && window.electronAPI.mcpStart) {
@@ -1008,15 +1012,15 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
   // AI 日志分析
   async function onAiAnalyze(promptOverride) {
-    if (!isVip) { showVipBlock('AI 深度分析'); return; }
+    if (!isVip) { showVipBlock(tr("AI 深度分析")); return; }
     if (aiHistoryReadOnly) {
       setAiPanelOpen(true);
-      setNote('恢复的 AI 对话为只读；请先选择“开始新的分析”');
+      setNote(tr("恢复的 AI 对话为只读；请先选择“开始新的分析”"));
       return;
     }
     if (filtered.length === 0) {
       setNoteType('error');
-      setNote('请先抓取或加载日志，再使用 AI 分析');
+      setNote(tr("请先抓取或加载日志，再使用 AI 分析"));
       return;
     }
 
@@ -1046,7 +1050,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setMapReduceProgress(null);
 
     // 创建本轮对话 turn
-    const turnHeader = `[${new Date().toLocaleTimeString('zh-CN')}] ${customPrompt ? '追问' : '分析'}${customPrompt ? `：${customPrompt}` : ''}`;
+    const turnHeader = `[${new Date().toLocaleTimeString(getLocale())}] ${customPrompt ? tr("追问") : tr("分析")}${customPrompt ? `：${customPrompt}` : ''}`;
     const currentTurn = {
       header: turnHeader,
       reasoning: '',
@@ -1074,7 +1078,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         thinkingMode: aiThinkingMode
       });
       if (!res.ok) {
-        setAiError(res.error || '启动分析失败');
+        setAiError(res.error || tr("启动分析失败"));
         setAiAnalyzing(false);
       }
     } catch (e) {
@@ -1127,11 +1131,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       // 拼接所有轮次的内容
       const fullContent = aiTurns.map(t => `## ${t.header}\n\n${t.content || ''}`).join('\n\n---\n\n');
       const res = await window.electronAPI.aiExportResult({
-        content: `# AI 日志助手分析报告\n\n生成时间：${now.toLocaleString('zh-CN')}\n\n---\n\n${fullContent}`,
+        content: tr("# AI 日志助手分析报告\n\n生成时间：{0}\n\n---\n\n{1}", { 0: now.toLocaleString(getLocale()), 1: fullContent }),
         defaultName: `ai_analysis_${dateStr}.md`
       });
       if (res.ok) {
-        setNote('AI 分析结果已导出');
+        setNote(tr("AI 分析结果已导出"));
       }
     }
   }
@@ -1139,10 +1143,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   // AI 自动诊断处理
   async function onAutoDiagnoseConfirm() {
     if (!autoDiagnoseAlert) return;
-    if (!isVip) { showVipBlock('AI 深度分析'); return; }
+    if (!isVip) { showVipBlock(tr("AI 深度分析")); return; }
     if (aiHistoryReadOnly) {
       setAiPanelOpen(true);
-      setNote('恢复的 AI 对话为只读；请先选择“开始新的分析”');
+      setNote(tr("恢复的 AI 对话为只读；请先选择“开始新的分析”"));
       return;
     }
     try {
@@ -1160,13 +1164,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       aiContentRef.current = '';
       aiReasoningRef.current = '';
       aiLastLogHashRef.current = '';
-      aiTurnsRef.current = [...aiTurnsRef.current, { header: `[${new Date().toLocaleTimeString('zh-CN')}] 规则诊断：${issues.length} 个问题`, reasoning: '', content: '', reasoningExpanded: true, evidenceRefs }];
+      aiTurnsRef.current = [...aiTurnsRef.current, { header: tr("[{0}] 规则诊断：{1} 个问题", { 0: new Date().toLocaleTimeString(getLocale()), 1: issues.length }), reasoning: '', content: '', reasoningExpanded: true, evidenceRefs }];
       setAiTurns([...aiTurnsRef.current]);
       setAiPanelOpen(true);
       setAiAnalyzing(true);
       setAiError('');
       const result = await window.electronAPI.autoDiagnoseAnalyze({ issues, summary: autoDiagnoseAlert.summary });
-      if (!result.ok) throw new Error(result.error || '自动诊断分析失败');
+      if (!result.ok) throw new Error(result.error || tr("自动诊断分析失败"));
     } catch (error) {
       setAiError(error.message);
       setAiAnalyzing(false);
@@ -1203,7 +1207,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   async function onSmartSearch() {
     if (!smartSearchQuery.trim()) return;
     if (entries.length === 0) {
-      setNote('请先抓取或加载日志，再使用智能搜索');
+      setNote(tr("请先抓取或加载日志，再使用智能搜索"));
       return;
     }
     if (window.electronAPI && window.electronAPI.smartSearch) {
@@ -1229,7 +1233,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       } catch (e) {
         setSmartSearching(false);
         setSmartSearchProgress(null);
-        setNote('智能搜索失败：' + (e.message || '未知错误'));
+        setNote(tr('智能搜索失败：{0}', { 0: e.message || tr("未知错误") }));
         // 搜索失败，显示区域回到原日志，重新扫描恢复诊断
         rescanAutoDiagnose(null, source);
       }
@@ -1327,8 +1331,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <div className="flex items-center gap-2 mr-2">
             <Terminal size={18} className={isDark ? 'text-cyan-400' : 'text-emerald-500'} />
             <div>
-              <div className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>Android Log Analyzer</div>
-              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>实时抓取 ADB Logcat · 文件加载 · MCP 服务</div>
+              <div className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("Android Log Analyzer")}</div>
+              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("实时抓取 ADB Logcat · 文件加载 · MCP 服务")}</div>
             </div>
           </div>
 
@@ -1347,15 +1351,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               }
             }}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm'}`}
-            title="刷新设备列表"
+            title={tr("刷新设备列表")}
           >
             <RefreshCw size={14} />
           </button>
 
           {devices.length === 0 && !running ? (
-            <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-red-50 text-red-600 border border-red-200'}`}>
-              无设备连接
-            </span>
+            <span className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-red-50 text-red-600 border border-red-200'}`}>{tr("无设备连接")}</span>
           ) : (
             // 设备选择自定义下拉（替代原生 select，风格与缓冲区下拉一致）
             <div className="relative" ref={deviceDropdownRef}>
@@ -1363,11 +1365,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 onClick={() => setDeviceDropdownOpen((v) => !v)}
                 disabled={running}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 ${deviceDropdownOpen ? (isDark ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-cyan-400 bg-cyan-50 text-cyan-600') : (isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm')}`}
-                title={running ? '抓取中无法切换设备' : '选择 ADB 设备'}
+                title={running ? tr("抓取中无法切换设备") : tr("选择 ADB 设备")}
               >
                 <Smartphone size={14} />
                 <span className="max-w-[140px] truncate">
-                  {deviceId ? (devices.find((d) => d.id === deviceId)?.label || `${deviceId}（离线）`) : '选择设备'}
+                  {deviceId ? (devices.find((d) => d.id === deviceId)?.label || tr("{0}（离线）", { 0: deviceId })) : tr("选择设备")}
                 </span>
                 <ChevronDown size={12} className={deviceDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </button>
@@ -1378,7 +1380,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left transition-colors ${!deviceId ? (isDark ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-50 text-cyan-700') : (isDark ? 'hover:bg-[#3E4145] text-[#E8EAED]' : 'hover:bg-slate-50 text-slate-700')}`}
                   >
                     <Smartphone size={14} className="shrink-0 opacity-60" />
-                    <span className="flex-1">默认设备</span>
+                    <span className="flex-1">{tr("默认设备")}</span>
                     {!deviceId && <CheckCircle size={12} className="text-cyan-400" />}
                   </button>
                   {devices.map((d) => (
@@ -1403,10 +1405,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               onClick={() => setBufferDropdownOpen((v) => !v)}
               disabled={running}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 ${bufferDropdownOpen ? (isDark ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-cyan-400 bg-cyan-50 text-cyan-600') : (isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm')}`}
-              title={running ? '抓取中无法切换缓冲区' : '选择要抓取的日志缓冲区'}
+              title={running ? tr("抓取中无法切换缓冲区") : tr("选择要抓取的日志缓冲区")}
             >
               <Layers size={14} />
-              <span>日志类型</span>
+              <span>{tr("日志类型")}</span>
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isDark ? 'bg-[#3E4145] text-cyan-400' : 'bg-slate-100 text-cyan-600'}`}>
                 {buffers.length}
               </span>
@@ -1414,9 +1416,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             </button>
             {bufferDropdownOpen && (
               <div className={`absolute top-full left-0 mt-1 w-72 rounded-xl border shadow-xl z-50 ${isDark ? 'bg-[#2D2F33] border-[#5F6368]' : 'bg-white border-slate-200'}`}>
-                <div className={`px-3 py-2 text-xs font-semibold border-b ${isDark ? 'text-[#E8EAED] border-[#3E4145]' : 'text-slate-700 border-slate-100'}`}>
-                  选择日志类型（可多选）
-                </div>
+                <div className={`px-3 py-2 text-xs font-semibold border-b ${isDark ? 'text-[#E8EAED] border-[#3E4145]' : 'text-slate-700 border-slate-100'}`}>{tr("选择日志类型（可多选）")}</div>
                 <div className="max-h-72 overflow-y-auto py-1">
                   {LOG_BUFFERS.map((b) => {
                     const checked = buffers.includes(b.id);
@@ -1447,13 +1447,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   })}
                 </div>
                 <div className={`px-3 py-2 border-t flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-                  <span className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>已选 {buffers.length} 个</span>
+                  <span className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("已选 {0} 个", { 0: buffers.length })}</span>
                   <button
                     onClick={() => setBuffers(['main'])}
                     className={`text-[11px] px-2 py-0.5 rounded ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
-                  >
-                    重置为默认
-                  </button>
+                  >{tr("重置为默认")}</button>
                 </div>
               </div>
             )}
@@ -1466,9 +1464,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               disabled={(devices.length === 0 && !running) || (deviceId && !devices.some(item => item.id === deviceId)) || loading}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all disabled:opacity-50 active:scale-95 shadow-sm ${t.button.primary}`}
             >
-              <Play size={14} />
-              开始抓取
-            </button>
+              <Play size={14} />{tr("开始抓取")}</button>
           ) : (
             <button
               onClick={onStop}
@@ -1476,9 +1472,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white transition-all disabled:opacity-50 active:scale-95 shadow-sm"
             >
-              <Square size={14} />
-              停止抓取
-            </button>
+              <Square size={14} />{tr("停止抓取")}</button>
           )}
 
           <button
@@ -1486,7 +1480,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             // M13: 加载中禁用
             disabled={loading}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm'}`}
-            title="打开 .log 日志文件"
+            title={tr("打开 .log 日志文件")}
           >
             <FolderOpen size={16} />
           </button>
@@ -1496,7 +1490,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onClick={onExport}
             disabled={filtered.length === 0 || exporting}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm'}`}
-            title="导出日志到文件"
+            title={tr("导出日志到文件")}
           >
             <Download size={14} />
           </button>
@@ -1505,7 +1499,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onClick={onCopyAll}
             disabled={filtered.length === 0}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-colors disabled:opacity-50 ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm'}`}
-            title="复制全部日志到剪贴板"
+            title={tr("复制全部日志到剪贴板")}
           >
             <Copy size={14} />
           </button>
@@ -1514,7 +1508,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onClick={onClear}
             disabled={filtered.length === 0 || loading}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 ${isDark ? 'border-slate-500 hover:bg-red-500/20 text-red-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-red-50 text-red-600 active:scale-95 shadow-sm'}`}
-            title="清空当前日志"
+            title={tr("清空当前日志")}
           >
             <Trash2 size={14} />
           </button>
@@ -1535,13 +1529,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <LogMarkers markers={markers} onChange={setMarkers} draft={markerDraft} onDismissDraft={() => setMarkerDraft(null)} isDark={isDark} onLocate={locateMarker} />
           <div className="flex-1" />
 
-          <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
-            {filtered.length.toLocaleString()} 条
-          </div>
-          {truncated && <span className="text-xs text-amber-500" title="为保持响应，显示窗口仅保留最近的日志；更早的日志不包含在保存会话中，已添加的问题标记仍保留。">仅显示最近日志</span>}
+          <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{tr("{0} 条", { 0: filtered.length.toLocaleString(getLocale()) })}</div>
+          {truncated && <span className="text-xs text-amber-500" title={tr("为保持响应，显示窗口仅保留最近的日志；更早的日志不包含在保存会话中，已添加的问题标记仍保留。")}>{tr("仅显示最近日志")}</span>}
 
-          <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>
-            Source: {source === 'realtime' ? '实时抓取' : source === 'file' ? '日志文件' : source}
+          <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{tr("Source:")}{source === 'realtime' ? tr("实时抓取") : source === 'file' ? tr("日志文件") : source}
           </div>
         </div>
 
@@ -1561,7 +1552,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   onSmartSearch();
                 }
               }}
-              placeholder="自然语言搜索日志，如「所有内存相关的错误」"
+              placeholder={tr("自然语言搜索日志，如「所有内存相关的错误」")}
               className={`w-70 bg-transparent text-xs outline-none placeholder:text-[#9AA0A6] ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}
               disabled={smartSearching}
             />
@@ -1570,7 +1561,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               <button
                 onClick={() => setSmartSearchQuery('')}
                 className={`px-1.5 py-0.5 text-xs rounded transition-colors ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-200'}`}
-                title="清空查询"
+                title={tr("清空查询")}
               >
                 <X size={12} />
               </button>
@@ -1579,21 +1570,17 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               <button
                 onClick={onSmartSearchStop}
                 className="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
-                title="中止搜索"
+                title={tr("中止搜索")}
               >
-                <StopCircle size={12} />
-                中止
-              </button>
+                <StopCircle size={12} />{tr("中止")}</button>
             ) : (
               <button
                 onClick={onSmartSearch}
                 disabled={!smartSearchQuery.trim() || entries.length === 0}
                 className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${(smartSearchQuery.trim() && entries.length > 0) ? (isDark ? 'bg-violet-500/20 text-violet-400 hover:bg-violet-500/30' : 'bg-violet-200 text-violet-700 hover:bg-violet-300') : (isDark ? 'bg-[#3E4145] text-[#9AA0A6] cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed')}`}
-                title="开始智能搜索 (Enter)"
+                title={tr("开始智能搜索 (Enter)")}
               >
-                <Search size={12} />
-                搜索
-              </button>
+                <Search size={12} />{tr("搜索")}</button>
             )}
           </div>
           ) : null}
@@ -1602,8 +1589,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           {smartSearching && smartSearchProgress && (
             <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-violet-400' : 'text-violet-600'}`}>
               <Loader2 size={12} className="animate-spin" />
-              {smartSearchProgress.completed}/{smartSearchProgress.total} 块，匹配 {smartSearchProgress.matchedCount} 条
-            </div>
+              {smartSearchProgress.completed}/{smartSearchProgress.total}{tr(" 块，匹配 ")}{smartSearchProgress.matchedCount}{tr(" 条")}</div>
           )}
 
           {/* 搜索结果模式：显示返回按钮 */}
@@ -1611,50 +1597,43 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <button
               onClick={onSmartSearchClear}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${isDark ? 'border-violet-500/40 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20' : 'border-violet-400 bg-violet-50 text-violet-600 hover:bg-violet-100'}`}
-              title="退出搜索，返回原日志列表"
+              title={tr("退出搜索，返回原日志列表")}
             >
-              <RefreshCw size={14} />
-              返回原日志（{smartSearchResult.matchedCount} 条）
-            </button>
+              <RefreshCw size={14} />{tr("返回原日志（")}{smartSearchResult.matchedCount}{tr(" 条）")}</button>
           )}
 
           {/* AI 分析按钮 */}
           <button
             onClick={() => {
-              if (!isVip) { showVipBlock('AI 深度分析'); return; }
+              if (!isVip) { showVipBlock(tr("AI 深度分析")); return; }
               if (filtered.length === 0) {
                 setNoteType('error');
-                setNote('请先抓取或加载日志，再使用 AI 分析');
+                setNote(tr("请先抓取或加载日志，再使用 AI 分析"));
                 return;
               }
               setAiPanelOpen(!aiPanelOpen);
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${aiPanelOpen ? 'bg-purple-500/20 border-purple-500/30 text-purple-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-cyan-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-emerald-600 active:scale-95 shadow-sm'}`}
-            title="使用 AI 分析当前过滤后的日志"
+            title={tr("使用 AI 分析当前过滤后的日志")}
           >
-            <Sparkles size={14} />
-            AI 分析
-          </button>
+            <Sparkles size={14} />{tr("AI 分析")}</button>
 
           {/* AI 自动诊断开关 */}
           <button
             onClick={onToggleAutoDiagnose}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${autoDiagnoseEnabled ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-500 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-400 active:scale-95 shadow-sm'}`}
-            title={autoDiagnoseEnabled ? '自动诊断已开启：实时检测崩溃/ANR/OOM 等问题' : '自动诊断已关闭'}
+            title={autoDiagnoseEnabled ? tr("自动诊断已开启：实时检测崩溃/ANR/OOM 等问题") : tr("自动诊断已关闭")}
           >
-            {autoDiagnoseEnabled ? <Zap size={14} /> : <ShieldCheck size={14} />}
-            自动诊断: {autoDiagnoseEnabled ? 'ON' : 'OFF'}
+            {autoDiagnoseEnabled ? <Zap size={14} /> : <ShieldCheck size={14} />}{tr("自动诊断: ")}{autoDiagnoseEnabled ? 'ON' : 'OFF'}
           </button>
 
           {/* 日志诊断规则库入口 */}
           <button
             onClick={() => setRuleLibraryOpen(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${ruleLibraryOpen ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-500 active:scale-95 shadow-sm'}`}
-            title="诊断规则库"
+            title={tr("诊断规则库")}
           >
-            <Layers size={14} />
-            规则库
-          </button>
+            <Layers size={14} />{tr("规则库")}</button>
 
           {/* 自动诊断已开启但监控窗口被隐藏时，显示"展开监控"按钮 */}
           {autoDiagnoseEnabled && !autoDiagnoseAlert && (
@@ -1674,17 +1653,15 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 }
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${isDark ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'border-emerald-400 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
-              title="展开自动诊断监控窗口"
+              title={tr("展开自动诊断监控窗口")}
             >
-              <AlertTriangle size={14} />
-              展开监控
-            </button>
+              <AlertTriangle size={14} />{tr("展开监控")}</button>
           )}
 
           {/* 状态提示：读取文件中 / 已停止抓取 等，紧跟自动诊断右侧 */}
           {note && (
             <div className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${noteType === 'error' ? (isDark ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-red-50 text-red-600 border border-red-200') : (isDark ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-blue-50 text-blue-600 border border-blue-200')}`}>
-              {note}
+              {tr(note)}
             </div>
           )}
 
@@ -1694,7 +1671,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <button
             onClick={() => setMcpHelpVisible(true)}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-500 active:scale-95 shadow-sm'}`}
-            title="查看 MCP 使用说明"
+            title={tr("查看 MCP 使用说明")}
           >
             <HelpCircle size={14} />
           </button>
@@ -1702,18 +1679,16 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <button
             onClick={onToggleMcp}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${mcpRunning ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-500 active:scale-95 shadow-sm'}`}
-            title={mcpRunning ? '点击关闭 MCP 服务' : '点击开启 MCP 服务'}
+            title={mcpRunning ? tr("点击关闭 MCP 服务") : tr("点击开启 MCP 服务")}
           >
-            <Radio size={14} />
-            MCP: {mcpRunning ? 'ON' : 'OFF'}
+            <Radio size={14} />{tr("MCP:")}{mcpRunning ? 'ON' : 'OFF'}
           </button>
           </>) : null}
         </div>
       </div>
 
       {/* Main Content */}
-      {restoredSessionName && <div className={`border-b px-4 py-2 text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border-[#3E4145]' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-        已恢复：{restoredSessionName} · {entries.length.toLocaleString()} 条原始日志 · {sourceLabel || '已保存来源'} · {aiHistoryReadOnly ? '历史 AI 对话只读，未自动采集或请求 AI' : '当前可手动开始新分析'}
+      {restoredSessionName && <div className={`border-b px-4 py-2 text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border-[#3E4145]' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{tr("已恢复：")}{restoredSessionName} · {entries.length.toLocaleString(getLocale())}{tr(" 条原始日志 · ")}{sourceLabel || tr("已保存来源")} · {aiHistoryReadOnly ? tr("历史 AI 对话只读，未自动采集或请求 AI") : tr("当前可手动开始新分析")}
       </div>}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Filter & Stats */}
@@ -1723,7 +1698,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Filter size={16} className={isDark ? 'text-cyan-400' : 'text-emerald-500'} />
-                <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>过滤</span>
+                <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("过滤")}</span>
               </div>
               <button
                 onClick={() => {
@@ -1736,19 +1711,17 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   }
                 }}
                 className={`text-xs px-2 py-1 rounded transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-[#E8EAED] hover:bg-[#3E4145]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
-              >
-                重置
-              </button>
+              >{tr("重置")}</button>
             </div>
 
             <LogFilterPresets filter={{ ...filter, text: filterTextInput || undefined }} buffers={buffers} onApply={applyFilterPreset} isDark={isDark} />
             <div className="space-y-3">
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>关键字</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("关键字")}</label>
                 <input
                   type="text"
                   value={filterTextInput}
-                  placeholder="包含文本"
+                  placeholder={tr("包含文本")}
                   onChange={(e) => {
                     // M8: 本地状态立即更新保持输入响应，setFilter 防抖 300ms
                     const val = e.target.value;
@@ -1763,44 +1736,44 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>排除</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("排除")}</label>
                 <input
                   type="text"
                   value={filter.excludeText ?? ''}
-                  placeholder="排除文本"
+                  placeholder={tr("排除文本")}
                   onChange={(e) => setFilter({ ...filter, excludeText: e.target.value || undefined })}
                   className={`w-full text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                 />
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>正则</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("正则")}</label>
                 <input
                   type="text"
                   value={filter.regex ?? ''}
-                  placeholder="例如: (ActivityManager|WindowManager)"
+                  placeholder={tr("例如: (ActivityManager|WindowManager)")}
                   onChange={(e) => setFilter({ ...filter, regex: e.target.value || undefined })}
                   className={`w-full text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                 />
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>包名</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("包名")}</label>
                 <input
                   type="text"
                   value={filter.pkg ?? ''}
-                  placeholder="例如: com.example.app"
+                  placeholder={tr("例如: com.example.app")}
                   onChange={(e) => setFilter({ ...filter, pkg: e.target.value || undefined })}
                   className={`w-full text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                 />
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>Tag</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("Tag")}</label>
                 <input
                   type="text"
                   value={filter.tag ?? ''}
-                  placeholder="例如: ActivityTaskManager"
+                  placeholder={tr("例如: ActivityTaskManager")}
                   onChange={(e) => setFilter({ ...filter, tag: e.target.value || undefined })}
                   className={`w-full text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                 />
@@ -1811,7 +1784,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 <input
                   type="text"
                   value={typeof filter.pid === 'number' ? String(filter.pid) : ''}
-                  placeholder="例如: 12345"
+                  placeholder={tr("例如: 12345")}
                   onChange={(e) => {
                     const raw = e.target.value.trim();
                     const pid = raw ? Number(raw) : undefined;
@@ -1822,7 +1795,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>最小级别</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("最小级别")}</label>
                 {/* 自定义下拉框，参考设备/缓冲区下拉风格，带级别颜色 */}
                 <div className="relative" ref={levelDropdownRef}>
                   <button
@@ -1837,7 +1810,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                           <span className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}>{levels.find(l => l.v === filter.minLevel)?.label}</span>
                         </>
                       ) : (
-                        <span>不过滤</span>
+                        <span>{tr("不过滤")}</span>
                       )}
                     </span>
                     <ChevronDown size={12} className={levelDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -1849,7 +1822,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                         className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left transition-colors ${!filter.minLevel ? (isDark ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-50 text-cyan-700') : (isDark ? 'hover:bg-[#3E4145] text-[#E8EAED]' : 'hover:bg-slate-50 text-slate-700')}`}
                       >
                         <span className="inline-block w-2 h-2 rounded-full bg-slate-400" />
-                        <span className="flex-1">不过滤</span>
+                        <span className="flex-1">{tr("不过滤")}</span>
                         {!filter.minLevel && <CheckCircle size={12} className="text-cyan-400" />}
                       </button>
                       {levels.map((l) => (
@@ -1869,9 +1842,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 </div>
               </div>
 
-              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                当前窗口总计：{entries.length.toLocaleString()}，过滤后：{filtered.length.toLocaleString()}
-                {truncated ? '（仅显示末尾 50k 条）' : ''}
+              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("当前窗口总计：")}{entries.length.toLocaleString(getLocale())}{tr("，过滤后：")}{filtered.length.toLocaleString(getLocale())}
+                {truncated ? tr("（仅显示末尾 50k 条）") : ''}
               </div>
             </div>
           </div>
@@ -1880,7 +1852,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <div className={`rounded-xl border p-4 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center gap-2 mb-3">
               <BarChart3 size={16} className={isDark ? 'text-cyan-400' : 'text-emerald-500'} />
-              <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>统计</span>
+              <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("统计")}</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {Object.entries(counts).map(([level, count]) => (
@@ -1890,9 +1862,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 </div>
               ))}
             </div>
-            <div className={`text-xs mt-3 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-              提示：双击日志行复制整行，也可用鼠标选中文本复制。
-            </div>
+            <div className={`text-xs mt-3 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("提示：双击日志行复制整行，也可用鼠标选中文本复制。")}</div>
           </div>
         </div>
 
@@ -1902,49 +1872,40 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {smartSearching && smartSearchIncremental.length > 0
                 ? <span className="flex items-center gap-2">
-                    <Loader2 size={14} className="text-violet-500 animate-spin" />
-                    搜索中…已匹配 {smartSearchIncremental.length} 条
-                  </span>
+                    <Loader2 size={14} className="text-violet-500 animate-spin" />{tr("搜索中…已匹配 ")}{smartSearchIncremental.length}{tr(" 条")}</span>
                 : (smartSearchResult && !smartSearching
                   ? <span className="flex items-center gap-2">
-                      <Brain size={14} className="text-violet-500" />
-                      搜索结果："{smartSearchResult.query}"（{smartSearchResult.matchedCount} 条）
-                    </span>
-                  : (source === 'realtime' ? '实时日志' : '文件日志'))
+                      <Brain size={14} className="text-violet-500" />{tr("搜索结果：\"")}{smartSearchResult.query}"（{smartSearchResult.matchedCount}{tr(" 条）")}</span>
+                  : (source === 'realtime' ? tr("实时日志") : tr("文件日志")))
               }
             </span>
-            <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-              双击一行即可复制 · 悬停可查看完整消息 · 拖拽列边界调整宽度
-            </span>
+            <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("双击一行即可复制 · 悬停可查看完整消息 · 拖拽列边界调整宽度")}</span>
           </div>
 
           <div
             className={`flex items-center px-4 py-1.5 border-b text-xs font-bold ${isDark ? 'bg-[#2A2C2F] border-[#3E4145] text-[#9AA0A6]' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
             style={{ display: 'grid', gridTemplateColumns: `${colWidths.ts}px ${colWidths.level}px ${colWidths.pkg}px ${colWidths.tag}px 1fr`, gap: '8px' }}
           >
-            <span className="relative">时间
-              <span
+            <span className="relative">{tr("时间")}<span
                 onMouseDown={(e) => onColResizeStart(e, 'ts')}
                 className={`absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 cursor-col-resize rounded ${isDark ? 'hover:bg-cyan-500/50' : 'hover:bg-cyan-500/40'}`}
-                title="拖拽调整时间列宽度"
+                title={tr("拖拽调整时间列宽度")}
               />
             </span>
-            <span className="text-center">级别</span>
-            <span className="relative truncate">包名
-              <span
+            <span className="text-center">{tr("级别")}</span>
+            <span className="relative truncate">{tr("包名")}<span
                 onMouseDown={(e) => onColResizeStart(e, 'pkg')}
                 className={`absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 cursor-col-resize rounded ${isDark ? 'hover:bg-cyan-500/50' : 'hover:bg-cyan-500/40'}`}
-                title="拖拽调整包名列宽度"
+                title={tr("拖拽调整包名列宽度")}
               />
             </span>
-            <span className="relative truncate">Tag
-              <span
+            <span className="relative truncate">{tr("Tag")}<span
                 onMouseDown={(e) => onColResizeStart(e, 'tag')}
                 className={`absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 cursor-col-resize rounded ${isDark ? 'hover:bg-cyan-500/50' : 'hover:bg-cyan-500/40'}`}
-                title="拖拽调整 Tag 列宽度"
+                title={tr("拖拽调整 Tag 列宽度")}
               />
             </span>
-            <span>消息</span>
+            <span>{tr("消息")}</span>
           </div>
 
           <div
@@ -1960,27 +1921,25 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             {loading ? (
               <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 <Loader2 size={32} className="mb-3 animate-spin" />
-                <p className="font-bold">正在读取日志文件…</p>
-                <p className="text-xs mt-2 opacity-60">文件较大时可能需要数秒，请稍候</p>
+                <p className="font-bold">{tr("正在读取日志文件…")}</p>
+                <p className="text-xs mt-2 opacity-60">{tr("文件较大时可能需要数秒，请稍候")}</p>
               </div>
             ) : smartSearching && smartSearchIncremental.length === 0 ? (
               <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-violet-400' : 'text-violet-600'}`}>
                 <Loader2 size={32} className="mb-3 animate-spin" />
-                <p className="font-bold">正在智能搜索…</p>
-                <p className="text-xs mt-1">查询："{smartSearchQuery}"</p>
+                <p className="font-bold">{tr("正在智能搜索…")}</p>
+                <p className="text-xs mt-1">{tr("查询：\"{0}\"", { 0: smartSearchQuery })}</p>
                 {smartSearchProgress && (
-                  <p className="text-xs mt-2">
-                    已搜索 {smartSearchProgress.completed}/{smartSearchProgress.total} 块
-                    {smartSearchProgress.matchedCount > 0 && `，已匹配 ${smartSearchProgress.matchedCount} 条`}
+                  <p className="text-xs mt-2">{tr("已搜索 ")}{smartSearchProgress.completed}/{smartSearchProgress.total}{tr(" 块")}{smartSearchProgress.matchedCount > 0 && tr("，已匹配 {0} 条", { 0: smartSearchProgress.matchedCount })}
                   </p>
                 )}
-                <p className="text-xs mt-3 opacity-60">AI 正在分块分析日志，结果将逐步显示…</p>
+                <p className="text-xs mt-3 opacity-60">{tr("AI 正在分块分析日志，结果将逐步显示…")}</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
                 <Terminal size={32} className="mb-3 opacity-50" />
-                <p>暂无日志</p>
-                <p className="text-xs mt-1">可点击"开始抓取"或"打开 .log"</p>
+                <p>{tr("暂无日志")}</p>
+                <p className="text-xs mt-1">{tr("可点击\"开始抓取\"或\"打开 .log\"")}</p>
               </div>
             ) : (
               <div className="relative" style={{ height: `${virtualLogRows.totalHeight}px` }}>
@@ -2052,39 +2011,35 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               <div className="flex-1 min-w-0">
                 <div className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                   {isMonitoring
-                    ? '自动诊断监控中'
+                    ? tr("自动诊断监控中")
                     : isClean
-                      ? '当前没有检测到异常'
-                      : `检测到 ${autoDiagnoseAlert.summary.total} 个关键问题`
+                      ? tr("当前没有检测到异常")
+                      : tr("检测到 {0} 个关键问题", { 0: autoDiagnoseAlert.summary.total })
                   }
                 </div>
                 {isMonitoring ? (
-                  <div className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                    正在实时监控崩溃 / ANR / OOM / Native Crash 等关键问题，暂未发现问题
-                  </div>
+                  <div className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("正在实时监控崩溃 / ANR / OOM / Native Crash 等关键问题，暂未发现问题")}</div>
                 ) : isClean ? (
-                  <div className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                    扫描完成，未发现崩溃 / ANR / OOM / Native Crash 等关键问题
-                  </div>
+                  <div className={`text-xs mt-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("扫描完成，未发现崩溃 / ANR / OOM / Native Crash 等关键问题")}</div>
                 ) : (
                   <div className={`text-xs mt-1 flex flex-wrap gap-1.5 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
                     {autoDiagnoseAlert.summary.crash > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">Crash ×{autoDiagnoseAlert.summary.crash}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">{tr("Crash ×")}{autoDiagnoseAlert.summary.crash}</span>
                     )}
                     {autoDiagnoseAlert.summary.anr > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400">ANR ×{autoDiagnoseAlert.summary.anr}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400">{tr("ANR ×")}{autoDiagnoseAlert.summary.anr}</span>
                     )}
                     {autoDiagnoseAlert.summary.native_crash > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400">Native ×{autoDiagnoseAlert.summary.native_crash}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400">{tr("Native ×")}{autoDiagnoseAlert.summary.native_crash}</span>
                     )}
                     {autoDiagnoseAlert.summary.oom > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">OOM ×{autoDiagnoseAlert.summary.oom}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{tr("OOM ×")}{autoDiagnoseAlert.summary.oom}</span>
                     )}
                     {autoDiagnoseAlert.summary.watchdog > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400">Watchdog ×{autoDiagnoseAlert.summary.watchdog}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400">{tr("Watchdog ×")}{autoDiagnoseAlert.summary.watchdog}</span>
                     )}
                     {autoDiagnoseAlert.summary.kernel_panic > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400">Kernel ×{autoDiagnoseAlert.summary.kernel_panic}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400">{tr("Kernel ×")}{autoDiagnoseAlert.summary.kernel_panic}</span>
                     )}
                   </div>
                 )}
@@ -2092,21 +2047,21 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   {hasIssues && (
                     <button
                       onClick={() => {
-                        if (!isVip) { showVipBlock('AI 深度分析'); return; }
+                        if (!isVip) { showVipBlock(tr("AI 深度分析")); return; }
                         onAutoDiagnoseConfirm();
                       }}
                       disabled={aiAnalyzing}
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg text-white transition-colors font-medium ${aiAnalyzing ? 'bg-amber-500/40 cursor-not-allowed' : 'bg-amber-500 hover:bg-amber-600'}`}
                     >
                       {aiAnalyzing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                      {aiAnalyzing ? '分析中…' : 'AI 分析'}
+                      {aiAnalyzing ? tr("分析中…") : tr("AI 分析")}
                     </button>
                   )}
                   <button
                     onClick={onAutoDiagnoseDismiss}
                     className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
                   >
-                    {isMonitoring ? '隐藏' : '忽略'}
+                    {isMonitoring ? tr("隐藏") : tr("忽略")}
                   </button>
                 </div>
               </div>
@@ -2148,22 +2103,20 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <div className={`flex items-center justify-between px-4 py-2 border-b ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
               <div className="flex items-center gap-2 min-w-0">
                 <Sparkles size={16} className={`shrink-0 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
-                <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>AI 日志助手</span>
+                <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("AI 日志助手")}</span>
                 {aiAnalyzing && (
                   <span className="flex items-center gap-1 text-xs text-purple-400 shrink-0">
                     <Loader2 size={12} className="animate-spin" />
                     {mapReduceProgress
                       ? mapReduceProgress.phase === 'map'
-                        ? `分块分析 ${mapReduceProgress.current}/${mapReduceProgress.total}${mapReduceProgress.lineRange ? `（第 ${mapReduceProgress.lineRange} 行）` : ''}`
+                        ? tr("分块分析 {0}/{1}{2}", { 0: mapReduceProgress.current, 1: mapReduceProgress.total, 2: mapReduceProgress.lineRange ? tr("（第 {0} 行）", { 0: mapReduceProgress.lineRange }) : '' })
                         : mapReduceProgress.phase === 'compress'
-                          ? '正在压缩上下文…'
-                          : '汇总分析中…'
-                      : '分析中…'}
+                          ? tr("正在压缩上下文…")
+                          : tr("汇总分析中…")
+                      : tr("分析中…")}
                   </span>
                 )}
-                <span className={`text-xs shrink-0 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                  ({filtered.length.toLocaleString()} 条日志)
-                </span>
+                <span className={`text-xs shrink-0 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("({0} 条日志)", { 0: filtered.length.toLocaleString(getLocale()) })}</span>
                 {(() => {
                   const usage = contextUsage || { usedTokens: 0, maxTokens: 524288, percent: 0, messageCount: 0 };
                   const pct = usage.percent;
@@ -2174,7 +2127,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   const offset = c - (pct / 100) * c;
                   const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
                   return (
-                    <div className="relative group/ctx flex items-center justify-center shrink-0 w-[22px] h-[22px]" title="上下文使用量">
+                    <div className="relative group/ctx flex items-center justify-center shrink-0 w-[22px] h-[22px]" title={tr("上下文使用量")}>
                       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
                         <circle cx="11" cy="11" r={r} fill="none" strokeWidth="2.5"
                           className={isDark ? 'stroke-[#3E4145]' : 'stroke-slate-200'} />
@@ -2188,13 +2141,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                       </span>
                       {/* Tooltip */}
                       <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover/ctx:opacity-100 transition-opacity pointer-events-none z-50 ${isDark ? 'bg-[#2A2C2F] border border-[#3E4145] text-[#E8EAED]' : 'bg-white border border-slate-200 text-slate-700 shadow-lg'}`}>
-                        <div className="font-bold mb-0.5">{pct}% 已用（剩余 {100 - pct}%）</div>
-                        <div className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}>
-                          已用 {fmt(usage.usedTokens)} / {fmt(usage.maxTokens)} tokens
-                        </div>
-                        <div className={`text-[10px] mt-0.5 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                          {usage.messageCount} 条对话消息
-                        </div>
+                        <div className="font-bold mb-0.5">{tr("{0}% 已用（剩余 {1}%）", { 0: pct, 1: 100 - pct })}</div>
+                        <div className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}>{tr("已用 {0} / {1} tokens", { 0: fmt(usage.usedTokens), 1: fmt(usage.maxTokens) })}</div>
+                        <div className={`text-[10px] mt-0.5 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("{0} 条对话消息", { 0: usage.messageCount })}</div>
                       </div>
                     </div>
                   );
@@ -2206,24 +2155,20 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     <button
                       onClick={onAiExport}
                       className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-[#E8EAED] hover:bg-[#3E4145]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
-                      title="导出为 .md 文件"
+                      title={tr("导出为 .md 文件")}
                     >
-                      <FileDown size={13} />
-                      导出
-                    </button>
+                      <FileDown size={13} />{tr("导出")}</button>
                     <button
                       onClick={onAiClear}
                       disabled={aiAnalyzing}
                       className={`text-xs px-2 py-1 rounded transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-[#E8EAED] hover:bg-[#3E4145]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
-                    >
-                      清空
-                    </button>
+                    >{tr("清空")}</button>
                   </>
                 )}
                 <button
                   onClick={onToggleFullscreen}
                   className={`p-1 rounded-lg transition-colors ${isDark ? 'hover:bg-[#3E4145] text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
-                  title={aiFullscreen ? '退出全屏' : '全屏查看'}
+                  title={aiFullscreen ? tr("退出全屏") : tr("全屏查看")}
                 >
                   {aiFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
                 </button>
@@ -2240,7 +2185,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {aiError ? (
                 <div className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
-                  <span className="font-bold">错误：</span>{aiError}
+                  <span className="font-bold">{tr("错误：")}</span>{tr(aiError)}
                 </div>
               ) : aiTurns.length > 0 ? (
                 <div className="space-y-4">
@@ -2269,7 +2214,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                               ) : (
                                 <span className="text-purple-400">&#128294;</span>
                               )}
-                              <span>{showThinking ? '思考中…' : '已完成思考'}</span>
+                              <span>{showThinking ? tr("思考中…") : tr("已完成思考")}</span>
                               <span className={`ml-auto transition-transform ${turn.reasoningExpanded ? 'rotate-180' : ''}`}>
                                 <ChevronDown size={12} />
                               </span>
@@ -2293,9 +2238,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                           </div>
                         ) : showThinking && !turn.reasoning ? (
                           <div className={`flex items-center gap-2 text-sm ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                            <Loader2 size={14} className="animate-spin text-purple-400" />
-                            AI 正在分析日志…
-                          </div>
+                            <Loader2 size={14} className="animate-spin text-purple-400" />{tr("AI 正在分析日志…")}</div>
                         ) : null}
                       </div>
                     );
@@ -2304,22 +2247,20 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               ) : aiAnalyzing ? (
                 <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
                   <Loader2 size={32} className="mb-3 animate-spin text-purple-400" />
-                  <p className="text-sm">AI 正在分析日志，请稍候…</p>
-                  <p className="text-xs mt-1">正在向 Agent AI 发送 {filtered.length.toLocaleString()} 条日志</p>
+                  <p className="text-sm">{tr("AI 正在分析日志，请稍候…")}</p>
+                  <p className="text-xs mt-1">{tr("正在向 Agent AI 发送 {0} 条日志", { 0: filtered.length.toLocaleString(getLocale()) })}</p>
                 </div>
               ) : (
                 <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
                   <Sparkles size={28} className="mb-2 opacity-50" />
-                  <p className="text-sm">点击下方"开始分析"让 AI 帮你诊断日志</p>
-                  <p className="text-xs mt-1">将基于当前 {filtered.length.toLocaleString()} 条过滤后日志进行分析</p>
+                  <p className="text-sm">{tr("点击下方\"开始分析\"让 AI 帮你诊断日志")}</p>
+                  <p className="text-xs mt-1">{tr("将基于当前 {0} 条过滤后日志进行分析", { 0: filtered.length.toLocaleString(getLocale()) })}</p>
                 </div>
               )}
             </div>
 
             {/* AI Input Bar */}
-            {aiHistoryReadOnly && <div className={`border-t px-4 py-3 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-              历史对话仅供查阅，不会作为新请求的上下文。开始新分析会清空当前对话视图，不影响已保存会话。
-              <button type="button" onClick={onAiClear} className="ml-3 rounded border border-current px-2 py-1">开始新的分析</button>
+            {aiHistoryReadOnly && <div className={`border-t px-4 py-3 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{tr("历史对话仅供查阅，不会作为新请求的上下文。开始新分析会清空当前对话视图，不影响已保存会话。")}<button type="button" onClick={onAiClear} className="ml-3 rounded border border-current px-2 py-1">{tr("开始新的分析")}</button>
             </div>}
             <div className={`flex items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
               {/* 快速/思考模式切换 */}
@@ -2331,10 +2272,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     ? (isDark ? 'border-purple-500/40 bg-purple-500/15 text-purple-400' : 'border-purple-300 bg-purple-50 text-purple-600')
                     : (isDark ? 'border-[#5F6368] bg-[#3E4145] text-[#9AA0A6]' : 'border-slate-200 bg-white text-slate-500')
                 }`}
-                title={aiThinkingMode ? '思考模式：AI 会先进行推理再回答' : '快速模式：AI 直接回答，速度更快'}
+                title={aiThinkingMode ? tr("思考模式：AI 会先进行推理再回答") : tr("快速模式：AI 直接回答，速度更快")}
               >
                 {aiThinkingMode ? <Brain size={13} /> : <Zap size={13} />}
-                {aiThinkingMode ? '思考' : '快速'}
+                {aiThinkingMode ? tr("思考") : tr("快速")}
               </button>
               <input
                 type="text"
@@ -2347,7 +2288,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     setAiCustomPrompt('');
                   }
                 }}
-                placeholder="附加分析要求（可选，如：重点关注内存泄漏）"
+                placeholder={tr("附加分析要求（可选，如：重点关注内存泄漏）")}
                 className={`flex-1 text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-purple-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
               />
               {aiAnalyzing ? (
@@ -2355,18 +2296,14 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   onClick={onAiStop}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
                 >
-                  <StopCircle size={14} />
-                  停止
-                </button>
+                  <StopCircle size={14} />{tr("停止")}</button>
               ) : (
                 <button
                   onClick={() => { onAiAnalyze(); setAiCustomPrompt(''); }}
                   disabled={filtered.length === 0 || aiHistoryReadOnly}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
                 >
-                  <Send size={14} />
-                  开始分析
-                </button>
+                  <Send size={14} />{tr("开始分析")}</button>
               )}
             </div>
           </div>
@@ -2389,8 +2326,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   <Radio size={20} />
                 </div>
                 <div>
-                  <div className={`text-base font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>MCP 服务使用说明</div>
-                  <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-500'}`}>Model Context Protocol · AI 工具集成接口</div>
+                  <div className={`text-base font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("MCP 服务使用说明")}</div>
+                  <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-500'}`}>{tr("Model Context Protocol · AI 工具集成接口")}</div>
                 </div>
               </div>
               <button
@@ -2404,61 +2341,59 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             {/* Body */}
             <div className="px-6 py-5 overflow-y-auto flex-1 space-y-5">
               {/* Intro */}
-              <div className={`text-xs leading-relaxed ${isDark ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>
-                MCP 服务让 AI 工具（Claude CLI、Cursor、Trae 等）能够直接读取和控制本应用的日志、应用包、性能采样和设备巡检能力，无需手动复制粘贴结果。
-              </div>
+              <div className={`text-xs leading-relaxed ${isDark ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>{tr("MCP 服务让 AI 工具（Claude CLI、Cursor、Trae 等）能够直接读取和控制本应用的日志、应用包、性能采样和设备巡检能力，无需手动复制粘贴结果。")}</div>
 
               {/* Tool Groups */}
               {[
                 {
-                  title: '设备与日志控制',
+                  title: tr("设备与日志控制"),
                   icon: '🎮',
                   color: isDark ? 'emerald' : 'emerald',
                   tools: [
-                    { name: 'device_list', desc: '列出所有 ADB 连接的设备' },
-                    { name: 'capture_start', desc: '选择设备并开始抓取日志', extra: '可选 buffers 指定缓冲区：main / system / radio / events / crash / kernel' },
-                    { name: 'capture_stop', desc: '停止当前抓取' },
-                    { name: 'log_clear', desc: '清空日志' },
+                    { name: 'device_list', desc: tr("列出所有 ADB 连接的设备") },
+                    { name: 'capture_start', desc: tr("选择设备并开始抓取日志"), extra: tr("可选 buffers 指定缓冲区：main / system / radio / events / crash / kernel") },
+                    { name: 'capture_stop', desc: tr("停止当前抓取") },
+                    { name: 'log_clear', desc: tr("清空日志") },
                   ],
                 },
                 {
-                  title: '应用包管理',
+                  title: tr("应用包管理"),
                   icon: '📦',
                   color: 'amber',
                   tools: [
-                    { name: 'package_list', desc: '列出指定设备已安装应用', extra: '默认返回用户应用；showSystem=true 时包含系统应用' },
-                    { name: 'package_detail', desc: '读取应用版本、路径、安装时间、启停状态和权限摘要' },
+                    { name: 'package_list', desc: tr("列出指定设备已安装应用"), extra: tr("默认返回用户应用；showSystem=true 时包含系统应用") },
+                    { name: 'package_detail', desc: tr("读取应用版本、路径、安装时间、启停状态和权限摘要") },
                   ],
                 },
                 {
-                  title: '性能与巡检',
+                  title: tr("性能与巡检"),
                   icon: '📊',
                   color: 'rose',
                   tools: [
-                    { name: 'perf_snapshot', desc: '执行一次性能采样', extra: '返回 CPU、内存、存储空间、电池、温度、FPS 和告警' },
-                    { name: 'inspection_run', desc: '执行标准设备巡检并导出报告与证据包', extra: '支持 includeBugreport、includeAiSummary 和 outputBaseDir' },
+                    { name: 'perf_snapshot', desc: tr("执行一次性能采样"), extra: tr("返回 CPU、内存、存储空间、电池、温度、FPS 和告警") },
+                    { name: 'inspection_run', desc: tr("执行标准设备巡检并导出报告与证据包"), extra: tr("支持 includeBugreport、includeAiSummary 和 outputBaseDir") },
                   ],
                 },
                 {
-                  title: '日志查询（只读）',
+                  title: tr("日志查询（只读）"),
                   icon: '🔍',
                   color: 'blue',
                   tools: [
-                    { name: 'log_sources', desc: '查看日志源条数' },
-                    { name: 'log_get', desc: '读取原始日志（分页）' },
-                    { name: 'log_filter', desc: '按级别/关键词/Tag/PID/包名/正则过滤' },
-                    { name: 'log_stats', desc: '统计各级别数量' },
-                    { name: 'log_watch', desc: '等待特定关键词出现' },
+                    { name: 'log_sources', desc: tr("查看日志源条数") },
+                    { name: 'log_get', desc: tr("读取原始日志（分页）") },
+                    { name: 'log_filter', desc: tr("按级别/关键词/Tag/PID/包名/正则过滤") },
+                    { name: 'log_stats', desc: tr("统计各级别数量") },
+                    { name: 'log_watch', desc: tr("等待特定关键词出现") },
                   ],
                 },
                 {
-                  title: 'AI 分析',
+                  title: tr("AI 分析"),
                   icon: '🤖',
                   color: 'violet',
                   tools: [
-                    { name: 'ai_analyze', desc: '启动 AI 日志分析（非流式，等待完整结果）', extra: '参数：source(realtime/file)、filter、customPrompt、timeoutMs' },
-                    { name: 'ai_get_result', desc: '获取最近一次 AI 分析结果（Markdown 格式）' },
-                    { name: 'ai_clear', desc: '清空 AI 分析结果和对话上下文' },
+                    { name: 'ai_analyze', desc: tr("启动 AI 日志分析（非流式，等待完整结果）"), extra: tr("参数：source(realtime/file)、filter、customPrompt、timeoutMs") },
+                    { name: 'ai_get_result', desc: tr("获取最近一次 AI 分析结果（Markdown 格式）") },
+                    { name: 'ai_clear', desc: tr("清空 AI 分析结果和对话上下文") },
                   ],
                 },
               ].map((group) => (
@@ -2493,7 +2428,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-sm">⚙️</span>
-                  <span className={`text-xs font-bold uppercase tracking-wide ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>配置方法</span>
+                  <span className={`text-xs font-bold uppercase tracking-wide ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("配置方法")}</span>
                   <div className={`flex-1 h-px ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
                 </div>
 
@@ -2541,8 +2476,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                     }}
                     className={`absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 text-[11px] rounded transition-colors ${isDark ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED]' : 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED]'}`}
                   >
-                    <Copy size={11} /> 复制
-                  </button>
+                    <Copy size={11} />{tr(" 复制")}</button>
                   <pre className={`px-3 py-3 pr-16 rounded-lg text-[11px] leading-relaxed font-mono overflow-x-auto ${isDark ? 'bg-slate-900 text-emerald-300 border border-[#3E4145]' : 'bg-slate-900 text-emerald-300'}`}>
 {mcpConfigTab === 'trae' ? `{
   "mcpServers": {
@@ -2551,18 +2485,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       "headers": {}
     }
   }
-}` : mcpConfigTab === 'claude' ? `# 方式一：CLI 命令（推荐）
-claude mcp add --transport http android-log-analyzer http://127.0.0.1:${mcpPort}/mcp
-
-# 方式二：编辑 ~/.claude.json 或项目根目录 .mcp.json
-{
-  "mcpServers": {
-    "android-log-analyzer": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:${mcpPort}/mcp"
-    }
-  }
-}` : `# ~/.codex/config.toml
+}` : mcpConfigTab === 'claude' ? tr("# 方式一：CLI 命令（推荐）\nclaude mcp add --transport http android-log-analyzer http://127.0.0.1:{0}/mcp\n\n# 方式二：编辑 ~/.claude.json 或项目根目录 .mcp.json\n{\n  \"mcpServers\": {\n    \"android-log-analyzer\": {\n      \"type\": \"streamable-http\",\n      \"url\": \"http://127.0.0.1:{1}/mcp\"\n    }\n  }\n}", { 0: mcpPort, 1: mcpPort }) : `# ~/.codex/config.toml
 [mcp_servers.android-log-analyzer]
 transport = "http"
 url = "http://127.0.0.1:${mcpPort}/mcp"`}
@@ -2571,24 +2494,21 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
 
                 {/* Config file path hint */}
                 <div className={`mt-1.5 text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                  {mcpConfigTab === 'trae' && '配置文件：Trae 的 mcp.json / Cursor 的 settings.json'}
-                  {mcpConfigTab === 'claude' && 'CLI 命令直接添加，或编辑 ~/.claude.json / .mcp.json'}
-                  {mcpConfigTab === 'codex' && '配置文件：~/.codex/config.toml'}
+                  {mcpConfigTab === 'trae' && tr("配置文件：Trae 的 mcp.json / Cursor 的 settings.json")}
+                  {mcpConfigTab === 'claude' && tr("CLI 命令直接添加，或编辑 ~/.claude.json / .mcp.json")}
+                  {mcpConfigTab === 'codex' && tr("配置文件：~/.codex/config.toml")}
                 </div>
               </div>
             </div>
 
             {/* Footer */}
             <div className={`flex items-center justify-between px-6 py-3 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
-              <div className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-                当前端口：<span className={`font-mono font-semibold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{mcpPort}</span>
+              <div className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("当前端口：")}<span className={`font-mono font-semibold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{mcpPort}</span>
               </div>
               <button
                 onClick={() => setMcpHelpVisible(false)}
                 className={`px-4 py-1.5 text-xs rounded-lg transition-colors ${isDark ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED]' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
-              >
-                关闭
-              </button>
+              >{tr("关闭")}</button>
             </div>
           </div>
         </div>
@@ -2611,22 +2531,20 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
                 <Lock size={20} className="text-amber-400" />
               </div>
               <div>
-                <h4 className="text-base font-semibold text-[#E8EAED]">会员专属功能</h4>
-                <p className="text-xs text-[#9AA0A6] mt-0.5">{vipBlockMsg} 仅会员可用</p>
+                <h4 className="text-base font-semibold text-[#E8EAED]">{tr("会员专属功能")}</h4>
+                <p className="text-xs text-[#9AA0A6] mt-0.5">{tr("{0} 仅会员可用", { 0: vipBlockMsg })}</p>
               </div>
             </div>
-            <p className="text-sm text-[#9AA0A6] mb-5">当前为基础版，开通会员即可解锁全部 AI 能力与 MCP 服务。</p>
+            <p className="text-sm text-[#9AA0A6] mb-5">{tr("当前为基础版，开通会员即可解锁全部 AI 能力与 MCP 服务。")}</p>
             <div className="flex justify-end gap-2">
-              <button onClick={dismissVipBlock} className="px-4 py-2 text-sm rounded-lg bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600 transition-colors">知道了</button>
+              <button onClick={dismissVipBlock} className="px-4 py-2 text-sm rounded-lg bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600 transition-colors">{tr("知道了")}</button>
               <button
                 onClick={() => {
                   dismissVipBlock();
                   if (window.electronAPI?.logAnalyzerClose) window.electronAPI.logAnalyzerClose();
                 }}
                 className="px-4 py-2 text-sm rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white font-medium transition-all"
-              >
-                去开通
-              </button>
+              >{tr("去开通")}</button>
             </div>
           </div>
         </div>
@@ -2637,6 +2555,7 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
 
 // H5: 使用 React.memo 避免不必要的重渲染（仅当 props 变化时才重新渲染）
 const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted, marked, onMark }) {
+  useLocale();
   const lvl = entry.level ?? 'V';
   const tag = entry.tag ?? '';
   const pkg = entry.pkg ?? '';
@@ -2659,7 +2578,7 @@ const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted, mar
       title={entry.raw}
     >
       <span className={`flex min-w-0 items-center gap-1 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-        <button type="button" aria-label={`标记日志 ${fmtTs(entry.ts)}`} title={marked ? '已标记，可添加另一条备注' : '标记问题发生的位置'} onDoubleClick={event => event.stopPropagation()} onClick={() => onMark(entry)} className={`shrink-0 rounded p-0.5 hover:bg-emerald-500/15 focus-visible:outline-emerald-500 ${marked ? 'text-emerald-500' : 'hover:text-emerald-500'}`}><BookmarkPlus size={12} /></button>
+        <button type="button" aria-label={tr("标记日志 {0}", { 0: fmtTs(entry.ts) })} title={marked ? tr("已标记，可添加另一条备注") : tr("标记问题发生的位置")} onDoubleClick={event => event.stopPropagation()} onClick={() => onMark(entry)} className={`shrink-0 rounded p-0.5 hover:bg-emerald-500/15 focus-visible:outline-emerald-500 ${marked ? 'text-emerald-500' : 'hover:text-emerald-500'}`}><BookmarkPlus size={12} /></button>
         <span className="truncate">{fmtTs(entry.ts)}</span>
       </span>
       <span className={`text-center font-bold text-xs rounded px-1 ${levelBgColors[lvl]} ${levelColors[lvl]}`}>
@@ -2681,12 +2600,13 @@ const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted, mar
 // 轻量 Markdown 渲染组件（用于 AI 分析结果展示）
 // 使用增量解析 + useDeferredValue 避免长文本时 UI 卡死
 function AiMarkdownRender({ content, isDark }) {
+  const locale = useLocale();
   // useDeferredValue: 让 React 在空闲时才渲染 Markdown，不阻塞用户交互
   const deferredContent = useDeferredValue(content);
   // M10: parseMarkdown 缓存优化 - useMemo 本身已提供基于 deferredContent 的 memoization，
   // 内容相同时不会重新解析；useDeferredValue 进一步确保只在空闲时更新。
   // 注：不使用 ref 缓存，因为 React 19 不允许在 render 阶段（useMemo 内）访问 refs。
-  const blocks = useMemo(() => parseMarkdown(deferredContent), [deferredContent]);
+  const blocks = useMemo(() => { void locale; return parseMarkdown(deferredContent); }, [deferredContent, locale]);
   const endRef = useRef(null);
   const isStale = content !== deferredContent;
 

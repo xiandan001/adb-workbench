@@ -83,7 +83,8 @@ test('standalone preload exposes only fixed-channel lifecycle functions and neve
   const ipcRenderer = new EventEmitter(); const sent = []; let exposed;
   ipcRenderer.send = (...args) => sent.push(args);
   vm.runInNewContext(source('preload.cjs'), { require: name => { assert.equal(name, 'electron'); return { ipcRenderer, contextBridge: { exposeInMainWorld: (name, value) => { exposed = { name, value }; } } }; } });
-  assert.equal(exposed.name, 'startupOverlay'); assert.deepEqual(Object.keys(exposed.value).sort(), ['finished', 'onPlay', 'ready']);
+  assert.equal(exposed.name, 'startupOverlay'); assert.deepEqual(Object.keys(exposed.value).sort(), ['finished', 'initialLanguage', 'onPlay', 'ready']);
+  assert.equal(exposed.value.initialLanguage, 'zh-CN');
   exposed.value.ready(); exposed.value.finished(); assert.deepEqual(sent, [['startup-overlay:ready'], ['startup-overlay:finished']]);
   const values = []; const unsubscribe = exposed.value.onPlay((...args) => values.push(args)); const payload = { target: { x: 1, y: 2, width: 900, height: 600 } };
   ipcRenderer.emit('startup-overlay:play', { privateEvent: true }, payload); ipcRenderer.emit('startup-overlay:play', {}, payload);

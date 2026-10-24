@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // Regression difference reports: capture reusable baselines and compare current devices.
 
 const { app } = require('electron');
@@ -88,7 +89,7 @@ async function captureBaseline(deviceId, options = {}) {
   const baseline = {
     version: 1,
     id: `baseline-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    name: String(options.name || '').trim() || `${snapshot.device.model || deviceId} 基线`,
+    name: String(options.name || '').trim() || tr("{0} 基线", { 0: snapshot.device.model || deviceId }),
     appVersion: getAppVersion(),
     deviceId,
     capturedAt: new Date().toISOString(),
@@ -114,7 +115,7 @@ async function runRegression(deviceId, baselinePath, options = {}) {
   const result = {
     version: 1,
     id: `regression-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    name: String(options.name || '').trim() || `${current.device.model || deviceId} 回归差异报告`,
+    name: String(options.name || '').trim() || tr("{0} 回归差异报告", { 0: current.device.model || deviceId }),
     appVersion: getAppVersion(),
     status,
     baseline: {
@@ -170,17 +171,17 @@ function compareSnapshots(baseline, current) {
   const logIssues = current.logs?.issues || [];
   const findings = [];
 
-  propDiffs.forEach(item => findings.push({ severity: isCriticalProp(item.key) ? 'high' : 'medium', label: `系统属性变化：${item.key}`, detail: `${item.before || '-'} -> ${item.after || '-'}` }));
-  packageDiff.removed.slice(0, 30).forEach(item => findings.push({ severity: item.system ? 'high' : 'medium', label: `应用减少：${item.packageName}`, detail: item.versionCode ? `versionCode ${item.versionCode}` : item.path || '' }));
-  packageDiff.added.slice(0, 30).forEach(item => findings.push({ severity: item.system ? 'medium' : 'low', label: `应用新增：${item.packageName}`, detail: item.versionCode ? `versionCode ${item.versionCode}` : item.path || '' }));
-  packageDiff.changed.slice(0, 50).forEach(item => findings.push({ severity: item.system ? 'medium' : 'low', label: `应用变化：${item.packageName}`, detail: item.changes.map(change => `${change.key}: ${change.before || '-'} -> ${change.after || '-'}`).join('; ') }));
+  propDiffs.forEach(item => findings.push({ severity: isCriticalProp(item.key) ? 'high' : 'medium', label: tr("系统属性变化：{0}", { 0: item.key }), detail: `${item.before || '-'} -> ${item.after || '-'}` }));
+  packageDiff.removed.slice(0, 30).forEach(item => findings.push({ severity: item.system ? 'high' : 'medium', label: tr("应用减少：{0}", { 0: item.packageName }), detail: item.versionCode ? `versionCode ${item.versionCode}` : item.path || '' }));
+  packageDiff.added.slice(0, 30).forEach(item => findings.push({ severity: item.system ? 'medium' : 'low', label: tr("应用新增：{0}", { 0: item.packageName }), detail: item.versionCode ? `versionCode ${item.versionCode}` : item.path || '' }));
+  packageDiff.changed.slice(0, 50).forEach(item => findings.push({ severity: item.system ? 'medium' : 'low', label: tr("应用变化：{0}", { 0: item.packageName }), detail: item.changes.map(change => `${change.key}: ${change.before || '-'} -> ${change.after || '-'}`).join('; ') }));
   performanceDiff.warnings.forEach(item => findings.push({ severity: item.severity, label: item.label, detail: item.detail }));
-  logIssues.slice(0, 30).forEach(item => findings.push({ severity: item.severity, label: `日志异常：${item.label}`, detail: item.detail }));
+  logIssues.slice(0, 30).forEach(item => findings.push({ severity: item.severity, label: tr("日志异常：{0}", { 0: item.label }), detail: item.detail }));
 
   const highCount = findings.filter(item => item.severity === 'high').length;
   const mediumCount = findings.filter(item => item.severity === 'medium').length;
   return {
-    summary: findings.length === 0 ? '未发现回归差异' : `发现 ${findings.length} 项差异或风险`,
+    summary: findings.length === 0 ? tr("未发现回归差异") : tr("发现 {0} 项差异或风险", { 0: findings.length }),
     highCount,
     mediumCount,
     lowCount: findings.length - highCount - mediumCount,
@@ -223,7 +224,7 @@ function comparePackages(before, after) {
 
 function comparePerformance(before, after) {
   const warnings = [];
-  if (!after) return { warnings: [{ severity: 'low', label: '当前性能快照未生成', detail: '请检查设备状态或 ADB 连接' }], metrics: [] };
+  if (!after) return { warnings: [{ severity: 'low', label: tr("当前性能快照未生成"), detail: tr("请检查设备状态或 ADB 连接") }], metrics: [] };
   const metrics = [
     metricDelta('CPU', before?.cpu?.usage, after?.cpu?.usage, '%', 30),
     metricDelta('内存', before?.memory?.usage, after?.memory?.usage, '%', 20),
@@ -232,9 +233,9 @@ function comparePerformance(before, after) {
     metricDelta('前台 FPS', before?.fps?.foreground?.fps, after?.fps?.foreground?.fps, ' FPS', -15)
   ].filter(Boolean);
   metrics.forEach(item => {
-    if (item.regressed) warnings.push({ severity: item.severity, label: `性能回退：${item.label}`, detail: `${item.beforeText} -> ${item.afterText}` });
+    if (item.regressed) warnings.push({ severity: item.severity, label: tr("性能回退：{0}", { 0: item.label }), detail: `${item.beforeText} -> ${item.afterText}` });
   });
-  (after.warnings || []).forEach(item => warnings.push({ severity: 'medium', label: `性能告警：${item.label}`, detail: item.type || '' }));
+  (after.warnings || []).forEach(item => warnings.push({ severity: 'medium', label: tr("性能告警：{0}", { 0: item.label }), detail: item.type || '' }));
   return { warnings, metrics };
 }
 
@@ -247,7 +248,7 @@ function metricDelta(label, before, after, suffix, threshold) {
   if (delta != null && threshold >= 0) regressed = delta >= threshold;
   if (delta != null && threshold < 0) regressed = delta <= threshold;
   return {
-    label,
+    label: tr(label),
     before: beforeNum,
     after: afterNum,
     delta,
@@ -279,69 +280,69 @@ function analyzeLogs(text) {
 function buildRegressionReport(result) {
   const { diff, baseline, current } = result;
   const lines = [
-    '# 回归差异报告',
+    tr("# 回归差异报告"),
     '',
-    '## 概要',
+    tr("## 概要"),
     '',
-    `- 状态：${statusText(result.status)}`,
-    `- 结论：${diff.summary}`,
-    `- 当前设备：${result.deviceId}`,
-    `- 当前型号：${current.device.model || '-'}`,
-    `- 基线：${baseline.name || '-'}`,
-    `- 基线设备：${baseline.deviceId || '-'}`,
-    `- 基线时间：${baseline.capturedAt || '-'}`,
-    `- 对比时间：${result.comparedAt}`,
-    `- 应用版本：${result.appVersion}`,
+    tr("- 状态：{0}", { 0: statusText(result.status) }),
+    tr("- 结论：{0}", { 0: diff.summary }),
+    tr("- 当前设备：{0}", { 0: result.deviceId }),
+    tr("- 当前型号：{0}", { 0: current.device.model || '-' }),
+    tr("- 基线：{0}", { 0: baseline.name || '-' }),
+    tr("- 基线设备：{0}", { 0: baseline.deviceId || '-' }),
+    tr("- 基线时间：{0}", { 0: baseline.capturedAt || '-' }),
+    tr("- 对比时间：{0}", { 0: result.comparedAt }),
+    tr("- 应用版本：{0}", { 0: result.appVersion }),
     '',
-    '## 风险汇总',
+    tr("## 风险汇总"),
     '',
-    `- 高风险：${diff.highCount}`,
-    `- 中风险：${diff.mediumCount}`,
-    `- 低风险：${diff.lowCount}`,
+    tr("- 高风险：{0}", { 0: diff.highCount }),
+    tr("- 中风险：{0}", { 0: diff.mediumCount }),
+    tr("- 低风险：{0}", { 0: diff.lowCount }),
     ''
   ];
 
   if (diff.findings.length === 0) {
-    lines.push('- 未发现差异或风险', '');
+    lines.push(tr("- 未发现差异或风险"), '');
   } else {
     diff.findings.forEach(item => lines.push(`- [${item.severity}] ${item.label}：${item.detail || '-'}`));
     lines.push('');
   }
 
-  lines.push('## 系统属性变化', '');
-  if (diff.propDiffs.length === 0) lines.push('- 无');
+  lines.push(tr("## 系统属性变化"), '');
+  if (diff.propDiffs.length === 0) lines.push(tr("- 无"));
   else {
-    lines.push('| 属性 | 基线 | 当前 |', '| --- | --- | --- |');
+    lines.push(tr("| 属性 | 基线 | 当前 |"), '| --- | --- | --- |');
     diff.propDiffs.forEach(item => lines.push(`| ${escapeTable(item.key)} | ${escapeTable(item.before || '-')} | ${escapeTable(item.after || '-')} |`));
   }
 
-  lines.push('', '## 应用包变化', '');
-  lines.push(`- 新增：${diff.packageDiff.added.length}`);
-  lines.push(`- 删除：${diff.packageDiff.removed.length}`);
-  lines.push(`- 变化：${diff.packageDiff.changed.length}`, '');
-  appendPackageRows(lines, '新增应用', diff.packageDiff.added);
-  appendPackageRows(lines, '删除应用', diff.packageDiff.removed);
+  lines.push('', tr("## 应用包变化"), '');
+  lines.push(tr("- 新增：{0}", { 0: diff.packageDiff.added.length }));
+  lines.push(tr("- 删除：{0}", { 0: diff.packageDiff.removed.length }));
+  lines.push(tr("- 变化：{0}", { 0: diff.packageDiff.changed.length }), '');
+  appendPackageRows(lines, tr("新增应用"), diff.packageDiff.added);
+  appendPackageRows(lines, tr("删除应用"), diff.packageDiff.removed);
   appendChangedPackageRows(lines, diff.packageDiff.changed);
 
-  lines.push('', '## 性能变化', '');
+  lines.push('', tr("## 性能变化"), '');
   if (diff.performanceDiff.metrics.length === 0) {
-    lines.push('- 当前性能数据不足，未生成对比');
+    lines.push(tr("- 当前性能数据不足，未生成对比"));
   } else {
-    lines.push('| 指标 | 基线 | 当前 | 变化 |', '| --- | ---: | ---: | ---: |');
+    lines.push(tr("| 指标 | 基线 | 当前 | 变化 |"), '| --- | ---: | ---: | ---: |');
     diff.performanceDiff.metrics.forEach(item => {
       lines.push(`| ${item.label} | ${item.beforeText} | ${item.afterText} | ${item.delta == null ? '-' : item.delta} |`);
     });
   }
   if (diff.performanceDiff.warnings.length) {
-    lines.push('', '### 性能告警', '');
+    lines.push('', tr("### 性能告警"), '');
     diff.performanceDiff.warnings.forEach(item => lines.push(`- [${item.severity}] ${item.label}：${item.detail || '-'}`));
   }
 
-  lines.push('', '## 当前日志异常', '');
-  if (diff.logIssues.length === 0) lines.push('- 未在当前日志尾部发现 Crash/ANR/OOM 等关键异常');
+  lines.push('', tr("## 当前日志异常"), '');
+  if (diff.logIssues.length === 0) lines.push(tr("- 未在当前日志尾部发现 Crash/ANR/OOM 等关键异常"));
   else diff.logIssues.forEach(item => lines.push(`- [${item.severity}] ${item.label}：${item.detail}`));
 
-  lines.push('', '## 当前设备信息', '');
+  lines.push('', tr("## 当前设备信息"), '');
   Object.entries(current.device).forEach(([key, value]) => lines.push(`- ${key}：${value || '-'}`));
   lines.push('');
   return lines.join('\n');
@@ -350,28 +351,28 @@ function buildRegressionReport(result) {
 function appendPackageRows(lines, title, rows) {
   lines.push(`### ${title}`, '');
   if (!rows.length) {
-    lines.push('- 无', '');
+    lines.push(tr("- 无"), '');
     return;
   }
-  lines.push('| 包名 | versionCode | 类型 | 路径 |', '| --- | ---: | --- | --- |');
+  lines.push(tr("| 包名 | versionCode | 类型 | 路径 |"), '| --- | ---: | --- | --- |');
   rows.slice(0, 80).forEach(item => {
-    lines.push(`| ${escapeTable(item.packageName)} | ${escapeTable(item.versionCode || '-')} | ${item.system ? '系统' : '用户'} | ${escapeTable(item.path || '-')} |`);
+    lines.push(`| ${escapeTable(item.packageName)} | ${escapeTable(item.versionCode || '-')} | ${item.system ? tr("系统") : tr("用户")} | ${escapeTable(item.path || '-')} |`);
   });
-  if (rows.length > 80) lines.push(`| ... | 还有 ${rows.length - 80} 项 | | |`);
+  if (rows.length > 80) lines.push(tr("| ... | 还有 {0} 项 | | |", { 0: rows.length - 80 }));
   lines.push('');
 }
 
 function appendChangedPackageRows(lines, rows) {
-  lines.push('### 变化应用', '');
+  lines.push(tr("### 变化应用"), '');
   if (!rows.length) {
-    lines.push('- 无', '');
+    lines.push(tr("- 无"), '');
     return;
   }
-  lines.push('| 包名 | 变化 |', '| --- | --- |');
+  lines.push(tr("| 包名 | 变化 |"), '| --- | --- |');
   rows.slice(0, 100).forEach(item => {
     lines.push(`| ${escapeTable(item.packageName)} | ${escapeTable(item.changes.map(change => `${change.key}: ${change.before || '-'} -> ${change.after || '-'}`).join('; '))} |`);
   });
-  if (rows.length > 100) lines.push(`| ... | 还有 ${rows.length - 100} 项 |`);
+  if (rows.length > 100) lines.push(tr("| ... | 还有 {0} 项 |", { 0: rows.length - 100 }));
   lines.push('');
 }
 
@@ -534,7 +535,7 @@ function escapeTable(value) {
 }
 
 function statusText(status) {
-  return status === 'passed' ? '通过' : status === 'attention' ? '需关注' : '未通过';
+  return status === 'passed' ? tr("通过") : status === 'attention' ? tr("需关注") : tr("未通过");
 }
 
 module.exports = { register, captureBaseline, runRegression, listBaselines };

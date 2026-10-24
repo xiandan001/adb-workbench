@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // App package management backend: package list/detail plus VIP-gated mutating actions.
 
 const { app } = require('electron');
@@ -123,7 +124,7 @@ function register(ipcMain) {
 async function withVip(action) {
   const status = await vip.getStatusAsync();
   if (!status.activated) {
-    return { ok: false, code: 'vip_required', error: 'VIP 会员专属功能，请先开通会员' };
+    return { ok: false, code: 'vip_required', error: tr("VIP 会员专属功能，请先开通会员") };
   }
   try {
     return await action(status);

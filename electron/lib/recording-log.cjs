@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,7 +7,7 @@ const LOG_LIMIT_BYTES = 100 * 1024 * 1024;
 async function startRecordingLog({ deviceId, videoPath, onState = () => {} }, {
   spawnAdb = require('./adb-runtime.cjs').spawnAdb, maxBytes = LOG_LIMIT_BYTES
 } = {}) {
-  if (!deviceId || !path.isAbsolute(videoPath) || !/\.mp4$/i.test(videoPath)) throw new Error('录屏日志参数无效');
+  if (!deviceId || !path.isAbsolute(videoPath) || !/\.mp4$/i.test(videoPath)) throw new Error(tr("录屏日志参数无效"));
   const file = videoPath.replace(/\.mp4$/i, '.log');
   const handle = await fs.promises.open(file, 'wx', 0o600);
   const writer = handle.createWriteStream({ autoClose: true });
@@ -44,7 +45,7 @@ async function startRecordingLog({ deviceId, videoPath, onState = () => {} }, {
     });
     child.on('close', code => {
       if (!stopping && !result.truncated) {
-        result.error ||= diagnostic.trim() || (code ? `日志采集已退出（${code}）` : '日志采集提前结束');
+        result.error ||= diagnostic.trim() || (code ? tr("日志采集已退出（{0}）", { 0: code }) : tr("日志采集提前结束"));
         notify();
       }
       if (!writer.destroyed && !writer.writableEnded) writer.end();
@@ -62,7 +63,7 @@ async function startRecordingLog({ deviceId, videoPath, onState = () => {} }, {
       stopPromise = (async () => {
         if (!finished) child.kill();
         const timer = setTimeout(() => {
-          if (!finished) { result.error ||= '日志采集停止超时，日志可能不完整'; notify(); child.stdout.destroy(); writer.end(); }
+          if (!finished) { result.error ||= tr("日志采集停止超时，日志可能不完整"); notify(); child.stdout.destroy(); writer.end(); }
         }, 5000);
         try { return await completion; }
         finally { clearTimeout(timer); }

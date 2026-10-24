@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { Cable } from 'lucide-react';
 import SerialConnectionSettings from './SerialConnectionSettings';
@@ -10,8 +11,8 @@ import { isDarkTheme } from '../shared/theme';
 import { readSerialTerminalStyle, saveSerialTerminalStyle } from '../shared/serialTerminalStyle';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
-const WORKSPACE_LABELS = { rs232: 'RS232调试', terminal: '串口终端' };
-const STATUS_LABELS = { disconnected: '未连接', connecting: '连接中', connected: '已连接', disconnecting: '断开中', error: '连接错误' };
+const WORKSPACE_LABELS = () => ({ rs232: tr("RS232调试"), terminal: tr("串口终端") });
+const STATUS_LABELS = () => ({ disconnected: tr("未连接"), connecting: tr("连接中"), connected: tr("已连接"), disconnecting: tr("断开中"), error: tr("连接错误") });
 
 function initialSettings() {
   let preferences = defaultSerialPreferences();
@@ -26,6 +27,7 @@ function initialSettings() {
 }
 
 export default function SerialPanel({ theme, showToast }) {
+  useLocale();
   const id = useId();
   const [settings] = useState(initialSettings);
   const [preferences, setPreferences] = useState(settings.preferences);
@@ -64,7 +66,7 @@ export default function SerialPanel({ theme, showToast }) {
   const changeTerminalSettings = changes => {
     if (Object.hasOwn(changes, 'style')) {
       try { saveSerialTerminalStyle(changes.style); setTerminalStyleError(''); }
-      catch (failure) { setTerminalStyleError(`终端样式未能保存，已保留原样式：${failure.message}`); return false; }
+      catch (failure) { setTerminalStyleError(tr("终端样式未能保存，已保留原样式：{0}", { 0: failure.message })); return false; }
     }
     updateWorkspace({ terminal: { ...workspace.terminal, ...changes } });
     return true;
@@ -84,10 +86,10 @@ export default function SerialPanel({ theme, showToast }) {
       if (snapshotPending[target]) { snapshotAgain[target] = true; return snapshotPending[target]; }
       snapshotPending[target] = (async () => {
         try {
-          if (!api?.serialSnapshot) throw new Error('串口服务不可用，请使用桌面版本并重启后重试');
+          if (!api?.serialSnapshot) throw new Error(tr("串口服务不可用，请使用桌面版本并重启后重试"));
           const result = await api.serialSnapshot({ workspace: target });
-          if (!result?.success) throw new Error(result?.error || '读取串口状态失败');
-          if (result.snapshot?.workspace !== target) throw new Error('串口状态来源不匹配，请重试');
+          if (!result?.success) throw new Error(result?.error || tr("读取串口状态失败"));
+          if (result.snapshot?.workspace !== target) throw new Error(tr("串口状态来源不匹配，请重试"));
           apply(result.snapshot);
         } catch (failure) { if (!disposed) setErrors(current => ({ ...current, [target]: failure.message })); }
       })().finally(() => {
@@ -97,7 +99,7 @@ export default function SerialPanel({ theme, showToast }) {
       return snapshotPending[target];
     };
     const discovery = createSerialDiscovery({ list: async () => {
-      if (!api?.serialListPorts) throw new Error('串口服务不可用，请使用桌面版本');
+      if (!api?.serialListPorts) throw new Error(tr("串口服务不可用，请使用桌面版本"));
       return api.serialListPorts();
     }, onResult: result => {
       if (result.ports) {
@@ -127,12 +129,12 @@ export default function SerialPanel({ theme, showToast }) {
       const active = !document.hidden;
       if (active) { void refresh(); timer = setInterval(() => { void refresh(); }, 2000); }
       try {
-        if (!api?.serialSubscribe) throw new Error('串口服务不可用，请使用桌面版本');
+        if (!api?.serialSubscribe) throw new Error(tr("串口服务不可用，请使用桌面版本"));
         const result = await api.serialSubscribe({ active });
         if (!disposed && generation === subscriptionGeneration && active) {
-          if (!result?.success) throw new Error(result?.error || '串口状态订阅失败');
+          if (!result?.success) throw new Error(result?.error || tr("串口状态订阅失败"));
           for (const target of SERIAL_WORKSPACES) {
-            if (result.snapshots?.[target]?.workspace !== target) throw new Error('串口状态来源不匹配，请重试');
+            if (result.snapshots?.[target]?.workspace !== target) throw new Error(tr("串口状态来源不匹配，请重试"));
             apply(result.snapshots[target]);
           }
         }
@@ -177,7 +179,7 @@ export default function SerialPanel({ theme, showToast }) {
     preferencesRef.current = normalized;
     setPreferences(normalized);
     try { saveSerialPreferences(normalized); setPersistenceError(''); return true; }
-    catch (failure) { setPersistenceError(`当前设置仅本次有效，未能保存：${failure.message}`); return false; }
+    catch (failure) { setPersistenceError(tr("当前设置仅本次有效，未能保存：{0}", { 0: failure.message })); return false; }
   };
 
   const act = async (target, kind, operation) => {
@@ -190,13 +192,13 @@ export default function SerialPanel({ theme, showToast }) {
       const result = await operation();
       if (!aliveRef.current) return result;
       if (result?.snapshot) {
-        if (result.snapshot.workspace !== target) throw new Error('串口操作返回了不同来源的状态，请刷新后重试');
+        if (result.snapshot.workspace !== target) throw new Error(tr("串口操作返回了不同来源的状态，请刷新后重试"));
         setSnapshots(current => applySerialWorkspaceSnapshot(current, result.snapshot));
       }
-      if (!result?.success && !result?.cancelled) throw new Error(result?.error || '串口操作未完成');
+      if (!result?.success && !result?.cancelled) throw new Error(result?.error || tr("串口操作未完成"));
       return result;
     } catch (failure) {
-      if (aliveRef.current && actionRef.current[target] === action) { setErrors(current => ({ ...current, [target]: failure.message || '串口操作未完成' })); void snapshotRef.current?.(target); }
+      if (aliveRef.current && actionRef.current[target] === action) { setErrors(current => ({ ...current, [target]: failure.message || tr("串口操作未完成") })); void snapshotRef.current?.(target); }
       return null;
     } finally {
       if (actionRef.current[target] === action) {
@@ -216,37 +218,37 @@ export default function SerialPanel({ theme, showToast }) {
       if (aliveRef.current) setHistory(nextHistory);
       window.dispatchEvent(new Event('serial-history-changed'));
     } catch (failure) {
-      if (aliveRef.current) setPersistenceError(`已写入串口，但发送历史未保存：${failure.message}`);
+      if (aliveRef.current) setPersistenceError(tr("已写入串口，但发送历史未保存：{0}", { 0: failure.message }));
     }
-    if (aliveRef.current) showToast?.('RS232：已写入串口，不代表设备已执行或回应');
+    if (aliveRef.current) showToast?.(tr("RS232：已写入串口，不代表设备已执行或回应"));
   };
   const save = async target => {
     const result = await act(target, 'save', () => window.electronAPI.serialSave({ workspace: target }));
-    if (result?.success && !result.cancelled && aliveRef.current) { showToast?.(`${WORKSPACE_LABELS[target]}当前记录已保存`); void snapshotRef.current?.(target); }
+    if (result?.success && !result.cancelled && aliveRef.current) { showToast?.(tr("{0}当前记录已保存", { 0: WORKSPACE_LABELS()[target] })); void snapshotRef.current?.(target); }
   };
   const connected = snapshot.status === 'connected';
-  const summary = snapshot.revision < 0 ? '正在读取状态…' : connected ? `已连接 · ${snapshot.path} · ${snapshot.config?.baudRate || config.baudRate}`
-    : snapshot.status === 'connecting' ? `连接中 · ${snapshot.path}` : snapshot.status === 'disconnecting' ? '正在断开'
-      : snapshot.status === 'error' ? '连接错误' : `发现 ${ports.length} 个串口`;
+  const summary = snapshot.revision < 0 ? tr("正在读取状态…") : connected ? tr("已连接 · {0} · {1}", { 0: snapshot.path, 1: snapshot.config?.baudRate || config.baudRate })
+    : snapshot.status === 'connecting' ? tr("连接中 · {0}", { 0: snapshot.path }) : snapshot.status === 'disconnecting' ? tr("正在断开")
+      : snapshot.status === 'error' ? tr("连接错误") : tr("发现 {0} 个串口", { 0: ports.length });
   const otherSelected = otherMode === 'terminal' ? workspace.terminalSelectedPath : workspace.selectedPath;
   const otherOccupied = otherSnapshot.reservedPort || (pending[otherMode] === 'connect' ? otherSelected
     : ['connected', 'connecting', 'disconnecting'].includes(otherSnapshot.status) ? otherSnapshot.path : '');
   const selectedOccupied = selectedPath && otherOccupied && selectedPath.toLowerCase() === otherOccupied.toLowerCase();
 
-  return <section aria-label="串口 / RS232" className={`mb-4 rounded-xl border shadow-sm ${theme.card} ${theme.text}`}>
+  return <section aria-label={tr("串口 / RS232")} className={`mb-4 rounded-xl border shadow-sm ${theme.card} ${theme.text}`}>
     <div className="flex w-full flex-wrap items-center gap-2.5 rounded-xl px-4 py-3 text-left">
-      <Cable size={18} className={connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">串口 / RS232</h2><label className="sr-only" htmlFor={`${id}-mode`}>工作模式</label><SelectMenu id={`${id}-mode`} isDark={isDark} compact value={workspace.mode} onChange={mode => updateWorkspace({ mode })} options={[{ value: 'rs232', label: 'RS232调试' }, { value: 'terminal', label: '串口终端' }]} className="w-36" /><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? ' · 有未保存记录' : ''}</span>
-      <p className={`w-full text-right text-[11px] ${theme.textMuted}`} aria-label="另一串口连接状态">{WORKSPACE_LABELS[otherMode]}：{otherSnapshot.revision < 0 ? '读取中' : STATUS_LABELS[otherSnapshot.status]}{otherSnapshot.path ? ` · ${otherSnapshot.path}` : ''}{otherSnapshot.unsaved ? ' · 有未保存记录' : ''}</p>
+      <Cable size={18} className={connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">{tr("串口 / RS232")}</h2><label className="sr-only" htmlFor={`${id}-mode`}>{tr("工作模式")}</label><SelectMenu id={`${id}-mode`} isDark={isDark} compact value={workspace.mode} onChange={mode => updateWorkspace({ mode })} options={[{ value: 'rs232', label: tr("RS232调试") }, { value: 'terminal', label: tr("串口终端") }]} className="w-36" /><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? tr(" · 有未保存记录") : ''}</span>
+      <p className={`w-full text-right text-[11px] ${theme.textMuted}`} aria-label={tr("另一串口连接状态")}>{WORKSPACE_LABELS()[otherMode]}：{otherSnapshot.revision < 0 ? tr("读取中") : STATUS_LABELS()[otherSnapshot.status]}{otherSnapshot.path ? ` · ${otherSnapshot.path}` : ''}{otherSnapshot.unsaved ? tr(" · 有未保存记录") : ''}</p>
     </div>
     <div className="space-y-4 border-t border-slate-400/20 p-4">
-      <p className={`text-xs leading-5 ${theme.textMuted}`}>两路独立，可同时连接不同 COM。切换只改变界面，不会断开另一侧连接或停止后台接收。{mode === 'terminal' ? '连接后点击终端，用键盘操作设备 Shell。' : '连接后选择格式，查看或发送数据。'}</p>
+      <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr("两路独立，可同时连接不同 COM。切换只改变界面，不会断开另一侧连接或停止后台接收。")}{mode === 'terminal' ? tr("连接后点击终端，用键盘操作设备 Shell。") : tr("连接后选择格式，查看或发送数据。")}</p>
       <SerialConnectionSettings key={mode} theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : selectedPath} onSelectPath={value => updateWorkspace({ [mode === 'terminal' ? 'terminalSelectedPath' : 'selectedPath']: value })} config={connected ? snapshot.config : config} onConfig={value => changePreferences({ [mode === 'terminal' ? 'terminalConfig' : 'config']: value })} status={snapshot.status} activePath={snapshot.path} pending={snapshot.revision < 0 || (Boolean(currentPending) && currentPending !== 'send')} connectingRequest={currentPending === 'connect'} cancelling={currentPending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act(mode, 'connect', () => window.electronAPI.serialConnect({ workspace: mode, path: selectedPath, config }))} onDisconnect={() => act(mode, 'disconnect', () => window.electronAPI.serialDisconnect({ workspace: mode }))} advanced={mode === 'terminal' ? workspace.terminalAdvanced : workspace.advanced} onAdvanced={advanced => updateWorkspace({ [mode === 'terminal' ? 'terminalAdvanced' : 'advanced']: advanced })} />
-      {selectedOccupied && <p role="status" className="text-xs text-amber-500">{selectedPath} 正由{WORKSPACE_LABELS[otherMode]}使用，请为当前界面选择另一个串口。</p>}
-      {discoveryError ? <p role="alert" className="text-xs text-amber-500">{discoveryError}。已保留上次列表，可点击刷新重试。</p> : !ports.length && <p className={`text-xs ${theme.textMuted}`}>未发现串口，请连接串口线并检查驱动。串口工具独立于 ADB 设备连接。</p>}
+      {selectedOccupied && <p role="status" className="text-xs text-amber-500">{tr("{0} 正由{1}使用，请为当前界面选择另一个串口。", { 0: selectedPath, 1: WORKSPACE_LABELS()[otherMode] })}</p>}
+      {discoveryError ? <p role="alert" className="text-xs text-amber-500">{tr("{0}。已保留上次列表，可点击刷新重试。", { 0: discoveryError })}</p> : !ports.length && <p className={`text-xs ${theme.textMuted}`}>{tr("未发现串口，请连接串口线并检查驱动。串口工具独立于 ADB 设备连接。")}</p>}
       {(error || snapshot.error) && <p role="alert" className="break-words rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error || snapshot.error}</p>}
-      {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{persistenceError}</p>}
-      {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{terminalStyleError}</p>}
-      {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>正在打开串口终端…</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
+      {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{tr(persistenceError)}</p>}
+      {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{tr(terminalStyleError)}</p>}
+      {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>{tr("正在打开串口终端…")}</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
       {mode === 'rs232' && <>
         <SerialDataView theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
         <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />

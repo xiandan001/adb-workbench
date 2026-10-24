@@ -1,3 +1,4 @@
+const { tr, windowArguments, onLocaleChanged } = require('./localization.cjs');
 // Android Log Analyzer 集成 - IPC 处理程序 + Log Analyzer 窗口生命周期
 // 该模块管理：
 //   - logcatProc / logStore / currentLogSource / pidPackageMap / logBatch 等
@@ -189,15 +190,22 @@ function createLogAnalyzerWindow() {
     minWidth: 1000,
     minHeight: 680,
     icon: path.join(__dirname, '../../icon.png'),
-    title: 'AI 日志助手',
+    title: tr('AI 日志助手'),
     webPreferences: {
       preload: path.join(__dirname, '../preload.cjs'),
+      additionalArguments: windowArguments(),
       nodeIntegration: false,
       contextIsolation: true,
     }
   });
 
   logAnalyzerWindow.setMenu(null);
+  logAnalyzerWindow.on('page-title-updated', event => event.preventDefault());
+  const stopLanguageUpdates = onLocaleChanged(locale => {
+    if (!logAnalyzerWindow.isDestroyed()) logAnalyzerWindow.setTitle(tr('AI 日志助手', {}, locale));
+  });
+  logAnalyzerWindow.once('closed', stopLanguageUpdates);
+  ctx.setLogAnalyzerWindow(logAnalyzerWindow);
 
   if (isDev) {
     logAnalyzerWindow.loadURL('http://localhost:5173/log-analyzer.html');
@@ -224,7 +232,6 @@ function createLogAnalyzerWindow() {
     ctx.setLogAnalyzerWindow(null);
   });
 
-  ctx.setLogAnalyzerWindow(logAnalyzerWindow);
   return logAnalyzerWindow;
 }
 
@@ -236,7 +243,7 @@ function register(ipcMain) {
     trashItem: file => require('electron').shell.trashItem(file),
     restore: (session) => {
       const aiModule = require('./ai-analyze.cjs');
-      if (logcatProc || aiModule.hasActiveAiRequest()) throw new Error('请先停止日志抓取和 AI 分析后再恢复会话');
+      if (logcatProc || aiModule.hasActiveAiRequest()) throw new Error(tr("请先停止日志抓取和 AI 分析后再恢复会话"));
       clearLogBatchState();
       aiModule.clearAiConversation();
       currentLogSource = session.source;
@@ -382,7 +389,7 @@ function register(ipcMain) {
     const parentWin = (ctx.getLogAnalyzerWindow() && !ctx.getLogAnalyzerWindow().isDestroyed()) ? ctx.getLogAnalyzerWindow() : ctx.getMainWindow();
     if (!parentWin) return { ok: false };
     const res = await dialog.showOpenDialog(parentWin, {
-      title: '选择日志文件',
+      title: tr("选择日志文件"),
       properties: ['openFile'],
       filters: [
         { name: 'Log', extensions: ['log', 'txt'] },
@@ -447,7 +454,7 @@ function register(ipcMain) {
     if (!parentWin) return { ok: false };
     const result = await dialog.showSaveDialog(parentWin, {
       defaultPath: args?.defaultName ?? 'log_export.txt',
-      filters: [{ name: '文本文件', extensions: ['txt', 'log'] }, { name: '所有文件', extensions: ['*'] }]
+      filters: [{ name: tr("文本文件"), extensions: ['txt', 'log'] }, { name: tr("所有文件"), extensions: ['*'] }]
     });
     if (result.canceled || !result.filePath) return { ok: false };
     fs.writeFileSync(result.filePath, args?.content ?? '', 'utf-8');

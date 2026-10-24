@@ -1,5 +1,6 @@
+import { tr } from './i18n.js';
 export function formatBytes(value) {
-  if (!Number.isFinite(value)) return '容量未知';
+  if (!Number.isFinite(value)) return tr("容量未知");
   if (value < 1024) return `${value} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
   let bytes = value / 1024;

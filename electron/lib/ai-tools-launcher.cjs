@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -17,12 +18,12 @@ async function findExecutable(command) {
 function createAiToolsLauncher({ platform = process.platform, environment = process.env, spawnProcess = spawn,
   createServer: pipeServer = createServer, randomId = randomUUID, timeoutMs = 15000, keepOpen = true, windowTitle } = {}) {
   async function launchTerminal({ executable, args, cwd, env: additions = {}, signal } = {}) {
-    if (platform !== 'win32') throw fail('AI_TOOLS_PLATFORM', '当前外部终端启动适配仅支持 Windows');
-    if (signal?.aborted) throw fail('AI_TOOLS_CANCELLED', '终端启动已取消');
+    if (platform !== 'win32') throw fail('AI_TOOLS_PLATFORM', tr("当前外部终端启动适配仅支持 Windows"));
+    if (signal?.aborted) throw fail('AI_TOOLS_CANCELLED', tr("终端启动已取消"));
     const text = value => typeof value === 'string' && value.length <= 8192 && !value.includes('\0');
     if (!text(executable) || !path.win32.isAbsolute(executable) || !text(cwd) || !path.win32.isAbsolute(cwd)
       || !Array.isArray(args) || args.length > 32 || !args.every(text) || !additions || typeof additions !== 'object' || Array.isArray(additions)
-      || Object.entries(additions).some(([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || !text(value))) throw fail('AI_TOOLS_LAUNCH_ARGUMENT', '终端启动参数无效，未执行命令');
+      || Object.entries(additions).some(([key, value]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || !text(value))) throw fail('AI_TOOLS_LAUNCH_ARGUMENT', tr("终端启动参数无效，未执行命令"));
     const env = {};
     for (const [key, value] of Object.entries(environment)) if (/^(?:PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|USERPROFILE|HOMEDRIVE|HOMEPATH|LOCALAPPDATA|APPDATA|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMDATA|COMSPEC|USERNAME|COMPUTERNAME|LANG|LC_ALL)$/i.test(key)) env[key] = value;
     Object.assign(env, additions);
@@ -34,14 +35,14 @@ function createAiToolsLauncher({ platform = process.platform, environment = proc
     const script = buildBootstrapScript({ host, terminal, cwd, keepOpen, terminalScript: buildTerminalScript({ executable, args, cwd, pipeName, nonce, title }) });
     return new Promise((resolve, reject) => {
       let settled = false; let granting = false; let child; let terminalPid; let ready; let stdout = ''; const sockets = new Set();
-      const failed = () => fail('AI_TOOLS_LAUNCH_FAILED', '外部终端未能就绪，请检查 PowerShell、CLI 安装与项目目录；未确认 CLI 启动成功');
+      const failed = () => fail('AI_TOOLS_LAUNCH_FAILED', tr("外部终端未能就绪，请检查 PowerShell、CLI 安装与项目目录；未确认 CLI 启动成功"));
       const finish = (error, result) => {
         if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort);
         for (const socket of sockets) socket.destroy();
         try { server.close(); } catch { /* The pipe may not have begun listening. */ }
         if (error) { child?.kill(); reject(error); } else resolve(result);
       };
-      const abort = () => finish(fail('AI_TOOLS_CANCELLED', '终端启动已取消，未授权运行 CLI'));
+      const abort = () => finish(fail('AI_TOOLS_CANCELLED', tr("终端启动已取消，未授权运行 CLI")));
       const permit = () => {
         if (settled || !ready || !terminalPid) return;
         if (ready.socket.destroyed || ready.message.parentPid !== terminalPid || ready.message.state !== 'ready' || ready.message.inputTTY !== true || ready.message.outputTTY !== true) return finish(failed());
@@ -68,7 +69,7 @@ function createAiToolsLauncher({ platform = process.platform, environment = proc
           ready = { socket, message }; permit();
         });
       });
-      const timer = setTimeout(() => finish(fail('AI_TOOLS_LAUNCH_TIMEOUT', '等待可见终端就绪超时，未授权运行 CLI；请检查系统终端后重试')), timeoutMs);
+      const timer = setTimeout(() => finish(fail('AI_TOOLS_LAUNCH_TIMEOUT', tr("等待可见终端就绪超时，未授权运行 CLI；请检查系统终端后重试"))), timeoutMs);
       server.once('error', () => finish(failed())); signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) { abort(); return; }
       server.listen(`\\\\.\\pipe\\${pipeName}`, () => {

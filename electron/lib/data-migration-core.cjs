@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { randomUUID, createHash } = require('crypto');
@@ -36,7 +37,7 @@ async function atomicWrite(root, relative, bytes, expectedHash) {
     handle = null;
     // Recheck the destination after writing; no renderer-selected path can be renamed over.
     await safePath(root, relative);
-    if (expectedHash !== undefined && await currentHash(root, relative, aiPlan.fileLimit(relative) || MAX_FILE_BYTES) !== expectedHash) throw new Error('迁移目标在临时文件写入期间发生外部变化，未覆盖');
+    if (expectedHash !== undefined && await currentHash(root, relative, aiPlan.fileLimit(relative) || MAX_FILE_BYTES) !== expectedHash) throw new Error(tr("迁移目标在临时文件写入期间发生外部变化，未覆盖"));
     await fs.promises.rename(temporary, target);
     owned = false;
   } finally {
@@ -47,7 +48,7 @@ async function atomicWrite(root, relative, bytes, expectedHash) {
 
 async function removeFile(root, relative, expectedHash) {
   const target = await safePath(root, relative);
-  if (expectedHash !== undefined && await currentHash(root, relative, aiPlan.fileLimit(relative) || MAX_FILE_BYTES) !== expectedHash) throw new Error('迁移目标在删除前发生外部变化，未删除');
+  if (expectedHash !== undefined && await currentHash(root, relative, aiPlan.fileLimit(relative) || MAX_FILE_BYTES) !== expectedHash) throw new Error(tr("迁移目标在删除前发生外部变化，未删除"));
   await fs.promises.unlink(target).catch(error => { if (error.code !== 'ENOENT') throw error; });
 }
 
@@ -64,26 +65,26 @@ function hasPendingImport(userData) {
 async function currentHash(root, name, limit = MAX_FILE_BYTES) {
   if (!await exists(root, name)) return null;
   const target = await safePath(root, name); const stat = await fs.promises.lstat(target);
-  if (stat.nlink !== 1) throw new Error('迁移目标包含硬链接，已停止操作');
+  if (stat.nlink !== 1) throw new Error(tr("迁移目标包含硬链接，已停止操作"));
   return bytesDigest(await boundedRead(root, name, limit));
 }
 
 async function checkAiState(root, writes, guards, { after = false } = {}) {
   const required = new Map([...guards, ...writes].map(row => [row.name, row.expectedHash]));
   if (after) for (const row of writes) required.set(row.name, bytesDigest(row.bytes));
-  for (const [name, expected] of required) if (await currentHash(root, name, aiPlan.fileLimit(name)) !== expected) throw new Error('AI 数据在预览或暂存后已变化，导入计划已失效；原有外部修改不会被覆盖');
+  for (const [name, expected] of required) if (await currentHash(root, name, aiPlan.fileLimit(name)) !== expected) throw new Error(tr("AI 数据在预览或暂存后已变化，导入计划已失效；原有外部修改不会被覆盖"));
 }
 
 async function stageImport(userData, input, currentPreferences, { aiWrites = [], aiGuards = [] } = {}) {
   const root = await safeRoot(userData);
-  if (await exists(root, PENDING) || await exists(root, JOURNAL)) throw new Error('已有待完成的数据导入，请先重启应用');
+  if (await exists(root, PENDING) || await exists(root, JOURNAL)) throw new Error(tr("已有待完成的数据导入，请先重启应用"));
   const { payload } = validatePayload(input);
   const previousPreferences = originalPreferences(currentPreferences);
   const writes = aiPlan.normalizeWrites(aiWrites); const guards = aiPlan.normalizeGuards(aiGuards, writes);
   await checkAiState(root, writes, guards);
   const pending = { schemaVersion: 2, id: randomUUID(), payload, previousPreferences, aiWrites: aiPlan.encodeWrites(writes), aiGuards: guards };
   const encoded = Buffer.from(JSON.stringify({ pending, sha256: digest(pending) }));
-  if (encoded.length > MAX_EXPANDED_BYTES) throw new Error('待导入数据超过 256 MiB，请取消包含 AI 会话或减少数据；不会截断');
+  if (encoded.length > MAX_EXPANDED_BYTES) throw new Error(tr("待导入数据超过 256 MiB，请取消包含 AI 会话或减少数据；不会截断"));
   await atomicWrite(root, PENDING, await gzipAsync(encoded));
   return { id: pending.id };
 }
@@ -94,12 +95,12 @@ async function readPending(root) {
     envelope = JSON.parse(gunzipSync(await boundedRead(root, PENDING, MAX_EXPANDED_BYTES), {
       maxOutputLength: MAX_EXPANDED_BYTES
     }).toString('utf8'));
-  } catch { throw new Error('待导入数据损坏或超出大小限制，原数据未修改'); }
+  } catch { throw new Error(tr("待导入数据损坏或超出大小限制，原数据未修改")); }
   const pending = envelope?.pending;
   if (!pending || ![1, 2].includes(pending.schemaVersion) || !UUID.test(pending.id)
-    || envelope.sha256 !== digest(pending)) throw new Error('待导入数据校验失败，原数据未修改');
+    || envelope.sha256 !== digest(pending)) throw new Error(tr("待导入数据校验失败，原数据未修改"));
   const fields = pending.schemaVersion === 1 ? ['schemaVersion', 'id', 'payload', 'previousPreferences'] : ['schemaVersion', 'id', 'payload', 'previousPreferences', 'aiWrites', 'aiGuards'];
-  if (Object.keys(pending).sort().join(',') !== fields.sort().join(',')) throw new Error('待导入记录包含未知字段，原数据未修改');
+  if (Object.keys(pending).sort().join(',') !== fields.sort().join(',')) throw new Error(tr("待导入记录包含未知字段，原数据未修改"));
   const aiWrites = pending.schemaVersion === 2 ? aiPlan.decodeWrites(pending.aiWrites) : [];
   return { schemaVersion: pending.schemaVersion, id: pending.id, payload: validatePayload(pending.payload).payload,
     previousPreferences: originalPreferences(pending.previousPreferences), aiWrites,
@@ -124,15 +125,15 @@ async function readJournal(root) {
   const journal = JSON.parse((await boundedRead(root, JOURNAL, MAX_JOURNAL_BYTES)).toString('utf8'));
   if (!journal || ![1, 2].includes(journal.schemaVersion) || !UUID.test(journal.id)
     || !['prepared', 'applied', 'rolled-back', 'committed'].includes(journal.phase) || !Array.isArray(journal.entries)
-    || journal.entries.length > (journal.schemaVersion === 1 ? 2000 : 2000 + aiPlan.MAX_AI_FILES)) throw new Error('导入恢复记录损坏，请保留恢复目录并联系支持');
+    || journal.entries.length > (journal.schemaVersion === 1 ? 2000 : 2000 + aiPlan.MAX_AI_FILES)) throw new Error(tr("导入恢复记录损坏，请保留恢复目录并联系支持"));
   const names = new Set();
   for (const [index, entry] of journal.entries.entries()) {
     const allowed = journal.schemaVersion === 1 ? policy.isAllowedFile(entry?.name)
       : entry?.kind === 'legacy' ? policy.isAllowedFile(entry.name) : entry?.kind === 'ai' && aiPlan.fileLimit(entry.name);
     if (!entry || !allowed || names.has(entry.name.toLowerCase())
       || typeof entry.existed !== 'boolean' || entry.backup !== `${String(index).padStart(4, '0')}.bin`
-      || (entry.existed && !/^[a-f0-9]{64}$/.test(entry.sha256))) throw new Error('导入恢复记录路径无效');
-    if (journal.schemaVersion === 2 && (!/^[a-f0-9]{64}$/.test(entry.afterHash) || entry.beforeHash !== (entry.existed ? entry.sha256 : null))) throw new Error('导入恢复记录校验值无效');
+      || (entry.existed && !/^[a-f0-9]{64}$/.test(entry.sha256))) throw new Error(tr("导入恢复记录路径无效"));
+    if (journal.schemaVersion === 2 && (!/^[a-f0-9]{64}$/.test(entry.afterHash) || entry.beforeHash !== (entry.existed ? entry.sha256 : null))) throw new Error(tr("导入恢复记录校验值无效"));
     names.add(entry.name.toLowerCase());
   }
   journal.preferences = policy.normalizePreferences(journal.preferences);
@@ -154,27 +155,27 @@ async function prepareJournal(root, pending) {
     const entry = { name: file.name, kind: file.kind, existed: await exists(root, file.name), backup: `${String(index).padStart(4, '0')}.bin` };
     let original = null;
     if (entry.existed) {
-      if ((await fs.promises.lstat(await safePath(root, file.name))).nlink !== 1) throw new Error('迁移目标包含硬链接，已停止操作');
+      if ((await fs.promises.lstat(await safePath(root, file.name))).nlink !== 1) throw new Error(tr("迁移目标包含硬链接，已停止操作"));
       original = await boundedRead(root, file.name, file.kind === 'ai' ? aiPlan.fileLimit(file.name) : MAX_FILE_BYTES);
       totalBytes += original.length;
-      if (totalBytes > MAX_EXPANDED_BYTES) throw new Error('当前数据恢复副本超过 256 MB，未修改数据');
+      if (totalBytes > MAX_EXPANDED_BYTES) throw new Error(tr("当前数据恢复副本超过 256 MB，未修改数据"));
       entry.sha256 = bytesDigest(original);
       await atomicWrite(root, `${RECOVERY}/${pending.id}/${entry.backup}`, original);
     }
     entry.beforeHash = entry.existed ? entry.sha256 : null;
-    if (file.kind === 'ai' && entry.beforeHash !== file.expectedHash) throw new Error('AI 数据在准备恢复记录时已变化，导入已停止');
+    if (file.kind === 'ai' && entry.beforeHash !== file.expectedHash) throw new Error(tr("AI 数据在准备恢复记录时已变化，导入已停止"));
     let bytes = file.bytes;
     if (file.kind === 'legacy') {
       let data = file.data;
       if (file.name === 'settings.json' && original) {
         const current = JSON.parse(original.toString('utf8'));
-        if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error('当前偏好设置格式无效，已取消导入');
+        if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(tr("当前偏好设置格式无效，已取消导入"));
         data = { ...current, ...data };
       }
       bytes = Buffer.from(JSON.stringify(data, null, 2));
     }
-    if (bytes.length > (file.kind === 'ai' ? aiPlan.fileLimit(file.name) : MAX_FILE_BYTES)) throw new Error('导入后的单个文件超过容量限制，未截断');
-    afterBytes += bytes.length; if (afterBytes > MAX_EXPANDED_BYTES) throw new Error('导入后的数据超过 256 MiB，未截断');
+    if (bytes.length > (file.kind === 'ai' ? aiPlan.fileLimit(file.name) : MAX_FILE_BYTES)) throw new Error(tr("导入后的单个文件超过容量限制，未截断"));
+    afterBytes += bytes.length; if (afterBytes > MAX_EXPANDED_BYTES) throw new Error(tr("导入后的数据超过 256 MiB，未截断"));
     entry.afterHash = bytesDigest(bytes); writes.push({ name: file.name, bytes, beforeHash: entry.beforeHash, afterHash: entry.afterHash });
     entries.push(entry);
   }
@@ -196,18 +197,18 @@ async function rollback(root, journal) {
     await safePath(root, entry.name);
     if (journal.schemaVersion === 2) {
       const current = await currentHash(root, entry.name, entry.kind === 'ai' ? aiPlan.fileLimit(entry.name) : MAX_FILE_BYTES);
-      if (current !== entry.beforeHash && current !== entry.afterHash) throw new Error('导入目标出现外部变化，已停止整体恢复，不会覆盖后续修改');
+      if (current !== entry.beforeHash && current !== entry.afterHash) throw new Error(tr("导入目标出现外部变化，已停止整体恢复，不会覆盖后续修改"));
     }
     if (!entry.existed) continue;
     const bytes = await boundedRead(root, `${RECOVERY}/${journal.id}/${entry.backup}`);
-    totalBytes += bytes.length; if (totalBytes > MAX_EXPANDED_BYTES) throw new Error('恢复副本总计超过 256 MiB，已停止整体恢复');
-    if (bytesDigest(bytes) !== entry.sha256) throw new Error('恢复副本校验失败，已停止恢复');
+    totalBytes += bytes.length; if (totalBytes > MAX_EXPANDED_BYTES) throw new Error(tr("恢复副本总计超过 256 MiB，已停止整体恢复"));
+    if (bytesDigest(bytes) !== entry.sha256) throw new Error(tr("恢复副本校验失败，已停止恢复"));
   }
   for (const entry of journal.entries) {
     let expectedHash;
     if (journal.schemaVersion === 2) {
       const current = await currentHash(root, entry.name, entry.kind === 'ai' ? aiPlan.fileLimit(entry.name) : MAX_FILE_BYTES);
-      if (current !== entry.beforeHash && current !== entry.afterHash) throw new Error('导入目标在恢复过程中出现外部变化，已停止恢复');
+      if (current !== entry.beforeHash && current !== entry.afterHash) throw new Error(tr("导入目标在恢复过程中出现外部变化，已停止恢复"));
       expectedHash = current;
     }
     if (entry.existed) {
@@ -242,11 +243,11 @@ async function applyPendingImport(userData) {
     // All preview-source leases are checked immediately before the first live write.
     await checkAiState(root, pending.aiWrites, pending.aiGuards);
     for (const file of prepared.writes) {
-      if (await currentHash(root, file.name, aiPlan.fileLimit(file.name) || MAX_FILE_BYTES) !== file.beforeHash) throw new Error('导入目标在写入前已发生变化，已停止导入');
+      if (await currentHash(root, file.name, aiPlan.fileLimit(file.name) || MAX_FILE_BYTES) !== file.beforeHash) throw new Error(tr("导入目标在写入前已发生变化，已停止导入"));
       await atomicWrite(root, file.name, file.bytes, file.beforeHash);
     }
     await checkAiState(root, pending.aiWrites, pending.aiGuards, { after: true });
-    for (const file of prepared.writes) if (await currentHash(root, file.name, aiPlan.fileLimit(file.name) || MAX_FILE_BYTES) !== file.afterHash) throw new Error('导入目标在写入后已发生外部变化，已停止导入');
+    for (const file of prepared.writes) if (await currentHash(root, file.name, aiPlan.fileLimit(file.name) || MAX_FILE_BYTES) !== file.afterHash) throw new Error(tr("导入目标在写入后已发生外部变化，已停止导入"));
     journal.phase = 'applied';
     await atomicWrite(root, JOURNAL, JSON.stringify(journal));
     await removeFile(root, PENDING);
@@ -272,14 +273,14 @@ async function applyPendingImport(userData) {
 async function rollbackStartupImport(userData, id) {
   const root = await safeRoot(userData);
   const journal = await readJournal(root);
-  if (journal.id !== id || journal.phase === 'committed') throw new Error('导入恢复请求已失效');
+  if (journal.id !== id || journal.phase === 'committed') throw new Error(tr("导入恢复请求已失效"));
   return rollback(root, journal);
 }
 
 async function finalizeStartupImport(userData, id) {
   const root = await safeRoot(userData);
   const journal = await readJournal(root);
-  if (journal.id !== id || !['applied', 'rolled-back'].includes(journal.phase)) throw new Error('导入完成请求已失效');
+  if (journal.id !== id || !['applied', 'rolled-back'].includes(journal.phase)) throw new Error(tr("导入完成请求已失效"));
   journal.phase = 'committed';
   await atomicWrite(root, JOURNAL, JSON.stringify(journal));
   await removeFile(root, PENDING);

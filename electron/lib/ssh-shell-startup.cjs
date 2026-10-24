@@ -1,9 +1,10 @@
+const { tr } = require('./localization.cjs');
 const path = require('node:path');
 const { buildBashIntegrationScript } = require('./ssh-shell-integration.cjs');
 const { closeChannel, sshError } = require('./ssh-session-terminal.cjs');
 
 const BASH_PROBE = 'case "${SHELL-}" in */bash) ;; *) exit 77;; esac; BASH_ENV= ENV= "$SHELL" --noprofile --norc -c \'if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then builtin printf "AWB_BASH_V1\\n%s\\n%s.%s\\n" "$BASH" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"; else exit 77; fi\'';
-const unavailable = () => sshError('SSH_BASH_UNAVAILABLE', '默认 Shell 不是受支持的 Bash 4.4+，或服务器不允许安全检测；仍可使用普通终端');
+const unavailable = () => sshError('SSH_BASH_UNAVAILABLE', tr("默认 Shell 不是受支持的 Bash 4.4+，或服务器不允许安全检测；仍可使用普通终端"));
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 function safeBashPath(value) {
   return typeof value === 'string' && value.length <= 3072 && path.posix.isAbsolute(value) && path.posix.basename(value) === 'bash'

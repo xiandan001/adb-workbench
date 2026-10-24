@@ -14,6 +14,7 @@ function callback(name, context) {
     VariableDeclarator({ node }) { if (node.id?.name === name) selected = node.init?.callee?.name === 'useCallback' ? node.init.arguments[0] : node.init; },
   });
   assert.ok(selected, `missing real callback ${name}`);
+  context.tr = (message, params = {}) => message.replace(/\{(\d+)\}/g, (token, index) => Object.hasOwn(params, index) ? String(params[index] ?? '') : token);
   return runInNewContext(`(${source.slice(selected.start, selected.end)})`, context);
 }
 const defaults = () => ({ version: 1, reducedMotion: false, startupAnimation: true });
@@ -94,7 +95,7 @@ test('development mode clearly distinguishes a saved preference from actual syst
 });
 test('three compact switches are native accessible controls in Appearance, and settings scrolling honors reduced motion', () => {
   assert.match(source, /role="switch" type="checkbox"/); assert.match(source, /aria-describedby/);
-  for (const title of ['减少动态效果', '启动动画', '开机自启']) assert.ok(source.includes(`title="${title}"`));
+  for (const title of ['减少动态效果', '启动动画', '开机自启']) assert.ok(source.includes(`title={tr("${title}")}`));
   assert.match(source, /系统的“减少动态效果”设置始终优先/); assert.match(source, /下次启动生效/);
   assert.match(source, /UI_MOTION_CHANGED/); assert.match(source, /UI_MOTION_PREFS_KEY/); assert.doesNotMatch(source, /localStorage\.setItem|setLoginItemSettings|showMessageBox/);
   const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');

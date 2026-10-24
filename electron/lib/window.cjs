@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // 窗口控制 + 对话框 + shell 操作 IPC handlers
 // 该模块聚合所有 UI 交互相关的 IPC：窗口最小化/最大化/关闭、文件对话框、拖拽、shell 打开
 
@@ -40,7 +41,7 @@ function register(ipcMain) {
     const result = await dialog.showOpenDialog(mainWindow, {
       defaultPath: app.getPath('downloads'),
       properties: ['openFile'],
-      filters: options?.filters || [{ name: 'APK Files', extensions: ['apk'] }],
+      filters: options?.filters || [{ name: tr('APK 文件'), extensions: ['apk'] }],
       ...options
     });
     return result;
@@ -51,7 +52,7 @@ function register(ipcMain) {
     const mainWindow = ctx.getMainWindow();
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: options?.defaultPath || '',
-      filters: options?.filters || [{ name: 'All Files', extensions: ['*'] }],
+      filters: options?.filters || [{ name: tr('所有文件'), extensions: ['*'] }],
       ...options
     });
     return result;
@@ -62,9 +63,9 @@ function register(ipcMain) {
     const mainWindow = ctx.getMainWindow();
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: '选择 APK 文件',
+        title: tr("选择 APK 文件"),
         defaultPath: path.join(app.getPath('downloads'), fileName),
-        filters: [{ name: 'APK Files', extensions: ['apk'] }],
+        filters: [{ name: tr('APK 文件'), extensions: ['apk'] }],
         properties: ['openFile']
       });
       if (!result.canceled && result.filePaths.length > 0) {
@@ -97,7 +98,7 @@ function register(ipcMain) {
     try {
       const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openDirectory'],
-        title: '选择截图保存路径'
+        title: tr("选择截图保存路径")
       });
       if (result.canceled) {
         return { success: false, canceled: true };

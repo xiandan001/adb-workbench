@@ -1,3 +1,4 @@
+import { tr, getLocale, useLocale } from '../../shared/i18n.js';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUp, ChevronRight, File, FilePlus2, Folder, FolderPlus, Home, Link2, Loader2, MoveRight, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react';
 import SelectMenu from '../SelectMenu';
@@ -6,6 +7,7 @@ import { clearSshDirectoryLoading, createSshDirectoryRequests, formatSshBytes, r
 import { isDarkTheme } from '../../shared/theme';
 
 function NameDialog({ operation, theme, onSubmit, onClose }) {
+  useLocale();
   const ref = useRef(null);
   const id = useId();
   const [name, setName] = useState(operation.name || '');
@@ -17,12 +19,13 @@ function NameDialog({ operation, theme, onSubmit, onClose }) {
     try { await onSubmit(name); onClose(); } catch (failure) { setError(failure.message); } finally { setBusy(false); }
   };
   return <dialog ref={ref} aria-labelledby={id} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }} className={`m-auto w-[min(480px,calc(100vw-32px))] rounded-xl border p-4 backdrop:bg-black/50 ${theme.card} ${theme.text}`}>
-    <h3 id={id} className="font-semibold">{operation.type === 'createfile' ? '新建远端文件' : operation.type === 'mkdir' ? '新建远端目录' : operation.type === 'move' ? '移动远端项' : '重命名远端项'}</h3><p className={`mt-2 break-all text-xs ${theme.textMuted}`}>{operation.path}</p>
-    <form onSubmit={submit} className="mt-3 space-y-3"><label className="block space-y-1 text-xs">{operation.type === 'move' ? '目标绝对路径' : '远端名称'}<input aria-label={operation.type === 'move' ? '远端目标路径' : '远端名称'} autoFocus value={name} maxLength={operation.type === 'move' ? 4096 : 255} onChange={event => setName(event.target.value)} disabled={busy} className={`w-full rounded-lg border px-3 py-2 text-sm ${theme.input}`} /></label>{error && <p role="alert" className="text-xs text-red-500">{error}</p>}<div className="flex justify-end gap-2"><button type="button" disabled={busy} onClick={onClose} className={`rounded-lg px-3 py-2 text-xs ${theme.button.secondary}`}>取消</button><button type="submit" disabled={busy || !name} className={`rounded-lg px-3 py-2 text-xs ${theme.button.primary}`}>{busy ? '处理中…' : '确认'}</button></div></form>
+    <h3 id={id} className="font-semibold">{operation.type === 'createfile' ? tr("新建远端文件") : operation.type === 'mkdir' ? tr("新建远端目录") : operation.type === 'move' ? tr("移动远端项") : tr("重命名远端项")}</h3><p className={`mt-2 break-all text-xs ${theme.textMuted}`}>{operation.path}</p>
+    <form onSubmit={submit} className="mt-3 space-y-3"><label className="block space-y-1 text-xs">{operation.type === 'move' ? tr("目标绝对路径") : tr("远端名称")}<input aria-label={operation.type === 'move' ? tr("远端目标路径") : tr("远端名称")} autoFocus value={name} maxLength={operation.type === 'move' ? 4096 : 255} onChange={event => setName(event.target.value)} disabled={busy} className={`w-full rounded-lg border px-3 py-2 text-sm ${theme.input}`} /></label>{error && <p role="alert" className="text-xs text-red-500">{tr(error)}</p>}<div className="flex justify-end gap-2"><button type="button" disabled={busy} onClick={onClose} className={`rounded-lg px-3 py-2 text-xs ${theme.button.secondary}`}>{tr("取消")}</button><button type="submit" disabled={busy || !name} className={`rounded-lg px-3 py-2 text-xs ${theme.button.primary}`}>{busy ? tr("处理中…") : tr("确认")}</button></div></form>
   </dialog>;
 }
 
 export default function SshFileTree({ session, active, path, directoryRevision = 0, onPath, onOpen, onMoved, onDeleted, refreshKey, theme, showToast }) {
+  useLocale();
   const [rootPath, setRootPath] = useState(path || '');
   const [pathInput, setPathInput] = useState(path || '');
   const [nodes, setNodes] = useState({});
@@ -70,8 +73,8 @@ export default function SshFileTree({ session, active, path, directoryRevision =
       return { ...next, [directory]: { ...next[directory], loading: true, error: '' } };
     });
     try {
-      const result = sshResult(await window.electronAPI.sshList({ sessionId: session.id, path: directory, ...(append ? { cursor: known.cursor } : {}) }), '无法读取远端目录');
-      if (result.sessionId !== session.id) throw new Error('目录所属 SSH 会话不匹配');
+      const result = sshResult(await window.electronAPI.sshList({ sessionId: session.id, path: directory, ...(append ? { cursor: known.cursor } : {}) }), tr("无法读取远端目录"));
+      if (result.sessionId !== session.id) throw new Error(tr("目录所属 SSH 会话不匹配"));
       if (!alive.current || !requests.current.isCurrent(request)) return;
       const entries = [...(append ? known?.entries || [] : []), ...(result.entries || [])];
       const unique = [...new Map(entries.map(item => [item.name, item])).values()];
@@ -95,13 +98,13 @@ export default function SshFileTree({ session, active, path, directoryRevision =
   const run = async action => {
     if (busy || !connected) return;
     setBusy(true); setError('');
-    try { const result = sshResult(await action()); if (!result.cancelled) { showToast?.('SSH 文件操作已提交'); await load(rootPath, { asRoot: true, force: true }); } }
+    try { const result = sshResult(await action()); if (!result.cancelled) { showToast?.(tr("SSH 文件操作已提交")); await load(rootPath, { asRoot: true, force: true }); } }
     catch (failure) { setError(failure.message); }
     finally { if (alive.current) setBusy(false); }
   };
   const destination = selected?.type === 'directory' ? selected.path : selected?.path ? remoteParent(selected.path) : rootPath;
   const nameSubmit = async name => {
-    if (operation.type === 'move' && (!name.startsWith('/') || name.includes('\0'))) throw new Error('请输入远端目标绝对路径');
+    if (operation.type === 'move' && (!name.startsWith('/') || name.includes('\0'))) throw new Error(tr("请输入远端目标绝对路径"));
     const target = operation.type === 'move' ? name : remoteChild(['mkdir', 'createfile'].includes(operation.type) ? operation.path : remoteParent(operation.path), name);
     const result = operation.type === 'mkdir'
       ? await window.electronAPI.sshMkdir({ sessionId: session.id, parent: operation.path, name })
@@ -125,7 +128,7 @@ export default function SshFileTree({ session, active, path, directoryRevision =
   const fileAction = (action, item = selected, basePath = rootPath) => {
     const parent = item?.type === 'directory' ? item.path : item?.path ? remoteParent(item.path) : basePath;
     if (action === 'properties') { setSelected(item); return; }
-    if (action === 'copyPath') { void navigator.clipboard.writeText(item?.path || basePath).then(() => showToast?.('远端路径已复制'), () => showToast?.('复制失败，请手动复制路径')); return; }
+    if (action === 'copyPath') { void navigator.clipboard.writeText(item?.path || basePath).then(() => showToast?.(tr("远端路径已复制")), () => showToast?.(tr("复制失败，请手动复制路径"))); return; }
     if (!connected) return;
     if (action === 'open') { if (item?.type === 'directory') void load(item.path, { asRoot: true, force: true }); else if (item?.type === 'file') onOpen(item.path); }
     else if (action === 'refresh') void load(basePath, { asRoot: true, force: true });
@@ -146,13 +149,13 @@ export default function SshFileTree({ session, active, path, directoryRevision =
     setMenu({ x: event.clientX || rect.left + 16, y: event.clientY || rect.bottom, item, rootPath, sessionId: session.id });
   };
   const menuItems = menu ? [
-    ...(menu.item && menu.item.type !== 'symlink' ? [{ id: 'open', label: menu.item.type === 'directory' ? '打开目录' : '打开 / 编辑', disabled: !connected }] : []),
-    { id: 'uploadFiles', label: '上传文件…', disabled: !connected || busy || !menu.rootPath }, { id: 'uploadDirectory', label: '上传文件夹…', disabled: !connected || busy || !menu.rootPath },
-    ...(menu.item ? [{ id: 'download', label: '下载…', disabled: !connected || busy }] : []),
-    { id: 'createfile', label: '新建文件…', separator: true, disabled: !connected || busy || !menu.rootPath }, { id: 'mkdir', label: '新建目录…', disabled: !connected || busy || !menu.rootPath },
-    ...(menu.item ? [{ id: 'rename', label: '重命名…', disabled: !connected || busy }, { id: 'move', label: '移动…', disabled: !connected || busy }] : []),
-    { id: 'copyPath', label: '复制路径', separator: true, disabled: !menu.rootPath }, { id: 'refresh', label: '刷新', disabled: !connected },
-    ...(menu.item ? [{ id: 'properties', label: '属性' }, { id: 'delete', label: '删除…', danger: true, separator: true, disabled: !connected || busy }] : []),
+    ...(menu.item && menu.item.type !== 'symlink' ? [{ id: 'open', label: menu.item.type === 'directory' ? tr("打开目录") : tr("打开 / 编辑"), disabled: !connected }] : []),
+    { id: 'uploadFiles', label: tr("上传文件…"), disabled: !connected || busy || !menu.rootPath }, { id: 'uploadDirectory', label: tr("上传文件夹…"), disabled: !connected || busy || !menu.rootPath },
+    ...(menu.item ? [{ id: 'download', label: tr("下载…"), disabled: !connected || busy }] : []),
+    { id: 'createfile', label: tr("新建文件…"), separator: true, disabled: !connected || busy || !menu.rootPath }, { id: 'mkdir', label: tr("新建目录…"), disabled: !connected || busy || !menu.rootPath },
+    ...(menu.item ? [{ id: 'rename', label: tr("重命名…"), disabled: !connected || busy }, { id: 'move', label: tr("移动…"), disabled: !connected || busy }] : []),
+    { id: 'copyPath', label: tr("复制路径"), separator: true, disabled: !menu.rootPath }, { id: 'refresh', label: tr("刷新"), disabled: !connected },
+    ...(menu.item ? [{ id: 'properties', label: tr("属性") }, { id: 'delete', label: tr("删除…"), danger: true, separator: true, disabled: !connected || busy }] : []),
   ] : [];
   const keyboard = event => {
     if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
@@ -162,7 +165,7 @@ export default function SshFileTree({ session, active, path, directoryRevision =
     event.preventDefault();
   };
   const branch = (directory, depth = 0) => {
-    if (depth > 24) return <p className={`px-2 py-1 text-xs ${theme.textMuted}`}>层级较深，请在路径栏打开该目录</p>;
+    if (depth > 24) return <p className={`px-2 py-1 text-xs ${theme.textMuted}`}>{tr("层级较深，请在路径栏打开该目录")}</p>;
     const node = nodes[directory];
     const count = visible[directory] || 200;
     const entries = (node?.entries || []).filter(item => showHidden || !item.name.startsWith('.')).sort((a, b) => {
@@ -182,27 +185,27 @@ export default function SshFileTree({ session, active, path, directoryRevision =
           {isDirectory ? <ChevronRight size={12} className={`shrink-0 ${expanded[itemPath] ? 'rotate-90' : ''}`} /> : <span className="w-3 shrink-0" />}{isDirectory ? <Folder size={14} className="shrink-0 text-amber-500" /> : item.type === 'symlink' ? <Link2 size={14} className="shrink-0" /> : <File size={14} className="shrink-0" />}<span className="min-w-0 truncate">{item.name}</span>{nodes[itemPath]?.loading && <Loader2 size={12} className="ml-auto shrink-0 animate-spin" />}
         </button>{isDirectory && expanded[itemPath] && branch(itemPath, depth + 1)}</div>;
       })}
-      {node?.loading && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>正在读取目录…</p>}
-      {node?.loaded && !entries.length && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>{node.entries.length ? '隐藏项已折叠' : '空目录'}</p>}
-      {entries.length > count && <button type="button" onClick={() => setVisible(previous => ({ ...previous, [directory]: count + 200 }))} className={`px-3 py-2 text-xs ${theme.textMuted}`}>显示更多条目…</button>}
-      {node?.cursor && <button type="button" onClick={() => load(directory, { more: true })} disabled={node.loading} className={`px-3 py-2 text-xs ${theme.textMuted}`}>加载下一页目录</button>}
-      {node?.truncated && !node.cursor && <p className="px-3 py-2 text-xs text-amber-500">目录过大，仅显示已返回条目</p>}
+      {node?.loading && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>{tr("正在读取目录…")}</p>}
+      {node?.loaded && !entries.length && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>{node.entries.length ? tr("隐藏项已折叠") : tr("空目录")}</p>}
+      {entries.length > count && <button type="button" onClick={() => setVisible(previous => ({ ...previous, [directory]: count + 200 }))} className={`px-3 py-2 text-xs ${theme.textMuted}`}>{tr("显示更多条目…")}</button>}
+      {node?.cursor && <button type="button" onClick={() => load(directory, { more: true })} disabled={node.loading} className={`px-3 py-2 text-xs ${theme.textMuted}`}>{tr("加载下一页目录")}</button>}
+      {node?.truncated && !node.cursor && <p className="px-3 py-2 text-xs text-amber-500">{tr("目录过大，仅显示已返回条目")}</p>}
     </div>;
   };
 
-  return <section aria-label="SSH 远端文件" className={`flex h-full min-h-0 min-w-0 flex-col rounded-lg border ${theme.card}`} onDragOver={event => { if (connected) event.preventDefault(); }} onDrop={event => {
+  return <section aria-label={tr("SSH 远端文件")} className={`flex h-full min-h-0 min-w-0 flex-col rounded-lg border ${theme.card}`} onDragOver={event => { if (connected) event.preventDefault(); }} onDrop={event => {
     event.preventDefault(); const files = [...(event.dataTransfer?.files || [])];
     if (connected && files.length) void run(() => window.electronAPI.sshUploadDropped({ sessionId: session.id, destination: destination || rootPath }, files));
   }}>
-    <div className="flex items-center gap-1 border-b border-slate-400/20 px-2 py-2"><h3 className="min-w-0 flex-1 truncate text-xs font-semibold">SFTP 文件</h3><button type="button" aria-label="刷新 SSH 文件" title="刷新" disabled={!connected} onClick={() => load(rootPath, { asRoot: true, force: true })} className={button}><RefreshCw size={13} /></button><button type="button" aria-label="返回 SSH 主目录" title="主目录" disabled={!connected} onClick={() => load('', { asRoot: true, force: true })} className={button}><Home size={13} /></button><button type="button" aria-label="SSH 上级目录" title="上级目录" disabled={!connected || rootPath === '/'} onClick={() => load(remoteParent(rootPath), { asRoot: true, force: true })} className={button}><ArrowUp size={13} /></button></div>
-    <form className="flex gap-1 p-2" onSubmit={event => { event.preventDefault(); void load(pathInput, { asRoot: true, force: true }); }}><input aria-label="SSH 远端路径" value={pathInput} onChange={event => setPathInput(event.target.value)} disabled={!connected} placeholder="远端目录" className={`min-w-0 flex-1 rounded border px-2 py-1.5 text-xs ${theme.input}`} /><button type="submit" disabled={!connected} className={`rounded px-2 text-xs ${theme.button.secondary}`}>打开</button></form>
-    <div className="flex flex-wrap gap-1 px-2 pb-2"><button type="button" aria-label="上传 SSH 文件" title="上传文件到当前目录" disabled={!connected || busy || !rootPath} onClick={() => fileAction('uploadFiles')} className={button}><Upload size={13} /></button><button type="button" aria-label="上传 SSH 文件夹" title="上传文件夹到当前目录" disabled={!connected || busy || !rootPath} onClick={() => fileAction('uploadDirectory')} className={button}><Folder size={13} /></button><button type="button" aria-label="下载 SSH 选中项" title="下载选中项" disabled={!connected || !selected || busy} onClick={() => fileAction('download')} className={button}><ArrowDownToLine size={13} /></button><button type="button" aria-label="新建 SSH 文件" title="新建空文件并编辑" disabled={!connected || !rootPath} onClick={() => fileAction('createfile')} className={button}><FilePlus2 size={13} /></button><button type="button" aria-label="新建 SSH 目录" title="新建目录" disabled={!connected || !rootPath} onClick={() => fileAction('mkdir')} className={button}><FolderPlus size={13} /></button><button type="button" aria-label="重命名 SSH 选中项" title="重命名" disabled={!connected || !selected} onClick={() => fileAction('rename')} className={button}><Pencil size={13} /></button><button type="button" aria-label="移动 SSH 选中项" title="移动到远端绝对路径" disabled={!connected || !selected} onClick={() => fileAction('move')} className={button}><MoveRight size={13} /></button><button type="button" aria-label="删除 SSH 选中项" title="删除选中项（需要确认）" disabled={!connected || !selected || busy} onClick={() => fileAction('delete')} className={button}><Trash2 size={13} /></button></div>
-    <div className="flex flex-wrap items-center gap-2 px-2 pb-2"><label className="sr-only" htmlFor={sortId}>SSH 文件排序</label><SelectMenu id={sortId} compact isDark={isDarkTheme(theme)} value={sort} onChange={setSort} options={[{ value: 'name', label: '按名称' }, { value: 'size', label: '按大小' }, { value: 'mtime', label: '按修改时间' }]} className="min-w-0 flex-1" /><label className={`flex items-center gap-1 text-[10px] ${theme.textMuted}`}><input type="checkbox" checked={showHidden} onChange={event => setShowHidden(event.target.checked)} />显示隐藏项</label></div>
-    {error && <p role="alert" className="break-words px-2 pb-2 text-xs text-red-500">{error}</p>}
-    {!connected && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>连接后可浏览文件；断开不会丢失已打开的编辑内容。</p>}
-    <div role="tree" aria-label="SSH 文件树" onContextMenu={event => openMenu(event, null)} className="min-h-0 flex-1 overflow-auto px-1 pb-2">{rootPath ? branch(rootPath) : <p className={`p-3 text-xs ${theme.textMuted}`}>{connected ? '正在读取主目录…' : '尚未连接'}</p>}</div>
-    {selected && <div aria-label="SSH 选中项属性" className={`space-y-0.5 border-t border-slate-400/15 px-2 py-1.5 text-[10px] ${theme.textMuted}`}><p className="truncate" title={selected.path}>{selected.path}</p><p>{selected.type === 'directory' ? '目录' : selected.type === 'symlink' ? '符号链接' : '文件'} · {formatSshBytes(selected.size)} · 权限 {typeof selected.mode === 'number' ? (selected.mode & 0o7777).toString(8).padStart(4, '0') : selected.mode || '—'}</p><p>修改：{selected.mtime ? new Date(typeof selected.mtime === 'number' && selected.mtime < 1e12 ? selected.mtime * 1000 : selected.mtime).toLocaleString() : '—'}</p></div>}
-    <p className={`border-t border-slate-400/15 px-2 py-1.5 text-[10px] ${theme.textMuted}`}>可拖入本地文件；符号链接不自动跟随。</p>
+    <div className="flex items-center gap-1 border-b border-slate-400/20 px-2 py-2"><h3 className="min-w-0 flex-1 truncate text-xs font-semibold">{tr("SFTP 文件")}</h3><button type="button" aria-label={tr("刷新 SSH 文件")} title={tr("刷新")} disabled={!connected} onClick={() => load(rootPath, { asRoot: true, force: true })} className={button}><RefreshCw size={13} /></button><button type="button" aria-label={tr("返回 SSH 主目录")} title={tr("主目录")} disabled={!connected} onClick={() => load('', { asRoot: true, force: true })} className={button}><Home size={13} /></button><button type="button" aria-label={tr("SSH 上级目录")} title={tr("上级目录")} disabled={!connected || rootPath === '/'} onClick={() => load(remoteParent(rootPath), { asRoot: true, force: true })} className={button}><ArrowUp size={13} /></button></div>
+    <form className="flex gap-1 p-2" onSubmit={event => { event.preventDefault(); void load(pathInput, { asRoot: true, force: true }); }}><input aria-label={tr("SSH 远端路径")} value={pathInput} onChange={event => setPathInput(event.target.value)} disabled={!connected} placeholder={tr("远端目录")} className={`min-w-0 flex-1 rounded border px-2 py-1.5 text-xs ${theme.input}`} /><button type="submit" disabled={!connected} className={`rounded px-2 text-xs ${theme.button.secondary}`}>{tr("打开")}</button></form>
+    <div className="flex flex-wrap gap-1 px-2 pb-2"><button type="button" aria-label={tr("上传 SSH 文件")} title={tr("上传文件到当前目录")} disabled={!connected || busy || !rootPath} onClick={() => fileAction('uploadFiles')} className={button}><Upload size={13} /></button><button type="button" aria-label={tr("上传 SSH 文件夹")} title={tr("上传文件夹到当前目录")} disabled={!connected || busy || !rootPath} onClick={() => fileAction('uploadDirectory')} className={button}><Folder size={13} /></button><button type="button" aria-label={tr("下载 SSH 选中项")} title={tr("下载选中项")} disabled={!connected || !selected || busy} onClick={() => fileAction('download')} className={button}><ArrowDownToLine size={13} /></button><button type="button" aria-label={tr("新建 SSH 文件")} title={tr("新建空文件并编辑")} disabled={!connected || !rootPath} onClick={() => fileAction('createfile')} className={button}><FilePlus2 size={13} /></button><button type="button" aria-label={tr("新建 SSH 目录")} title={tr("新建目录")} disabled={!connected || !rootPath} onClick={() => fileAction('mkdir')} className={button}><FolderPlus size={13} /></button><button type="button" aria-label={tr("重命名 SSH 选中项")} title={tr("重命名")} disabled={!connected || !selected} onClick={() => fileAction('rename')} className={button}><Pencil size={13} /></button><button type="button" aria-label={tr("移动 SSH 选中项")} title={tr("移动到远端绝对路径")} disabled={!connected || !selected} onClick={() => fileAction('move')} className={button}><MoveRight size={13} /></button><button type="button" aria-label={tr("删除 SSH 选中项")} title={tr("删除选中项（需要确认）")} disabled={!connected || !selected || busy} onClick={() => fileAction('delete')} className={button}><Trash2 size={13} /></button></div>
+    <div className="flex flex-wrap items-center gap-2 px-2 pb-2"><label className="sr-only" htmlFor={sortId}>{tr("SSH 文件排序")}</label><SelectMenu id={sortId} compact isDark={isDarkTheme(theme)} value={sort} onChange={setSort} options={[{ value: 'name', label: tr("按名称") }, { value: 'size', label: tr("按大小") }, { value: 'mtime', label: tr("按修改时间") }]} className="min-w-0 flex-1" /><label className={`flex items-center gap-1 text-[10px] ${theme.textMuted}`}><input type="checkbox" checked={showHidden} onChange={event => setShowHidden(event.target.checked)} />{tr("显示隐藏项")}</label></div>
+    {error && <p role="alert" className="break-words px-2 pb-2 text-xs text-red-500">{tr(error)}</p>}
+    {!connected && <p className={`px-3 py-2 text-xs ${theme.textMuted}`}>{tr("连接后可浏览文件；断开不会丢失已打开的编辑内容。")}</p>}
+    <div role="tree" aria-label={tr("SSH 文件树")} onContextMenu={event => openMenu(event, null)} className="min-h-0 flex-1 overflow-auto px-1 pb-2">{rootPath ? branch(rootPath) : <p className={`p-3 text-xs ${theme.textMuted}`}>{connected ? tr("正在读取主目录…") : tr("尚未连接")}</p>}</div>
+    {selected && <div aria-label={tr("SSH 选中项属性")} className={`space-y-0.5 border-t border-slate-400/15 px-2 py-1.5 text-[10px] ${theme.textMuted}`}><p className="truncate" title={selected.path}>{selected.path}</p><p>{tr("{0} · {1} · 权限 {2}", { 0: selected.type === 'directory' ? tr("目录") : selected.type === 'symlink' ? tr("符号链接") : tr("文件"), 1: formatSshBytes(selected.size), 2: typeof selected.mode === 'number' ? (selected.mode & 0o7777).toString(8).padStart(4, '0') : selected.mode || '—' })}</p><p>{tr("修改：{0}", { 0: selected.mtime ? new Date(typeof selected.mtime === 'number' && selected.mtime < 1e12 ? selected.mtime * 1000 : selected.mtime).toLocaleString(getLocale()) : '—' })}</p></div>}
+    <p className={`border-t border-slate-400/15 px-2 py-1.5 text-[10px] ${theme.textMuted}`}>{tr("可拖入本地文件；符号链接不自动跟随。")}</p>
     {active && operation && <NameDialog operation={operation} theme={theme} onSubmit={nameSubmit} onClose={() => setOperation(null)} />}
     {active && menu && <SshFileContextMenu key={`${menu.x}-${menu.y}-${menu.item?.path || ''}`} x={menu.x} y={menu.y} items={menuItems} theme={theme} onClose={() => setMenu(null)} onAction={action => { if (menu.sessionId === session.id) fileAction(action, menu.item, menu.rootPath); }} />}
   </section>;

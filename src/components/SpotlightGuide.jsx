@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle, X } from 'lucide-react';
@@ -7,7 +8,8 @@ import { preferredScrollBehavior } from '../shared/uiMotionPreferences';
 const TARGET_PADDING = 8;
 const TOOLTIP_GAP = 14;
 
-function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
+function SpotlightGuide({ guide, theme, onSkip, skipLabel = tr("跳过教程") }) {
+  const locale = useLocale();
   const [targetRect, setTargetRect] = useState(null);
   const [revision, setRevision] = useState(0);
   const isDark = isDarkTheme(theme);
@@ -84,6 +86,7 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
   }, [guide?.selector, revision]);
 
   const tooltipStyle = useMemo(() => {
+    void locale;
     if (!targetRect || typeof window === 'undefined') return null;
     const width = Math.min(340, window.innerWidth - 24);
     const fitsBelow = targetRect.bottom + TOOLTIP_GAP + 150 <= window.innerHeight;
@@ -95,7 +98,7 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
       targetRect.left + targetRect.width / 2 - width / 2
     ));
     return { top, left, width };
-  }, [targetRect]);
+  }, [targetRect, locale]);
 
   if (!guide || typeof document === 'undefined') return null;
 
@@ -104,19 +107,13 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
       <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4">
         <div className={`w-full max-w-sm rounded-2xl border p-5 shadow-2xl ${isDark ? 'border-[#3E4145] bg-[#202124] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-800'}`}>
           <div className="flex items-center gap-2 font-semibold">
-            <HelpCircle size={18} className="text-emerald-500" />
-            正在定位操作位置
-          </div>
-          <p className={`mt-2 text-sm leading-6 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-            当前操作位置尚未显示，可以重新定位或退出教程。
-          </p>
+            <HelpCircle size={18} className="text-emerald-500" />{tr("正在定位操作位置")}</div>
+          <p className={`mt-2 text-sm leading-6 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("当前操作位置尚未显示，可以重新定位或退出教程。")}</p>
           <div className="mt-4 flex justify-end gap-2">
             <button type="button" onClick={onSkip} className={`rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>
               {skipLabel}
             </button>
-            <button type="button" onClick={() => setRevision(value => value + 1)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-              重新定位
-            </button>
+            <button type="button" onClick={() => setRevision(value => value + 1)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">{tr("重新定位")}</button>
           </div>
         </div>
       </div>,
@@ -147,7 +144,7 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs font-medium text-emerald-500">第 {guide.step}/6 步</div>
+            <div className="text-xs font-medium text-emerald-500">{tr("第 {0}/6 步", { 0: guide.step })}</div>
             <div className="mt-1 font-semibold">{guide.title}</div>
           </div>
           <button type="button" aria-label={skipLabel} onClick={onSkip} className={`rounded-md border p-1.5 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>
@@ -155,7 +152,7 @@ function SpotlightGuide({ guide, theme, onSkip, skipLabel = '跳过教程' }) {
           </button>
         </div>
         <p className={`mt-2 text-sm leading-6 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>{guide.description}</p>
-        <div className={`mt-3 text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-400'}`}>直接点击高亮区域继续</div>
+        <div className={`mt-3 text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-400'}`}>{tr("直接点击高亮区域继续")}</div>
       </aside>
     </>,
     document.body

@@ -1,3 +1,4 @@
+import { tr } from '../../shared/i18n.js';
 // Endpoints match the pinned upstream provider catalog; models are deliberately not guessed.
 export const AI_PROVIDER_PRESETS = Object.freeze([
   { value: 'anthropic', label: 'Anthropic 官方', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', targetApps: ['claude'] },
@@ -10,7 +11,7 @@ export const AI_PROVIDER_PRESETS = Object.freeze([
 ]);
 export function applyProviderPreset(draft, value) {
   const preset = AI_PROVIDER_PRESETS.find(item => item.value === value);
-  if (!preset) throw new Error('供应商模板不存在');
+  if (!preset) throw new Error(tr("供应商模板不存在"));
   const next = { ...draft, name: preset.label, protocol: preset.protocol, baseUrl: preset.baseUrl, model: '', contextWindow: '', targetApps: [...preset.targetApps],
     apiKey: '', quotaKey: '', clearKey: false, clearQuotaKey: false, quotaTemplate: '', quota: preset.quota ? { adapter: preset.quota } : null };
   delete next.claudeModels;

@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export const CAPABILITY_REFRESH_MS = 30000;
 
 // Discard late replies after device/config changes or a reconnect starts a newer check.
@@ -20,7 +21,7 @@ export function createCapabilityLoader({ load, onResult, now = Date.now }) {
       }, () => {
         if (!disposed && generation === request) {
           checkedAt = now();
-          onResult({ success: false, error: '暂时无法检查设备，操作前仍会校验' });
+          onResult({ success: false, error: tr("暂时无法检查设备，操作前仍会校验") });
         }
       }).finally(() => { if (pending === task) pending = null; });
       pending = task;

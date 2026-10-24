@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { createHash } = require('node:crypto');
 
 const MIB = 1024 * 1024;
@@ -11,7 +12,7 @@ const SKILL = new RegExp(`^ai-tools/skills/archives/${UUID}\\.json$`);
 const SESSION = /^ai-tools\/session-archives\/[a-f0-9]{64}\.json$/;
 const HASH = /^[a-f0-9]{64}$/;
 const digestBytes = value => createHash('sha256').update(value).digest('hex');
-const invalid = () => new Error('AI 导入计划包含未允许的路径、密文或校验值，原数据未修改');
+const invalid = () => new Error(tr("AI 导入计划包含未允许的路径、密文或校验值，原数据未修改"));
 function fileLimit(name) { return typeof name === 'string' ? FIXED.get(name) || (SKILL.test(name) ? 48 * MIB : SESSION.test(name) ? 32 * MIB : 0) : 0; }
 function record(value, keys) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value)) || Object.keys(value).sort().join(',') !== [...keys].sort().join(',')) throw invalid();
@@ -36,7 +37,7 @@ function normalizeWrites(input = []) {
     record(row, ['name', 'bytes', 'expectedHash']); expected(row.expectedHash);
     if (names.has(row.name)) throw invalid(); names.add(row.name);
     const bytes = cipherBytes(row.name, row.bytes); total += bytes.length;
-    if (total > 256 * MIB) throw new Error('AI 导入计划超过 256 MiB，请取消包含 AI 会话或减少数据；不会截断');
+    if (total > 256 * MIB) throw new Error(tr("AI 导入计划超过 256 MiB，请取消包含 AI 会话或减少数据；不会截断"));
     return { name: row.name, bytes, expectedHash: row.expectedHash };
   });
 }

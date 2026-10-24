@@ -1,3 +1,4 @@
+import { tr, useLocale, getLocale } from '../shared/i18n';
 import {
   Clock3,
   Settings2,
@@ -18,6 +19,7 @@ function TaskCenterQuickStart({
   onOpenTask,
   onCompare
 }) {
+  useLocale();
   const isDark = isDarkTheme(theme);
   const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
   const cardClass = isDark
@@ -31,15 +33,15 @@ function TaskCenterQuickStart({
   const entries = [
     {
       id: 'record',
-      title: '录制操作',
-      description: '在设备画面上操作，生成可以重复执行的步骤。',
+      title: tr("录制操作"),
+      description: tr("在设备画面上操作，生成可以重复执行的步骤。"),
       icon: Smartphone,
       action: onRecord
     },
     {
       id: 'import',
-      title: '导入脚本',
-      description: '运行已有的 Python、Shell、JSON 或 YAML 脚本。',
+      title: tr("导入脚本"),
+      description: tr("运行已有的 Python、Shell、JSON 或 YAML 脚本。"),
       icon: Upload,
       action: onImport
     }
@@ -55,17 +57,15 @@ function TaskCenterQuickStart({
       <section className={'rounded-xl border p-5 shadow-sm ' + panelClass}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className={'text-lg font-semibold ' + textClass}>你想完成什么？</h3>
-            <p className={'mt-1 text-sm ' + mutedClass}>先选择目标，复杂设置会在需要时再显示。</p>
+            <h3 className={'text-lg font-semibold ' + textClass}>{tr("你想完成什么？")}</h3>
+            <p className={'mt-1 text-sm ' + mutedClass}>{tr("先选择目标，复杂设置会在需要时再显示。")}</p>
           </div>
           <button
             type="button"
             onClick={onOpenAdvanced}
             className={'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ' + secondaryButton}
           >
-            <Settings2 size={15} />
-            高级编排
-          </button>
+            <Settings2 size={15} />{tr("高级编排")}</button>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {entries.map(entry => {
@@ -91,7 +91,7 @@ function TaskCenterQuickStart({
 
       {runningTasks.length > 0 && (
         <section className={'rounded-xl border p-5 ' + panelClass}>
-          <h4 className={'font-semibold ' + textClass}>正在运行</h4>
+          <h4 className={'font-semibold ' + textClass}>{tr("正在运行")}</h4>
           <div className="mt-3 space-y-2">
             {runningTasks.map(task => (
               <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full justify-between rounded-lg border p-3 text-left text-sm ' + cardClass}>
@@ -105,10 +105,10 @@ function TaskCenterQuickStart({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className={'rounded-xl border p-5 ' + panelClass}>
-          <h4 className={'font-semibold ' + textClass}>已保存测试</h4>
+          <h4 className={'font-semibold ' + textClass}>{tr("已保存测试")}</h4>
           <div className="mt-3 space-y-2">
             {visibleScripts.length === 0 ? (
-              <p className={'py-6 text-center text-sm ' + mutedClass}>暂无已保存测试</p>
+              <p className={'py-6 text-center text-sm ' + mutedClass}>{tr("暂无已保存测试")}</p>
             ) : visibleScripts.map(script => (
               <button
                 key={script.id}
@@ -116,8 +116,8 @@ function TaskCenterQuickStart({
                 onClick={() => onOpenScript(script)}
                 className={'block w-full rounded-lg border p-3 text-left transition-colors ' + cardClass}
               >
-                <span className={'block truncate font-medium ' + textClass}>{script.name}</span>
-                <span className={'mt-1 block text-xs ' + mutedClass}>{script.steps?.length || 0} 个步骤</span>
+                <span className={'block truncate font-medium ' + textClass}>{script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name}</span>
+                <span className={'mt-1 block text-xs ' + mutedClass}>{script.steps?.length || 0}{tr(" 个步骤")}</span>
               </button>
             ))}
           </div>
@@ -125,12 +125,12 @@ function TaskCenterQuickStart({
 
         <section className={'rounded-xl border p-5 ' + panelClass}>
           <div className="flex items-center justify-between gap-3">
-            <h4 className={'font-semibold ' + textClass}>最近运行</h4>
-            {history.length > 1 && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">比较两次运行</button>}
+            <h4 className={'font-semibold ' + textClass}>{tr("最近运行")}</h4>
+            {history.length > 1 && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">{tr("比较两次运行")}</button>}
           </div>
           <div className="mt-3 space-y-2">
             {recentHistory.length === 0 ? (
-              <p className={'py-6 text-center text-sm ' + mutedClass}>暂无运行记录</p>
+              <p className={'py-6 text-center text-sm ' + mutedClass}>{tr("暂无运行记录")}</p>
             ) : recentHistory.map(task => (
               <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm ' + cardClass}>
                 <div className="min-w-0">
@@ -151,12 +151,12 @@ function TaskCenterQuickStart({
 }
 
 function statusLabel(status) {
-  if (status === 'success') return '成功';
-  if (status === 'failed') return '失败';
-  if (status === 'cancelled') return '已取消';
-  if (status === 'running') return '执行中';
-  if (status === 'queued') return '等待中';
-  return status || '未知';
+  if (status === 'success') return tr("成功");
+  if (status === 'failed') return tr("失败");
+  if (status === 'cancelled') return tr("已取消");
+  if (status === 'running') return tr("执行中");
+  if (status === 'queued') return tr("等待中");
+  return status || tr("未知");
 }
 
 function statusColor(status) {
@@ -167,10 +167,10 @@ function statusColor(status) {
 }
 
 function formatTime(value) {
-  if (!value) return '时间未知';
+  if (!value) return tr("时间未知");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('zh-CN', { hour12: false });
+  return date.toLocaleString(getLocale(), { hour12: false });
 }
 
 export default TaskCenterQuickStart;

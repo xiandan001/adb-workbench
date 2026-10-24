@@ -4,13 +4,19 @@
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
+const { tr } = require('./localization.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const CUSTOM_THEMES_FILE = 'customThemes.json';
 let settingsWriteQueue = Promise.resolve();
 
 const SETTING_KEYS = {
+  locale: { fallback: 'zh-CN', sanitize: value => {
+    if (!['zh-CN', 'en-US'].includes(value)) throw new Error(tr('不支持的界面语言'));
+    return value;
+  } },
   screenshotPath: { fallback: null },
   screenRecordPath: { fallback: null },
   inspectionPath: { fallback: null },
@@ -37,6 +43,7 @@ function register(ipcMain) {
 
   ipcMain.handle('settings:savePatch', async (event, patch) => {
     try {
+      if (patch && Object.hasOwn(patch, 'locale')) throw new Error(tr('请通过语言设置修改界面语言'));
       await writeSettingsPatch(patch || {});
       return { success: true };
     } catch (error) {
@@ -107,13 +114,14 @@ async function readSettings() {
   };
 }
 
-async function writeSettingsPatch(patch) {
-  const task = settingsWriteQueue.then(() => writeSettingsPatchNow(patch));
+async function writeSettingsPatch(patch, guard = () => {}) {
+  const task = settingsWriteQueue.then(() => writeSettingsPatchNow(patch, guard));
   settingsWriteQueue = task.catch(() => {});
   return task;
 }
 
-async function writeSettingsPatchNow(patch) {
+async function writeSettingsPatchNow(patch, guard) {
+  guard();
   const current = await readSettings();
   const next = { ...current };
   for (const [key, value] of Object.entries(patch || {})) {
@@ -125,7 +133,8 @@ async function writeSettingsPatchNow(patch) {
     }
     next[key] = sanitized;
   }
-  await writeJson(getSettingsPath(), next);
+  guard();
+  await writeSettingsJson(next, guard);
   return next;
 }
 
@@ -149,6 +158,21 @@ async function writeJson(filePath, value) {
   await fs.promises.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
 }
 
+async function writeSettingsJson(value, guard) {
+  const file = getSettingsPath(); const temporary = path.join(path.dirname(file), `.settings-${randomUUID()}.tmp`);
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  let handle; let owned = false;
+  try {
+    handle = await fs.promises.open(temporary, 'wx', 0o600); owned = true;
+    await handle.writeFile(JSON.stringify(value, null, 2) + '\n', 'utf8');
+    await handle.sync(); await handle.close(); handle = undefined;
+    guard(); await fs.promises.rename(temporary, file); owned = false;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    if (owned) await fs.promises.unlink(temporary).catch(() => {});
+  }
+}
+
 function getSettingsPath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE);
 }
@@ -161,4 +185,4 @@ function cloneFallback(value) {
   return Array.isArray(value) ? value.slice() : value;
 }
 
-module.exports = { register };
+module.exports = { register, readSettings, writeSettingsPatch };

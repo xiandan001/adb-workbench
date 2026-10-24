@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 const ACTIVE_STATUSES = new Set(['starting', 'recording', 'stopping', 'saving']);
 
 export function deviceRecordingSessions(sessions, deviceId) {
@@ -14,9 +15,9 @@ export function currentDeviceRecording(sessions, deviceId) {
 export function recordingButtonState(session, { loaded, pending, isOnline }) {
   const status = session?.status;
   const busy = pending || ['starting', 'stopping', 'saving'].includes(status);
-  const labels = { starting: '启动中...', recording: '停止并保存', stopping: '停止中...', saving: '保存中...' };
+  const labels = { starting: tr("启动中..."), recording: tr("停止并保存"), stopping: tr("停止中..."), saving: tr("保存中...") };
   return {
-    label: !loaded ? '读取录屏状态...' : pending && !ACTIVE_STATUSES.has(status) ? '处理中...' : labels[status] || '录屏',
+    label: !loaded ? tr("读取录屏状态...") : pending && !ACTIVE_STATUSES.has(status) ? tr("处理中...") : labels[status] || tr("录屏"),
     recording: status === 'recording',
     busy,
     disabled: !loaded || busy || !isOnline,
@@ -52,13 +53,13 @@ export function watchDeviceRecordings(api, deviceId, onSnapshot) {
   const refresh = async () => {
     const requestedRevision = ++revision;
     try {
-      if (!api?.recordingSessionsList) throw new Error('录屏服务不可用，请重启软件后重试');
+      if (!api?.recordingSessionsList) throw new Error(tr("录屏服务不可用，请重启软件后重试"));
       const result = await api.recordingSessionsList({ deviceId });
       if (disposed || requestedRevision !== revision) return;
-      if (!result?.success) throw new Error(result?.error || '无法读取录屏状态');
+      if (!result?.success) throw new Error(result?.error || tr("无法读取录屏状态"));
       onSnapshot({ sessions: deviceRecordingSessions(result.sessions, deviceId), loaded: true, error: '' });
     } catch (error) {
-      if (!disposed && requestedRevision === revision) onSnapshot({ loaded: false, error: error.message || '无法读取录屏状态' });
+      if (!disposed && requestedRevision === revision) onSnapshot({ loaded: false, error: error.message || tr("无法读取录屏状态") });
     }
   };
   void refresh();

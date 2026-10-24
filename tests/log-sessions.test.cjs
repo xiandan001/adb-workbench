@@ -130,7 +130,7 @@ test('rename refuses a name that would exceed the size limit before changing the
   const module = { exports: {} };
   // Exercise the exact production byte guard with a small cap instead of allocating a 64 MB fixture.
   vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8').replace('64 * 1024 * 1024', '2048'), {
-    module, exports: module.exports, require, Buffer
+    module, exports: module.exports, require: name => name === './localization.cjs' ? require('../electron/lib/localization.cjs') : require(name), Buffer
   }, { filename: sourcePath });
   const store = module.exports.createSessionStore(directory);
   const input = { ...fixture(), name: 'a' };
@@ -208,6 +208,7 @@ test('logger context changes never start capture or AI; session restore uses loc
   vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), {
     module, exports: module.exports, __dirname: path.dirname(sourcePath), console, Buffer, setTimeout, clearTimeout,
     require: name => {
+      if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (name === 'electron') return { app: { getPath: () => directory } };
       if (name === './app-context.cjs') return ctx;
       if (name === './adb-runtime.cjs') return { runAdb: () => { throw new Error('No ADB allowed'); }, spawnAdb: () => { throw new Error('No ADB allowed'); } };

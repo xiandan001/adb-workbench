@@ -1,19 +1,21 @@
+import { tr, useLocale, getLocale } from '../shared/i18n';
 import { useState } from 'react';
 import { PERFORMANCE_METRICS, makePerformancePath, performanceAxisMax, performanceSampleIndex } from '../shared/performanceChart';
 
-const GROUPS = [
-  { id: 'percent', label: '占用率 %', unit: '%' },
-  { id: 'temperature', label: '温度 °C', unit: '°C' },
-  { id: 'fps', label: '帧率 FPS', unit: 'FPS' }
-];
+const GROUPS = () => ([
+  { id: 'percent', label: tr("占用率 %"), unit: '%' },
+  { id: 'temperature', label: tr("温度 °C"), unit: '°C' },
+  { id: 'fps', label: tr("帧率 FPS"), unit: 'FPS' }
+]);
 
 export default function PerformanceTrendChart({ points, isDark }) {
+  useLocale();
   const [group, setGroup] = useState('percent');
   const [hidden, setHidden] = useState([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const metrics = PERFORMANCE_METRICS.filter(metric => metric.group === group);
   const visible = metrics.filter(metric => !hidden.includes(metric.key));
-  const unit = GROUPS.find(item => item.id === group).unit;
+  const unit = GROUPS().find(item => item.id === group).unit;
   const width = 720;
   const height = 260;
   const pad = 42;
@@ -24,24 +26,24 @@ export default function PerformanceTrendChart({ points, isDark }) {
   const times = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].filter(index => index >= 0 && index < points.length);
   const field = isDark ? 'border-[#5F6368] bg-[#202124] text-[#E8EAED]' : 'border-slate-300 bg-white text-slate-700';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const formatTime = timestamp => timestamp ? new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '--:--:--';
+  const formatTime = timestamp => timestamp ? new Date(timestamp).toLocaleTimeString(getLocale(), { hour12: false }) : '--:--:--';
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div role="group" aria-label="趋势图单位分组" className="flex flex-wrap gap-1">
-          {GROUPS.map(item => <button key={item.id} type="button" aria-pressed={group === item.id} onClick={() => setGroup(item.id)} className={`rounded-lg border px-2.5 py-1.5 text-xs ${group === item.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600' : field}`}>{item.label}</button>)}
+        <div role="group" aria-label={tr("趋势图单位分组")} className="flex flex-wrap gap-1">
+          {GROUPS().map(item => <button key={item.id} type="button" aria-pressed={group === item.id} onClick={() => setGroup(item.id)} className={`rounded-lg border px-2.5 py-1.5 text-xs ${group === item.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600' : field}`}>{item.label}</button>)}
         </div>
-        <span className={`text-xs ${muted}`}>显示最近 {points.length} 个样本（最多 80 个）</span>
+        <span className={`text-xs ${muted}`}>{tr("显示最近 {0} 个样本（最多 80 个）", { 0: points.length })}</span>
       </div>
-      <div className="flex flex-wrap gap-3 mb-2" role="group" aria-label="显示的性能指标">
+      <div className="flex flex-wrap gap-3 mb-2" role="group" aria-label={tr("显示的性能指标")}>
         {metrics.map(metric => <label key={metric.key} className={`inline-flex items-center gap-1.5 text-xs ${muted}`}>
           <input type="checkbox" checked={!hidden.includes(metric.key)} onChange={() => setHidden(previous => previous.includes(metric.key) ? previous.filter(key => key !== metric.key) : [...previous, metric.key])} />
           <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: metric.color }} />{metric.label}
         </label>)}
       </div>
       <div className={`h-[270px] overflow-hidden rounded-lg border ${field}`}>
-        {points.length < 2 ? <div className={`flex h-full items-center justify-center text-sm ${muted}`}>至少需要 2 个样本显示趋势</div> : visible.length === 0 ? <div className={`flex h-full items-center justify-center text-sm ${muted}`}>勾选至少一个指标以显示曲线</div> : (
-          <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-full" role="img" aria-label={`${unit} 性能趋势图`} onPointerMove={event => {
+        {points.length < 2 ? <div className={`flex h-full items-center justify-center text-sm ${muted}`}>{tr("至少需要 2 个样本显示趋势")}</div> : visible.length === 0 ? <div className={`flex h-full items-center justify-center text-sm ${muted}`}>{tr("勾选至少一个指标以显示曲线")}</div> : (
+          <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="w-full h-full" role="img" aria-label={tr("{0} 性能趋势图", { 0: unit })} onPointerMove={event => {
             const rect = event.currentTarget.getBoundingClientRect();
             const x = (event.clientX - rect.left) / rect.width * width;
             setActiveIndex(performanceSampleIndex((x - pad) / (width - pad * 2), points.length));
@@ -60,10 +62,10 @@ export default function PerformanceTrendChart({ points, isDark }) {
       <div className={`mt-2 min-h-8 text-xs ${muted}`} aria-live="polite">
         {selected ? <div className="flex flex-wrap gap-x-4 gap-y-1">
           <span>{formatTime(selected.timestamp)}</span>
-          {visible.map(metric => <span key={metric.key}>{metric.label}：{Number.isFinite(selected[metric.key]) ? `${selected[metric.key].toFixed(1)} ${metric.unit}` : '无数据'}</span>)}
-        </div> : '悬停查看时间和准确数值；缺失样本不连线。'}
+          {visible.map(metric => <span key={metric.key}>{metric.label}：{Number.isFinite(selected[metric.key]) ? `${selected[metric.key].toFixed(1)} ${metric.unit}` : tr("无数据")}</span>)}
+        </div> : tr("悬停查看时间和准确数值；缺失样本不连线。")}
       </div>
-      {points.length > 1 && <input type="range" min="0" max={points.length - 1} value={selectedIndex < 0 ? points.length - 1 : selectedIndex} onChange={event => setActiveIndex(Number(event.target.value))} aria-label="用键盘选择趋势样本" className="w-full accent-emerald-500" />}
+      {points.length > 1 && <input type="range" min="0" max={points.length - 1} value={selectedIndex < 0 ? points.length - 1 : selectedIndex} onChange={event => setActiveIndex(Number(event.target.value))} aria-label={tr("用键盘选择趋势样本")} className="w-full accent-emerald-500" />}
     </div>
   );
 }

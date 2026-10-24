@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // Device guard: lightweight live monitoring with a final local report.
 
 const { app } = require('electron');
@@ -60,7 +61,7 @@ function createGuard(deviceId, args) {
   const now = new Date();
   return {
     id: `guard-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    name: String(args?.name || '').trim() || `${deviceId} 设备守护`,
+    name: String(args?.name || '').trim() || tr("{0} 设备守护", { 0: deviceId }),
     deviceId,
     startedAt: now.toISOString(),
     endedAt: '',
@@ -87,7 +88,7 @@ function scheduleGuardTick(guard, delayMs) {
     guard.timer = null;
     runGuardTick(guard).catch(error => {
       guard.lastError = error.message || 'guard_tick_failed';
-      addGuardEvent(guard, 'high', '守护采样异常', guard.lastError);
+      addGuardEvent(guard, 'high', tr("守护采样异常"), guard.lastError);
       broadcastState(guard);
     }).finally(() => {
       if (guard.status === 'running') scheduleGuardTick(guard, guard.intervalMs);
@@ -104,7 +105,7 @@ async function runGuardTick(guard) {
   try {
     const online = await checkDeviceOnline(guard.deviceId);
     if (!online.ok) {
-      addGuardEvent(guard, 'high', '设备离线', online.error || `device_offline:${guard.deviceId}`);
+      addGuardEvent(guard, 'high', tr("设备离线"), online.error || `device_offline:${guard.deviceId}`);
       appendSample(guard, { at, online: false, error: online.error || 'device_offline' });
       broadcastState(guard);
       return;
@@ -128,7 +129,7 @@ async function runGuardTick(guard) {
       guard.lastSnapshot = snapshotResult.snapshot;
       evaluateSnapshot(guard, snapshotResult.snapshot);
     } else {
-      addGuardEvent(guard, 'medium', '性能采样失败', snapshotResult.error || 'performance_snapshot_failed');
+      addGuardEvent(guard, 'medium', tr("性能采样失败"), snapshotResult.error || 'performance_snapshot_failed');
     }
     scanLogs(guard, logResult.output || logResult.stdout || '');
     broadcastState(guard);
@@ -184,13 +185,13 @@ function evaluateSnapshot(guard, snapshot) {
   const sample = summarizeSnapshot(snapshot);
   const thresholds = guard.thresholds;
   if (Number.isFinite(sample.cpuUsage) && sample.cpuUsage >= thresholds.cpuUsage) {
-    addGuardEvent(guard, 'medium', 'CPU 使用率过高', `${sample.cpuUsage}% >= ${thresholds.cpuUsage}%`);
+    addGuardEvent(guard, 'medium', tr("CPU 使用率过高"), `${sample.cpuUsage}% >= ${thresholds.cpuUsage}%`);
   }
   if (Number.isFinite(sample.memoryUsage) && sample.memoryUsage >= thresholds.memoryUsage) {
-    addGuardEvent(guard, 'medium', '内存使用率过高', `${sample.memoryUsage}% >= ${thresholds.memoryUsage}%`);
+    addGuardEvent(guard, 'medium', tr("内存使用率过高"), `${sample.memoryUsage}% >= ${thresholds.memoryUsage}%`);
   }
   if (Number.isFinite(sample.temperature) && sample.temperature >= thresholds.temperature) {
-    addGuardEvent(guard, 'high', '设备温度过高', `${sample.temperature}°C >= ${thresholds.temperature}°C`);
+    addGuardEvent(guard, 'high', tr("设备温度过高"), `${sample.temperature}°C >= ${thresholds.temperature}°C`);
   }
 }
 
@@ -314,44 +315,44 @@ function getDataUsage(snapshot) {
 function buildGuardReport(result) {
   const eventStats = countEvents(result.events || []);
   const lines = [
-    '# 设备守护报告',
+    tr("# 设备守护报告"),
     '',
-    '## 概要',
+    tr("## 概要"),
     '',
-    `- 名称：${result.name}`,
-    `- 设备：${result.deviceId}`,
-    `- 状态：${result.status}`,
-    `- 开始时间：${result.startedAt}`,
-    `- 结束时间：${result.endedAt || '-'}`,
-    `- 采样间隔：${result.intervalMs}ms`,
-    `- 采样次数：${result.tickCount}`,
-    `- 事件总数：${result.events.length}`,
-    `- 高风险：${eventStats.high}`,
-    `- 中风险：${eventStats.medium}`,
-    `- 应用版本：${result.appVersion}`,
+    tr("- 名称：{0}", { 0: result.name }),
+    tr("- 设备：{0}", { 0: result.deviceId }),
+    tr("- 状态：{0}", { 0: result.status }),
+    tr("- 开始时间：{0}", { 0: result.startedAt }),
+    tr("- 结束时间：{0}", { 0: result.endedAt || '-' }),
+    tr("- 采样间隔：{0}ms", { 0: result.intervalMs }),
+    tr("- 采样次数：{0}", { 0: result.tickCount }),
+    tr("- 事件总数：{0}", { 0: result.events.length }),
+    tr("- 高风险：{0}", { 0: eventStats.high }),
+    tr("- 中风险：{0}", { 0: eventStats.medium }),
+    tr("- 应用版本：{0}", { 0: result.appVersion }),
     '',
-    '## 最近事件',
+    tr("## 最近事件"),
     ''
   ];
   const recentEvents = (result.events || []).slice(-60);
   if (recentEvents.length === 0) {
-    lines.push('- 未发现 Crash/ANR/OOM/Watchdog 或阈值告警', '');
+    lines.push(tr("- 未发现 Crash/ANR/OOM/Watchdog 或阈值告警"), '');
   } else {
-    lines.push('| 时间 | 级别 | 类型 | 详情 |', '| --- | --- | --- | --- |');
+    lines.push(tr("| 时间 | 级别 | 类型 | 详情 |"), '| --- | --- | --- | --- |');
     recentEvents.forEach(event => {
       lines.push(`| ${escapeTable(event.at)} | ${escapeTable(event.severity)} | ${escapeTable(event.label)} | ${escapeTable(event.detail)} |`);
     });
     lines.push('');
   }
-  lines.push('## 最近采样', '');
+  lines.push(tr("## 最近采样"), '');
   const recentSamples = (result.samples || []).slice(-20);
   if (recentSamples.length === 0) {
-    lines.push('- 无采样记录', '');
+    lines.push(tr("- 无采样记录"), '');
   } else {
-    lines.push('| 时间 | 在线 | CPU | 内存 | 温度 | 前台应用 | FPS |', '| --- | --- | ---: | ---: | ---: | --- | ---: |');
+    lines.push(tr("| 时间 | 在线 | CPU | 内存 | 温度 | 前台应用 | FPS |"), '| --- | --- | ---: | ---: | ---: | --- | ---: |');
     recentSamples.forEach(sample => {
       const snap = sample.snapshot || {};
-      lines.push(`| ${escapeTable(sample.at)} | ${sample.online ? '是' : '否'} | ${formatMetric(snap.cpuUsage, '%')} | ${formatMetric(snap.memoryUsage, '%')} | ${formatMetric(snap.temperature, '°C')} | ${escapeTable(snap.foregroundPackage || '-')} | ${formatMetric(snap.foregroundFps, '')} |`);
+      lines.push(`| ${escapeTable(sample.at)} | ${sample.online ? tr("是") : tr("否")} | ${formatMetric(snap.cpuUsage, '%')} | ${formatMetric(snap.memoryUsage, '%')} | ${formatMetric(snap.temperature, '°C')} | ${escapeTable(snap.foregroundPackage || '-')} | ${formatMetric(snap.foregroundFps, '')} |`);
     });
     lines.push('');
   }

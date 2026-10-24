@@ -1,3 +1,4 @@
+const { tr, getLocale, withLocale } = require('./localization.cjs');
 // Task center: replay scripts, multi-device task queue, and execution history.
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
 
@@ -182,7 +183,7 @@ function register(ipcMain) {
 async function runInlineScript(script, deviceIds, sender, args = {}) {
   try {
     const devices = normalizeDeviceIds(deviceIds);
-    if (devices.length === 0) return { ok: false, error: '请至少选择一台在线设备' };
+    if (devices.length === 0) return { ok: false, error: tr("请至少选择一台在线设备") };
     const nextScript = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(script);
     if (!nextScript) return { ok: false, error: 'script_not_found' };
     const task = createTask(nextScript, devices, sender, args || {});
@@ -191,7 +192,7 @@ async function runInlineScript(script, deviceIds, sender, args = {}) {
     const started = startWorkerTask(task);
     if (!started.ok) {
       task.status = 'failed';
-      task.error = started.error || '任务 Worker 启动失败';
+      task.error = started.error || tr("任务 Worker 启动失败");
       task.endedAt = new Date().toISOString();
       await finishWorkerTask(publicTask(task));
     }
@@ -218,6 +219,7 @@ function ensureTaskWorker() {
   try {
     taskWorker = new Worker(getTaskCenterWorkerPath(), {
       workerData: {
+        locale: getLocale(),
         adbPath: getAdbCommand(),
         defaultArtifactBaseDir: resolveTaskArtifactBaseDir('')
       }
@@ -233,7 +235,7 @@ function ensureTaskWorker() {
     const hadActiveTasks = activeTasks.size > 0;
     taskWorker = null;
     if (code !== 0 && hadActiveTasks) {
-      handleTaskWorkerFailure(new Error(`任务 Worker 已退出：${code}`));
+      handleTaskWorkerFailure(new Error(tr("任务 Worker 已退出：{0}", { 0: code })));
     }
   });
   return taskWorker;
@@ -249,7 +251,7 @@ function getTaskCenterWorkerPath() {
 function postTaskWorker(message) {
   try {
     const worker = message?.action === 'run' ? ensureTaskWorker() : taskWorker;
-    worker?.postMessage({ adbPath: getAdbCommand(), ...message });
+    worker?.postMessage({ adbPath: getAdbCommand(), ...message, locale: getLocale() });
   } catch (error) {
     handleTaskWorkerFailure(error);
   }
@@ -272,13 +274,13 @@ function handleTaskWorkerMessage(message) {
     return;
   }
   if (message?.type === 'bridge:request') {
-    handleTaskWorkerBridge(message).catch(error => {
+    withLocale(message.locale, () => handleTaskWorkerBridge(message)).catch(error => {
       respondTaskWorkerBridge(message.id, false, null, error.message || 'bridge_failed');
     });
     return;
   }
   if (message?.type === 'workerError') {
-    handleTaskWorkerFailure(new Error(message.error || '任务 Worker 异常'));
+    handleTaskWorkerFailure(new Error(message.error || tr("任务 Worker 异常")));
   }
 }
 
@@ -343,7 +345,7 @@ function handleTaskWorkerFailure(error) {
     const record = publicTask(task);
     if (record.status === 'running' || record.status === 'queued') {
       record.status = 'failed';
-      record.error = error.message || '任务 Worker 异常';
+      record.error = error.message || tr("任务 Worker 异常");
       record.endedAt = now;
     }
     failedRecords.push(record);
@@ -404,7 +406,7 @@ async function bridgeInspection(payload) {
   if (!taskId || !deviceId) return { ok: false, error: 'task_or_device_required' };
   const status = await vip.getStatusAsync();
   if (!status.activated) {
-    return { ok: false, error: '设备巡检为会员专属功能，请先开通会员', code: 'vip_required' };
+    return { ok: false, error: tr("设备巡检为会员专属功能，请先开通会员"), code: 'vip_required' };
   }
   const bridgeTask = createBridgeInspectionTask(taskId, deviceId);
   addBridgeInspectionTask(taskId, bridgeTask);
@@ -486,7 +488,7 @@ function ensureRunManifest(record) {
   try {
     writeRunManifest(record);
   } catch (error) {
-    record.error = [record.error, `运行清单保存失败：${error.message}`].filter(Boolean).join('\n');
+    record.error = [record.error, tr("运行清单保存失败：{0}", { 0: error.message })].filter(Boolean).join('\n');
   }
 }
 
@@ -494,7 +496,7 @@ async function runTask(task) {
   task.status = 'running';
   task.startedAt = new Date().toISOString();
   await ensureTaskRootDir(task);
-  appendTaskLog(task, task.script.mode === 'stress' ? '自动化压测开始' : '任务开始');
+  appendTaskLog(task, task.script.mode === 'stress' ? tr("自动化压测开始") : tr("任务开始"));
   broadcastTask(task);
 
   if (task.script.mode === 'stress') {
@@ -524,7 +526,7 @@ async function runTask(task) {
     task.status = 'success';
   }
   task.endedAt = new Date().toISOString();
-  appendTaskLog(task, task.status === 'success' ? '任务完成' : task.status === 'cancelled' ? '任务已取消' : '任务存在失败项');
+  appendTaskLog(task, task.status === 'success' ? tr("任务完成") : task.status === 'cancelled' ? tr("任务已取消") : tr("任务存在失败项"));
   await finishTask(task);
 }
 
@@ -540,7 +542,7 @@ async function runDevice(task, run) {
     run.steps.push(stepRun);
     stepRun.status = 'running';
     stepRun.startedAt = new Date().toISOString();
-    appendTaskLog(task, `[${run.deviceId}] ${stepRun.label} 开始`);
+    appendTaskLog(task, tr("[{0}] {1} 开始", { 0: run.deviceId, 1: stepRun.label }));
     broadcastTask(task);
 
     try {
@@ -552,10 +554,10 @@ async function runDevice(task, run) {
       stepRun.endedAt = new Date().toISOString();
       if (result.ok) {
         task.completedSteps += 1;
-        appendTaskLog(task, `[${run.deviceId}] ${stepRun.label} 完成`);
+        appendTaskLog(task, tr("[{0}] {1} 完成", { 0: run.deviceId, 1: stepRun.label }));
       } else {
         task.failedSteps += 1;
-        appendTaskLog(task, `[${run.deviceId}] ${stepRun.label} 失败：${stepRun.error || '未知错误'}`);
+        appendTaskLog(task, tr("[{0}] {1} 失败：{2}", { 0: run.deviceId, 1: stepRun.label, 2: stepRun.error || tr("未知错误") }));
         if (!task.continueOnError && !step.continueOnError) {
           run.status = 'failed';
           break;
@@ -566,7 +568,7 @@ async function runDevice(task, run) {
       stepRun.error = error.message;
       stepRun.endedAt = new Date().toISOString();
       task.failedSteps += 1;
-      appendTaskLog(task, `[${run.deviceId}] ${stepRun.label} 异常：${error.message}`);
+      appendTaskLog(task, tr("[{0}] {1} 异常：{2}", { 0: run.deviceId, 1: stepRun.label, 2: error.message }));
       if (!task.continueOnError && !step.continueOnError) {
         run.status = 'failed';
         break;
@@ -609,11 +611,11 @@ async function runStressTask(task) {
     task.status = 'success';
   } else {
     task.status = 'failed';
-    task.error = summary.reason || '压测验收未通过';
+    task.error = summary.reason || tr("压测验收未通过");
   }
 
   task.endedAt = new Date().toISOString();
-  appendTaskLog(task, task.status === 'success' ? '自动化压测通过' : task.status === 'cancelled' ? '自动化压测已取消' : `自动化压测失败：${task.error || '验收未通过'}`);
+  appendTaskLog(task, task.status === 'success' ? tr("自动化压测通过") : task.status === 'cancelled' ? tr("自动化压测已取消") : tr("自动化压测失败：{0}", { 0: task.error || tr("验收未通过") }));
   await writeStressArtifacts(task, summary);
   await finishTask(task);
 }
@@ -642,7 +644,7 @@ async function runStressDevice(task, run) {
       warnings: []
     };
     appendStressRound(run, round);
-    appendTaskLog(task, `[${run.deviceId}] 第 ${roundIndex} 轮开始`);
+    appendTaskLog(task, tr("[{0}] 第 {1} 轮开始", { 0: run.deviceId, 1: roundIndex }));
     broadcastTask(task);
 
     let stopRound = false;
@@ -654,7 +656,7 @@ async function runStressDevice(task, run) {
       stepRun.status = 'running';
       stepRun.startedAt = new Date().toISOString();
       appendStressStep(run, round, stepRun);
-      appendTaskLog(task, `[${run.deviceId}] 第 ${roundIndex} 轮 ${stepRun.label} 开始`);
+      appendTaskLog(task, tr("[{0}] 第 {1} 轮 {2} 开始", { 0: run.deviceId, 1: roundIndex, 2: stepRun.label }));
       broadcastTask(task);
 
       try {
@@ -670,7 +672,7 @@ async function runStressDevice(task, run) {
     }
 
     if (!task.cancelled && task.script.report?.includePerformance === true) {
-      const perfStep = createStepRun({ id: `perf-${roundIndex}`, type: 'perfSnapshot', label: '轮次性能快照' }, task.script.steps.length);
+      const perfStep = createStepRun({ id: `perf-${roundIndex}`, type: 'perfSnapshot', label: tr("轮次性能快照") }, task.script.steps.length);
       perfStep.roundIndex = roundIndex;
       perfStep.status = 'running';
       perfStep.startedAt = new Date().toISOString();
@@ -695,10 +697,10 @@ async function runStressDevice(task, run) {
     round.endedAt = new Date().toISOString();
     if (round.status === 'success') {
       run.completedRounds += 1;
-      appendTaskLog(task, `[${run.deviceId}] 第 ${roundIndex} 轮完成`);
+      appendTaskLog(task, tr("[{0}] 第 {1} 轮完成", { 0: run.deviceId, 1: roundIndex }));
     } else if (round.status === 'failed') {
       run.failedRounds += 1;
-      appendTaskLog(task, `[${run.deviceId}] 第 ${roundIndex} 轮失败`);
+      appendTaskLog(task, tr("[{0}] 第 {1} 轮失败", { 0: run.deviceId, 1: roundIndex }));
       if (loop.continueOnError === false) break;
     }
     broadcastTask(task);
@@ -774,7 +776,7 @@ async function executeStep(task, deviceId, step) {
   }
   if (type === 'delay') {
     await sleepWithCancel(task, Math.max(100, Math.min(Number(step.durationMs) || 1000, 600000)));
-    return { ok: true, output: '等待完成' };
+    return { ok: true, output: tr("等待完成") };
   }
   if (type === 'externalScript') {
     return runExternalScriptStep(task, deviceId, step);
@@ -828,8 +830,8 @@ async function compareScreenshot(task, deviceId, step) {
 
   return {
     ok: passed,
-    output: `截图相似度 ${result.similarity.toFixed(2)}%，阈值 ${threshold}%`,
-    error: passed ? '' : `截图相似度低于阈值：${result.similarity.toFixed(2)}% < ${threshold}%`,
+    output: tr("截图相似度 {0}%，阈值 {1}%", { 0: result.similarity.toFixed(2), 1: threshold }),
+    error: passed ? '' : tr("截图相似度低于阈值：{0}% < {1}%", { 0: result.similarity.toFixed(2), 1: threshold }),
     artifact: resultPath,
     imageCompare: { ...result, threshold, baselinePath: resolvedBaseline, currentPath, resultPath }
   };
@@ -854,7 +856,7 @@ async function tapUiTarget(task, deviceId, step) {
   const point = await findUiPoint(task, deviceId, step, step.timeoutMs || DEFAULT_TIMEOUT_MS) || fallbackPoint;
   if (!point) return { ok: false, error: 'ui_target_not_found' };
   const res = await runAdb(task, ['-s', deviceId, 'shell', `input tap ${point.x} ${point.y}`], step.timeoutMs || DEFAULT_TIMEOUT_MS);
-  return { ...res, output: res.output || `点击 ${point.x},${point.y}` };
+  return { ...res, output: res.output || tr("点击 {0},{1}", { 0: point.x, 1: point.y }) };
 }
 
 async function longPressUiTarget(task, deviceId, step) {
@@ -864,7 +866,7 @@ async function longPressUiTarget(task, deviceId, step) {
   const duration = clampNumber(step.durationMs, 300, 10000, 800);
   const command = `input swipe ${point.x} ${point.y} ${point.x} ${point.y} ${duration}`;
   const res = await runAdb(task, ['-s', deviceId, 'shell', command], step.timeoutMs || DEFAULT_TIMEOUT_MS);
-  return { ...res, output: res.output || `长按 ${point.x},${point.y} ${duration}ms` };
+  return { ...res, output: res.output || tr("长按 {0},{1} {2}ms", { 0: point.x, 1: point.y, 2: duration }) };
 }
 
 async function swipeUiTarget(task, deviceId, step) {
@@ -876,7 +878,7 @@ async function swipeUiTarget(task, deviceId, step) {
   const duration = clampNumber(step.durationMs, 50, 10000, 300);
   const command = `input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`;
   const res = await runAdb(task, ['-s', deviceId, 'shell', command], step.timeoutMs || DEFAULT_TIMEOUT_MS);
-  return { ...res, output: res.output || `滑动 ${start.x},${start.y} -> ${end.x},${end.y}` };
+  return { ...res, output: res.output || tr("滑动 {0},{1} -> {2},{3}", { 0: start.x, 1: start.y, 2: end.x, 3: end.y }) };
 }
 
 async function curveSwipeUiTarget(task, deviceId, step, points) {
@@ -885,13 +887,13 @@ async function curveSwipeUiTarget(task, deviceId, step, points) {
   const motionCommand = buildMotionEventSwipeCommand(gesturePoints, duration);
   const motionResult = await runAdb(task, ['-s', deviceId, 'shell', motionCommand], step.timeoutMs || DEFAULT_TIMEOUT_MS);
   if (motionResult.ok) {
-    return { ...motionResult, output: motionResult.output || `曲线滑动 ${gesturePoints.length} 点` };
+    return { ...motionResult, output: motionResult.output || tr("曲线滑动 {0} 点", { 0: gesturePoints.length }) };
   }
   const fallbackCommand = buildSegmentedSwipeCommand(gesturePoints, duration);
   const fallbackResult = await runAdb(task, ['-s', deviceId, 'shell', fallbackCommand], step.timeoutMs || DEFAULT_TIMEOUT_MS);
   return {
     ...fallbackResult,
-    output: fallbackResult.output || `曲线滑动 ${gesturePoints.length} 点（分段模式）`,
+    output: fallbackResult.output || tr("曲线滑动 {0} 点（分段模式）", { 0: gesturePoints.length }),
     error: fallbackResult.ok ? '' : fallbackResult.error || motionResult.error
   };
 }
@@ -900,14 +902,14 @@ async function inputText(task, deviceId, step) {
   const text = String(step.text || '');
   if (!text) return { ok: false, error: 'input_text_required' };
   const res = await runAdb(task, ['-s', deviceId, 'shell', `input text ${shellQuoteForAndroidInput(text)}`], step.timeoutMs || DEFAULT_TIMEOUT_MS);
-  return { ...res, output: res.output || '文本输入完成' };
+  return { ...res, output: res.output || tr("文本输入完成") };
 }
 
 async function pressKeyevent(task, deviceId, step) {
   const keyCode = String(step.keyCode || '').trim();
   if (!keyCode) return { ok: false, error: 'keycode_required' };
   const res = await runAdb(task, ['-s', deviceId, 'shell', `input keyevent ${keyCode}`], step.timeoutMs || DEFAULT_TIMEOUT_MS);
-  return { ...res, output: res.output || `按键 ${keyCode}` };
+  return { ...res, output: res.output || tr("按键 {0}", { 0: keyCode }) };
 }
 
 async function waitForText(task, deviceId, step) {
@@ -915,7 +917,7 @@ async function waitForText(task, deviceId, step) {
   if (!hasSelector(selector)) return { ok: false, error: 'selector_required' };
   const node = await waitForUiNode(task, deviceId, { ...step, selector }, step.timeoutMs || DEFAULT_TIMEOUT_MS);
   const label = describeSelector(selector);
-  return node ? { ok: true, output: `已找到控件：${label}` } : { ok: false, error: `等待控件超时：${label}` };
+  return node ? { ok: true, output: tr("已找到控件：{0}", { 0: label }) } : { ok: false, error: tr("等待控件超时：{0}", { 0: label }) };
 }
 
 async function assertText(task, deviceId, step) {
@@ -923,13 +925,13 @@ async function assertText(task, deviceId, step) {
   if (!hasSelector(selector)) return { ok: false, error: 'selector_required' };
   const node = await findUiNode(task, deviceId, { ...step, selector }, step.timeoutMs || DEFAULT_TIMEOUT_MS);
   const label = describeSelector(selector);
-  return node ? { ok: true, output: `断言控件存在：${label}` } : { ok: false, error: `控件不存在：${label}` };
+  return node ? { ok: true, output: tr("断言控件存在：{0}", { 0: label }) } : { ok: false, error: tr("控件不存在：{0}", { 0: label }) };
 }
 
 async function captureInspectionSummary(task, deviceId, step) {
   const status = await vip.getStatusAsync();
   if (!status.activated) {
-    return { ok: false, error: '设备巡检为会员专属功能，请先开通会员', code: 'vip_required' };
+    return { ok: false, error: tr("设备巡检为会员专属功能，请先开通会员"), code: 'vip_required' };
   }
   const outputBaseDir = await ensureTaskArtifactDir(task, 'inspection');
   const inspectionTask = createLinkedInspectionTask(task, deviceId);
@@ -942,11 +944,11 @@ async function captureInspectionSummary(task, deviceId, step) {
   });
   const findings = result.analysis?.findings || [];
   const output = [
-    result.cancelled ? '巡检已取消，已生成部分结果' : result.ok ? '完整巡检已完成' : '巡检未完整完成',
-    `报告：${result.reportPath || '-'}`,
-    `证据包：${result.zipPath || result.zipError || '-'}`,
-    `健康结论：${result.analysis?.summary || '-'}`,
-    findings.length > 0 ? `风险项：${findings.map(item => `${item.label}(${item.severity})`).join(', ')}` : '风险项：无'
+    result.cancelled ? tr("巡检已取消，已生成部分结果") : result.ok ? tr("完整巡检已完成") : tr("巡检未完整完成"),
+    tr("报告：{0}", { 0: result.reportPath || '-' }),
+    tr("证据包：{0}", { 0: result.zipPath || result.zipError || '-' }),
+    tr("健康结论：{0}", { 0: result.analysis?.summary || '-' }),
+    findings.length > 0 ? tr("风险项：{0}", { 0: findings.map(item => `${item.label}(${item.severity})`).join(', ') }) : tr("风险项：无")
   ].join('\n');
   return {
     ok: result.ok === true || result.cancelled === true,
@@ -983,17 +985,17 @@ async function waitForLog(task, deviceId, step) {
   const intervalMs = Math.max(1000, Math.min(Number(step.intervalMs) || 2000, 10000));
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
-    if (task.cancelled) return { ok: false, error: '用户取消' };
+    if (task.cancelled) return { ok: false, error: tr("用户取消") };
     const res = await runAdb(task, ['-s', deviceId, 'logcat', '-d', '-v', 'threadtime'], Math.min(15000, timeoutMs));
     const text = res.output || res.stdout || '';
     const matched = regex ? regex.test(text) : text.includes(keyword);
     if (matched) {
       const line = text.split(/\r?\n/).find(item => regex ? regex.test(item) : item.includes(keyword)) || '';
-      return { ok: true, output: line || '已匹配日志' };
+      return { ok: true, output: line || tr("已匹配日志") };
     }
     await sleepWithCancel(task, intervalMs);
   }
-  return { ok: false, error: `等待日志超时：${keyword || regexText}` };
+  return { ok: false, error: tr("等待日志超时：{0}", { 0: keyword || regexText }) };
 }
 
 function createRecorderTask(sender) {
@@ -1040,7 +1042,7 @@ async function recordStressAction(task, deviceId, args) {
   const step = buildRecordedStep(action, args);
   if (!step) return { ok: false, error: 'unsupported_record_action' };
 
-  let result = { ok: true, output: '已记录' };
+  let result = { ok: true, output: tr("已记录") };
   if (['tap', 'longPress', 'swipe', 'input', 'keyevent', 'waitText', 'assertText'].includes(step.type)) {
     result = await executeStep(task, deviceId, step);
   }
@@ -1055,7 +1057,7 @@ function buildRecordedStep(action, args) {
     const point = pointFromRecordedNodeOrArgs(node, args);
     return normalizeStep({
       type: 'tap',
-      label: `点击 ${node?.label || formatPointLabel(point)}`,
+      label: tr("点击 {0}", { 0: node?.label || formatPointLabel(point) }),
       ...selector,
       ...point
     });
@@ -1065,7 +1067,7 @@ function buildRecordedStep(action, args) {
     const point = pointFromRecordedNodeOrArgs(node, args);
     return normalizeStep({
       type: 'longPress',
-      label: `长按 ${node?.label || formatPointLabel(point)}`,
+      label: tr("长按 {0}", { 0: node?.label || formatPointLabel(point) }),
       ...selector,
       ...point,
       durationMs: args.durationMs || 800
@@ -1077,7 +1079,7 @@ function buildRecordedStep(action, args) {
     const label = text || node?.label || describeSelector(selector);
     return normalizeStep({
       type: action,
-      label: action === 'waitText' ? `等待 ${label || '控件'}` : `断言 ${label || '控件'}`,
+      label: action === 'waitText' ? tr("等待 {0}", { 0: label || tr("控件") }) : tr("断言 {0}", { 0: label || tr("控件") }),
       ...(text ? { text } : {}),
       ...selector,
       timeoutMs: args.timeoutMs || DEFAULT_TIMEOUT_MS
@@ -1086,14 +1088,14 @@ function buildRecordedStep(action, args) {
   if (action === 'input') {
     return normalizeStep({
       type: 'input',
-      label: '输入文本',
+      label: tr("输入文本"),
       text: String(args.text || '')
     });
   }
   if (action === 'keyevent') {
     return normalizeStep({
       type: 'keyevent',
-      label: `按键 ${args.keyCode || ''}`,
+      label: tr("按键 {0}", { 0: args.keyCode || '' }),
       keyCode: String(args.keyCode || '')
     });
   }
@@ -1101,7 +1103,7 @@ function buildRecordedStep(action, args) {
     const points = normalizeGesturePoints(args.points || args.curvePoints || args.pathPoints);
     return normalizeStep({
       type: 'swipe',
-      label: points.length > 2 ? '曲线滑动' : '滑动',
+      label: points.length > 2 ? tr("曲线滑动") : tr("滑动"),
       x: args.x,
       y: args.y,
       endX: args.endX,
@@ -1113,7 +1115,7 @@ function buildRecordedStep(action, args) {
   if (action === 'delay') {
     return normalizeStep({
       type: 'delay',
-      label: `等待 ${args.durationMs || 1000}ms`,
+      label: tr("等待 {0}ms", { 0: args.durationMs || 1000 }),
       durationMs: args.durationMs || 1000
     });
   }
@@ -1123,7 +1125,7 @@ function buildRecordedStep(action, args) {
 function toPublicUiNode(node, index) {
   const attrs = node.attrs || {};
   const center = getNodeCenter(node);
-  const label = attrs.text || attrs['content-desc'] || attrs['resource-id'] || attrs.class || `控件 ${index + 1}`;
+  const label = attrs.text || attrs['content-desc'] || attrs['resource-id'] || attrs.class || tr("控件 {0}", { 0: index + 1 });
   return {
     index,
     label,
@@ -1164,7 +1166,7 @@ function pointFromRecordedNodeOrArgs(node, args) {
 }
 
 function formatPointLabel(point) {
-  return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? `${point.x},${point.y}` : '目标';
+  return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? `${point.x},${point.y}` : tr("目标");
 }
 
 function compactObject(value) {
@@ -1264,8 +1266,8 @@ function hasSelector(selector) {
 }
 
 function describeSelector(selector) {
-  if (!selector) return '控件';
-  return selector.text || selector.textContains || selector.resourceId || selector.contentDesc || selector.className || selector.xpath || '控件';
+  if (!selector) return tr("控件");
+  return selector.text || selector.textContains || selector.resourceId || selector.contentDesc || selector.className || selector.xpath || tr("控件");
 }
 
 function getExplicitPoint(step) {
@@ -1505,7 +1507,7 @@ function bufferToText(buffer) {
 }
 
 async function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  if (task.cancelled) return { ok: false, error: '用户取消', output: '' };
+  if (task.cancelled) return { ok: false, error: tr("用户取消"), output: '' };
   let currentProc = null;
   const res = await runRuntimeAdb(args, {
     timeoutMs,
@@ -1524,7 +1526,7 @@ async function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
       stdout,
       stderr,
       output: trimOutput(`${stdout}${stderr}`),
-      error: task.cancelled ? '用户取消' : (res.error || stderr || 'ADB command failed')
+      error: task.cancelled ? tr("用户取消") : (res.error || stderr || 'ADB command failed')
     };
   }
   return { ok: true, stdout, stderr, output: trimOutput(stdout || stderr || '') };
@@ -1532,7 +1534,7 @@ async function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
 
 async function runAdbBuffer(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
   if (task.cancelled) {
-    return { ok: false, error: '用户取消', stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+    return { ok: false, error: tr("用户取消"), stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
   }
   let currentProc = null;
   const res = await runRuntimeAdb(args, {
@@ -1553,7 +1555,7 @@ async function runAdbBuffer(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
       ok: false,
       stdout,
       stderr,
-      error: task.cancelled ? '用户取消' : (bufferToText(stderr) || res.error || 'ADB command failed')
+      error: task.cancelled ? tr("用户取消") : (bufferToText(stderr) || res.error || 'ADB command failed')
     };
   }
   return { ok: true, stdout, stderr };
@@ -1562,7 +1564,7 @@ async function runAdbBuffer(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
 function runProcess(task, command, args, timeoutMs, cwd = undefined) {
   return new Promise((resolve) => {
     if (task.cancelled) {
-      resolve({ ok: false, error: '用户取消', output: '' });
+      resolve({ ok: false, error: tr("用户取消"), output: '' });
       return;
     }
     const proc = execFile(command, args, { windowsHide: true, timeout: timeoutMs, cwd }, (error, stdout, stderr) => {
@@ -1621,7 +1623,7 @@ async function runExternalScriptStep(task, deviceId, step) {
   ].join('\n'), 'utf8');
   return {
     ...result,
-    output: result.output || `外部脚本执行完成：${finalCommand}`,
+    output: result.output || tr("外部脚本执行完成：{0}", { 0: finalCommand }),
     artifact: logPath
   };
 }
@@ -1733,7 +1735,7 @@ async function finishTask(task) {
     await finalizeTaskArtifactDir(task);
   } catch (error) {
     task.error = task.error || error.message;
-    appendTaskLog(task, `产物目录整理失败：${error.message}`);
+    appendTaskLog(task, tr("产物目录整理失败：{0}", { 0: error.message }));
   }
   activeTasks.delete(task.id);
   const record = publicTask(task);
@@ -1802,11 +1804,11 @@ function createStepRun(step, index) {
 function normalizeScript(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const steps = Array.isArray(source.steps) ? source.steps.map(normalizeStep).filter(Boolean) : [];
-  if (steps.length === 0) throw new Error('脚本至少需要一个步骤');
+  if (steps.length === 0) throw new Error(tr("脚本至少需要一个步骤"));
   const mode = source.mode === 'stress' || source.type === 'stress' ? 'stress' : 'replay';
   return {
     id: String(source.id || `script-${Date.now()}-${Math.random().toString(16).slice(2)}`).trim(),
-    name: String(source.name || '未命名脚本').trim().slice(0, 80),
+    name: String(source.name || tr("未命名脚本")).trim().slice(0, 80),
     description: String(source.description || '').trim().slice(0, 500),
     mode,
     continueOnError: source.continueOnError !== false,
@@ -1930,10 +1932,10 @@ function finishStressStep(task, stepRun, result) {
   stepRun.endedAt = new Date().toISOString();
   if (result.ok) {
     task.completedSteps += 1;
-    appendTaskLog(task, `${stepRun.label} 完成`);
+    appendTaskLog(task, tr("{0} 完成", { 0: stepRun.label }));
   } else {
     task.failedSteps += 1;
-    appendTaskLog(task, `${stepRun.label} 失败：${stepRun.error || '未知错误'}`);
+    appendTaskLog(task, tr("{0} 失败：{1}", { 0: stepRun.label, 1: stepRun.error || tr("未知错误") }));
   }
 }
 
@@ -1949,10 +1951,10 @@ function evaluatePerformanceSnapshot(snapshot, thresholds = {}) {
       warnings.push({ type, label, value, limit, fail: true });
     }
   };
-  push('cpu', 'CPU 使用率超限', Number(snapshot.cpu?.usage), thresholds.cpu);
-  push('memory', '内存使用率超限', Number(snapshot.memory?.usage), thresholds.memory);
-  push('batteryTemp', '电池温度超限', getSnapshotTemperature(snapshot), thresholds.batteryTemp);
-  push('dataUsed', '存储空间使用率超限', getSnapshotDataUsage(snapshot), thresholds.dataUsed);
+  push('cpu', tr("CPU 使用率超限"), Number(snapshot.cpu?.usage), thresholds.cpu);
+  push('memory', tr("内存使用率超限"), Number(snapshot.memory?.usage), thresholds.memory);
+  push('batteryTemp', tr("电池温度超限"), getSnapshotTemperature(snapshot), thresholds.batteryTemp);
+  push('dataUsed', tr("存储空间使用率超限"), getSnapshotDataUsage(snapshot), thresholds.dataUsed);
   return warnings;
 }
 
@@ -1976,10 +1978,10 @@ async function detectCrashAnr(task, deviceId, acceptance) {
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'logcat -d -v time -t 300'], 10000);
   const text = res.output || res.stdout || '';
   if (acceptance.failOnCrash && /FATAL EXCEPTION|AndroidRuntime|CRASH:/i.test(text)) {
-    warnings.push({ type: 'crash', label: '检测到崩溃日志', fail: true });
+    warnings.push({ type: 'crash', label: tr("检测到崩溃日志"), fail: true });
   }
   if (acceptance.failOnAnr && /\bANR\b|Application Not Responding|am_anr/i.test(text)) {
-    warnings.push({ type: 'anr', label: '检测到 ANR 日志', fail: true });
+    warnings.push({ type: 'anr', label: tr("检测到 ANR 日志"), fail: true });
   }
   return { ok: warnings.length === 0, warnings };
 }
@@ -1997,9 +1999,9 @@ function buildStressSummary(task) {
   let reason = '';
   if (successRate < acceptance.minSuccessRate) {
     passed = false;
-    reason = `成功率 ${successRate}% 低于 ${acceptance.minSuccessRate}%`;
+    reason = tr("成功率 {0}% 低于 {1}%", { 0: successRate, 1: acceptance.minSuccessRate });
   } else if (failedRounds > 0) {
-    reason = `存在 ${failedRounds} 个失败轮次`;
+    reason = tr("存在 {0} 个失败轮次", { 0: failedRounds });
   }
   return {
     passed,
@@ -2022,7 +2024,7 @@ function collectStressFailures(runs) {
             deviceId: run.deviceId,
             round: round.index,
             step: step.label,
-            error: step.error || '未知错误'
+            error: step.error || tr("未知错误")
           });
         }
       }
@@ -2080,39 +2082,39 @@ async function writeStressArtifacts(task, summary) {
   await fs.promises.writeFile(reportPath, buildStressReport(result, aiSummary), 'utf8');
   task.stressResultPath = resultPath;
   task.stressReportPath = reportPath;
-  appendTaskLog(task, `压测报告：${reportPath}`);
+  appendTaskLog(task, tr("压测报告：{0}", { 0: reportPath }));
 }
 
 function buildStressReport(result, aiSummary) {
   const lines = [
-    `# ${result.scriptName} 自动化压测报告`,
+    tr("# {0} 自动化压测报告", { 0: result.scriptName }),
     '',
-    `- 状态：${result.status}`,
-    `- 开始时间：${result.startedAt || '-'}`,
-    `- 结束时间：${result.endedAt || '-'}`,
-    `- 总轮次：${result.summary.totalRounds}`,
-    `- 成功轮次：${result.summary.successRounds}`,
-    `- 失败轮次：${result.summary.failedRounds}`,
-    `- 成功率：${result.summary.successRate}%`,
-    `- 结论：${result.summary.passed ? '通过' : '失败'}`,
-    result.summary.reason ? `- 原因：${result.summary.reason}` : '',
+    tr("- 状态：{0}", { 0: result.status }),
+    tr("- 开始时间：{0}", { 0: result.startedAt || '-' }),
+    tr("- 结束时间：{0}", { 0: result.endedAt || '-' }),
+    tr("- 总轮次：{0}", { 0: result.summary.totalRounds }),
+    tr("- 成功轮次：{0}", { 0: result.summary.successRounds }),
+    tr("- 失败轮次：{0}", { 0: result.summary.failedRounds }),
+    tr("- 成功率：{0}%", { 0: result.summary.successRate }),
+    tr("- 结论：{0}", { 0: result.summary.passed ? tr("通过") : tr("失败") }),
+    result.summary.reason ? tr("- 原因：{0}", { 0: result.summary.reason }) : '',
     '',
-    '## 设备结果',
+    tr("## 设备结果"),
     ''
   ].filter(line => line !== '');
 
   for (const device of result.devices || []) {
     lines.push(`### ${device.deviceId}`, '');
-    lines.push(`- 状态：${device.status}`);
-    lines.push(`- 成功轮次：${device.completedRounds}`);
-    lines.push(`- 失败轮次：${device.failedRounds}`, '');
+    lines.push(tr("- 状态：{0}", { 0: device.status }));
+    lines.push(tr("- 成功轮次：{0}", { 0: device.completedRounds }));
+    lines.push(tr("- 失败轮次：{0}", { 0: device.failedRounds }), '');
   }
 
-  lines.push('## 失败明细', '');
+  lines.push(tr("## 失败明细"), '');
   if ((result.summary.failures || []).length === 0) {
-    lines.push('无', '');
+    lines.push(tr("无"), '');
   } else {
-    lines.push('| 设备 | 轮次 | 步骤 | 错误 |');
+    lines.push(tr("| 设备 | 轮次 | 步骤 | 错误 |"));
     lines.push('| --- | --- | --- | --- |');
     for (const failure of result.summary.failures || []) {
       lines.push(`| ${escapeTable(failure.deviceId)} | ${failure.round} | ${escapeTable(failure.step)} | ${escapeTable(failure.error)} |`);
@@ -2120,22 +2122,22 @@ function buildStressReport(result, aiSummary) {
     lines.push('');
   }
 
-  lines.push('## AI 分析', '');
+  lines.push(tr("## AI 分析"), '');
   if (aiSummary?.ok && aiSummary.summary) {
     lines.push(aiSummary.summary.trim(), '');
   } else if (aiSummary?.skipped) {
-    lines.push('未启用 AI 分析。', '');
+    lines.push(tr("未启用 AI 分析。"), '');
   } else {
-    lines.push(`AI 分析失败：${aiSummary?.error || '未知错误'}`, '');
+    lines.push(tr("AI 分析失败：{0}", { 0: aiSummary?.error || tr("未知错误") }), '');
   }
   return lines.join('\n');
 }
 
 async function buildStressAiSummary(result) {
   const prompt = [
-    '你是 Android 自动化压测报告分析助手。',
-    '只能基于用户提供的结构化压测结果总结，不要臆测未出现的信息。',
-    '输出应包含：整体结论、主要失败原因、性能/稳定性风险、下一步建议。'
+    tr("你是 Android 自动化压测报告分析助手。"),
+    tr("只能基于用户提供的结构化压测结果总结，不要臆测未出现的信息。"),
+    tr("输出应包含：整体结论、主要失败原因、性能/稳定性风险、下一步建议。")
   ].join('\n');
   const content = JSON.stringify({
     scriptName: result.scriptName,
@@ -2159,17 +2161,17 @@ async function buildStressAiSummary(result) {
 function importStressScript(filePath, scriptArgs = '') {
   const target = String(filePath || '').trim();
   if (!target) throw new Error('file_required');
-  if (!fs.existsSync(target)) throw new Error('脚本文件不存在');
+  if (!fs.existsSync(target)) throw new Error(tr("脚本文件不存在"));
   const ext = path.extname(target).toLowerCase();
   if (ext === '.py' || ext === '.sh') {
     const fileName = path.basename(target);
     return normalizeScript({
       mode: 'stress',
       name: path.basename(target, ext),
-      description: `导入自 ${fileName}`,
+      description: tr("导入自 {0}", { 0: fileName }),
       steps: [{
         type: 'externalScript',
-        label: `执行 ${fileName}`,
+        label: tr("执行 {0}", { 0: fileName }),
         adapter: 'custom',
         scriptPath: path.resolve(target),
         args: String(scriptArgs ?? '')
@@ -2177,7 +2179,7 @@ function importStressScript(filePath, scriptArgs = '') {
     });
   }
   if (!['.json', '.yaml', '.yml'].includes(ext)) {
-    throw new Error(`不支持的脚本格式：${ext || '无扩展名'}`);
+    throw new Error(tr("不支持的脚本格式：{0}", { 0: ext || tr("无扩展名") }));
   }
   const content = fs.readFileSync(target, 'utf8');
   const parsed = ext === '.yaml' || ext === '.yml' ? parseSimpleYaml(content) : JSON.parse(content);
@@ -2185,7 +2187,7 @@ function importStressScript(filePath, scriptArgs = '') {
     ...parsed,
     mode: 'stress',
     name: parsed.name || path.basename(target, ext),
-    description: parsed.description || `导入自 ${path.basename(target)}`
+    description: parsed.description || tr("导入自 {0}", { 0: path.basename(target) })
   });
 }
 
@@ -2214,7 +2216,7 @@ function parseSimpleYaml(content) {
     while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
     const parent = stack[stack.length - 1].value;
     if (text.startsWith('- ')) {
-      if (!Array.isArray(parent)) throw new Error('YAML 列表必须位于数组字段下');
+      if (!Array.isArray(parent)) throw new Error(tr("YAML 列表必须位于数组字段下"));
       const itemText = text.slice(2).trim();
       const item = {};
       parent.push(item);
@@ -2423,24 +2425,24 @@ function normalizeDeviceId(value) {
 
 function getStepTypeLabel(type) {
   return {
-    shell: '执行 Shell',
-    installApk: '安装 APK',
-    pushFile: '推送文件',
-    screenshot: '截图',
-    imageCompare: '截图比对',
-    perfSnapshot: '性能采样',
-    tap: '点击',
-    longPress: '长按',
-    swipe: '滑动',
-    input: '输入文本',
-    keyevent: '按键',
-    waitText: '等待文本',
-    assertText: '断言文本',
-    inspection: '设备巡检',
-    waitLog: '等待日志',
-    externalScript: '外部脚本',
-    delay: '等待'
-  }[type] || '执行步骤';
+    shell: tr("执行 Shell"),
+    installApk: tr("安装 APK"),
+    pushFile: tr("推送文件"),
+    screenshot: tr("截图"),
+    imageCompare: tr("截图比对"),
+    perfSnapshot: tr("性能采样"),
+    tap: tr("点击"),
+    longPress: tr("长按"),
+    swipe: tr("滑动"),
+    input: tr("输入文本"),
+    keyevent: tr("按键"),
+    waitText: tr("等待文本"),
+    assertText: tr("断言文本"),
+    inspection: tr("设备巡检"),
+    waitLog: tr("等待日志"),
+    externalScript: tr("外部脚本"),
+    delay: tr("等待")
+  }[type] || tr("执行步骤");
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -2470,7 +2472,7 @@ function estimateTotalSteps(script, deviceCount) {
 
 function trimOutput(value) {
   const text = String(value || '');
-  return text.length > MAX_OUTPUT_CHARS ? `${text.slice(0, MAX_OUTPUT_CHARS)}\n...输出已截断` : text;
+  return text.length > MAX_OUTPUT_CHARS ? tr("{0}\n...输出已截断", { 0: text.slice(0, MAX_OUTPUT_CHARS) }) : text;
 }
 
 function sanitizeName(value) {
@@ -2485,7 +2487,7 @@ function formatStamp(date) {
 function sleepWithCancel(task, durationMs) {
   return new Promise((resolve, reject) => {
     if (task.cancelled) {
-      reject(new Error('用户取消'));
+      reject(new Error(tr("用户取消")));
       return;
     }
     const timer = setTimeout(() => {
@@ -2496,7 +2498,7 @@ function sleepWithCancel(task, durationMs) {
       if (!task.cancelled) return;
       clearTimeout(timer);
       clearInterval(check);
-      reject(new Error('用户取消'));
+      reject(new Error(tr("用户取消")));
     }, 200);
     check.unref?.();
   });

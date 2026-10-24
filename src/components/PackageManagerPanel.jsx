@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 // App 包管理增强面板：保留安装/推送/浏览，并新增应用列表、详情和会员操作。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -37,6 +38,7 @@ import { executePersistedPackageBatch, readPackageBatchResult, storePackageBatch
 import { FAVORITE_PACKAGES_EVENT, FAVORITE_PACKAGES_KEY, filterPackages, readFavoritePackages, saveShortcutList } from '../shared/deviceShortcuts';
 
 function OperationResult({ isDark, loading, loadingText, result }) {
+  useLocale();
   const status = loading ? 'loading' : result?.status;
   const message = loading ? loadingText : result?.message;
   if (!status || !message) return null;
@@ -84,6 +86,7 @@ function PackageManagerPanel({
   apkBrowserLoading,
   operationLoading
 }) {
+  const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
   const isVip = vipStatus?.activated === true;
@@ -143,8 +146,8 @@ function PackageManagerPanel({
   const isLoading = (key) => operationLoading?.[key];
   const packageCount = packages.length;
   const userPackageCount = packages.filter(item => !item.system).length;
-  const filteredPackages = useMemo(() => filterPackages(packages, { query, showSystem, onlyFavorites, favorites: favoritePackages }), [packages, query, showSystem, onlyFavorites, favoritePackages]);
-  const visiblePackageNames = useMemo(() => filteredPackages.map(item => item.packageName), [filteredPackages]);
+  const filteredPackages = useMemo(() => { void locale; return filterPackages(packages, { query, showSystem, onlyFavorites, favorites: favoritePackages }); }, [packages, query, showSystem, onlyFavorites, favoritePackages, locale]);
+  const visiblePackageNames = useMemo(() => { void locale; return filteredPackages.map(item => item.packageName); }, [filteredPackages, locale]);
   const selectedCount = selectedPackageNames.size;
   const allVisibleSelected = visiblePackageNames.length > 0 && visiblePackageNames.every(name => selectedPackageNames.has(name));
 
@@ -166,7 +169,7 @@ function PackageManagerPanel({
     const current = readFavoritePackages();
     const next = current.includes(packageName) ? current.filter(name => name !== packageName) : [...current, packageName];
     if (!saveShortcutList(FAVORITE_PACKAGES_KEY, next)) {
-      reportFailure('收藏未能保存，请检查本地存储空间');
+      reportFailure(tr("收藏未能保存，请检查本地存储空间"));
       return;
     }
     setFavoritePackages(next);
@@ -198,10 +201,10 @@ function PackageManagerPanel({
       if (res.ok) {
         setPackages(res.packages || []);
       } else {
-        reportFailure(`应用列表加载失败：${res.error || '未知错误'}`);
+        reportFailure(tr("应用列表加载失败：{0}", { 0: res.error || tr("未知错误") }));
       }
     } catch (error) {
-      reportFailure(`应用列表加载异常：${error.message}`);
+      reportFailure(tr("应用列表加载异常：{0}", { 0: error.message }));
     } finally {
       setLoadingPackages(false);
     }
@@ -222,9 +225,9 @@ function PackageManagerPanel({
       const res = await window.electronAPI.packageDetail({ deviceId: device.id, packageName: pkg.packageName });
       if (requestId !== detailRequestRef.current) return;
       if (res.ok) setDetail(res.detail);
-      else reportFailure(`应用详情加载失败：${res.error || '未知错误'}`);
+      else reportFailure(tr("应用详情加载失败：{0}", { 0: res.error || tr("未知错误") }));
     } catch (error) {
-      if (requestId === detailRequestRef.current) reportFailure(`应用详情加载异常：${error.message}`);
+      if (requestId === detailRequestRef.current) reportFailure(tr("应用详情加载异常：{0}", { 0: error.message }));
     } finally {
       if (requestId === detailRequestRef.current) setDetailLoading(false);
     }
@@ -232,7 +235,7 @@ function PackageManagerPanel({
 
   const requireVip = () => {
     if (isVip) return true;
-    showToast?.('该包管理操作需要会员版');
+    showToast?.(tr("该包管理操作需要会员版"));
     onOpenMemberCenter?.();
     return false;
   };
@@ -243,14 +246,14 @@ function PackageManagerPanel({
     try {
       const res = await action(selectedPackage.packageName);
       if (res.ok) {
-        showToast?.(`${label}完成`);
+        showToast?.(tr("{0}完成", { 0: label }));
         if (refresh) await loadPackages();
         if (selectedPackage) await selectPackage(selectedPackage);
       } else {
-        reportFailure(`${label}失败：${res.error || '未知错误'}`);
+        reportFailure(tr("{0}失败：{1}", { 0: label, 1: res.error || tr("未知错误") }));
       }
     } catch (error) {
-      reportFailure(`${label}异常：${error.message}`);
+      reportFailure(tr("{0}异常：{1}", { 0: label, 1: error.message }));
     } finally {
       setActionLoading('');
     }
@@ -277,12 +280,12 @@ function PackageManagerPanel({
       ...options,
       onConfirm,
       rememberChoice: false,
-      rememberLabel: options.rememberLabel || '下次不再提示'
+      rememberLabel: options.rememberLabel || tr("下次不再提示")
     };
     if (next.rememberKey && isConfirmSuppressed(next.rememberKey)) {
       Promise.resolve()
         .then(() => onConfirm?.())
-        .catch((err) => showToastRef.current?.(`操作失败: ${err?.message || '未知错误'}`));
+        .catch((err) => showToastRef.current?.(tr("操作失败: {0}", { 0: err?.message || tr("未知错误") })));
       return;
     }
     setConfirmDialog(next);
@@ -291,12 +294,12 @@ function PackageManagerPanel({
   const exportApk = async () => {
     if (!selectedPackage || !isOnline || !requireVip()) return;
     const result = await window.electronAPI.showSaveDialog({
-      title: '导出 APK',
+      title: tr("导出 APK"),
       defaultPath: `${selectedPackage.packageName}.apk`,
       filters: [{ name: 'APK Files', extensions: ['apk'] }]
     });
     if (result.canceled || !result.filePath) return;
-    await runPackageAction('export', '导出 APK', (packageName) => window.electronAPI.packageExportApk({
+    await runPackageAction('export', tr("导出 APK"), (packageName) => window.electronAPI.packageExportApk({
       deviceId: device.id,
       packageName,
       localPath: result.filePath
@@ -309,9 +312,9 @@ function PackageManagerPanel({
     try {
       const res = await window.electronAPI.packagePermissions({ deviceId: device.id, packageName: selectedPackage.packageName });
       if (res.ok) setPermissions(res.permissions || []);
-      else reportFailure(`权限读取失败：${res.error || '未知错误'}`);
+      else reportFailure(tr("权限读取失败：{0}", { 0: res.error || tr("未知错误") }));
     } catch (error) {
-      reportFailure(`权限读取异常：${error.message}`);
+      reportFailure(tr("权限读取异常：{0}", { 0: error.message }));
     } finally {
       setActionLoading('');
     }
@@ -322,10 +325,10 @@ function PackageManagerPanel({
     setActionLoading('launch');
     try {
       const res = await window.electronAPI.packageLaunch({ deviceId: device.id, packageName: selectedPackage.packageName });
-      if (res.ok) showToast?.('启动完成');
-      else reportFailure(`启动失败：${res.error || '未知错误'}`);
+      if (res.ok) showToast?.(tr("启动完成"));
+      else reportFailure(tr("启动失败：{0}", { 0: res.error || tr("未知错误") }));
     } catch (error) {
-      reportFailure(`启动异常：${error.message}`);
+      reportFailure(tr("启动异常：{0}", { 0: error.message }));
     } finally {
       setActionLoading('');
     }
@@ -333,8 +336,8 @@ function PackageManagerPanel({
 
   const exportSnapshot = async () => {
     const res = await window.electronAPI.packageSnapshot({ deviceId: device.id });
-    if (res.ok) showToast?.(`包快照已导出：${res.path}`);
-    else showToast?.(`包快照导出失败：${res.error || '未知错误'}`);
+    if (res.ok) showToast?.(tr("包快照已导出：{0}", { 0: res.path }));
+    else showToast?.(tr("包快照导出失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
   const togglePackageSelection = (packageName) => {
@@ -361,7 +364,7 @@ function PackageManagerPanel({
     const targetDeviceId = device.id;
     const execute = async () => {
       if (!onlineRef.current) {
-        reportFailure('设备已离线，批量操作未执行。恢复连接后请重新确认。');
+        reportFailure(tr("设备已离线，批量操作未执行。恢复连接后请重新确认。"));
         return false;
       }
       setBatchLoading(action);
@@ -375,10 +378,10 @@ function PackageManagerPanel({
         setBatchResult(summary);
         setSelectedPackageNames(new Set(summary.failures.map(item => item.packageName)));
         if (requestError) {
-          reportFailure(`${label}异常：${requestError}；执行结果已保留，请先核实设备状态`);
+          reportFailure(tr("{0}异常：{1}；执行结果已保留，请先核实设备状态", { 0: label, 1: requestError }));
           return true;
         }
-        showToast?.(`${label}完成：成功 ${summary.successCount}，失败 ${summary.failures.length}`);
+        showToast?.(tr("{0}完成：成功 {1}，失败 {2}", { 0: label, 1: summary.successCount, 2: summary.failures.length }));
         await loadPackages();
         if (!mountedRef.current) return true;
         if (action === 'uninstall' && selectedPackage && summary.items.some(item => item.packageName === selectedPackage.packageName && item.ok)) {
@@ -390,7 +393,7 @@ function PackageManagerPanel({
         }
       } catch (error) {
         // Post-operation UI refresh must not replace the persisted execution result.
-        if (mountedRef.current) reportFailure(`${label}结果刷新异常：${error.message}`);
+        if (mountedRef.current) reportFailure(tr("{0}结果刷新异常：{1}", { 0: label, 1: error.message }));
       } finally {
         if (mountedRef.current) setBatchLoading('');
       }
@@ -432,11 +435,11 @@ function PackageManagerPanel({
       message={confirmDialog?.message}
       detail={confirmDialog?.detail}
       bullets={confirmDialog?.bullets || []}
-      confirmLabel={confirmDialog?.confirmLabel || '确定'}
+      confirmLabel={confirmDialog?.confirmLabel || tr("确定")}
       tone={confirmDialog?.tone || 'danger'}
       loading={confirmLoading}
       rememberChoice={!!confirmDialog?.rememberChoice}
-      rememberLabel={confirmDialog?.rememberLabel || '下次不再提示'}
+      rememberLabel={confirmDialog?.rememberLabel || tr("下次不再提示")}
       onRememberChoiceChange={confirmDialog?.rememberKey ? (checked) => {
         setConfirmDialog(prev => prev ? { ...prev, rememberChoice: checked } : prev);
       } : undefined}
@@ -446,32 +449,32 @@ function PackageManagerPanel({
     <div className={`border-t p-4 ${isDark ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
       {operationError && (
         <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-          <span className="min-w-0 flex-1 break-words">{operationError}</span>
-          <button type="button" onClick={() => setOperationError('')} className="shrink-0 underline">收起</button>
+          <span className="min-w-0 flex-1 break-words">{tr(operationError)}</span>
+          <button type="button" onClick={() => setOperationError('')} className="shrink-0 underline">{tr("收起")}</button>
         </div>
       )}
-      {!isOnline && <p role="status" className="mb-3 text-xs text-amber-500">设备不可用，已保留应用列表与操作结果。恢复连接后才能执行操作。</p>}
+      {!isOnline && <p role="status" className="mb-3 text-xs text-amber-500">{tr("设备不可用，已保留应用列表与操作结果。恢复连接后才能执行操作。")}</p>}
       {batchResult && (
         <div role="status" className={`mb-3 rounded-lg border p-3 ${batchResult.failures.length ? 'border-amber-500/30 bg-amber-500/10' : 'border-emerald-500/30 bg-emerald-500/10'}`}>
           <div className={`flex flex-wrap items-center gap-2 text-xs ${t.text}`}>
-            <span className="flex-1">{batchResult.label}：成功 {batchResult.successCount}，失败 {batchResult.failures.length}</span>
+            <span className="flex-1">{tr("{0}：成功 {1}，失败 {2}", { 0: batchResult.label, 1: batchResult.successCount, 2: batchResult.failures.length })}</span>
             {batchResult.failures.length > 0 && <button type="button" onClick={() => {
               setSelectedPackageNames(new Set(batchResult.failures.map(item => item.packageName)));
               setPackageSearchVisible(true);
-            }} className="underline underline-offset-2">仅选择失败项</button>}
+            }} className="underline underline-offset-2">{tr("仅选择失败项")}</button>}
             <button type="button" onClick={() => {
               const error = storePackageBatchResult(device.id, null);
               if (!error) setBatchResult(null);
               else reportFailure(error);
-            }} className={t.textMuted}>关闭结果</button>
+            }} className={t.textMuted}>{tr("关闭结果")}</button>
           </div>
           {batchResult.failures.length > 0 && (
             <>
-              <p className={`mt-2 text-xs ${t.textMuted}`}>失败项已保留；不会自动重试。请核实原因后再手动操作。</p>
+              <p className={`mt-2 text-xs ${t.textMuted}`}>{tr("失败项已保留；不会自动重试。请核实原因后再手动操作。")}</p>
               <ul className="mt-2 max-h-44 overflow-y-auto space-y-2">
                 {batchResult.failures.map(item => <li key={item.packageName} className="text-xs">
                   <div className={`font-mono break-all ${t.text}`}>{item.packageName}</div>
-                  <div className="mt-0.5 break-words text-amber-600">{item.error || item.message || '操作失败，未返回原因'}</div>
+                  <div className="mt-0.5 break-words text-amber-600">{item.error || item.message || tr("操作失败，未返回原因")}</div>
                 </li>)}
               </ul>
             </>
@@ -480,9 +483,7 @@ function PackageManagerPanel({
       )}
       <div className="flex items-center justify-between mb-4">
         <h4 className={`text-sm font-semibold flex items-center gap-2 ${t.text}`}>
-          <Package size={16} />
-          App 包管理
-        </h4>
+          <Package size={16} />{tr("App 包管理")}</h4>
         <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-white text-slate-500 border border-slate-200'}`}>
             {userPackageCount}/{packageCount}
@@ -491,27 +492,25 @@ function PackageManagerPanel({
             type="button"
             onClick={() => setPackageSearchVisible(prev => !prev)}
             className={`px-3 py-2 rounded-lg border text-xs transition-colors flex items-center gap-1.5 ${packageSearchVisible ? t.button.secondary : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'}`}
-            title={packageSearchVisible ? '隐藏应用列表和包名搜索' : '显示应用列表和包名搜索'}
+            title={packageSearchVisible ? tr("隐藏应用列表和包名搜索") : tr("显示应用列表和包名搜索")}
           >
             {packageSearchVisible ? <EyeOff size={14} /> : <Eye size={14} />}
-            {packageSearchVisible ? '隐藏列表' : '显示列表'}
+            {packageSearchVisible ? tr("隐藏列表") : tr("显示列表")}
           </button>
           <button
             type="button"
             onClick={exportSnapshot}
             disabled={!isOnline || loadingPackages || packages.length === 0}
             className={`px-3 py-2 rounded-lg border text-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 ${t.button.secondary}`}
-            title="导出包快照"
+            title={tr("导出包快照")}
           >
-            <Download size={14} />
-            快照
-          </button>
+            <Download size={14} />{tr("快照")}</button>
           <button
             type="button"
             onClick={loadPackages}
             disabled={!isOnline || loadingPackages}
             className={`p-2 rounded-lg border transition-colors ${t.button.secondary} disabled:opacity-50`}
-            title="刷新应用列表"
+            title={tr("刷新应用列表")}
           >
             <RefreshCw size={14} className={loadingPackages ? 'animate-spin' : ''} />
           </button>
@@ -525,24 +524,20 @@ function PackageManagerPanel({
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Download size={14} className={t.primary === 'pink' ? 'text-pink-500' : t.primary === 'orange' ? 'text-orange-500' : 'text-emerald-500'} />
-                  <span className={`text-sm font-medium ${t.text}`}>安装 APK</span>
+                  <span className={`text-sm font-medium ${t.text}`}>{tr("安装 APK")}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={apkInstallPath}
                     readOnly
-                    placeholder="选择 APK 文件"
+                    placeholder={tr("选择 APK 文件")}
                     className={`min-w-[260px] flex-[1_1_260px] px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                   />
                   <button onClick={onSelectApkForInstall} disabled={isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm border rounded-lg transition-colors flex items-center gap-1 ${t.button.secondary}`}>
-                    <FolderOpen size={14} />
-                    选择
-                  </button>
+                    <FolderOpen size={14} />{tr("选择")}</button>
                   <button onClick={onInstallApk} disabled={!isOnline || !apkInstallPath || isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
-                    {isLoading(`install_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-                    安装
-                  </button>
+                    {isLoading(`install_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}{tr("安装")}</button>
                 </div>
                 {recentApks.length > 0 && <div className="mt-2">
                   <SelectMenu
@@ -550,17 +545,17 @@ function PackageManagerPanel({
                     value={recentApks.includes(apkInstallPath) ? apkInstallPath : ''}
                     options={recentApks.map(path => ({ value: path, label: path }))}
                     onChange={onSelectRecentApk}
-                    placeholder="最近使用的 APK"
+                    placeholder={tr("最近使用的 APK")}
                     isDark={isDark}
                     compact
                     disabled={isLoading(`install_${device.id}`)}
                   />
-                  <p className={`mt-1 text-[11px] ${t.textMuted}`}>最近 5 个 APK · 选择后仅填入路径，点击“安装”才会执行</p>
+                  <p className={`mt-1 text-[11px] ${t.textMuted}`}>{tr("最近 5 个 APK · 选择后仅填入路径，点击“安装”才会执行")}</p>
                 </div>}
                 <OperationResult
                   isDark={isDark}
                   loading={isLoading(`install_${device.id}`)}
-                  loadingText="APK 安装中"
+                  loadingText={tr("APK 安装中")}
                   result={apkInstallResult}
                 />
               </div>
@@ -568,19 +563,17 @@ function PackageManagerPanel({
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Upload size={14} className="text-blue-500" />
-                  <span className={`text-sm font-medium ${t.text}`}>推送文件</span>
+                  <span className={`text-sm font-medium ${t.text}`}>{tr("推送文件")}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input type="text" value={apkPushPath} readOnly placeholder="选择本地文件" className={`min-w-[260px] flex-[1_1_260px] px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`} />
+                  <input type="text" value={apkPushPath} readOnly placeholder={tr("选择本地文件")} className={`min-w-[260px] flex-[1_1_260px] px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`} />
                   <button onClick={onSelectApkForPush} disabled={isLoading(`push_${device.id}`)} className={`px-3 py-2 text-sm border rounded-lg transition-colors flex items-center gap-1 ${t.button.secondary}`}>
-                    <FolderOpen size={14} />
-                    选择
-                  </button>
+                    <FolderOpen size={14} />{tr("选择")}</button>
                   <input
                     type="text"
                     value={apkPushRemotePath}
                     onChange={(e) => onPushPathChange?.(e.target.value)}
-                    aria-label="设备推送目标路径"
+                    aria-label={tr("设备推送目标路径")}
                     placeholder="/sdcard/"
                     className={`w-40 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                   />
@@ -591,19 +584,17 @@ function PackageManagerPanel({
                     onChange={path => onPushPathChange?.(path)}
                     isDark={isDark}
                     accent={t.primary}
-                    placeholder="历史路径"
+                    placeholder={tr("历史路径")}
                     compact
                     className="w-36"
                   />}
                   <button onClick={onPushApk} disabled={!isOnline || !apkPushPath || isLoading(`push_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
-                    {isLoading(`push_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
-                    推送
-                  </button>
+                    {isLoading(`push_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}{tr("推送")}</button>
                 </div>
                 <OperationResult
                   isDark={isDark}
                   loading={isLoading(`push_${device.id}`)}
-                  loadingText="文件推送中"
+                  loadingText={tr("文件推送中")}
                   result={apkPushResult}
                 />
               </div>
@@ -613,16 +604,16 @@ function PackageManagerPanel({
           <div className={`p-4 rounded-lg border ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center gap-2 mb-3">
               <Folder size={14} className="text-purple-500" />
-              <span className={`text-sm font-medium ${t.text}`}>设备文件</span>
+              <span className={`text-sm font-medium ${t.text}`}>{tr("设备文件")}</span>
               <span className={`ml-auto text-xs font-mono px-2 py-1 rounded select-all ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{apkBrowserPath}</span>
               <button
                 type="button"
                 onClick={() => {
                   navigator.clipboard.writeText(apkBrowserPath);
-                  showToast?.(`路径已复制: ${apkBrowserPath}`);
+                  showToast?.(tr("路径已复制: {0}", { 0: apkBrowserPath }));
                 }}
                 className={`p-1 transition-colors ${isDark ? 'text-[#9AA0A6] hover:text-cyan-400' : 'text-[#9AA0A6] hover:text-emerald-500'}`}
-                title="复制路径"
+                title={tr("复制路径")}
               >
                 <Copy size={14} />
               </button>
@@ -630,15 +621,15 @@ function PackageManagerPanel({
             <div className="flex items-center gap-2 flex-wrap">
               {['/', '/system/app', '/system_ext/app', '/data/app'].map(item => (
                 <button key={item} disabled={!isOnline} onClick={() => onBrowsePath?.(item)} className={`px-3 py-2 text-sm border rounded-lg transition-colors disabled:opacity-50 ${t.button.secondary}`}>
-                  {item === '/' ? '/ 根目录' : item}
+                  {item === '/' ? tr("/ 根目录") : item}
                 </button>
               ))}
             </div>
             <div className={`mt-3 border rounded-lg max-h-48 overflow-y-auto ${isDark ? 'bg-slate-800/50 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
               {apkBrowserLoading ? (
-                <div className="p-4 text-center text-sm text-[#9AA0A6]">加载中...</div>
+                <div className="p-4 text-center text-sm text-[#9AA0A6]">{tr("加载中...")}</div>
               ) : apkBrowserItems.length === 0 ? (
-                <div className="p-4 text-center text-sm text-[#9AA0A6]">暂无文件</div>
+                <div className="p-4 text-center text-sm text-[#9AA0A6]">{tr("暂无文件")}</div>
               ) : (
                 <div className={`divide-y ${isDark ? 'divide-slate-700' : 'divide-slate-100'}`}>
                   {apkBrowserItems.map((item, index) => (
@@ -650,7 +641,7 @@ function PackageManagerPanel({
                       <div className="flex items-center gap-2 min-w-0">
                         {item.name === '.' ? <ArrowLeft size={14} className="text-slate-400" /> : item.name === '..' ? <ArrowLeft size={14} className="text-blue-400" /> : item.isDirectory ? <Folder size={14} className="text-amber-500" /> : <File size={14} className="text-slate-400" />}
                         <span className={`text-sm truncate ${item.name === '..' ? 'text-blue-500 font-medium' : item.name === '.' ? 'text-slate-400' : t.text}`}>
-                          {item.name === '.' ? '当前目录' : item.name === '..' ? '上一级目录' : item.name}
+                          {item.name === '.' ? tr("当前目录") : item.name === '..' ? tr("上一级目录") : item.name}
                         </span>
                       </div>
                       {!item.isDirectory && item.name !== '.' && item.name !== '..' ? (
@@ -660,13 +651,11 @@ function PackageManagerPanel({
                             onClick={(e) => {
                               e.stopPropagation();
                               navigator.clipboard.writeText(item.path);
-                              showToast?.(`路径已复制: ${item.path}`);
+                              showToast?.(tr("路径已复制: {0}", { 0: item.path }));
                             }}
                             className={`px-2 py-1 text-xs border rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ${t.button.secondary}`}
                           >
-                            <Copy size={12} />
-                            复制
-                          </button>
+                            <Copy size={12} />{tr("复制")}</button>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -676,9 +665,7 @@ function PackageManagerPanel({
                             disabled={!isOnline || isLoading(`pull_${device.id}_${item.path}`)}
                             className={`px-2 py-1 text-xs border rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ${t.button.secondary} disabled:opacity-50`}
                           >
-                            {isLoading(`pull_${device.id}_${item.path}`) ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
-                            拉取
-                          </button>
+                            {isLoading(`pull_${device.id}_${item.path}`) ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}{tr("拉取")}</button>
                         </div>
                       ) : item.isDirectory ? (
                         item.name !== '.' && <ChevronRight size={14} className="text-slate-400" />
@@ -702,7 +689,7 @@ function PackageManagerPanel({
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="搜索包名"
+                  placeholder={tr("搜索包名")}
                   className={`w-full pl-9 pr-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                 />
               </div>
@@ -712,18 +699,14 @@ function PackageManagerPanel({
                 onClick={() => setOnlyFavorites(prev => !prev)}
                 className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${onlyFavorites ? 'border-amber-500/30 bg-amber-500/10 text-amber-500' : t.button.secondary}`}
               >
-                <Star size={13} fill={onlyFavorites ? 'currentColor' : 'none'} />
-                收藏
-              </button>
+                <Star size={13} fill={onlyFavorites ? 'currentColor' : 'none'} />{tr("收藏")}</button>
               <button
                 type="button"
                 onClick={() => setShowSystem(prev => !prev)}
                 disabled={onlyFavorites}
                 className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${showSystem ? 'border-blue-500/30 bg-blue-500/10 text-blue-400' : t.button.secondary}`}
               >
-                {showSystem ? <Eye size={13} /> : <EyeOff size={13} />}
-                系统
-              </button>
+                {showSystem ? <Eye size={13} /> : <EyeOff size={13} />}{tr("系统")}</button>
               <button
                 type="button"
                 onClick={toggleVisibleSelection}
@@ -731,36 +714,36 @@ function PackageManagerPanel({
                 className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${allVisibleSelected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : t.button.secondary}`}
               >
                 <CheckSquare size={13} />
-                {allVisibleSelected ? '取消' : '全选'}
+                {allVisibleSelected ? tr("取消") : tr("全选")}
               </button>
             </div>
             {selectedCount > 0 && (
               <div className={`mt-3 rounded-lg border px-3 py-2 flex flex-wrap items-center gap-2 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-                <span className={`text-xs mr-auto ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>已选 {selectedCount} 个应用</span>
-                <button type="button" onClick={() => runBatchAction('forceStop', '批量停止')} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}停止</button>
-                <button type="button" onClick={() => runBatchAction('clearData', '批量清数据', {
-                  title: '批量清除应用数据',
-                  message: `确定清除 ${selectedCount} 个应用的数据吗？`,
-                  detail: '清数据会删除应用本地账号、缓存和配置，无法从本工具直接恢复。',
-                  confirmLabel: '清除数据',
+                <span className={`text-xs mr-auto ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("已选 {0} 个应用", { 0: selectedCount })}</span>
+                <button type="button" onClick={() => runBatchAction('forceStop', tr("批量停止"))} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}{tr("停止")}</button>
+                <button type="button" onClick={() => runBatchAction('clearData', tr("批量清数据"), {
+                  title: tr("批量清除应用数据"),
+                  message: tr("确定清除 {0} 个应用的数据吗？", { 0: selectedCount }),
+                  detail: tr("清数据会删除应用本地账号、缓存和配置，无法从本工具直接恢复。"),
+                  confirmLabel: tr("清除数据"),
                   rememberKey: 'package.batchClearData'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}清数据</button>
-                <button type="button" onClick={() => runBatchAction('disable', '批量停用', {
-                  title: '批量停用应用',
-                  message: `确定停用 ${selectedCount} 个应用吗？`,
-                  detail: '停用后应用不会正常启动。可在包管理中重新启用作为回滚。',
-                  confirmLabel: '停用应用',
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}{tr("清数据")}</button>
+                <button type="button" onClick={() => runBatchAction('disable', tr("批量停用"), {
+                  title: tr("批量停用应用"),
+                  message: tr("确定停用 {0} 个应用吗？", { 0: selectedCount }),
+                  detail: tr("停用后应用不会正常启动。可在包管理中重新启用作为回滚。"),
+                  confirmLabel: tr("停用应用"),
                   rememberKey: 'package.batchDisable',
                   tone: 'warning'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}停用</button>
-                <button type="button" onClick={() => runBatchAction('enable', '批量启用')} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}启用</button>
-                <button type="button" onClick={() => runBatchAction('uninstall', '批量卸载', {
-                  title: '批量卸载应用',
-                  message: `确定卸载 ${selectedCount} 个应用吗？`,
-                  detail: '卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。',
-                  confirmLabel: '卸载应用',
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}{tr("停用")}</button>
+                <button type="button" onClick={() => runBatchAction('enable', tr("批量启用"))} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}{tr("启用")}</button>
+                <button type="button" onClick={() => runBatchAction('uninstall', tr("批量卸载"), {
+                  title: tr("批量卸载应用"),
+                  message: tr("确定卸载 {0} 个应用吗？", { 0: selectedCount }),
+                  detail: tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
+                  confirmLabel: tr("卸载应用"),
                   rememberKey: 'package.batchUninstall'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}卸载</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}{tr("卸载")}</button>
               </div>
             )}
           </div>
@@ -769,11 +752,9 @@ function PackageManagerPanel({
             <div className={`max-h-[320px] overflow-y-auto border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
               {loadingPackages ? (
                 <div className="h-full flex items-center justify-center text-sm text-[#9AA0A6]">
-                  <RefreshCw size={16} className="animate-spin mr-2" />
-                  加载中...
-                </div>
+                  <RefreshCw size={16} className="animate-spin mr-2" />{tr("加载中...")}</div>
               ) : filteredPackages.length === 0 ? (
-                <div className="min-h-24 flex items-center justify-center px-4 text-center text-sm text-[#9AA0A6]">{onlyFavorites ? '暂无匹配的收藏应用；点击应用右侧的星标即可收藏' : '暂无应用'}</div>
+                <div className="min-h-24 flex items-center justify-center px-4 text-center text-sm text-[#9AA0A6]">{onlyFavorites ? tr("暂无匹配的收藏应用；点击应用右侧的星标即可收藏") : tr("暂无应用")}</div>
               ) : filteredPackages.map(pkg => (
                 <div
                   key={pkg.packageName}
@@ -805,9 +786,9 @@ function PackageManagerPanel({
                     {pkg.system && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400">SYS</span>}
                     <button
                       type="button"
-                      aria-label={`${favoritePackages.includes(pkg.packageName) ? '取消收藏' : '收藏'} ${pkg.packageName}`}
+                      aria-label={`${favoritePackages.includes(pkg.packageName) ? tr("取消收藏") : tr("收藏")} ${pkg.packageName}`}
                       aria-pressed={favoritePackages.includes(pkg.packageName)}
-                      title={favoritePackages.includes(pkg.packageName) ? '取消收藏' : '收藏应用并优先显示'}
+                      title={favoritePackages.includes(pkg.packageName) ? tr("取消收藏") : tr("收藏应用并优先显示")}
                       onClick={(event) => { event.stopPropagation(); toggleFavorite(pkg.packageName); }}
                       className={`shrink-0 rounded p-1.5 transition-colors ${favoritePackages.includes(pkg.packageName) ? 'text-amber-500 bg-amber-500/10' : 'text-slate-400 hover:text-amber-500'}`}
                     ><Star size={16} fill={favoritePackages.includes(pkg.packageName) ? 'currentColor' : 'none'} /></button>
@@ -820,7 +801,7 @@ function PackageManagerPanel({
               {!selectedPackage ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-[#9AA0A6]">
                   <Info size={30} className="mb-2 opacity-60" />
-                  <div className="text-sm">选择一个应用</div>
+                  <div className="text-sm">{tr("选择一个应用")}</div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -830,18 +811,16 @@ function PackageManagerPanel({
                   </div>
                   {detailLoading ? (
                     <div className="flex items-center text-sm text-[#9AA0A6]">
-                      <RefreshCw size={15} className="animate-spin mr-2" />
-                      加载详情...
-                    </div>
+                      <RefreshCw size={15} className="animate-spin mr-2" />{tr("加载详情...")}</div>
                   ) : detail && (
                     <div className={`text-xs rounded-lg border overflow-hidden ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
                       {[
-                        ['版本名', detail.versionName || '-'],
-                        ['版本号', detail.versionCode || '-'],
+                        [tr("版本名"), detail.versionName || '-'],
+                        [tr("版本号"), detail.versionCode || '-'],
                         ['UID', detail.userId || detail.uid || '-'],
-                        ['安装器', detail.installer || '-'],
-                        ['首次安装', detail.firstInstallTime || '-'],
-                        ['最后更新', detail.lastUpdateTime || '-']
+                        [tr("安装器"), detail.installer || '-'],
+                        [tr("首次安装"), detail.firstInstallTime || '-'],
+                        [tr("最后更新"), detail.lastUpdateTime || '-']
                       ].map(([label, value]) => (
                         <div key={label} className={`flex gap-3 px-3 py-2 border-b last:border-b-0 ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                           <span className="w-16 shrink-0 text-[#9AA0A6]">{label}</span>
@@ -856,31 +835,31 @@ function PackageManagerPanel({
                       type="button"
                       onClick={() => onViewApplicationLogs({ deviceId: device.id, packageName: selectedPackage.packageName })}
                       className={`px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 ${t.button.secondary}`}
-                    ><FileText size={13} />查看日志</button>}
+                    ><FileText size={13} />{tr("查看日志")}</button>}
                     {onInspectApplication && <button
                       type="button"
                       onClick={() => onInspectApplication({ deviceId: device.id, packageName: selectedPackage.packageName })}
                       className={`px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 ${t.button.secondary}`}
-                    ><ClipboardCheck size={13} />排查此应用</button>}
-                    {packageActionButton('launch', '启动', <Play size={13} />, launchPackage, 'normal', false)}
-                    {packageActionButton('permissions', '权限', <ShieldCheck size={13} />, loadPermissions)}
-                    {packageActionButton('export', '导出', <Download size={13} />, exportApk)}
-                    {packageActionButton('stop', '停止', <Power size={13} />, () => runPackageAction('stop', '强制停止', packageName => window.electronAPI.packageForceStop({ deviceId: device.id, packageName }), false))}
-                    {packageActionButton('clear', '清数据', <Database size={13} />, () => confirmPackageAction({
-                      title: '清除应用数据',
-                      message: `确定清除 ${selectedPackage.packageName} 的应用数据吗？`,
-                      detail: '清数据会删除该应用本地账号、缓存和配置，无法从本工具直接恢复。',
-                      confirmLabel: '清除数据',
+                    ><ClipboardCheck size={13} />{tr("排查此应用")}</button>}
+                    {packageActionButton('launch', tr("启动"), <Play size={13} />, launchPackage, 'normal', false)}
+                    {packageActionButton('permissions', tr("权限"), <ShieldCheck size={13} />, loadPermissions)}
+                    {packageActionButton('export', tr("导出"), <Download size={13} />, exportApk)}
+                    {packageActionButton('stop', tr("停止"), <Power size={13} />, () => runPackageAction('stop', tr("强制停止"), packageName => window.electronAPI.packageForceStop({ deviceId: device.id, packageName }), false))}
+                    {packageActionButton('clear', tr("清数据"), <Database size={13} />, () => confirmPackageAction({
+                      title: tr("清除应用数据"),
+                      message: tr("确定清除 {0} 的应用数据吗？", { 0: selectedPackage.packageName }),
+                      detail: tr("清数据会删除该应用本地账号、缓存和配置，无法从本工具直接恢复。"),
+                      confirmLabel: tr("清除数据"),
                       rememberKey: 'package.clearData'
-                    }, () => runPackageAction('clear', '清除数据', packageName => window.electronAPI.packageClearData({ deviceId: device.id, packageName }))))}
-                    {packageActionButton('disable', detail?.enabled === false ? '启用' : '停用', detail?.enabled === false ? <Eye size={13} /> : <EyeOff size={13} />, () => runPackageAction('disable', detail?.enabled === false ? '启用应用' : '停用应用', packageName => window.electronAPI.packageSetEnabled({ deviceId: device.id, packageName, enabled: detail?.enabled === false })))}
-                    {packageActionButton('uninstall', '卸载', <Trash2 size={13} />, () => confirmPackageAction({
-                      title: '卸载应用',
-                      message: `确定卸载 ${selectedPackage.packageName} 吗？`,
-                      detail: '卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。',
-                      confirmLabel: '卸载应用',
+                    }, () => runPackageAction('clear', tr("清除数据"), packageName => window.electronAPI.packageClearData({ deviceId: device.id, packageName }))))}
+                    {packageActionButton('disable', detail?.enabled === false ? tr("启用") : tr("停用"), detail?.enabled === false ? <Eye size={13} /> : <EyeOff size={13} />, () => runPackageAction('disable', detail?.enabled === false ? tr("启用应用") : tr("停用应用"), packageName => window.electronAPI.packageSetEnabled({ deviceId: device.id, packageName, enabled: detail?.enabled === false })))}
+                    {packageActionButton('uninstall', tr("卸载"), <Trash2 size={13} />, () => confirmPackageAction({
+                      title: tr("卸载应用"),
+                      message: tr("确定卸载 {0} 吗？", { 0: selectedPackage.packageName }),
+                      detail: tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
+                      confirmLabel: tr("卸载应用"),
                       rememberKey: 'package.uninstall'
-                    }, () => runPackageAction('uninstall', '卸载应用', packageName => window.electronAPI.packageUninstall({ deviceId: device.id, packageName }))), 'danger')}
+                    }, () => runPackageAction('uninstall', tr("卸载应用"), packageName => window.electronAPI.packageUninstall({ deviceId: device.id, packageName }))), 'danger')}
                   </div>
 
                   {permissions.length > 0 && (

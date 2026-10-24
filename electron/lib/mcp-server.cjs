@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // MCP HTTP Server 集成 - 提供 AI 工具接口
 // 该模块启动一个 HTTP 服务器，实现 MCP（Model Context Protocol）协议
 // 通过 log-analyzer / ai-analyze 的 getter/setter 操作共享日志与 AI 状态
@@ -38,19 +39,19 @@ function buildMcpTools() {
   return [
     {
       name: 'device_list',
-      description: '列出当前通过 ADB 连接的所有设备（USB 和 WiFi），返回设备 ID、型号等信息',
+      description: tr("列出当前通过 ADB 连接的所有设备（USB 和 WiFi），返回设备 ID、型号等信息"),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'capture_start',
-      description: '选择设备并开始抓取 logcat 日志。会先清空旧日志再开始。如不指定 deviceId 则使用默认设备。可选指定 buffers 数组同时抓取多个日志缓冲区。',
+      description: tr("选择设备并开始抓取 logcat 日志。会先清空旧日志再开始。如不指定 deviceId 则使用默认设备。可选指定 buffers 数组同时抓取多个日志缓冲区。"),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: '设备 ID（从 device_list 获取），不填则使用默认设备' },
+          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取），不填则使用默认设备") },
           buffers: {
             type: 'array',
-            description: '要抓取的日志缓冲区列表。默认不传（adb 默认 main/system/crash）。可选值：main, system, radio, events, crash, kernel',
+            description: tr("要抓取的日志缓冲区列表。默认不传（adb 默认 main/system/crash）。可选值：main, system, radio, events, crash, kernel"),
             items: { type: 'string', enum: ['main', 'system', 'radio', 'events', 'crash', 'kernel'] }
           }
         },
@@ -59,34 +60,34 @@ function buildMcpTools() {
     },
     {
       name: 'capture_stop',
-      description: '停止当前正在进行的 logcat 日志抓取',
+      description: tr("停止当前正在进行的 logcat 日志抓取"),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'log_clear',
-      description: '清空指定日志源的所有日志，同时清空设备端 log buffer',
+      description: tr("清空指定日志源的所有日志，同时清空设备端 log buffer"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '要清空的日志源，默认 realtime' }
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("要清空的日志源，默认 realtime") }
         },
         additionalProperties: false
       }
     },
     {
       name: 'log_sources',
-      description: '列出可读取的日志源（realtime/file）及其当前条数',
+      description: tr("列出可读取的日志源（realtime/file）及其当前条数"),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'package_list',
-      description: '列出指定设备已安装应用。默认只返回用户应用；showSystem=true 时包含系统应用。',
+      description: tr("列出指定设备已安装应用。默认只返回用户应用；showSystem=true 时包含系统应用。"),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: '设备 ID（从 device_list 获取）' },
-          showSystem: { type: 'boolean', description: '是否包含系统应用，默认 false' },
-          limit: { type: 'integer', minimum: 1, maximum: 1000, description: '最大返回数量，默认 200' }
+          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取）") },
+          showSystem: { type: 'boolean', description: tr("是否包含系统应用，默认 false") },
+          limit: { type: 'integer', minimum: 1, maximum: 1000, description: tr("最大返回数量，默认 200") }
         },
         required: ['deviceId'],
         additionalProperties: false
@@ -94,12 +95,12 @@ function buildMcpTools() {
     },
     {
       name: 'package_detail',
-      description: '读取指定应用的版本、路径、安装时间、启停状态和权限摘要。',
+      description: tr("读取指定应用的版本、路径、安装时间、启停状态和权限摘要。"),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: '设备 ID（从 device_list 获取）' },
-          packageName: { type: 'string', description: 'Android 包名，例如 com.example.app' }
+          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取）") },
+          packageName: { type: 'string', description: tr("Android 包名，例如 com.example.app") }
         },
         required: ['deviceId', 'packageName'],
         additionalProperties: false
@@ -107,12 +108,12 @@ function buildMcpTools() {
     },
     {
       name: 'perf_snapshot',
-      description: '对指定设备执行一次性能采样，返回 CPU、内存、磁盘、电池、温度、FPS 和告警。',
+      description: tr("对指定设备执行一次性能采样，返回 CPU、内存、磁盘、电池、温度、FPS 和告警。"),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: '设备 ID（从 device_list 获取）' },
-          includeProcesses: { type: 'boolean', description: '是否包含进程占用；非会员会自动降级为 false' }
+          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取）") },
+          includeProcesses: { type: 'boolean', description: tr("是否包含进程占用；非会员会自动降级为 false") }
         },
         required: ['deviceId'],
         additionalProperties: false
@@ -120,14 +121,14 @@ function buildMcpTools() {
     },
     {
       name: 'inspection_run',
-      description: '对指定设备执行一次标准巡检并导出报告与证据包。bugreport 默认不包含，避免耗时过长。',
+      description: tr("对指定设备执行一次标准巡检并导出报告与证据包。bugreport 默认不包含，避免耗时过长。"),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: '设备 ID（从 device_list 获取）' },
-          includeBugreport: { type: 'boolean', description: '是否包含 bugreport，默认 false' },
-          includeAiSummary: { type: 'boolean', description: '是否包含 AI 总结，默认 true' },
-          outputBaseDir: { type: 'string', description: '可选输出目录；不填使用应用默认目录' }
+          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取）") },
+          includeBugreport: { type: 'boolean', description: tr("是否包含 bugreport，默认 false") },
+          includeAiSummary: { type: 'boolean', description: tr("是否包含 AI 总结，默认 true") },
+          outputBaseDir: { type: 'string', description: tr("可选输出目录；不填使用应用默认目录") }
         },
         required: ['deviceId'],
         additionalProperties: false
@@ -135,13 +136,13 @@ function buildMcpTools() {
     },
     {
       name: 'log_get',
-      description: '读取指定日志源的原始日志（支持分页）',
+      description: tr("读取指定日志源的原始日志（支持分页）"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '日志源' },
-          offset: { type: 'integer', minimum: 0, description: '起始偏移量，默认 0' },
-          limit: { type: 'integer', minimum: 1, maximum: 5000, description: '返回条数，默认 200' }
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("日志源") },
+          offset: { type: 'integer', minimum: 0, description: tr("起始偏移量，默认 0") },
+          limit: { type: 'integer', minimum: 1, maximum: 5000, description: tr("返回条数，默认 200") }
         },
         required: ['source'],
         additionalProperties: false
@@ -149,26 +150,26 @@ function buildMcpTools() {
     },
     {
       name: 'log_filter',
-      description: '对指定日志源进行过滤并返回匹配结果（支持分页）',
+      description: tr("对指定日志源进行过滤并返回匹配结果（支持分页）"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '日志源' },
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("日志源") },
           filter: {
             type: 'object',
-            description: '过滤条件',
+            description: tr("过滤条件"),
             properties: {
-              minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: '最低日志级别' },
-              tag: { type: 'string', description: 'Tag 关键词（包含）' },
-              pid: { type: 'string', description: '进程 PID' },
-              pkg: { type: 'string', description: '包名关键词（包含），如 com.example.app' },
-              text: { type: 'string', description: '消息关键词（包含）' },
-              excludeText: { type: 'string', description: '排除消息关键词' },
-              regex: { type: 'string', description: '正则表达式匹配消息' }
+              minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: tr("最低日志级别") },
+              tag: { type: 'string', description: tr("Tag 关键词（包含）") },
+              pid: { type: 'string', description: tr("进程 PID") },
+              pkg: { type: 'string', description: tr("包名关键词（包含），如 com.example.app") },
+              text: { type: 'string', description: tr("消息关键词（包含）") },
+              excludeText: { type: 'string', description: tr("排除消息关键词") },
+              regex: { type: 'string', description: tr("正则表达式匹配消息") }
             }
           },
-          offset: { type: 'integer', minimum: 0, description: '起始偏移量，默认 0' },
-          limit: { type: 'integer', minimum: 1, maximum: 5000, description: '返回条数，默认 200' }
+          offset: { type: 'integer', minimum: 0, description: tr("起始偏移量，默认 0") },
+          limit: { type: 'integer', minimum: 1, maximum: 5000, description: tr("返回条数，默认 200") }
         },
         required: ['source', 'filter'],
         additionalProperties: false
@@ -176,12 +177,12 @@ function buildMcpTools() {
     },
     {
       name: 'log_stats',
-      description: '统计指定日志源在过滤条件下的各级别数量',
+      description: tr("统计指定日志源在过滤条件下的各级别数量"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '日志源' },
-          filter: { type: 'object', description: '过滤条件（可选）' }
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("日志源") },
+          filter: { type: 'object', description: tr("过滤条件（可选）") }
         },
         required: ['source'],
         additionalProperties: false
@@ -189,14 +190,14 @@ function buildMcpTools() {
     },
     {
       name: 'log_watch',
-      description: '等待指定关键词出现在新日志中（轮询方式）。适用于：AI 修改代码并部署后，等待特定 Log 输出出现来验证代码是否生效。超时后返回空结果。',
+      description: tr("等待指定关键词出现在新日志中（轮询方式）。适用于：AI 修改代码并部署后，等待特定 Log 输出出现来验证代码是否生效。超时后返回空结果。"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '日志源，默认 realtime' },
-          keyword: { type: 'string', description: '要等待的关键词' },
-          timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, description: '超时时间（毫秒），默认 30000' },
-          intervalMs: { type: 'integer', minimum: 500, maximum: 5000, description: '轮询间隔（毫秒），默认 1000' }
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("日志源，默认 realtime") },
+          keyword: { type: 'string', description: tr("要等待的关键词") },
+          timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000, description: tr("超时时间（毫秒），默认 30000") },
+          intervalMs: { type: 'integer', minimum: 500, maximum: 5000, description: tr("轮询间隔（毫秒），默认 1000") }
         },
         required: ['keyword'],
         additionalProperties: false
@@ -204,38 +205,38 @@ function buildMcpTools() {
     },
     {
       name: 'ai_analyze',
-      description: '启动 AI 日志分析（非流式，等待完整结果后返回）。基于当前抓取的日志进行分析。可选传入自定义分析要求。',
+      description: tr("启动 AI 日志分析（非流式，等待完整结果后返回）。基于当前抓取的日志进行分析。可选传入自定义分析要求。"),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: '日志源，默认 realtime' },
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("日志源，默认 realtime") },
           filter: {
             type: 'object',
-            description: '过滤条件（可选）',
+            description: tr("过滤条件（可选）"),
             properties: {
-              minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: '最低日志级别' },
-              tag: { type: 'string', description: 'Tag 关键词' },
+              minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: tr("最低日志级别") },
+              tag: { type: 'string', description: tr("Tag 关键词") },
               pid: { type: 'string', description: 'PID' },
-              pkg: { type: 'string', description: '包名关键词' },
-              text: { type: 'string', description: '消息关键词' },
-              excludeText: { type: 'string', description: '排除消息关键词' },
-              regex: { type: 'string', description: '正则表达式' }
+              pkg: { type: 'string', description: tr("包名关键词") },
+              text: { type: 'string', description: tr("消息关键词") },
+              excludeText: { type: 'string', description: tr("排除消息关键词") },
+              regex: { type: 'string', description: tr("正则表达式") }
             }
           },
-          customPrompt: { type: 'string', description: '附加分析要求（可选），如"重点关注内存泄漏"' },
-          timeoutMs: { type: 'integer', minimum: 5000, maximum: 300000, description: '超时时间（毫秒），默认 120000' }
+          customPrompt: { type: 'string', description: tr("附加分析要求（可选），如\"重点关注内存泄漏\"") },
+          timeoutMs: { type: 'integer', minimum: 5000, maximum: 300000, description: tr("超时时间（毫秒），默认 120000") }
         },
         additionalProperties: false
       }
     },
     {
       name: 'ai_get_result',
-      description: '获取最近一次 AI 分析的结果（Markdown 格式）。如果没有分析过则返回空。',
+      description: tr("获取最近一次 AI 分析的结果（Markdown 格式）。如果没有分析过则返回空。"),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'ai_clear',
-      description: '清空 AI 分析结果和对话上下文，使下一次分析从头开始。',
+      description: tr("清空 AI 分析结果和对话上下文，使下一次分析从头开始。"),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     }
   ];
@@ -259,7 +260,7 @@ async function readJsonBody(req, maxBytes) {
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buf.length;
-    if (total > maxBytes) throw new Error('Request too large');
+    if (total > maxBytes) throw new Error(tr('请求内容过大'));
     chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString('utf-8');
@@ -297,7 +298,7 @@ async function callMcpTool(name, args) {
 
   if (name === 'capture_start') {
     if (logcatProc) {
-      return mcpText({ ok: false, message: '当前已在抓取中，请先停止当前抓取' });
+      return mcpText({ ok: false, message: tr("当前已在抓取中，请先停止当前抓取") });
     }
     const devices = await new Promise((resolve) => {
       runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
@@ -312,7 +313,7 @@ async function callMcpTool(name, args) {
       });
     });
     if (devices.length === 0) {
-      return mcpText({ ok: false, message: '无设备连接，请先通过 USB 或 WiFi 连接 Android 设备并授权调试' });
+      return mcpText({ ok: false, message: tr("无设备连接，请先通过 USB 或 WiFi 连接 Android 设备并授权调试") });
     }
     const deviceId = args.deviceId || undefined;
     logAnalyzer.setCurrentLogSource('realtime', deviceId || '');
@@ -361,7 +362,7 @@ async function callMcpTool(name, args) {
       logAnalyzer.clearLogBatchFlushTimer();
       logAnalyzer.getFlushLogBatch()();
     });
-    return mcpText({ ok: true, message: deviceId ? `已开始在设备 ${deviceId} 上抓取日志` : '已开始在默认设备上抓取日志' });
+    return mcpText({ ok: true, message: deviceId ? tr("已开始在设备 {0} 上抓取日志", { 0: deviceId }) : tr("已开始在默认设备上抓取日志") });
   }
 
   if (name === 'package_list') {
@@ -395,7 +396,7 @@ async function callMcpTool(name, args) {
     if (!deviceId) return mcpText({ ok: false, error: 'device_required' });
     const status = await vip.getStatusAsync();
     if (!status.activated) {
-      return mcpText({ ok: false, code: 'vip_required', error: '设备巡检为会员专属功能，请先开通会员' });
+      return mcpText({ ok: false, code: 'vip_required', error: tr("设备巡检为会员专属功能，请先开通会员") });
     }
     const task = { id: `mcp-inspection-${Date.now()}`, deviceId, sender: null, cancelled: false, currentProc: null };
     const result = await inspection.runInspection(task, {
@@ -415,7 +416,7 @@ async function callMcpTool(name, args) {
     logAnalyzer.getFlushLogBatch()();
     const proc = logAnalyzer.getLogcatProc();
     if (proc) { try { proc.kill(); } catch {} logAnalyzer.setLogcatProc(null); }
-    return mcpText({ ok: true, message: '已停止抓取' });
+    return mcpText({ ok: true, message: tr("已停止抓取") });
   }
 
   if (name === 'log_clear') {
@@ -425,7 +426,7 @@ async function callMcpTool(name, args) {
     }
     logAnalyzer.clearLogStoreBySource(source);
     ctx.broadcastToAllWindows('log:reset', { source: source ?? logAnalyzer.getCurrentLogSource(), entries: [] });
-    return mcpText({ ok: true, message: `${source} 日志已清空` });
+    return mcpText({ ok: true, message: tr("{0} 日志已清空", { 0: source }) });
   }
 
   if (name === 'log_sources') {
@@ -479,7 +480,7 @@ async function callMcpTool(name, args) {
           return;
         }
         if (Date.now() >= deadline) {
-          resolve(mcpText({ found: false, keyword, message: `等待超时（${timeoutMs}ms），未发现包含 "${keyword}" 的日志`, newEntriesSinceWatch: newEntries.length }));
+          resolve(mcpText({ found: false, keyword, message: tr("等待超时（{0}ms），未发现包含 \"{1}\" 的日志", { 0: timeoutMs, 1: keyword }), newEntriesSinceWatch: newEntries.length }));
           return;
         }
         setTimeout(poll, Math.min(intervalMs, 5000));
@@ -496,7 +497,7 @@ async function callMcpTool(name, args) {
 
     const allEntries = filterEntries(logStore[source] || [], filter);
     if (allEntries.length === 0) {
-      return mcpText({ ok: false, message: '没有可分析的日志，请先抓取或加载日志' });
+      return mcpText({ ok: false, message: tr("没有可分析的日志，请先抓取或加载日志") });
     }
 
     // 格式化日志行
@@ -525,8 +526,8 @@ async function callMcpTool(name, args) {
       const logContent = effectiveLines.join('\n');
       systemPrompt = aiAnalyze.buildAiSystemPrompt(filter);
       userContent = customPrompt
-        ? `${customPrompt}\n\n--- 日志内容 ---\n${logContent}`
-        : `请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n${logContent}`;
+        ? tr("{0}\n\n--- 日志内容 ---\n{1}", { 0: customPrompt, 1: logContent })
+        : tr("请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n{0}", { 0: logContent });
     }
 
     // 构建消息（MCP 调用不使用多轮上下文，独立分析）
@@ -547,7 +548,7 @@ async function callMcpTool(name, args) {
     // 非流式请求
     const result = await new Promise((resolve) => {
       const timer = setTimeout(() => {
-        resolve({ ok: false, error: `AI 分析超时（${timeoutMs}ms）` });
+        resolve({ ok: false, error: tr("AI 分析超时（{0}ms）", { 0: timeoutMs }) });
       }, timeoutMs);
 
       const postReq = https.request({
@@ -565,7 +566,7 @@ async function callMcpTool(name, args) {
         res.on('end', () => {
           clearTimeout(timer);
           if (res.statusCode !== 200) {
-            resolve({ ok: false, error: `API返回 ${res.statusCode}: ${body.slice(0, 500)}` });
+            resolve({ ok: false, error: tr("API返回 {0}: {1}", { 0: res.statusCode, 1: body.slice(0, 500) }) });
             return;
           }
           try {
@@ -574,7 +575,7 @@ async function callMcpTool(name, args) {
             aiAnalyze.setAiLastResult(content);
             resolve({ ok: true, result: content, totalLines: lines.length, truncated });
           } catch (e) {
-            resolve({ ok: false, error: `解析响应失败: ${e.message}` });
+            resolve({ ok: false, error: tr("解析响应失败: {0}", { 0: e.message }) });
           }
         });
       });
@@ -598,10 +599,10 @@ async function callMcpTool(name, args) {
 
   if (name === 'ai_clear') {
     aiAnalyze.clearAiConversation();
-    return mcpText({ ok: true, message: 'AI 分析结果和对话上下文已清空' });
+    return mcpText({ ok: true, message: tr("AI 分析结果和对话上下文已清空") });
   }
 
-  throw new Error(`Unknown tool: ${name}`);
+      throw new Error(tr('未知工具：{0}', { 0: name }));
 }
 
 function startMcpHttpServer() {
@@ -741,7 +742,7 @@ function register(ipcMain) {
     try {
       const status = vip.getStatus();
       if (!status.activated) {
-        return { ok: false, running: false, error: 'VIP 会员专属功能，请先开通会员', code: 'vip_required' };
+        return { ok: false, running: false, error: tr("VIP 会员专属功能，请先开通会员"), code: 'vip_required' };
       }
       if (!mcpServerInstance) initMcpServer();
       return { ok: true, running: true };

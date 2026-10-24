@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { codexCliAssignments } = require('./ai-tools-cli-config.cjs');
 const { fail } = require('./ai-tools-file-safety.cjs');
 const { isDeepStrictEqual } = require('node:util');
@@ -9,7 +10,7 @@ function projectCodexAdvanced(content, provider, expected, { patchTomlSection, c
     const section = keys.slice(0, -1).join('.'); const field = keys.at(-1);
     let target = expected;
     for (const key of keys.slice(0, -1)) {
-      if (target[key] !== undefined && (target[key] === null || typeof target[key] !== 'object' || Array.isArray(target[key]))) throw fail('AI_TOOLS_CONFIG_TOML', '高级配置目标不是 TOML 配置表，未覆盖原值');
+      if (target[key] !== undefined && (target[key] === null || typeof target[key] !== 'object' || Array.isArray(target[key]))) throw fail('AI_TOOLS_CONFIG_TOML', tr("高级配置目标不是 TOML 配置表，未覆盖原值"));
       target[key] ||= {}; target = target[key];
     }
     const before = target[field];
@@ -23,7 +24,7 @@ function projectCodexAdvanced(content, provider, expected, { patchTomlSection, c
   if (httpHeaders !== undefined) {
     const providerId = `awb_${provider.id.replaceAll('-', '')}`;
     const keys = ['model_providers', providerId, 'http_headers']; const current = expected.model_providers[providerId].http_headers;
-    if (current !== undefined && (current === null || typeof current !== 'object' || Array.isArray(current))) throw fail('AI_TOOLS_CONFIG_TOML', '原有 http_headers 不是配置表，未覆盖');
+    if (current !== undefined && (current === null || typeof current !== 'object' || Array.isArray(current))) throw fail('AI_TOOLS_CONFIG_TOML', tr("原有 http_headers 不是配置表，未覆盖"));
     const tableHeader = new RegExp(`^\\s*\\[model_providers\\.${providerId}\\.http_headers\\]`, 'm');
     if (tableHeader.test(content)) {
       if (httpHeaders === null) for (const name of Object.keys(current || {})) put([...keys, name], undefined, true);

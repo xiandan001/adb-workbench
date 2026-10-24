@@ -1,6 +1,8 @@
+import { tr, useLocale } from '../../shared/i18n.js';
 import { useEffect, useRef } from 'react';
 
 export default function SshSplitPanels({ layout, onChange, onCommit, left, top, bottom }) {
+  useLocale();
   const root = useRef(null); const right = useRef(null); const drag = useRef(null);
   useEffect(() => () => { if (drag.current) document.body.style.userSelect = drag.current.selection; }, []);
   const start = (event, axis) => {
@@ -30,7 +32,7 @@ export default function SshSplitPanels({ layout, onChange, onCommit, left, top, 
   };
   return <div ref={root} className="grid h-full min-h-0 min-w-0" style={{ gridTemplateColumns: `minmax(160px,${layout.files * 100}fr) 8px minmax(280px,${(1 - layout.files) * 100}fr)` }}>
     <div className="min-h-0 min-w-0 overflow-hidden">{left}</div>
-    <div role="separator" aria-label="SSH 文件区宽度" aria-orientation="vertical" aria-valuenow={Math.round(layout.files * 100)} aria-valuemin={18} aria-valuemax={45} tabIndex={0} onPointerDown={event => start(event, 'files')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={event => key(event, 'files')} className="mx-0.5 cursor-col-resize rounded hover:bg-emerald-500/30 focus-visible:bg-emerald-500/30 focus-visible:outline-none" />
-    <div ref={right} className="grid h-full min-h-0 min-w-0" style={{ gridTemplateRows: `minmax(160px,${layout.editor * 100}fr) 8px minmax(220px,${(1 - layout.editor) * 100}fr)` }}><div className="min-h-0 min-w-0 overflow-hidden">{top}</div><div role="separator" aria-label="SSH 编辑区高度" aria-orientation="horizontal" aria-valuenow={Math.round(layout.editor * 100)} aria-valuemin={25} aria-valuemax={75} tabIndex={0} onPointerDown={event => start(event, 'editor')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={event => key(event, 'editor')} className="my-0.5 cursor-row-resize rounded hover:bg-emerald-500/30 focus-visible:bg-emerald-500/30 focus-visible:outline-none" /><div className="min-h-0 min-w-0 overflow-hidden">{bottom}</div></div>
+    <div role="separator" aria-label={tr("SSH 文件区宽度")} aria-orientation="vertical" aria-valuenow={Math.round(layout.files * 100)} aria-valuemin={18} aria-valuemax={45} tabIndex={0} onPointerDown={event => start(event, 'files')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={event => key(event, 'files')} className="mx-0.5 cursor-col-resize rounded hover:bg-emerald-500/30 focus-visible:bg-emerald-500/30 focus-visible:outline-none" />
+    <div ref={right} className="grid h-full min-h-0 min-w-0" style={{ gridTemplateRows: `minmax(160px,${layout.editor * 100}fr) 8px minmax(220px,${(1 - layout.editor) * 100}fr)` }}><div className="min-h-0 min-w-0 overflow-hidden">{top}</div><div role="separator" aria-label={tr("SSH 编辑区高度")} aria-orientation="horizontal" aria-valuenow={Math.round(layout.editor * 100)} aria-valuemin={25} aria-valuemax={75} tabIndex={0} onPointerDown={event => start(event, 'editor')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onKeyDown={event => key(event, 'editor')} className="my-0.5 cursor-row-resize rounded hover:bg-emerald-500/30 focus-visible:bg-emerald-500/30 focus-visible:outline-none" /><div className="min-h-0 min-w-0 overflow-hidden">{bottom}</div></div>
   </div>;
 }

@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { collectArtifactFiles } = require('./artifact-export.cjs');
@@ -19,14 +20,14 @@ async function artifactDetails(item) {
 async function previewArtifact(item, name) {
   const selected = await collectArtifactFiles(item);
   const file = selected.files.find(entry => entry.name === name);
-  if (!file || !previewable(file.name)) throw new Error('该文件不在当前产物中，或不支持预览');
+  if (!file || !previewable(file.name)) throw new Error(tr("该文件不在当前产物中，或不支持预览"));
   const extension = path.extname(file.name).toLowerCase();
   const mime = IMAGE_TYPES[extension];
   const handle = await fs.promises.open(file.source, 'r');
   try {
     const stat = await handle.stat();
-    if (!stat.isFile()) throw new Error('预览目标不是普通文件');
-    if (mime && stat.size > IMAGE_LIMIT) throw new Error('图片超过 12 MB，请使用打开目录查看');
+    if (!stat.isFile()) throw new Error(tr("预览目标不是普通文件"));
+    if (mime && stat.size > IMAGE_LIMIT) throw new Error(tr("图片超过 12 MB，请使用打开目录查看"));
     // Read bounded bytes even if a capture is still appending to this file.
     const buffer = Buffer.alloc(Math.min(stat.size, mime ? IMAGE_LIMIT : TEXT_LIMIT));
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);

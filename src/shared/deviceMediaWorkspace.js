@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export function recentDeviceMedia(items, deviceId) {
   return (Array.isArray(items) ? items : [])
     .filter(item => item?.deviceId === deviceId && ['image', 'video'].includes(item.type))
@@ -7,7 +8,7 @@ export function recentDeviceMedia(items, deviceId) {
 
 export function formatMediaBytes(bytes) {
   const value = Number(bytes);
-  if (!Number.isFinite(value) || value < 0) return '大小未知';
+  if (!Number.isFinite(value) || value < 0) return tr("大小未知");
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;

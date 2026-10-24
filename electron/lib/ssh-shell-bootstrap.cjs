@@ -1,7 +1,8 @@
+const { tr } = require('./localization.cjs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
-const failure = () => Object.assign(new Error('无法准备 Bash 命令识别，请检查 SFTP 写入权限或重新打开终端'), { code: 'SSH_SHELL_BOOTSTRAP_FAILED' });
+const failure = () => Object.assign(new Error(tr("无法准备 Bash 命令识别，请检查 SFTP 写入权限或重新打开终端")), { code: 'SSH_SHELL_BOOTSTRAP_FAILED' });
 
 async function installBashIntegration({ getSftp, signal, assertCurrent, script, write, launch, waitReady, timeoutMs = 15000, cleanupTimeoutMs = 2000 }) {
   let sftp;
@@ -79,7 +80,7 @@ async function installBashIntegration({ getSftp, signal, assertCurrent, script, 
     if (ownedPath && !await cleanupCall('unlink', ownedPath)) cleanupFailed = true;
     cleanupFinalized = true;
   }
-  if (cleanupFailed) throw Object.assign(new Error(`命令识别临时脚本可能未清理，请在服务器检查：${ownedPath || targetPath}`),
+  if (cleanupFailed) throw Object.assign(new Error(tr("命令识别临时脚本可能未清理，请在服务器检查：{0}", { 0: ownedPath || targetPath })),
     { code: 'SSH_SHELL_CLEANUP_FAILED', temporaryPath: ownedPath || targetPath });
   if (operationError) throw operationError;
 }

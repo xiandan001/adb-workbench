@@ -77,6 +77,7 @@ function captureHarness({ maxBytes } = {}) {
   vm.runInNewContext(maxBytes ? source.replace('100 * 1024 * 1024', String(maxBytes)) : source, {
     module, __dirname: path.dirname(filename), Buffer, console, ...clock,
     require: name => {
+      if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (name === 'electron') return {};
       if (name === './app-context.cjs') return context;
       if (name === './adb-runtime.cjs') return adb;
@@ -191,6 +192,7 @@ test('MCP capture uses the same bounded batcher and ignores an old process exit'
   vm.runInNewContext(`${fs.readFileSync(filename, 'utf8')}\nmodule.exports.callMcpTool = callMcpTool;`, {
     module, console, Buffer, ...h.clock,
     require: name => {
+      if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (name === './app-context.cjs') return h.context;
       if (name === './log-analyzer.cjs') return h.api;
       if (name === './adb-runtime.cjs') return h.adb;
@@ -233,6 +235,7 @@ test('repeated diagnosed stack lines do not log or snapshot again inside the deb
     module, Buffer, Date: FixedDate,
     console: { log: message => messages.push(message) },
     require: name => {
+      if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (name === 'electron') return { app: { getPath: () => '' } };
       if (name === 'fs') return { readFileSync() { throw new Error('No custom rules'); } };
       if (name === './app-context.cjs') return { broadcastToAllWindows: (channel, payload) => events.push({ channel, payload }) };

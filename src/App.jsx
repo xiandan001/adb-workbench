@@ -19,6 +19,8 @@ import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
 import StartupPreferences from './components/StartupPreferences';
+import LanguagePreferences from './components/LanguagePreferences';
+import { tr, useLocale, getLocale } from './shared/i18n.js';
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
@@ -36,19 +38,20 @@ const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspa
 
 async function requestAiTools(command, args = {}) {
   const response = await window.electronAPI.aiToolsRequest({ command, args });
-  if (!response?.success) throw Object.assign(new Error(response?.error?.message || 'AI 工具操作未完成'), { code: response?.error?.code, backupId: response?.error?.backupId });
+  if (!response?.success) throw Object.assign(new Error(response?.error?.message || tr("AI 工具操作未完成")), { code: response?.error?.code, backupId: response?.error?.backupId });
   return response.result;
 }
 
 const getOperationErrorMessage = (error) => {
-  const lines = String(error || '未知错误')
+  const lines = String(error || tr("未知错误"))
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(Boolean);
-  return lines[lines.length - 1] || '未知错误';
+  return lines[lines.length - 1] || tr("未知错误");
 };
 
 function App() {
+  const locale = useLocale();
   const [devices, setDevices] = useState([]);
   const [deviceQuery, setDeviceQuery] = useState('');
   const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
@@ -105,16 +108,16 @@ function App() {
   const [environmentCheckModalOpen, setEnvironmentCheckModalOpen] = useState(false);
   const showConfirm = useCallback((options, onConfirm) => {
     const next = typeof options === 'string'
-      ? { title: '确认操作', message: options, onConfirm }
+      ? { title: tr("确认操作"), message: options, onConfirm }
       : { ...options, onConfirm: options?.onConfirm || onConfirm };
     if (next.rememberKey && isConfirmSuppressed(next.rememberKey)) {
       Promise.resolve()
         .then(() => next.onConfirm?.())
-        .catch((err) => showToast(`操作失败: ${err?.message || '未知错误'}`));
+        .catch((err) => showToast(tr("操作失败: {0}", { 0: err?.message || tr("未知错误") })));
       return;
     }
     next.rememberChoice = false;
-    next.rememberLabel = next.rememberLabel || '下次不再提示';
+    next.rememberLabel = next.rememberLabel || tr("下次不再提示");
     setConfirmModal(next);
   }, [showToast]);
   const runConfirmModal = async () => {
@@ -195,7 +198,7 @@ function App() {
       localStorage.setItem('currentTheme', currentTheme);
       localStorage.setItem('scrcpySettings', JSON.stringify(scrcpySettings));
     } catch {
-      showToast('本地偏好保存失败，请检查可用存储空间');
+      showToast(tr("本地偏好保存失败，请检查可用存储空间"));
     }
   }, [deviceNames, currentTheme, scrcpySettings, showToast]);
   const [globalCommandSettings, setGlobalCommandSettings] = useState(() => {
@@ -276,7 +279,7 @@ function App() {
   }, []);
 
   const saveCustomTheme = () => {
-    const themeName = newThemeName.trim() || `自定义${customThemes.length + 1}`;
+    const themeName = newThemeName.trim() || tr("自定义{0}", { 0: customThemes.length + 1 });
     const isDarkCard = themeColors.card.includes('slate-800') || themeColors.card.includes('gradient');
     const autoText = isDarkCard ? 'text-[#E8EAED]' : 'text-slate-700';
     const autoTextMuted = isDarkCard ? 'text-slate-400' : 'text-slate-400';
@@ -358,7 +361,7 @@ function App() {
       setActiveDeviceId(previous => resolveActiveDeviceId(previous, nextDevices));
       setError('');
     } catch (err) {
-      setError(`设备状态刷新失败：${err.message || '请检查 ADB 环境'}。已保留设备选择，请运行环境自检。`);
+      setError(tr("设备状态刷新失败：{0}。已保留设备选择，请运行环境自检。", { 0: err.message || tr("请检查 ADB 环境") }));
       setDevices(previous => previous.map(device => ({ ...device, status: 'offline' })));
     } finally {
       if (!silent) setLoading(false);
@@ -376,7 +379,7 @@ function App() {
     if (!previousId || previousId === activeDeviceId) return;
     const nextDevice = devices.find(device => device.id === activeDeviceId && device.status === 'device');
     if (nextDevice && !devices.some(device => device.id === previousId && device.status === 'device')) {
-      showToast(`已切换到在线设备：${deviceNames[activeDeviceId] || nextDevice.model || activeDeviceId}。设备状态已更新，进行中的操作仍绑定原设备。`);
+      showToast(tr("已切换到在线设备：{0}。设备状态已更新，进行中的操作仍绑定原设备。", { 0: deviceNames[activeDeviceId] || nextDevice.model || activeDeviceId }));
     }
   }, [activeDeviceId, devices, deviceNames, showToast]);
 
@@ -415,31 +418,31 @@ function App() {
     if (deviceId) setActiveDeviceId(deviceId);
     try {
       const result = await window.electronAPI?.logAnalyzerOpen?.({ deviceId: deviceId || activeDeviceId, packageName });
-      if (result?.success === false || result?.ok === false) throw new Error(result.error || '日志窗口打开失败');
+      if (result?.success === false || result?.ok === false) throw new Error(result.error || tr("日志窗口打开失败"));
     } catch (err) {
-      showToast(`日志窗口打开失败：${err.message}`);
+      showToast(tr("日志窗口打开失败：{0}", { 0: err.message }));
     }
   };
 
   const globalCommands = useMemo(() => {
     const builtIns = [
-      { id: 'cmd-devices', title: '设备列表', description: '查看已连接设备', action: 'tab:devices', group: '导航' },
-      { id: 'cmd-serial', title: '串口 / RS232', description: '连接电脑串口并查看、发送数据', action: 'tab:serial', group: '导航' },
-      { id: 'cmd-ssh', title: 'SSH 工作区', description: '多主机终端、SFTP 文件传输与远端编辑', action: 'tab:ssh', group: '导航' },
-      { id: 'cmd-ai-tools', title: 'AI 工具管理', description: '供应商、额度、资源和本机路由', action: 'tab:ai-tools', group: '导航' },
-      { id: 'cmd-environment', title: '环境自检', description: '检查 ADB、scrcpy 和设备授权', action: 'environmentCheck', group: '工具' },
-      { id: 'cmd-troubleshoot', title: '问题排查', description: '按问题场景自动采集证据', action: 'tab:troubleshoot', group: '导航' },
-      { id: 'cmd-artifacts', title: '产物中心', description: '查看报告、数据和证据目录', action: 'tab:artifacts', group: '导航' },
-      { id: 'cmd-quality', title: '质量中心', description: '生成回归差异报告和验收证据', action: 'tab:quality', group: '导航' },
-      { id: 'cmd-history', title: '连接历史', description: '查看无线连接历史', action: 'tab:history', group: '导航' },
-      { id: 'cmd-tasks', title: '任务中心', description: '运行复现脚本和自动化压测', action: 'tab:tasks', group: '导航' },
-      { id: 'cmd-performance', title: '性能监控', description: '查看设备资源与进程状态', action: 'tab:performance', group: '导航' },
-      { id: 'cmd-settings', title: '偏好设置', description: '配置应用偏好', action: 'tab:settings', group: '导航' },
-      { id: 'cmd-log', title: '打开日志分析', description: '打开独立日志分析窗口', action: 'logAnalyzer', group: '工具' },
-      { id: 'cmd-refresh', title: '刷新设备', description: '重新获取设备列表', action: 'refreshDevices', group: '工具' }
+      { id: 'cmd-devices', title: tr("设备列表"), description: tr("查看已连接设备"), action: 'tab:devices', group: tr("导航") },
+      { id: 'cmd-serial', title: tr("串口 / RS232"), description: tr("连接电脑串口并查看、发送数据"), action: 'tab:serial', group: tr("导航") },
+      { id: 'cmd-ssh', title: tr("SSH 工作区"), description: tr("多主机终端、SFTP 文件传输与远端编辑"), action: 'tab:ssh', group: tr("导航") },
+      { id: 'cmd-ai-tools', title: tr("AI 工具管理"), description: tr("供应商、额度、资源和本机路由"), action: 'tab:ai-tools', group: tr("导航") },
+      { id: 'cmd-environment', title: tr("环境自检"), description: tr("检查 ADB、scrcpy 和设备授权"), action: 'environmentCheck', group: tr("工具") },
+      { id: 'cmd-troubleshoot', title: tr("问题排查"), description: tr("按问题场景自动采集证据"), action: 'tab:troubleshoot', group: tr("导航") },
+      { id: 'cmd-artifacts', title: tr("产物中心"), description: tr("查看报告、数据和证据目录"), action: 'tab:artifacts', group: tr("导航") },
+      { id: 'cmd-quality', title: tr("质量中心"), description: tr("生成回归差异报告和验收证据"), action: 'tab:quality', group: tr("导航") },
+      { id: 'cmd-history', title: tr("连接历史"), description: tr("查看无线连接历史"), action: 'tab:history', group: tr("导航") },
+      { id: 'cmd-tasks', title: tr("任务中心"), description: tr("运行复现脚本和自动化压测"), action: 'tab:tasks', group: tr("导航") },
+      { id: 'cmd-performance', title: tr("性能监控"), description: tr("查看设备资源与进程状态"), action: 'tab:performance', group: tr("导航") },
+      { id: 'cmd-settings', title: tr("偏好设置"), description: tr("配置应用偏好"), action: 'tab:settings', group: tr("导航") },
+      { id: 'cmd-log', title: tr("打开日志分析"), description: tr("打开独立日志分析窗口"), action: 'logAnalyzer', group: tr("工具") },
+      { id: 'cmd-refresh', title: tr("刷新设备"), description: tr("重新获取设备列表"), action: 'refreshDevices', group: tr("工具") }
     ];
     return [...builtIns, ...(globalCommandSettings.customCommands || [])];
-  }, [globalCommandSettings.customCommands]);
+  }, [globalCommandSettings.customCommands, locale]);
 
   const runGlobalCommand = (command) => {
     const action = String(command?.action || '');
@@ -656,12 +659,12 @@ function App() {
         taskId: result.taskId,
         deviceId: result.deviceId,
         status: result.cancelled ? 'cancelled' : result.ok ? 'success' : 'failed',
-        progress: { percent: 100, message: result.cancelled ? '巡检已取消' : result.ok ? '巡检已完成' : '巡检失败' },
+        progress: { percent: 100, message: result.cancelled ? tr("巡检已取消") : result.ok ? tr("巡检已完成") : tr("巡检失败") },
         result
       };
       setTask('inspection', task, true);
       if (!result.ok && !result.cancelled && result.deviceId) {
-        setDeviceOperationErrors(previous => ({ ...previous, [result.deviceId]: `设备巡检失败：${result.error || '请打开巡检查看结果'}` }));
+        setDeviceOperationErrors(previous => ({ ...previous, [result.deviceId]: tr("设备巡检失败：{0}", { 0: result.error || tr("请打开巡检查看结果") }) }));
       }
     });
     const offReportProgress = window.electronAPI?.onPerfReportProgress?.((task) => {
@@ -669,8 +672,8 @@ function App() {
     });
     const offReportDone = window.electronAPI?.onPerfReportDone?.((task) => {
       setTask('performanceReport', task, true);
-      if (task?.result?.ok) showToast(`性能报告已生成：${task.result.path}`);
-      else if (task?.result?.error) showToast(`性能报告生成失败：${task.result.error}`);
+      if (task?.result?.ok) showToast(tr("性能报告已生成：{0}", { 0: task.result.path }));
+      else if (task?.result?.error) showToast(tr("性能报告生成失败：{0}", { 0: task.result.error }));
     });
     return () => {
       offInspectionProgress?.();
@@ -794,7 +797,7 @@ function App() {
         // 如果服务器未配置或开发模式，静默失败
         if (!res?.success) {
           console.log('[AutoUpdate] 自动检查跳过:', res?.error);
-          setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || '检查失败' }));
+          setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || tr("检查失败") }));
           return;
         }
         // 使用 IPC 返回值更新检查状态
@@ -834,7 +837,7 @@ function App() {
         const res = await window.electronAPI.adbScreenRecordStart(deviceId, options);
         return res;
       }
-      return { success: false, error: '录屏功能需要 Electron 环境' };
+      return { success: false, error: tr("录屏功能需要 Electron 环境") };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -846,7 +849,7 @@ function App() {
         const res = await window.electronAPI.adbScreenRecordStop(deviceId);
         return res;
       }
-      return { success: false, error: '录屏功能需要 Electron 环境' };
+      return { success: false, error: tr("录屏功能需要 Electron 环境") };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -857,12 +860,12 @@ function App() {
     try {
       if (window.electronAPI) {
         const res = await window.electronAPI.startScrcpy(deviceId, scrcpySettings);
-        showToast(res?.message || `开始投屏 ${deviceId}`);
+        showToast(res?.message || tr("开始投屏 {0}", { 0: deviceId }));
       } else {
-        showToast(`开始投屏 ${deviceId}`);
+        showToast(tr("开始投屏 {0}", { 0: deviceId }));
       }
     } catch (err) {
-      showDeviceFailure(deviceId, `投屏启动失败: ${err.message}`);
+      showDeviceFailure(deviceId, tr("投屏启动失败: {0}", { 0: err.message }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: false }));
     }
@@ -873,13 +876,13 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbShell(deviceId, command);
         if (!res.success) {
-          showDeviceFailure(deviceId, `命令执行失败: ${res.error}`);
+          showDeviceFailure(deviceId, tr("命令执行失败: {0}", { 0: res.error }));
         }
       } else {
         console.log(`发送命令到 ${deviceId}: adb shell ${command}`);
       }
     } catch (err) {
-      showDeviceFailure(deviceId, `命令执行错误: ${err.message}`);
+      showDeviceFailure(deviceId, tr("命令执行错误: {0}", { 0: err.message }));
     }
   };
 
@@ -888,21 +891,21 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbShell(deviceId, command);
         if (res.success) {
-          return res.output || '命令执行成功';
+          return res.output || tr("命令执行成功");
         }
         if (res.cancelled) {
-          return res.output ? `（已中断）\n${res.output}` : '命令已中断';
+          return res.output ? tr("（已中断）\n{0}", { 0: res.output }) : tr("命令已中断");
         }
         // 失败/超时但已有部分输出时一并展示，便于查看交互式命令的回显
         if (res.output) {
           return `${res.error}\n${res.output}`;
         }
-        return `命令执行失败: ${res.error}`;
+        return tr("命令执行失败: {0}", { 0: res.error });
       } else {
-        return '终端功能需要 Electron 环境';
+        return tr("终端功能需要 Electron 环境");
       }
     } catch (err) {
-      return `命令执行错误: ${err.message}`;
+      return tr("命令执行错误: {0}", { 0: err.message });
     }
   };
 
@@ -922,17 +925,17 @@ function App() {
   // 清空终端命令历史记录
   const handleClearTerminalHistory = async () => {
     showConfirm({
-      title: '清空终端命令历史',
-      message: '确定清空所有已保存的终端命令吗？',
-      detail: '该操作只清除本机命令历史，不影响当前终端输出和设备数据。',
-      confirmLabel: '清空历史',
+      title: tr("清空终端命令历史"),
+      message: tr("确定清空所有已保存的终端命令吗？"),
+      detail: tr("该操作只清除本机命令历史，不影响当前终端输出和设备数据。"),
+      confirmLabel: tr("清空历史"),
       rememberKey: 'app.clearTerminalHistory',
       onConfirm: async () => {
         setTerminalCommandHistory([]);
         if (window.electronAPI) {
           await window.electronAPI.clearTerminalHistory();
         }
-        showToast('终端命令历史已清除');
+        showToast(tr("终端命令历史已清除"));
       }
     });
   };
@@ -957,16 +960,16 @@ function App() {
             setLatestScreenshot({ path: pullRes.path || localPath, preview: pullRes.preview || '', deviceName: deviceNames[deviceId] || deviceId });
             if (pullRes.historyWarning) showToast(pullRes.historyWarning);
           } else {
-            showDeviceFailure(deviceId, `截图保存失败: ${pullRes.error}`);
+            showDeviceFailure(deviceId, tr("截图保存失败: {0}", { 0: pullRes.error }));
           }
         } else {
-          showDeviceFailure(deviceId, `截图命令失败: ${res.error}`);
+          showDeviceFailure(deviceId, tr("截图命令失败: {0}", { 0: res.error }));
         }
       } else {
-        showToast('截图功能需要 Electron 环境');
+        showToast(tr("截图功能需要 Electron 环境"));
       }
     } catch (err) {
-      showDeviceFailure(deviceId, `截图错误: ${err.message}`);
+      showDeviceFailure(deviceId, tr("截图错误: {0}", { 0: err.message }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`screenshot_${deviceId}`]: false }));
     }
@@ -974,10 +977,10 @@ function App() {
 
   const handleReboot = async (deviceId) => {
     showConfirm({
-      title: '重启设备',
-      message: `确定重启设备 ${deviceId} 吗？`,
-      detail: '重启会中断当前投屏、日志抓取和未完成的设备操作。设备重新上线后可刷新列表继续使用。',
-      confirmLabel: '重启设备',
+      title: tr("重启设备"),
+      message: tr("确定重启设备 {0} 吗？", { 0: deviceId }),
+      detail: tr("重启会中断当前投屏、日志抓取和未完成的设备操作。设备重新上线后可刷新列表继续使用。"),
+      confirmLabel: tr("重启设备"),
       rememberKey: 'device.reboot',
       onConfirm: async () => {
         setOperationLoading(prev => ({ ...prev, [`reboot_${deviceId}`]: true }));
@@ -985,17 +988,17 @@ function App() {
           if (window.electronAPI) {
             const res = await window.electronAPI.adbReboot(deviceId);
             if (res.success) {
-              showToast('设备正在重启...');
+              showToast(tr("设备正在重启..."));
               // 延迟多次刷新，确保设备重新上线后列表更新
               [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showDeviceFailure(deviceId, `重启失败: ${res.error}`);
+              showDeviceFailure(deviceId, tr("重启失败: {0}", { 0: res.error }));
             }
           } else {
-            showToast('重启功能需要 Electron 环境');
+            showToast(tr("重启功能需要 Electron 环境"));
           }
         } catch (err) {
-          showDeviceFailure(deviceId, `重启失败: ${err.message}`);
+          showDeviceFailure(deviceId, tr("重启失败: {0}", { 0: err.message }));
         } finally {
           setOperationLoading(prev => ({ ...prev, [`reboot_${deviceId}`]: false }));
         }
@@ -1005,10 +1008,10 @@ function App() {
 
   const handleRebootLoader = async (deviceId) => {
     showConfirm({
-      title: '进入 Loader 模式',
-      message: `确定让设备 ${deviceId} 进入 loader 模式吗？`,
-      detail: '设备会断开当前 ADB 会话并进入刷机/引导模式；通常需要手动重启或刷机工具才能回到系统。',
-      confirmLabel: '进入 Loader',
+      title: tr("进入 Loader 模式"),
+      message: tr("确定让设备 {0} 进入 loader 模式吗？", { 0: deviceId }),
+      detail: tr("设备会断开当前 ADB 会话并进入刷机/引导模式；通常需要手动重启或刷机工具才能回到系统。"),
+      confirmLabel: tr("进入 Loader"),
       rememberKey: 'device.rebootLoader',
       onConfirm: async () => {
         setOperationLoading(prev => ({ ...prev, [`loader_${deviceId}`]: true }));
@@ -1016,17 +1019,17 @@ function App() {
           if (window.electronAPI) {
             const res = await window.electronAPI.adbRebootLoader(deviceId);
             if (res.success) {
-              showToast('设备正在进入loader模式...');
+              showToast(tr("设备正在进入loader模式..."));
               // 延迟多次刷新，确保设备状态变更后列表更新
               [3000, 6000, 10000, 15000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showDeviceFailure(deviceId, `进入loader模式失败: ${res.error}`);
+              showDeviceFailure(deviceId, tr("进入loader模式失败: {0}", { 0: res.error }));
             }
           } else {
-            showToast('Loader模式需要 Electron 环境');
+            showToast(tr("Loader模式需要 Electron 环境"));
           }
         } catch (err) {
-          showDeviceFailure(deviceId, `进入loader模式失败: ${err.message}`);
+          showDeviceFailure(deviceId, tr("进入loader模式失败: {0}", { 0: err.message }));
         } finally {
           setOperationLoading(prev => ({ ...prev, [`loader_${deviceId}`]: false }));
         }
@@ -1036,10 +1039,10 @@ function App() {
 
   const handleUnlock = async (deviceId) => {
     showConfirm({
-      title: '设备解锁 Unlock',
-      message: `即将对设备 ${deviceId} 执行 Unlock 解锁流程。`,
-      detail: '执行前必须先在开发者模式中打开 OEM 解锁。设备端可能需要手动确认解锁，解锁过程可能会清除设备数据。',
-      confirmLabel: '开始 Unlock',
+      title: tr("设备解锁 Unlock"),
+      message: tr("即将对设备 {0} 执行 Unlock 解锁流程。", { 0: deviceId }),
+      detail: tr("执行前必须先在开发者模式中打开 OEM 解锁。设备端可能需要手动确认解锁，解锁过程可能会清除设备数据。"),
+      confirmLabel: tr("开始 Unlock"),
       rememberKey: 'device.unlock',
       onConfirm: async () => {
         setOperationLoading(prev => ({ ...prev, [`unlock_${deviceId}`]: true }));
@@ -1047,17 +1050,17 @@ function App() {
           if (window.electronAPI) {
             const res = await window.electronAPI.adbUnlock(deviceId);
             if (res.success) {
-              showToast(res.message || 'Unlock 命令已执行，设备正在重启...');
+              showToast(res.message || tr("Unlock 命令已执行，设备正在重启..."));
               // 延迟多次刷新，确保设备重启完成后列表更新
               [8000, 12000, 16000, 20000].forEach(delay => setTimeout(() => fetchDevices(), delay));
             } else {
-              showDeviceFailure(deviceId, `Unlock 失败: ${res.error}`);
+              showDeviceFailure(deviceId, tr("Unlock 失败: {0}", { 0: res.error }));
             }
           } else {
-            showToast('Unlock 功能需要 Electron 环境');
+            showToast(tr("Unlock 功能需要 Electron 环境"));
           }
         } catch (err) {
-          showDeviceFailure(deviceId, `Unlock 执行失败: ${err.message}`);
+          showDeviceFailure(deviceId, tr("Unlock 执行失败: {0}", { 0: err.message }));
         } finally {
           setOperationLoading(prev => ({ ...prev, [`unlock_${deviceId}`]: false }));
         }
@@ -1071,15 +1074,15 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbRoot(deviceId);
         if (res.success) {
-          showToast(`Root 成功！${res.message}`);
+          showToast(tr("Root 成功！{0}", { 0: res.message }));
         } else {
-          showDeviceFailure(deviceId, `Root 失败: ${res.error}`);
+          showDeviceFailure(deviceId, tr("Root 失败: {0}", { 0: res.error }));
         }
       } else {
-        showToast('Root 功能需要 Electron 环境');
+        showToast(tr("Root 功能需要 Electron 环境"));
       }
     } catch (err) {
-      showDeviceFailure(deviceId, `Root 执行失败: ${err.message}`);
+      showDeviceFailure(deviceId, tr("Root 执行失败: {0}", { 0: err.message }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`root_${deviceId}`]: false }));
     }
@@ -1091,15 +1094,15 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbRemount(deviceId);
         if (res.success) {
-          showToast(`Remount 成功！${res.message}`);
+          showToast(tr("Remount 成功！{0}", { 0: res.message }));
         } else {
-          showDeviceFailure(deviceId, `Remount 失败: ${res.error}`);
+          showDeviceFailure(deviceId, tr("Remount 失败: {0}", { 0: res.error }));
         }
       } else {
-        showToast('Remount 功能需要 Electron 环境');
+        showToast(tr("Remount 功能需要 Electron 环境"));
       }
     } catch (err) {
-      showDeviceFailure(deviceId, `Remount 执行失败: ${err.message}`);
+      showDeviceFailure(deviceId, tr("Remount 执行失败: {0}", { 0: err.message }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`remount_${deviceId}`]: false }));
     }
@@ -1110,7 +1113,7 @@ function App() {
     setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
     const next = addRecentApk(recentApks, selectedPath);
     setRecentApks(next);
-    if (!saveShortcutList(RECENT_APKS_KEY, next)) showToast('路径已选择，但最近 APK 记录未能保存');
+    if (!saveShortcutList(RECENT_APKS_KEY, next)) showToast(tr("路径已选择，但最近 APK 记录未能保存"));
   };
 
   const handleSelectApkFile = async (deviceId, forWhat) => {
@@ -1123,7 +1126,7 @@ function App() {
         if (forWhat === 'install') {
           dialogOptions.filters = [{ name: 'APK Files', extensions: ['apk'] }];
         } else {
-          dialogOptions.filters = [{ name: '所有文件', extensions: ['*'] }];
+          dialogOptions.filters = [{ name: tr("所有文件"), extensions: ['*'] }];
         }
         // 记住上次打开的文件夹路径
         if (lastSelectFolder) {
@@ -1142,18 +1145,18 @@ function App() {
           }
         }
       } else {
-        showToast('选择文件功能需要 Electron 环境');
+        showToast(tr("选择文件功能需要 Electron 环境"));
       }
     } catch (err) {
-      showToast(`选择文件失败: ${err.message}`);
+      showToast(tr("选择文件失败: {0}", { 0: err.message }));
     }
   };
 
   const handleInstallApk = async (deviceId) => {
     const apkPath = apkInstallPaths[deviceId];
     if (!apkPath) {
-      showToast('请先选择一个 APK 文件');
-      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '安装失败：请先选择一个 APK 文件' } }));
+      showToast(tr("请先选择一个 APK 文件"));
+      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("安装失败：请先选择一个 APK 文件") } }));
       return;
     }
     setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
@@ -1162,19 +1165,19 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbInstall(deviceId, apkPath);
         if (res.success) {
-          showToast(`安装成功！文件: ${apkPath}`);
-          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: '安装成功' } }));
+          showToast(tr("安装成功！文件: {0}", { 0: apkPath }));
+          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: tr("安装成功") } }));
         } else {
-          showToast(`安装失败: ${res.error}`);
-          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `安装失败：${getOperationErrorMessage(res.error)}` } }));
+          showToast(tr("安装失败: {0}", { 0: res.error }));
+          setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("安装失败：{0}", { 0: getOperationErrorMessage(res.error) }) } }));
         }
       } else {
-        showToast('安装功能需要 Electron 环境');
-        setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '安装失败：当前环境不支持安装功能' } }));
+        showToast(tr("安装功能需要 Electron 环境"));
+        setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("安装失败：当前环境不支持安装功能") } }));
       }
     } catch (err) {
-      showToast(`安装失败: ${err.message}`);
-      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `安装失败：${getOperationErrorMessage(err.message)}` } }));
+      showToast(tr("安装失败: {0}", { 0: err.message }));
+      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("安装失败：{0}", { 0: getOperationErrorMessage(err.message) }) } }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`install_${deviceId}`]: false }));
     }
@@ -1184,13 +1187,13 @@ function App() {
     const localPath = apkPushPaths[deviceId];
     const remotePath = apkPushRemotePaths[deviceId] !== undefined ? apkPushRemotePaths[deviceId] : '/sdcard/';
     if (!localPath) {
-      showToast('请先选择一个文件');
-      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：请先选择一个文件' } }));
+      showToast(tr("请先选择一个文件"));
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：请先选择一个文件") } }));
       return;
     }
     if (!remotePath) {
-      showToast('请输入远程路径');
-      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：请输入远程路径' } }));
+      showToast(tr("请输入远程路径"));
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：请输入远程路径") } }));
       return;
     }
     await runPushFile(deviceId, localPath, remotePath);
@@ -1203,24 +1206,24 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbPush(deviceId, localPath, remotePath);
         if (res.success) {
-          showToast(`推送成功！文件: ${localPath} 目标: ${remotePath}`);
-          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: '推送成功' } }));
+          showToast(tr("推送成功！文件: {0} 目标: {1}", { 0: localPath, 1: remotePath }));
+          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'success', message: tr("推送成功") } }));
           // 推送成功后将远程路径加入历史记录
           setPushRemotePathHistory(prev => {
             const filtered = prev.filter(p => p !== remotePath);
             return [remotePath, ...filtered].slice(0, 10);
           });
         } else {
-          showToast(`推送失败: ${res.error}`);
-          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `推送失败：${getOperationErrorMessage(res.error)}` } }));
+          showToast(tr("推送失败: {0}", { 0: res.error }));
+          setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：{0}", { 0: getOperationErrorMessage(res.error) }) } }));
         }
       } else {
-        showToast('推送功能需要 Electron 环境');
-        setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: '推送失败：当前环境不支持推送功能' } }));
+        showToast(tr("推送功能需要 Electron 环境"));
+        setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：当前环境不支持推送功能") } }));
       }
     } catch (err) {
-      showToast(`推送失败: ${err.message}`);
-      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: `推送失败：${getOperationErrorMessage(err.message)}` } }));
+      showToast(tr("推送失败: {0}", { 0: err.message }));
+      setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：{0}", { 0: getOperationErrorMessage(err.message) }) } }));
     } finally {
       setOperationLoading(prev => ({ ...prev, [`push_${deviceId}`]: false }));
     }
@@ -1235,13 +1238,13 @@ function App() {
           setApkBrowserPaths(prev => ({ ...prev, [deviceId]: res.currentPath }));
           setApkBrowserItemsMap(prev => ({ ...prev, [deviceId]: res.items }));
         } else {
-          showToast(`浏览失败: ${res.error}`);
+          showToast(tr("浏览失败: {0}", { 0: res.error }));
         }
       } else {
-        showToast('浏览功能需要 Electron 环境');
+        showToast(tr("浏览功能需要 Electron 环境"));
       }
     } catch (err) {
-      showToast(`浏览失败: ${err.message}`);
+      showToast(tr("浏览失败: {0}", { 0: err.message }));
     } finally {
       setApkBrowserLoadingMap(prev => ({ ...prev, [deviceId]: false }));
     }
@@ -1266,13 +1269,13 @@ function App() {
         if (res.success) {
           showToast(res.message);
         } else {
-          showToast(`拉取失败: ${res.error}`);
+          showToast(tr("拉取失败: {0}", { 0: res.error }));
         }
       } else {
-        showToast('拉取功能需要 Electron 环境');
+        showToast(tr("拉取功能需要 Electron 环境"));
       }
     } catch (err) {
-      showToast(`拉取失败: ${err.message}`);
+      showToast(tr("拉取失败: {0}", { 0: err.message }));
     } finally {
       setOperationLoading(prev => {
         const newState = { ...prev };
@@ -1290,7 +1293,7 @@ function App() {
     const target = address.trim();
     if (!target || connectingAddressesRef.current.has(target)) return false;
     connectingAddressesRef.current.add(target);
-    setConnectionResults(prev => ({ ...prev, [target]: { status: 'loading', message: '正在连接…' } }));
+    setConnectionResults(prev => ({ ...prev, [target]: { status: 'loading', message: tr("正在连接…") } }));
     try {
       const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
       if (result.history) setConnectionHistory(result.history);
@@ -1324,10 +1327,10 @@ function App() {
 
   const handleDisconnect = async (deviceId) => {
     showConfirm({
-      title: '断开设备连接',
-      message: `确定断开设备 ${deviceId} 吗？`,
-      detail: '断开后当前投屏、文件操作和终端命令都会失去目标设备。可重新插拔 USB 或重新发起 Wi-Fi 连接恢复。',
-      confirmLabel: '断开连接',
+      title: tr("断开设备连接"),
+      message: tr("确定断开设备 {0} 吗？", { 0: deviceId }),
+      detail: tr("断开后当前投屏、文件操作和终端命令都会失去目标设备。可重新插拔 USB 或重新发起 Wi-Fi 连接恢复。"),
+      confirmLabel: tr("断开连接"),
       rememberKey: 'device.disconnect',
       onConfirm: async () => {
         try {
@@ -1336,14 +1339,14 @@ function App() {
             if (res.success) {
               fetchDevices();
             } else {
-              showToast(`断开连接失败: ${res.error}`);
+              showToast(tr("断开连接失败: {0}", { 0: res.error }));
             }
           } else {
-            showToast(`模拟断开设备: ${deviceId}`);
+            showToast(tr("模拟断开设备: {0}", { 0: deviceId }));
             fetchDevices();
           }
         } catch (err) {
-          showToast(`断开请求错误: ${err.message}`);
+          showToast(tr("断开请求错误: {0}", { 0: err.message }));
         }
       }
     });
@@ -1363,7 +1366,7 @@ function App() {
 
   const handleToggleDevicePin = (deviceId) => {
     try { setPinnedDeviceIds(togglePinnedDevice(deviceId)); }
-    catch (failure) { showToast(`常用设备保存失败：${failure.message}`); }
+    catch (failure) { showToast(tr("常用设备保存失败：{0}", { 0: failure.message })); }
   };
 
   const t = theme || themes.default;
@@ -1393,14 +1396,14 @@ function App() {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
   };
   const settingsSections = useMemo(() => [
-    { id: 'settings-commands', label: '快捷命令', icon: ClipboardList },
-    { id: 'settings-cast', label: '投屏', icon: Smartphone },
-    { id: 'settings-paths', label: '保存路径', icon: Folder },
-    { id: 'settings-appearance', label: '外观', icon: Palette },
-    { id: 'settings-data', label: '数据迁移', icon: DownloadCloud },
-    { id: 'settings-update', label: '更新', icon: Package },
-    { id: 'settings-danger', label: '高危操作', icon: RotateCcw }
-  ], []);
+    { id: 'settings-commands', label: tr("快捷命令"), icon: ClipboardList },
+    { id: 'settings-cast', label: tr("投屏"), icon: Smartphone },
+    { id: 'settings-paths', label: tr("保存路径"), icon: Folder },
+    { id: 'settings-appearance', label: tr("外观"), icon: Palette },
+    { id: 'settings-data', label: tr("数据迁移"), icon: DownloadCloud },
+    { id: 'settings-update', label: tr("更新"), icon: Package },
+    { id: 'settings-danger', label: tr("高危操作"), icon: RotateCcw }
+  ], [locale]);
 
   useEffect(() => {
     if (activeTab !== 'settings') return undefined;
@@ -1448,7 +1451,7 @@ function App() {
       {/* Toast 提示 */}
       {toast && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-[#2D2F33] text-white rounded-lg shadow-lg text-sm">
-          {toast}
+          {tr(toast)}
         </div>
       )}
       {latestScreenshot && <ScreenshotResult key={latestScreenshot.path} screenshot={latestScreenshot} theme={t} onClose={() => setLatestScreenshot(null)} />}
@@ -1472,8 +1475,7 @@ function App() {
                   <h3 className={`text-lg font-bold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                     {changelogContent.title}
                   </h3>
-                  <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
-                    发布日期：{changelogContent.date}
+                  <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("发布日期：")}{changelogContent.date}
                   </p>
                 </div>
                 <button
@@ -1487,9 +1489,9 @@ function App() {
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2.5">
               {changelogContent.items.map((item, idx) => {
                 const typeConfig = {
-                  feature: { label: '新增', color: isDarkTheme(t) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                  fix: { label: '修复', color: isDarkTheme(t) ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200' },
-                  improve: { label: '优化', color: isDarkTheme(t) ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-cyan-50 text-cyan-600 border-cyan-200' }
+                  feature: { label: tr("新增"), color: isDarkTheme(t) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                  fix: { label: tr("修复"), color: isDarkTheme(t) ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-red-50 text-red-600 border-red-200' },
+                  improve: { label: tr("优化"), color: isDarkTheme(t) ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-cyan-50 text-cyan-600 border-cyan-200' }
                 };
                 const cfg = typeConfig[item.type] || typeConfig.improve;
                 return (
@@ -1505,9 +1507,7 @@ function App() {
               })}
             </div>
             <div className={`px-6 py-4 border-t flex items-center justify-between ${isDarkTheme(t) ? 'border-[#3E4145] bg-[#202124]/50' : 'border-slate-100 bg-slate-50'}`}>
-              <span className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                感谢使用，如有问题请反馈
-              </span>
+              <span className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("感谢使用，如有问题请反馈")}</span>
               <button
                 onClick={() => setShowChangelog(false)}
                 className={`px-5 py-2 text-sm font-medium rounded-lg transition-all active:scale-95 shadow-sm ${
@@ -1515,9 +1515,7 @@ function App() {
                     ? 'bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-600 hover:to-emerald-600 text-white'
                     : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white'
                 }`}
-              >
-                知道了
-              </button>
+              >{tr("知道了")}</button>
             </div>
           </div>
         </div>
@@ -1529,12 +1527,12 @@ function App() {
         message={confirmModal?.message}
         detail={confirmModal?.detail}
         bullets={confirmModal?.bullets || []}
-        confirmLabel={confirmModal?.confirmLabel || '确定'}
-        cancelLabel={confirmModal?.cancelLabel || '取消'}
+        confirmLabel={confirmModal?.confirmLabel || tr("确定")}
+        cancelLabel={confirmModal?.cancelLabel || tr("取消")}
         tone={confirmModal?.tone || 'danger'}
         loading={confirmLoading}
         rememberChoice={!!confirmModal?.rememberChoice}
-        rememberLabel={confirmModal?.rememberLabel || '下次不再提示'}
+        rememberLabel={confirmModal?.rememberLabel || tr("下次不再提示")}
         onRememberChoiceChange={confirmModal?.rememberKey ? (checked) => {
           setConfirmModal(prev => prev ? { ...prev, rememberChoice: checked } : prev);
         } : undefined}
@@ -1553,24 +1551,16 @@ function App() {
                     <DownloadCloud size={20} className="text-emerald-500" />
                   </div>
                   <div>
-                    <h3 className={`text-base font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                      安装更新并重启
-                    </h3>
-                    <p className={`text-xs ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                      新版本 v{updaterState.info?.version || '未知'} 已准备就绪
-                    </p>
+                    <h3 className={`text-base font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("安装更新并重启")}</h3>
+                    <p className={`text-xs ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("新版本 v")}{updaterState.info?.version || tr("未知")}{tr(" 已准备就绪")}</p>
                   </div>
                 </div>
-                <p className={`mb-5 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>
-                  安装过程中应用将自动关闭并重启，请确保已保存所有操作。是否立即安装？
-                </p>
+                <p className={`mb-5 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-600'}`}>{tr("安装过程中应用将自动关闭并重启，请确保已保存所有操作。是否立即安装？")}</p>
                 <div className="flex justify-end gap-2">
                   <button
                     onClick={() => setUpdateInstallModal(false)}
                     className={`px-4 py-2 text-sm rounded-lg transition-colors ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                  >
-                    稍后
-                  </button>
+                  >{tr("稍后")}</button>
                   <button
                     onClick={async () => {
                       setUpdateInstalling(true);
@@ -1581,9 +1571,7 @@ function App() {
                     }}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
                   >
-                    <RefreshCw size={14} />
-                    安装并重启
-                  </button>
+                    <RefreshCw size={14} />{tr("安装并重启")}</button>
                 </div>
               </>
             ) : (
@@ -1591,9 +1579,7 @@ function App() {
                 <div className="flex items-center justify-center mb-4">
                   <Loader2 size={32} className="animate-spin text-emerald-500" />
                 </div>
-                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
-                  正在安装更新，应用即将重启…
-                </p>
+                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("正在安装更新，应用即将重启…")}</p>
                 <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
                   <div className="h-full bg-emerald-500 rounded-full animate-[loading_1.2s_ease-in-out_infinite]" style={{ width: '100%' }} />
                 </div>
@@ -1613,18 +1599,14 @@ function App() {
           >
             <div className={`flex items-center justify-between gap-4 border-b px-6 py-4 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div>
-                <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                  环境自检
-                </h3>
-                <p className={`mt-1 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>
-                  检查 ADB、scrcpy 和设备授权状态
-                </p>
+                <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("环境自检")}</h3>
+                <p className={`mt-1 text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("检查 ADB、scrcpy 和设备授权状态")}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setEnvironmentCheckModalOpen(false)}
                 className={`rounded-lg p-2 transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
-                aria-label="关闭环境自检"
+                aria-label={tr("关闭环境自检")}
               >
                 <X size={18} />
               </button>
@@ -1647,18 +1629,18 @@ function App() {
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
           <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">卓控台</h1>
-          <button type="button" aria-label="打开问题反馈" title="问题反馈" onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
+          <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1">
-          <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">设备与诊断</div>
+          <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">{tr("设备与诊断")}</div>
           <button
             onClick={() => setActiveTab('devices')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'devices' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Smartphone size={20} />
-            <span className="font-medium">设备列表</span>
+            <span className="font-medium">{tr("设备列表")}</span>
           </button>
           <button
             onClick={() => setActiveTab('serial')}
@@ -1666,7 +1648,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Cable size={20} />
-            <span className="font-medium">串口 / RS232</span>
+            <span className="font-medium">{tr("串口 / RS232")}</span>
           </button>
           <button
             onClick={() => setActiveTab('ssh')}
@@ -1674,7 +1656,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Server size={20} />
-            <span className="font-medium">SSH 工作区</span>
+            <span className="font-medium">{tr("SSH 工作区")}</span>
           </button>
           <button
             onClick={() => setActiveTab('troubleshoot')}
@@ -1682,7 +1664,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <ClipboardCheck size={20} />
-            <span className="font-medium">问题排查</span>
+            <span className="font-medium">{tr("问题排查")}</span>
           </button>
           <button
             onClick={() => setActiveTab('performance')}
@@ -1690,16 +1672,16 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Gauge size={20} />
-            <span className="font-medium">性能监控</span>
+            <span className="font-medium">{tr("性能监控")}</span>
           </button>
-          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">测试与证据</div>
+          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("测试与证据")}</div>
           <button
             onClick={() => setActiveTab('quality')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'quality' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <ShieldCheck size={20} />
-            <span className="font-medium">质量中心</span>
+            <span className="font-medium">{tr("质量中心")}</span>
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
@@ -1707,7 +1689,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <ClipboardList size={20} />
-            <span className="font-medium">任务中心</span>
+            <span className="font-medium">{tr("任务中心")}</span>
           </button>
           <button
             onClick={() => setActiveTab('artifacts')}
@@ -1715,13 +1697,13 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <FolderOpen size={20} />
-            <span className="font-medium">产物中心</span>
+            <span className="font-medium">{tr("产物中心")}</span>
           </button>
-          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">工具与设置</div>
+          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("工具与设置")}</div>
           <button onClick={() => setActiveTab('ai-tools')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-tools' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}>
-            <SlidersHorizontal size={20} /><span className="font-medium">AI 工具管理</span>
+            <SlidersHorizontal size={20} /><span className="font-medium">{tr("AI 工具管理")}</span>
           </button>
           <button
             onClick={() => viewApplicationLogs()}
@@ -1729,7 +1711,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Bot size={20} />
-            <span className="font-medium">AI 日志助手</span>
+            <span className="font-medium">{tr("AI 日志助手")}</span>
           </button>
           <button
             onClick={() => {
@@ -1740,7 +1722,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Crown size={20} />
-            <span className="font-medium">会员中心</span>
+            <span className="font-medium">{tr("会员中心")}</span>
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -1748,7 +1730,7 @@ function App() {
             style={{ WebkitAppRegion: 'no-drag' }}
           >
             <Settings size={20} />
-            <span className="font-medium">偏好设置</span>
+            <span className="font-medium">{tr("偏好设置")}</span>
           </button>
         </nav>
 
@@ -1766,15 +1748,15 @@ function App() {
             <button
               onClick={() => setUpdateInstallModal(true)}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 transition-all active:scale-95"
-              title={`新版本 v${updaterState.info?.version || ''} 已就绪，点击安装并重启`}
+              title={tr("新版本 v{0} 已就绪，点击安装并重启", { 0: updaterState.info?.version || '' })}
             >
               <div className="relative">
                 <DownloadCloud size={20} />
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
               </div>
               <div className="flex-1 text-left">
-                <div className="text-xs font-semibold">新版本已就绪</div>
-                <div className="text-[10px] opacity-70">v{updaterState.info?.version || '未知'} · 点击安装</div>
+                <div className="text-xs font-semibold">{tr("新版本已就绪")}</div>
+                <div className="text-[10px] opacity-70">v{updaterState.info?.version || tr("未知")}{tr(" · 点击安装")}</div>
               </div>
             </button>
           </div>
@@ -1788,12 +1770,12 @@ function App() {
           <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? '已连接设备' : activeTab === 'serial' ? '串口 / RS232' : activeTab === 'ssh' ? 'SSH 工作区' : activeTab === 'ai-tools' ? 'AI 工具管理' : activeTab === 'troubleshoot' ? '问题排查' : activeTab === 'artifacts' ? '产物中心' : activeTab === 'quality' ? '质量中心' : activeTab === 'history' ? '连接历史' : activeTab === 'tasks' ? '任务中心' : activeTab === 'performance' ? '性能监控' : activeTab === 'member' ? '会员中心' : '全局设置'}
+              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
             </h2>
-            {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>每 5 秒自动刷新 · 当前设备断开后自动选用在线设备</p>}
-            {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>通过电脑串口线连接设备 · 端口列表每 2 秒自动更新</p>}
-            {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>多台主机 · 多个终端 · 文件与终端同屏操作</p>}
-            {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>供应商配置 · 额度查询 · 安全切换与恢复</p>}
+            {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
+            {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("通过电脑串口线连接设备 · 端口列表每 2 秒自动更新")}</p>}
+            {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("多台主机 · 多个终端 · 文件与终端同屏操作")}</p>}
+            {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>
 
           {activeTab === 'devices' && (
@@ -1804,7 +1786,7 @@ function App() {
                 className={`flex items-center space-x-2 rounded-lg border px-4 py-2 font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
               >
                 <ClipboardCheck size={18} />
-                <span>环境自检</span>
+                <span>{tr("环境自检")}</span>
               </button>
               <button
                 onClick={fetchDevices}
@@ -1812,7 +1794,7 @@ function App() {
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''}`}
               >
                 <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-                <span>刷新</span>
+                <span>{tr("刷新")}</span>
               </button>
             </div>
           )}
@@ -1822,17 +1804,17 @@ function App() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance'].includes(activeTab) && (
             <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}>
-              <label htmlFor="active-device" className="text-xs font-medium">当前设备</label>
+              <label htmlFor="active-device" className="text-xs font-medium">{tr("当前设备")}</label>
               <SelectMenu
                 id="active-device"
                 value={activeDevice?.id || ''}
                 onChange={setActiveDeviceId}
                 isDark={isDark}
-                placeholder="尚未发现设备"
-                emptyText="尚未发现设备"
+                placeholder={tr("尚未发现设备")}
+                emptyText={tr("尚未发现设备")}
                 className="min-w-0 max-w-full flex-1"
                 options={[
-                  ...(!activeDevice ? [{ value: '', label: '尚未发现设备' }] : []),
+                  ...(!activeDevice ? [{ value: '', label: tr("尚未发现设备") }] : []),
                   ...devices.map(device => ({
                     value: device.id,
                     label: `${deviceNames[device.id] || device.model || device.id} · ${device.id} · ${deviceStatusLabel(device.status)}`
@@ -1842,15 +1824,15 @@ function App() {
               {activeDevice && activeDevice.status !== 'device' && (
                 <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
                   <AlertCircle size={14} />
-                  <span className="flex-1">当前设备{deviceStatusLabel(activeDevice.status)}，正在等待可用的在线设备；发现后会自动选用并刷新。{deviceConnectionHint(activeDevice.status)}</span>
-                  <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">环境自检</button>
+                  <span className="flex-1">{tr("当前设备")}{deviceStatusLabel(activeDevice.status)}{tr("，正在等待可用的在线设备；发现后会自动选用并刷新。")}{deviceConnectionHint(activeDevice.status)}</span>
+                  <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">{tr("环境自检")}</button>
                 </div>
               )}
             </div>
           )}
           {error && !['serial', 'ssh'].includes(activeTab) && (
             <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
-              {error}
+              {tr(error)}
             </div>
           )}
 
@@ -1862,19 +1844,19 @@ function App() {
                   <div className="flex flex-wrap items-center gap-3">
                     <h3 className={`text-sm font-semibold flex items-center gap-2 whitespace-nowrap ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
                       <Wifi size={17} className="text-emerald-500" />
-                      {hasOnlineDevice ? '设备连接' : '连接第一台设备'}
+                      {hasOnlineDevice ? tr("设备连接") : tr("连接第一台设备")}
                     </h3>
-                    {!showConnectionForm && <span className={`text-xs ${t.textMuted}`}>{devices.filter(device => device.status === 'device').length} 台在线</span>}
+                    {!showConnectionForm && <span className={`text-xs ${t.textMuted}`}>{devices.filter(device => device.status === 'device').length}{tr(" 台在线")}</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setActiveTab('history')}
-                      title="查看无线连接历史"
+                      title={tr("查看无线连接历史")}
                       className={`inline-flex w-fit items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                     >
                       <History size={16} />
-                      <span>连接历史</span>
+                      <span>{tr("连接历史")}</span>
                       <span className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-500'}`}>
                         {connectionHistory.length}
                       </span>
@@ -1885,18 +1867,18 @@ function App() {
                       aria-controls="wireless-connection-form"
                       onClick={() => setConnectionFormOpen(prev => !prev)}
                       className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${t.button.secondary}`}
-                    >{showConnectionForm ? '收起' : '连接设备'}</button>}
+                    >{showConnectionForm ? tr("收起") : tr("连接设备")}</button>}
                   </div>
                 </div>
                 {showConnectionForm && <div id="wireless-connection-form" className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center">
-                <p className={`flex-1 text-xs leading-relaxed ${t.textMuted}`}>{hasOnlineDevice ? '通过 Wi-Fi 连接另一台设备。' : 'USB：连接设备并开启 USB 调试；Wi-Fi：输入设备的 IP 地址和端口。'}<span className="block">地址示例：192.168.1.100:5555</span></p>
+                <p className={`flex-1 text-xs leading-relaxed ${t.textMuted}`}>{hasOnlineDevice ? tr("通过 Wi-Fi 连接另一台设备。") : tr("USB：连接设备并开启 USB 调试；Wi-Fi：输入设备的 IP 地址和端口。")}<span className="block">{tr("地址示例：192.168.1.100:5555")}</span></p>
                 <form onSubmit={handleWifiConnect} className="flex w-full xl:w-auto gap-2">
                   <input
                     type="text"
                     value={wifiIp}
                     onChange={(e) => setWifiIp(e.target.value)}
-                    placeholder="IP 地址:端口"
-                    aria-label="Wi-Fi 设备地址"
+                    placeholder={tr("IP 地址:端口")}
+                    aria-label={tr("Wi-Fi 设备地址")}
                     className={`min-w-0 flex-1 xl:w-64 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-slate-50 border-slate-200'}`}
                   />
                   <button
@@ -1904,7 +1886,7 @@ function App() {
                     disabled={isConnecting || !wifiIp.trim()}
                     className={`px-6 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}
                   >
-                    {isConnecting ? '连接中...' : '连接'}
+                    {isConnecting ? tr("连接中...") : tr("连接")}
                   </button>
                 </form>
                 </div>}
@@ -1915,31 +1897,31 @@ function App() {
                   <Search size={16} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${t.textMuted}`} />
                   <input
                     type="search"
-                    aria-label="搜索设备"
+                    aria-label={tr("搜索设备")}
                     value={deviceQuery}
                     maxLength={300}
                     onChange={event => setDeviceQuery(event.target.value)}
-                    placeholder="搜索设备名称、型号、序列号或 IP"
+                    placeholder={tr("搜索设备名称、型号、序列号或 IP")}
                     className={`w-full rounded-lg border py-2 pl-9 pr-9 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 [&::-webkit-search-cancel-button]:hidden ${t.input}`}
                   />
-                  {deviceQuery && <button type="button" aria-label="清空设备搜索" title="清空搜索" onClick={() => setDeviceQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${t.textMuted}`}><X size={15} /></button>}
+                  {deviceQuery && <button type="button" aria-label={tr("清空设备搜索")} title={tr("清空搜索")} onClick={() => setDeviceQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${t.textMuted}`}><X size={15} /></button>}
                 </div>
-                <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />常用设备优先 · {visibleDevices.length} / {eligibleDevices.length} 台</span>
+                <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />{tr("常用设备优先 · ")}{visibleDevices.length} / {eligibleDevices.length}{tr(" 台")}</span>
               </div>}
               <div className="grid gap-6 grid-cols-1 xl:grid-cols-2">
                 {devices.length === 0 && !loading && !error ? (
                   <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
                     <Smartphone size={48} className={`mb-4 opacity-50 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
-                    <p className="text-lg">未发现设备</p>
-                    <p className="text-sm">请确保已开启 USB 调试并连接设备</p>
+                    <p className="text-lg">{tr("未发现设备")}</p>
+                    <p className="text-sm">{tr("请确保已开启 USB 调试并连接设备")}</p>
                   </div>
                 ) : (
                   <>
                     {deviceQuery.trim() && visibleDevices.length === 0 && <div className={`col-span-full rounded-xl border border-dashed p-8 text-center ${t.textMuted}`}>
                       <Search size={24} className="mx-auto mb-3 opacity-60" />
-                      <p className="text-sm font-medium">没有匹配的设备</p>
-                      <p className="mt-1 text-xs">试试设备名称、型号、序列号或 IP。搜索不会改变当前设备选择。</p>
-                      <button type="button" onClick={() => setDeviceQuery('')} className={`mt-3 rounded-lg border px-3 py-1.5 text-xs ${t.button.secondary}`}>清空搜索</button>
+                      <p className="text-sm font-medium">{tr("没有匹配的设备")}</p>
+                      <p className="mt-1 text-xs">{tr("试试设备名称、型号、序列号或 IP。搜索不会改变当前设备选择。")}</p>
+                      <button type="button" onClick={() => setDeviceQuery('')} className={`mt-3 rounded-lg border px-3 py-1.5 text-xs ${t.button.secondary}`}>{tr("清空搜索")}</button>
                     </div>}
                     {visibleDevices.map(device => (
                     <DeviceCard
@@ -2018,9 +2000,7 @@ function App() {
                   {lockedCount > 0 && (
                     <div className={`col-span-full flex items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                       <Lock size={20} className="text-amber-400" />
-                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                        还有 {lockedCount} 台设备已连接，<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">开通会员</button>解锁全部
-                      </span>
+                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("还有 ")}{lockedCount}{tr(" 台设备已连接，")}<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">{tr("开通会员")}</button>{tr("解锁全部")}</span>
                     </div>
                   )}
                   </>
@@ -2031,12 +2011,12 @@ function App() {
 
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} />}
           {sshVisited && <div hidden={activeTab !== 'ssh'}>
-            <Suspense fallback={<div className={t.textMuted}>正在加载 SSH 工作区…</div>}>
+            <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 SSH 工作区…")}</div>}>
               <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} />
             </Suspense>
           </div>}
           {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
-            <Suspense fallback={<div className={t.textMuted}>正在加载 AI 工具管理…</div>}>
+            <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 AI 工具管理…")}</div>}>
               <AiToolsWorkspace active={activeTab === 'ai-tools'} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }} />
             </Suspense>
           </div>}
@@ -2084,46 +2064,39 @@ function App() {
                       onClick={() => setActiveTab('devices')}
                       className={`inline-flex w-fit items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                     >
-                      <ArrowLeft size={16} />
-                      返回设备列表
-                    </button>
+                      <ArrowLeft size={16} />{tr("返回设备列表")}</button>
                     <h3 className={`text-lg font-semibold flex items-center gap-2 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                      <History size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />
-                      连接历史
-                      <span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
-                        {connectionHistory.length} 条
-                      </span>
+                      <History size={20} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-500'} />{tr("连接历史")}<span className={`text-sm font-normal ml-2 px-2 py-0.5 rounded-full ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-slate-100 text-[#80868B]'}`}>
+                        {connectionHistory.length}{tr(" 条")}</span>
                     </h3>
                   </div>
                   {connectionHistory.length > 0 && (
                     <button
                       onClick={() => {
                         showConfirm({
-                          title: '清除连接历史',
-                          message: '确定要清除所有连接历史吗？',
-                          confirmLabel: '清除历史',
+                          title: tr("清除连接历史"),
+                          message: tr("确定要清除所有连接历史吗？"),
+                          confirmLabel: tr("清除历史"),
                           rememberKey: 'history.clearConnections',
                           onConfirm: async () => {
                             if (window.electronAPI) {
                               await window.electronAPI.clearConnectionHistory();
                             }
                             setConnectionHistory([]);
-                            showToast('历史记录已清除');
+                            showToast(tr("历史记录已清除"));
                           }
                         });
                       }}
                       className={`text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-red-400 hover:bg-red-900/30' : 'text-[#80868B] hover:text-red-600 hover:bg-red-50'}`}
                     >
-                      <RotateCcw size={14} />
-                      一键清除
-                    </button>
+                      <RotateCcw size={14} />{tr("一键清除")}</button>
                   )}
                 </div>
                 {connectionHistory.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16">
                     <History size={48} className={`mb-4 opacity-30 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
-                    <p className={`text-lg ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>暂无连接历史</p>
-                    <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-slate-600' : 'text-[#9AA0A6]'}`}>通过 Wi-Fi 连接设备后会显示在这里</p>
+                    <p className={`text-lg ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("暂无连接历史")}</p>
+                    <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-slate-600' : 'text-[#9AA0A6]'}`}>{tr("通过 Wi-Fi 连接设备后会显示在这里")}</p>
                   </div>
                 ) : (
                   <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -2162,17 +2135,17 @@ function App() {
                                 <button
                                   onClick={() => {
                                     navigator.clipboard.writeText(item.ip);
-                                    showToast('IP 已复制');
+                                    showToast(tr("IP 已复制"));
                                   }}
                                   className={`p-1.5 rounded-lg transition-colors ${isDarkTheme(t) ? 'hover:bg-slate-600 text-[#9AA0A6] hover:text-[#E8EAED]' : 'hover:bg-slate-200 text-[#9AA0A6] hover:text-slate-600'}`}
-                                  title="复制 IP"
+                                  title={tr("复制 IP")}
                                 >
                                   <Copy size={14} />
                                 </button>
                               </div>
                             )}
                             <div className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                              {new Date(item.timestamp).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              {new Date(item.timestamp).toLocaleString(getLocale(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </div>
                           </div>
                         </div>
@@ -2184,7 +2157,7 @@ function App() {
                             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''}`}
                           >
                             {connectionResult?.status === 'loading' && <Loader2 size={14} className="animate-spin" />}
-                            {!address ? 'USB 设备请重新插拔' : connectionResult?.status === 'loading' ? '连接中…' : '连接'}
+                            {!address ? tr("USB 设备请重新插拔") : connectionResult?.status === 'loading' ? tr("连接中…") : tr("连接")}
                           </button>
                         </div>
                         {connectionResult && <p role={connectionResult.status === 'error' ? 'alert' : 'status'} className={`mt-2 break-words text-xs ${connectionResult.status === 'error' ? 'text-red-500' : connectionResult.status === 'success' ? 'text-emerald-500' : t.textMuted}`}>{connectionResult.message}</p>}
@@ -2193,9 +2166,7 @@ function App() {
                     {lockedHistoryCount > 0 && (
                       <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                         <Lock size={18} className="text-amber-400" />
-                        <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                          还有 {lockedHistoryCount} 条历史记录，<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">开通会员</button>查看全部
-                        </span>
+                        <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("还有 ")}{lockedHistoryCount}{tr(" 条历史记录，")}<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">{tr("开通会员")}</button>{tr("查看全部")}</span>
                       </div>
                     )}
                         </>
@@ -2277,13 +2248,13 @@ function App() {
               </section>
 
               <section id="settings-cast" className={settingsSectionClass}>
-              <h3 className={`text-lg font-semibold mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>Scrcpy 投屏设置</h3>
-              <p className={`text-sm mb-6 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>这些设置将在启动新的投屏会话时应用。</p>
+              <h3 className={`text-lg font-semibold mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("Scrcpy 投屏设置")}</h3>
+              <p className={`text-sm mb-6 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("这些设置将在启动新的投屏会话时应用。")}</p>
 
               <div className="space-y-4">
                 <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>投屏时关闭设备屏幕</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("投屏时关闭设备屏幕")}</span>
                     <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--turn-screen-off</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -2299,8 +2270,8 @@ function App() {
 
                 <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>保持唤醒</span>
-                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>设备在投屏期间保持唤醒状态</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("保持唤醒")}</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("设备在投屏期间保持唤醒状态")}</p>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -2315,44 +2286,44 @@ function App() {
 
                 <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>视频比特率</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("视频比特率")}</span>
                     <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--video-bit-rate</p>
                   </div>
                   <SelectMenu id="cast-bitrate" value={scrcpySettings.bitrate} isDark={isDarkTheme(t)} className="w-40"
                     onChange={value => setScrcpySettings(prev => ({ ...prev, bitrate: value }))}
-                    options={['2 Mbps', '4 Mbps', '8 Mbps', '16 Mbps', '32 Mbps'].map(value => ({ value, label: value === '8 Mbps' ? '8 Mbps（推荐）' : value }))} />
+                    options={['2 Mbps', '4 Mbps', '8 Mbps', '16 Mbps', '32 Mbps'].map(value => ({ value, label: value === '8 Mbps' ? tr("8 Mbps（推荐）") : value }))} />
                 </div>
 
                 <div className={`flex items-center justify-between py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div>
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>最大分辨率</span>
-                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>--max-size，0 表示不限制</p>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("最大分辨率")}</span>
+                    <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("--max-size，0 表示不限制")}</p>
                   </div>
                   <SelectMenu id="cast-resolution" value={scrcpySettings.maxSize} isDark={isDarkTheme(t)} className="w-40"
                     onChange={value => setScrcpySettings(prev => ({ ...prev, maxSize: value }))}
-                    options={['0', '1920', '1280', '1024', '720'].map(value => ({ value, label: value === '0' ? '不限制' : value }))} />
+                    options={['0', '1920', '1280', '1024', '720'].map(value => ({ value, label: value === '0' ? tr("不限制") : value }))} />
                 </div>
               </div>
               </section>
 
               <section id="settings-paths" className={settingsSectionClass}>
                 <div className="mb-5">
-                  <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>保存路径</h3>
-                  <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>集中管理截图、录屏、巡检、性能、任务和质量产物目录。</p>
+                  <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("保存路径")}</h3>
+                  <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("集中管理截图、录屏、巡检、性能、任务和质量产物目录。")}</p>
                 </div>
                 <div className="space-y-4">
                 {/* 截图保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <Camera size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>截图保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("截图保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={screenshotPath}
                       onChange={(e) => setScreenshotPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/screenshot/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/screenshot/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2366,9 +2337,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2384,27 +2353,23 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    截图将保存到此目录，默认为 %APPDATA%/adb-workbench/screenshot/
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("截图将保存到此目录，默认为 %APPDATA%/adb-workbench/screenshot/")}</p>
                 </div>
 
                 {/* 录屏保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <Video size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>录屏保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("录屏保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={screenRecordPath}
                       onChange={(e) => setScreenRecordPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/screenrecord/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/screenrecord/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2418,9 +2383,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2436,27 +2399,23 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    录屏文件将保存到此目录，默认为 %APPDATA%/adb-workbench/screenrecord/
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("录屏文件将保存到此目录，默认为 %APPDATA%/adb-workbench/screenrecord/")}</p>
                 </div>
 
                 {/* 巡检保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <ClipboardCheck size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>巡检保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("巡检保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={inspectionPath}
                       onChange={(e) => setInspectionPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/inspection/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/inspection/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2470,9 +2429,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2488,27 +2445,23 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    巡检报告和证据包将保存到此目录，默认为 %APPDATA%/adb-workbench/inspection/
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("巡检报告和证据包将保存到此目录，默认为 %APPDATA%/adb-workbench/inspection/")}</p>
                 </div>
 
                 {/* 性能导出保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <Gauge size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>性能导出保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("性能导出保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={performancePath}
                       onChange={(e) => setPerformancePath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/performance-monitor/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/performance-monitor/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2522,9 +2475,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2541,27 +2492,23 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    性能数据和分析报告将保存到此目录，默认为 %APPDATA%/adb-workbench/performance-monitor/
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("性能数据和分析报告将保存到此目录，默认为 %APPDATA%/adb-workbench/performance-monitor/")}</p>
                 </div>
 
                 {/* 任务中心保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <ClipboardList size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>任务中心保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("任务中心保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={taskCenterPath}
                       onChange={(e) => setTaskCenterPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/task-center-artifacts/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/task-center-artifacts/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2575,9 +2522,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2594,27 +2539,23 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    每次任务执行完成后，会在此目录下生成“脚本名-执行完成时间”的独立文件夹。
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("每次任务执行完成后，会在此目录下生成“脚本名-执行完成时间”的独立文件夹。")}</p>
                 </div>
 
                 {/* 质量中心保存路径设置 */}
                 <div className={`py-3 border-b ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                   <div className="flex items-center gap-2 mb-2">
                     <ShieldCheck size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>质量中心保存路径</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("质量中心保存路径")}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={qualityCenterPath}
                       onChange={(e) => setQualityCenterPath(e.target.value)}
-                      placeholder="默认: %APPDATA%/adb-workbench/quality-center/"
+                      placeholder={tr("默认: %APPDATA%/adb-workbench/quality-center/")}
                       className={`flex-1 border text-sm rounded-lg p-2.5 ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                     <button
@@ -2628,9 +2569,7 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <FolderOpen size={16} />
-                      浏览
-                    </button>
+                      <FolderOpen size={16} />{tr("浏览")}</button>
                     <button
                       onClick={async () => {
                         if (window.electronAPI) {
@@ -2647,25 +2586,22 @@ function App() {
                       }}
                       className={`px-3 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${isDarkTheme(t) ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] border border-[#5F6368]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'}`}
                     >
-                      <Folder size={16} />
-                      打开
-                    </button>
+                      <Folder size={16} />{tr("打开")}</button>
                   </div>
-                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>
-                    回归基线、回归报告和设备守护报告将保存到此目录，默认为 %APPDATA%/adb-workbench/quality-center/
-                  </p>
+                  <p className={`text-xs mt-1.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("回归基线、回归报告和设备守护报告将保存到此目录，默认为 %APPDATA%/adb-workbench/quality-center/")}</p>
                 </div>
                 </div>
               </section>
 
               <section id="settings-appearance" className={settingsSectionClass}>
+                <LanguagePreferences theme={t} isDark={isDark} />
                 <StartupPreferences theme={t} isDark={isDark} />
                 {/* Theme Selection */}
                 <div className="py-3">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <Palette size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                      <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>界面主题</span>
+                      <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("界面主题")}</span>
                     </div>
                     <button
                       onClick={() => {
@@ -2691,9 +2627,7 @@ function App() {
                         setShowThemeEditor(true);
                       }}
                       className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} text-white`}
-                    >
-                      + 自定义主题
-                    </button>
+                    >{tr("+ 自定义主题")}</button>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                     {Object.entries(allThemes).filter(([key]) => !key.startsWith('custom_') || customThemes.some(t => t.key === key)).map(([key, themeOption]) => {
@@ -2725,14 +2659,14 @@ function App() {
                               <button
                                 onClick={(e) => { e.stopPropagation(); editCustomTheme(themeOption); }}
                                 className="w-5 h-5 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center"
-                                title="编辑"
+                                title={tr("编辑")}
                               >
                                 <span className="text-white text-xs">✎</span>
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); deleteCustomTheme(key); }}
                                 className="w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center"
-                                title="删除"
+                                title={tr("删除")}
                               >
                                 <span className="text-white text-xs">×</span>
                               </button>
@@ -2755,21 +2689,21 @@ function App() {
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">
                     <Package size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>关于与更新</span>
+                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("关于与更新")}</span>
                   </div>
 
                   <div className="space-y-3">
                     {/* 版本号显示 */}
                     <div className={`flex items-center justify-between px-3 py-2 rounded-lg ${isDarkTheme(t) ? 'bg-[#3E4145]/50' : 'bg-slate-50'}`}>
-                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>当前版本</span>
+                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("当前版本")}</span>
                       <span className={`text-sm font-mono font-semibold ${isDarkTheme(t) ? 'text-cyan-400' : 'text-cyan-600'}`}>v{appVersion || '2.0.0'}</span>
                     </div>
 
                     {/* 自动更新开关 */}
                     <div className={`flex items-center justify-between py-2 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'} border-b`}>
                       <div>
-                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>启动时自动检查更新</span>
-                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>应用启动 3 秒后自动检测新版本</p>
+                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("启动时自动检查更新")}</span>
+                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("应用启动 3 秒后自动检测新版本")}</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
@@ -2796,7 +2730,7 @@ function App() {
                       {updaterState.checking && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
                           <Loader2 size={14} className="animate-spin" />
-                          <span>正在检查更新…</span>
+                          <span>{tr("正在检查更新…")}</span>
                         </div>
                       )}
 
@@ -2804,7 +2738,7 @@ function App() {
                       {updaterState.notAvailable && !updaterState.checking && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-slate-500/10 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
                           <CheckCircle2 size={14} />
-                          <span>当前已是最新版本</span>
+                          <span>{tr("当前已是最新版本")}</span>
                         </div>
                       )}
 
@@ -2812,7 +2746,7 @@ function App() {
                       {updaterState.available && !updaterState.downloaded && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
                           <DownloadCloud size={14} />
-                          <span className="font-semibold">发现新版本 v{updaterState.info?.version || '未知'}</span>
+                          <span className="font-semibold">{tr("发现新版本 v")}{updaterState.info?.version || tr("未知")}</span>
                         </div>
                       )}
 
@@ -2821,9 +2755,7 @@ function App() {
                         <div className={`px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-700'}`}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1.5">
-                              <Loader2 size={12} className="animate-spin" />
-                              正在下载…
-                            </span>
+                              <Loader2 size={12} className="animate-spin" />{tr("正在下载…")}</span>
                             <span className="font-mono">{updaterState.progress.percent.toFixed(1)}%</span>
                           </div>
                           <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
@@ -2843,7 +2775,7 @@ function App() {
                       {updaterState.downloaded && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
                           <CheckCircle2 size={14} />
-                          <span className="flex-1">更新已下载完成，点击"立即安装"重启应用</span>
+                          <span className="flex-1">{tr("更新已下载完成，点击\"立即安装\"重启应用")}</span>
                         </div>
                       )}
 
@@ -2855,7 +2787,7 @@ function App() {
                             setUpdaterState(prev => ({ ...prev, error: null, checking: true, notAvailable: false, available: false }));
                             const res = await window.electronAPI?.checkForUpdates?.();
                             if (!res?.success) {
-                              setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || '检查失败' }));
+                              setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || tr("检查失败") }));
                             } else {
                               // 使用 IPC 返回的状态作为兜底（事件可能已先行更新 state）
                               setUpdaterState(prev => ({
@@ -2873,10 +2805,10 @@ function App() {
                               ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145] active:scale-95 shadow-sm'
                               : 'border-slate-300 text-slate-700 hover:bg-slate-100 active:scale-95 shadow-sm'
                           }`}
-                          title="手动检查是否有新版本"
+                          title={tr("手动检查是否有新版本")}
                         >
                           <RefreshCw size={14} className={updaterState.checking ? 'animate-spin' : ''} />
-                          <span>检查更新</span>
+                          <span>{tr("检查更新")}</span>
                         </button>
 
                         {/* 下载按钮（发现新版本且未下载时显示） */}
@@ -2890,7 +2822,7 @@ function App() {
                             }`}
                           >
                             <Download size={14} />
-                            <span>下载更新</span>
+                            <span>{tr("下载更新")}</span>
                           </button>
                         )}
 
@@ -2905,7 +2837,7 @@ function App() {
                             }`}
                           >
                             <DownloadCloud size={14} />
-                            <span>立即安装并重启</span>
+                            <span>{tr("立即安装并重启")}</span>
                           </button>
                         )}
                       </div>
@@ -2921,16 +2853,16 @@ function App() {
                     <div className="flex items-center gap-2">
                       <RotateCcw size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
                       <div>
-                        <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>重置所有设置</span>
-                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>清除所有自定义配置，恢复默认状态</p>
+                        <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("重置所有设置")}</span>
+                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("清除所有自定义配置，恢复默认状态")}</p>
                       </div>
                     </div>
                     <button
                       onClick={async () => {
                         showConfirm({
-                          title: '重置所有设置',
-                          message: '确定要重置所有设置吗？这将清除所有自定义主题和配置。',
-                          confirmLabel: '重置',
+                          title: tr("重置所有设置"),
+                          message: tr("确定要重置所有设置吗？这将清除所有自定义主题和配置。"),
+                          confirmLabel: tr("重置"),
                           rememberKey: 'settings.resetAll',
                           onConfirm: async () => {
                           setCustomThemes([]);
@@ -2963,15 +2895,13 @@ function App() {
                             await window.electronAPI.saveSettingsPatch?.({ taskCenterOnboarding: null });
                           }
                           clearConfirmSuppressionMemory();
-                          showToast('所有设置已重置为默认值');
+                          showToast(tr("所有设置已重置为默认值"));
                           }
                         });
                       }}
                       className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${isDarkTheme(t) ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30' : 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'}`}
                     >
-                      <RotateCcw size={16} />
-                      重置
-                    </button>
+                      <RotateCcw size={16} />{tr("重置")}</button>
                   </div>
                 </div>
               </section>
@@ -2982,7 +2912,7 @@ function App() {
                     <div className={`w-full max-w-xl my-4 mx-2 sm:mx-auto p-4 sm:p-6 rounded-xl border shadow-xl ${isDarkTheme(t) ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                       <div className="flex items-center justify-between mb-4">
                         <h4 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                          {editingTheme ? '编辑自定义主题' : '创建自定义主题'}
+                          {editingTheme ? tr("编辑自定义主题") : tr("创建自定义主题")}
                         </h4>
                         <button onClick={() => setShowThemeEditor(false)} className={`p-1 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:text-slate-600'}`}>
                           <X size={20} />
@@ -2991,18 +2921,18 @@ function App() {
 
                       <div className="space-y-4 overflow-y-auto">
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主题名称</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("主题名称")}</label>
                           <input
                             type="text"
                             value={newThemeName}
                             onChange={(e) => setNewThemeName(e.target.value)}
-                            placeholder="输入主题名称..."
+                            placeholder={tr("输入主题名称...")}
                             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none ${isDarkTheme(t) ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-400' : 'bg-white border-slate-200 text-slate-700'}`}
                           />
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-2 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>主色调</label>
+                          <label className={`block text-sm font-medium mb-2 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("主色调")}</label>
                           <div className="flex flex-wrap gap-2">
                             {[
                               { name: 'emerald', color: '#10b981' },
@@ -3027,7 +2957,7 @@ function App() {
                         </div>
 
                         <div className="flex items-center justify-between">
-                          <span className={`text-sm font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>按钮渐变</span>
+                          <span className={`text-sm font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("按钮渐变")}</span>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
                               type="checkbox"
@@ -3036,19 +2966,19 @@ function App() {
                               className="sr-only peer"
                             />
                             <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                            <span className={`ml-2 text-xs ${themeColors.useGradient ? 'text-emerald-500' : 'text-slate-400'}`}>{themeColors.useGradient ? '开启' : '关闭'}</span>
+                            <span className={`ml-2 text-xs ${themeColors.useGradient ? 'text-emerald-500' : 'text-slate-400'}`}>{themeColors.useGradient ? tr("已启用") : tr("已禁用")}</span>
                           </label>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变起点</label>
+                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>{tr("按钮渐变起点")}</label>
 <SelectMenu id="theme-primaryFrom" value={themeColors.primaryFrom} isDark={isDarkTheme(t)} className="w-full"
                               onChange={value => setThemeColors(prev => ({ ...prev, primaryFrom: value }))}
                               disabled={!themeColors.useGradient} options={gradientOptions('from', themeColors.primaryFrom)} />
                           </div>
                           <div>
-                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>按钮渐变终点</label>
+                            <label className={`block text-sm font-medium mb-1 ${themeColors.useGradient ? (isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700') : 'text-[#9AA0A6]'}`}>{tr("按钮渐变终点")}</label>
 <SelectMenu id="theme-primaryTo" value={themeColors.primaryTo} isDark={isDarkTheme(t)} className="w-full"
                               onChange={value => setThemeColors(prev => ({ ...prev, primaryTo: value }))}
                               disabled={!themeColors.useGradient} options={gradientOptions('to', themeColors.primaryTo)} />
@@ -3056,14 +2986,14 @@ function App() {
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>卡片背景</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("卡片背景")}</label>
 <SelectMenu id="theme-card" value={themeColors.card} isDark={isDarkTheme(t)} className="w-full"
                               onChange={value => setThemeColors(prev => ({ ...prev, card: value }))}
                               options={CARD_BACKGROUNDS} />
                         </div>
 
                         <div>
-                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>终端背景</label>
+                          <label className={`block text-sm font-medium mb-1 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("终端背景")}</label>
 <SelectMenu id="theme-terminalBg" value={themeColors.terminalBg} isDark={isDarkTheme(t)} className="w-full"
                               onChange={value => setThemeColors(prev => ({ ...prev, terminalBg: value }))}
                               options={TERMINAL_BACKGROUNDS} />
@@ -3074,14 +3004,12 @@ function App() {
                         <button
                           onClick={() => setShowThemeEditor(false)}
                           className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${isDarkTheme(t) ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                        >
-                          取消
-                        </button>
+                        >{tr("取消")}</button>
                         <button
                           onClick={saveCustomTheme}
                           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} text-white`}
                         >
-                          {editingTheme ? '保存修改' : '创建主题'}
+                          {editingTheme ? tr("保存修改") : tr("创建主题")}
                         </button>
                       </div>
                     </div>
@@ -3150,8 +3078,8 @@ function toSidebarTask(key, task) {
       deviceId: task.deviceId,
       icon: ClipboardCheck,
       status: task.status || 'running',
-      title: running ? '设备巡检运行中' : cancelled ? '设备巡检已取消' : failed ? '设备巡检失败' : '设备巡检完成',
-      message: (failed && task.result?.error) || task.progress?.stepLabel || task.progress?.message || task.deviceId || '等待巡检进度',
+      title: running ? tr("设备巡检运行中") : cancelled ? tr("设备巡检已取消") : failed ? tr("设备巡检失败") : tr("设备巡检完成"),
+      message: tr((failed && task.result?.error) || task.progress?.stepLabel || task.progress?.message) || task.deviceId || tr("等待巡检进度"),
       percent
     };
   }
@@ -3161,8 +3089,8 @@ function toSidebarTask(key, task) {
     deviceId: task.deviceId,
     icon: Gauge,
     status: task.status || 'running',
-    title: running ? '性能报告生成中' : failed ? '性能报告失败' : '性能报告完成',
-    message: (failed && task.result?.error) || task.progress?.message || task.deviceId || '等待报告进度',
+    title: running ? tr("性能报告生成中") : failed ? tr("性能报告失败") : tr("性能报告完成"),
+    message: tr((failed && task.result?.error) || task.progress?.message) || task.deviceId || tr("等待报告进度"),
     percent
   };
 }

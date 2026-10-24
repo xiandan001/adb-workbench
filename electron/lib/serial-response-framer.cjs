@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const AB_HEADER = 0xab;
 const XBH_HEADER = 0xfe;
 const XBH_SIGNATURE = [0x58, 0x42, 0x48, 0x43, 0x4d, 0x44];
@@ -40,7 +41,7 @@ function appendSegment(segments, kind, bytes, start, end, protocol) {
 // Stateless ordinary AB / XBHCMD framing. AB uses CRC; XBHCMD uses its fixed
 // signature and declared tail, not CRC. Unknown bytes retain their original order.
 function splitSerialResponses(bytes, { final = false } = {}) {
-  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) throw new TypeError('串口分帧输入必须是 Buffer 或 Uint8Array');
+  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) throw new TypeError(tr("串口分帧输入必须是 Buffer 或 Uint8Array"));
   const input = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const segments = [];
   let rawStart = 0;

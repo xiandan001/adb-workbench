@@ -1,7 +1,8 @@
+import { tr } from './i18n.js';
 import { createSerialTerminalWriter } from './serialTerminalTransport.js';
 
 function requireIdentity(sessionId, terminalId) {
-  if (!sessionId || !terminalId) throw new Error('SSH 会话或终端标识无效');
+  if (!sessionId || !terminalId) throw new Error(tr("SSH 会话或终端标识无效"));
 }
 
 function decodeHex(hex) {
@@ -28,13 +29,13 @@ export function createSshTerminalReader({ sessionId, terminalId, api, write, onE
     try {
       const result = await api.sshTerminalRead({ sessionId, terminalId, offset });
       if (!active || disposed || generation !== requestedGeneration) return;
-      if (!result?.success) throw new Error(result?.error || 'SSH 终端输出读取失败');
-      if (result.sessionId !== sessionId || result.terminalId !== terminalId) throw new Error('SSH 输出所属终端已变化');
+      if (!result?.success) throw new Error(result?.error || tr("SSH 终端输出读取失败"));
+      if (result.sessionId !== sessionId || result.terminalId !== terminalId) throw new Error(tr("SSH 输出所属终端已变化"));
       const { startOffset, endOffset, nextOffset, hex } = result;
       const start = Math.max(offset, startOffset);
       if (![startOffset, endOffset, nextOffset].every(value => Number.isSafeInteger(value) && value >= 0)
         || startOffset > endOffset || nextOffset < start || nextOffset > endOffset
-        || typeof hex !== 'string' || hex.length % 2 || !/^[0-9a-f]*$/i.test(hex) || hex.length > 128 * 1024 || hex.length / 2 !== nextOffset - start) throw new Error('SSH 输出游标或数据无效，已暂停读取');
+        || typeof hex !== 'string' || hex.length % 2 || !/^[0-9a-f]*$/i.test(hex) || hex.length > 128 * 1024 || hex.length / 2 !== nextOffset - start) throw new Error(tr("SSH 输出游标或数据无效，已暂停读取"));
       const bytes = decodeHex(hex); activity = bytes.length > 0;
       backlog = nextOffset < endOffset;
       if (replayEnd === null) replayEnd = endOffset;
@@ -61,7 +62,7 @@ export function createSshTerminalReader({ sessionId, terminalId, api, write, onE
       offset = nextOffset;
       if (generation === requestedGeneration && replaying && offset >= replayEnd) { replaying = false; onReplayChange(false); }
     } catch (failure) {
-      if (!disposed && generation === requestedGeneration) { active = false; onError(failure.message || 'SSH 终端输出读取失败'); }
+      if (!disposed && generation === requestedGeneration) { active = false; onError(failure.message || tr("SSH 终端输出读取失败")); }
     } finally {
       running = false;
       if (active && !disposed) {
@@ -85,5 +86,5 @@ export function createSshTerminalWriter({ sessionId, terminalId, api, onError = 
   requireIdentity(sessionId, terminalId);
   return createSerialTerminalWriter({ ...options, sessionId, delayMs,
     write: args => api.sshTerminalWrite({ ...args, terminalId }),
-    onError: message => onError(message.replaceAll('串口', 'SSH')) });
+    onError });
 }

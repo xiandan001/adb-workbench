@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
@@ -20,11 +21,11 @@ const safeText = value => typeof value === 'string' && Buffer.from(value, 'utf8'
   && !Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 
 function normalizeIdentity(value) {
-  if (!value || typeof value !== 'object' || !safeText(value.host) || !value.host.trim() || value.host.length > 253) throw failure('SSH_HISTORY_IDENTITY_INVALID', 'SSH 历史主机身份无效');
+  if (!value || typeof value !== 'object' || !safeText(value.host) || !value.host.trim() || value.host.length > 253) throw failure('SSH_HISTORY_IDENTITY_INVALID', tr("SSH 历史主机身份无效"));
   const host = value.host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
-  if (!host || /[\s/\\@?#]/.test(host) || host.includes('[') || host.includes(']')) throw failure('SSH_HISTORY_IDENTITY_INVALID', 'SSH 历史主机地址无效');
-  if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw failure('SSH_HISTORY_IDENTITY_INVALID', 'SSH 历史端口无效');
-  if (!safeText(value.username) || !value.username.trim() || value.username.length > 128) throw failure('SSH_HISTORY_IDENTITY_INVALID', 'SSH 历史用户名无效');
+  if (!host || /[\s/\\@?#]/.test(host) || host.includes('[') || host.includes(']')) throw failure('SSH_HISTORY_IDENTITY_INVALID', tr("SSH 历史主机地址无效"));
+  if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw failure('SSH_HISTORY_IDENTITY_INVALID', tr("SSH 历史端口无效"));
+  if (!safeText(value.username) || !value.username.trim() || value.username.length > 128) throw failure('SSH_HISTORY_IDENTITY_INVALID', tr("SSH 历史用户名无效"));
   return { host, port: value.port, username: value.username.trim() };
 }
 const identityKey = identity => JSON.stringify([identity.host, identity.port, identity.username]);
@@ -71,11 +72,11 @@ function validatePayload(value) {
 }
 
 function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt, decrypt, now = Date.now } = {}) {
-  if (typeof directory !== 'string' || !path.isAbsolute(directory) || directory.includes('\0')) throw failure('SSH_HISTORY_DIRECTORY_INVALID', 'SSH 历史保存目录无效');
+  if (typeof directory !== 'string' || !path.isAbsolute(directory) || directory.includes('\0')) throw failure('SSH_HISTORY_DIRECTORY_INVALID', tr("SSH 历史保存目录无效"));
   const file = path.join(path.resolve(directory), FILE_NAME);
   let data; let persistent; let observedChecksum = null; let defaultPaused = false; let warning = '';
   const available = () => { try { return Boolean(canEncrypt()) && typeof encrypt === 'function' && typeof decrypt === 'function'; } catch { return false; } };
-  const state = () => ({ persistent, warning });
+  const state = () => ({ persistent, warning: tr(warning) });
   function downgrade(message = MEMORY_WARNING) { persistent = false; warning = message; }
 
   function readDisk() {
@@ -110,19 +111,19 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
       const plain = decrypt(cipher);
       if (typeof plain !== 'string' || Buffer.byteLength(plain, 'utf8') > MAX_PLAINTEXT_BYTES) throw new Error('plaintext limit');
       data = validatePayload(JSON.parse(plain)); return data;
-    } catch { throw failure('SSH_HISTORY_READ_FAILED', 'SSH 命令历史无法读取，已保留原文件，请备份后检查 ssh-command-history.v1.json'); }
+    } catch { throw failure('SSH_HISTORY_READ_FAILED', tr("SSH 命令历史无法读取，已保留原文件，请备份后检查 ssh-command-history.v1.json")); }
   }
 
   function checkUnchanged() {
     try {
       const raw = readDisk(); const actual = raw ? checksum(raw) : null;
       if (actual !== observedChecksum) throw new Error('changed');
-    } catch { throw failure('SSH_HISTORY_CHANGED', 'SSH 命令历史文件已变化，已保留原文件；请重新打开软件后再操作'); }
+    } catch { throw failure('SSH_HISTORY_CHANGED', tr("SSH 命令历史文件已变化，已保留原文件；请重新打开软件后再操作")); }
   }
 
   function persist(next) {
     const plain = JSON.stringify(next);
-    if (Buffer.byteLength(plain, 'utf8') > MAX_PLAINTEXT_BYTES) throw failure('SSH_HISTORY_LIMIT', 'SSH 命令历史超过 2 MiB 容量限制');
+    if (Buffer.byteLength(plain, 'utf8') > MAX_PLAINTEXT_BYTES) throw failure('SSH_HISTORY_LIMIT', tr("SSH 命令历史超过 2 MiB 容量限制"));
     if (!persistent) { data = next; return; }
     let encrypted;
     try {
@@ -140,7 +141,7 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
       observedChecksum = checksum(content); data = next;
     } catch (error) {
       if (error.code === 'SSH_HISTORY_CHANGED') throw error;
-      throw failure('SSH_HISTORY_SAVE_FAILED', 'SSH 命令历史保存失败，原有历史未被替换；请检查磁盘空间和权限');
+      throw failure('SSH_HISTORY_SAVE_FAILED', tr("SSH 命令历史保存失败，原有历史未被替换；请检查磁盘空间和权限"));
     } finally {
       if (handle !== undefined) { try { fs.closeSync(handle); } catch { /* Preserve the original save error. */ } }
       if (created) { try { fs.unlinkSync(temporary); } catch { /* Only an owned encrypted temporary may remain; never remove another path. */ } }
@@ -151,7 +152,7 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
   const findHost = (current, id) => current.hosts.find(host => identityKey(host.identity) === identityKey(id));
   function timestamp(current) {
     const value = now();
-    if (!Number.isSafeInteger(value) || value < 0) throw failure('SSH_HISTORY_TIME_INVALID', 'SSH 历史记录时间无效');
+    if (!Number.isSafeInteger(value) || value < 0) throw failure('SSH_HISTORY_TIME_INVALID', tr("SSH 历史记录时间无效"));
     return Math.max(value, ...current.hosts.map(host => host.updatedAt));
   }
   function ensureHost(next, id, time) {
@@ -174,7 +175,7 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
         const entry = host.entries.at(-1);
         if (entry && (!oldest || entry.lastUsed <= oldest.entries.at(-1).lastUsed)) oldest = host;
       }
-      if (!oldest) throw failure('SSH_HISTORY_LIMIT', 'SSH 命令历史超过 2 MiB 容量限制');
+      if (!oldest) throw failure('SSH_HISTORY_LIMIT', tr("SSH 命令历史超过 2 MiB 容量限制"));
       oldest.entries.pop();
     }
   }
@@ -197,7 +198,7 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
   }
   function remove(identity, entryId) {
     const id = normalizeIdentity(identity);
-    if (typeof entryId !== 'string' || !UUID.test(entryId)) throw failure('SSH_HISTORY_ENTRY_INVALID', 'SSH 历史记录标识无效');
+    if (typeof entryId !== 'string' || !UUID.test(entryId)) throw failure('SSH_HISTORY_ENTRY_INVALID', tr("SSH 历史记录标识无效"));
     const current = load(); const host = findHost(current, id);
     if (!host?.entries.some(entry => entry.id === entryId)) return list(id);
     const next = copy(current); const changed = findHost(next, id); changed.entries = changed.entries.filter(entry => entry.id !== entryId);
@@ -210,11 +211,11 @@ function createSshCommandHistory({ directory, canEncrypt = () => false, encrypt,
   }
   function setPaused(identity, paused) {
     const id = normalizeIdentity(identity);
-    if (typeof paused !== 'boolean') throw failure('SSH_HISTORY_PAUSE_INVALID', 'SSH 历史暂停参数无效');
+    if (typeof paused !== 'boolean') throw failure('SSH_HISTORY_PAUSE_INVALID', tr("SSH 历史暂停参数无效"));
     const current = load(); const existing = findHost(current, id);
     if ((existing?.paused ?? defaultPaused) === paused) return list(id);
     const time = timestamp(current); const next = copy(current); const host = ensureHost(next, id, time);
-    if (!host) throw failure('SSH_HISTORY_HOST_LIMIT', '已达到 64 个主机的历史上限，请先恢复一个不再需要暂停的主机');
+    if (!host) throw failure('SSH_HISTORY_HOST_LIMIT', tr("已达到 64 个主机的历史上限，请先恢复一个不再需要暂停的主机"));
     host.paused = paused; touch(next, host, time); trim(next); persist(next); return list(id);
   }
   return { list, record, remove, clear, setPaused };

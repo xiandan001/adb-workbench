@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // electron/lib/vip.cjs
 // VIP 授权运行时：Ed25519 验签 + 机器码绑定 + fail-closed
 // 性能优化：全部异步化，机器码采集不阻塞 main 进程
@@ -65,7 +66,7 @@ function appendActivationRecord(payload, machineId, token) {
     expiresAt: payload.e || null,
     tokenHash,
     note: duplicate?.note || '',
-    reSignNote: '如更换设备或机器码变化，请复制当前机器码与本记录截图联系开发者重签。'
+    reSignNote: tr("如更换设备或机器码变化，请复制当前机器码与本记录截图联系开发者重签。")
   };
   if (duplicate) {
     data.records = data.records.map(item => item.id === duplicate.id ? { ...duplicate, ...record } : item);

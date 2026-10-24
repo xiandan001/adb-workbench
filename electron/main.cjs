@@ -1,7 +1,7 @@
 // 瘦入口：app 生命周期 + createWindow + 注册所有领域模块
 // 各领域逻辑已拆分到 electron/lib/ 下的模块中
 
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -15,6 +15,9 @@ const updater = require('./lib/updater.cjs');
 const adb = require('./lib/adb.cjs');
 const window = require('./lib/window.cjs');
 const settings = require('./lib/settings.cjs');
+const localization = require('./lib/localization.cjs');
+const { tr } = localization;
+const { installApplicationMenu } = require('./lib/application-menu.cjs');
 const history = require('./lib/history.cjs');
 const logAnalyzer = require('./lib/log-analyzer.cjs');
 const mcp = require('./lib/mcp-server.cjs');
@@ -111,6 +114,7 @@ function createWindow() {
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
+      additionalArguments: localization.windowArguments(),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: !presentStartup,
@@ -155,13 +159,16 @@ app.whenReady().then(async () => {
   if (dataMigration.hasPendingImport()) {
     try { await dataMigration.prepareStartup(); }
     catch (error) {
-      dialog.showErrorBox('数据迁移未完成', `为保护现有数据，应用暂未启动。请保留数据目录中的恢复备份后重试。\n${error.message}`);
+      await localization.initialize();
+      dialog.showErrorBox(tr('数据迁移未完成'), tr('为保护现有数据，应用暂未启动。请保留数据目录中的恢复备份后重试。\n{0}', { 0: error.message }));
       app.exit(1);
       return;
     }
   }
 
   // 检测版本升级：必须在 createWindow() 之前执行。
+  await localization.initialize();
+  installApplicationMenu({ Menu, getMainWindow: ctx.getMainWindow, getLogAnalyzerWindow: ctx.getLogAnalyzerWindow });
   // 因为 createWindow() 会立即加载页面，渲染进程会马上调用 app:checkChangelog
   // 查询 pendingChangelog；如果此时还没设置标志位，弹窗就会丢失。
   version.cleanupPendingUpdater();
@@ -170,13 +177,14 @@ app.whenReady().then(async () => {
   // 注册所有领域模块的 IPC handlers
   // 顺序无依赖（每个模块独立注册自己的 ipcMain.handle/on）
   feedback.register(ipcMain);
-  const diagnosticIpc = feedback.observedIpc(ipcMain);
+  const diagnosticIpc = localization.scopeIpc(feedback.observedIpc(ipcMain));
   feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
   version.register(diagnosticIpc);
   updater.register(diagnosticIpc);
   adb.register(diagnosticIpc);
   window.register(diagnosticIpc);
   settings.register(diagnosticIpc);
+  localization.register(diagnosticIpc);
   startupSettings.register(diagnosticIpc);
   history.register(diagnosticIpc);
   logAnalyzer.register(diagnosticIpc);
@@ -287,8 +295,8 @@ app.on('before-quit', async (event) => {
     if (!proceed) { quitCleanupRunning = false; return; }
   } catch (error) {
     quitCleanupRunning = false;
-    await appMessageDialog.ask({ type: 'error', title: '未能完成退出前保存', message: '应用尚未退出，请返回相关页面重试。', detail: error.message,
-      buttons: ['返回应用'], defaultId: 0, cancelId: 0 });
+    await appMessageDialog.ask({ type: 'error', title: tr('未能完成退出前保存'), message: tr('应用尚未退出，请返回相关页面重试。'), detail: error.message,
+      buttons: [tr('返回应用')], defaultId: 0, cancelId: 0 });
     return;
   }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();

@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -42,7 +43,7 @@ function writeRunManifest(record) {
   const outputDir = record.artifactDir || (record.artifactBaseDir
     ? path.join(record.artifactBaseDir, `run-${String(record.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`)
     : '');
-  if (!outputDir) throw new Error('任务缺少证据目录');
+  if (!outputDir) throw new Error(tr("任务缺少证据目录"));
   fs.mkdirSync(outputDir, { recursive: true });
   const runResultPath = path.join(outputDir, 'run-result.json');
   const manifest = {

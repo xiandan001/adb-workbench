@@ -1,16 +1,17 @@
+const { tr } = require('./localization.cjs');
 const { randomUUID } = require('node:crypto');
 
 const CHANNEL = 'app-message-dialog:event';
 const cancelled = options => ({ response: options.cancelId, checkboxChecked: options.checkboxChecked });
 function normalizeOptions(input = {}) {
-  const buttons = input.buttons || ['确定'];
+  const buttons = input.buttons || [tr("确定")];
   const validText = (value, max) => typeof value === 'string' && value.length <= max && !value.includes('\0');
-  if (!Array.isArray(buttons) || !buttons.length || buttons.length > 6 || buttons.some(label => !validText(label, 160))) throw new Error('确认对话框按钮无效');
+  if (!Array.isArray(buttons) || !buttons.length || buttons.length > 6 || buttons.some(label => !validText(label, 160))) throw new Error(tr("确认对话框按钮无效"));
   const cancelId = input.cancelId ?? 0; const defaultId = input.defaultId ?? cancelId;
-  if (![cancelId, defaultId].every(index => Number.isInteger(index) && index >= 0 && index < buttons.length)) throw new Error('确认对话框默认操作无效');
-  const options = { title: input.title || '请确认', message: input.message || '', detail: input.detail || '', buttons: [...buttons], cancelId, defaultId,
+  if (![cancelId, defaultId].every(index => Number.isInteger(index) && index >= 0 && index < buttons.length)) throw new Error(tr("确认对话框默认操作无效"));
+  const options = { title: input.title || tr("请确认"), message: input.message || '', detail: input.detail || '', buttons: [...buttons], cancelId, defaultId,
     type: ['info', 'error', 'warning', 'question'].includes(input.type) ? input.type : 'question', checkboxLabel: input.checkboxLabel || '', checkboxChecked: input.checkboxChecked === true };
-  for (const [key, max] of Object.entries({ title: 240, message: 8000, detail: 64000, checkboxLabel: 400 })) if (!validText(options[key], max)) throw new Error('确认对话框内容无效');
+  for (const [key, max] of Object.entries({ title: 240, message: 8000, detail: 64000, checkboxLabel: 400 })) if (!validText(options[key], max)) throw new Error(tr("确认对话框内容无效"));
   if (!options.checkboxLabel) options.checkboxChecked = false;
   return options;
 }

@@ -55,6 +55,7 @@ function harness(t, restartError = '') {
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../electron/lib/data-migration.cjs'), 'utf8'), {
     module, console, setTimeout: callback => { timers.push(callback); },
     require: name => {
+      if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (name === 'electron') return { app: { getPath: value => value === 'userData' ? data : root, getVersion: () => '4.3.2' }, dialog, BrowserWindow: { fromWebContents: () => ({}) } };
       if (name === './app-context.cjs') return { getMainWindow: () => ({ webContents: sender }) };
       if (name === './data-migration-core.cjs') return core;

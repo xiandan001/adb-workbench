@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { createSerialTerminalBuffer } = require('./serial-terminal-buffer.cjs');
 const { createSshShellIntegration } = require('./ssh-shell-integration.cjs');
 
@@ -58,7 +59,7 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
   function failQueue(failure) {
     for (const item of queue.splice(0)) finishItem(item, failure);
     if (current) finishItem(current, current.started
-      ? sshError('SSH_WRITE_UNKNOWN', 'SSH 终端写入中断，发送结果无法确认；未写入输入不会重播') : failure);
+      ? sshError('SSH_WRITE_UNKNOWN', tr("SSH 终端写入中断，发送结果无法确认；未写入输入不会重播")) : failure);
     current = null;
   }
 
@@ -76,9 +77,9 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
     if (status === 'closed' || status === 'error') return;
     status = failure ? 'error' : 'closed';
     error = failure?.message || '';
-    settleIntegration(sshError('SSH_TERMINAL_CLOSED', 'SSH 终端已关闭，命令识别已取消'));
+    settleIntegration(sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端已关闭，命令识别已取消")));
     integration.close();
-    failQueue(sshError('SSH_TERMINAL_CLOSED', 'SSH 终端已关闭，未写入输入已取消'));
+    failQueue(sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端已关闭，未写入输入已取消")));
     detach();
     closeChannel(channel);
     onChange();
@@ -86,7 +87,7 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
 
   function failOpen() {
     status = 'error';
-    error = '无法打开 SSH 终端；仍可使用文件功能';
+    error = tr("无法打开 SSH 终端；仍可使用文件功能");
     onChange();
   }
 
@@ -99,7 +100,7 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
       const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
       integration.feed(bytes); rxBytes += bytes.length; onChange();
     };
-    const failed = () => close(sshError('SSH_TERMINAL_FAILED', 'SSH 终端通道已中断'));
+    const failed = () => close(sshError('SSH_TERMINAL_FAILED', tr("SSH 终端通道已中断")));
     const closed = () => close();
     const exited = (code, signal) => {
       exitCode = Number.isInteger(code) ? code : null;
@@ -121,7 +122,7 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
       const result = output.read({ sessionId, offset });
       return { ...result, terminalId, shellIntegration: shellState(), shellMarkers: shellMarkers.filter(marker => marker.offset >= Math.max(offset, result.startOffset) && marker.offset <= result.nextOffset) };
     }
-    catch { throw sshError('SSH_TERMINAL_OFFSET_INVALID', 'SSH 终端读取位置无效，请重新同步'); }
+    catch { throw sshError('SSH_TERMINAL_OFFSET_INVALID', tr("SSH 终端读取位置无效，请重新同步")); }
   }
 
   function pump() {
@@ -136,28 +137,28 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
       current = null; onChange(); queueMicrotask(pump);
     };
     channel.on('drain', item.onDrain);
-    item.timer = setTimeout(() => close(sshError('SSH_WRITE_UNKNOWN', 'SSH 终端写入超时，发送结果无法确认；未写入输入不会重播')), writeTimeoutMs);
+    item.timer = setTimeout(() => close(sshError('SSH_WRITE_UNKNOWN', tr("SSH 终端写入超时，发送结果无法确认；未写入输入不会重播"))), writeTimeoutMs);
     try {
       item.started = true;
       item.needsDrain = channel.write(item.bytes, failure => {
         if (item.settled) return;
-        if (failure) { close(sshError('SSH_WRITE_UNKNOWN', 'SSH 终端写入失败，发送结果无法确认；未写入输入不会重播')); return; }
+        if (failure) { close(sshError('SSH_WRITE_UNKNOWN', tr("SSH 终端写入失败，发送结果无法确认；未写入输入不会重播"))); return; }
         item.callbackDone = true; complete();
       }) === false;
       item.returned = true; complete();
-    } catch { close(sshError('SSH_WRITE_UNKNOWN', 'SSH 终端写入失败，发送结果无法确认；未写入输入不会重播')); }
+    } catch { close(sshError('SSH_WRITE_UNKNOWN', tr("SSH 终端写入失败，发送结果无法确认；未写入输入不会重播"))); }
   }
 
   function write({ content }, bootstrap = false) {
     try {
       assertCurrent();
-      if (status !== 'ready') throw sshError('SSH_TERMINAL_NOT_READY', 'SSH 终端尚未就绪或已经关闭');
-      if (integrationPending && !bootstrap) throw sshError('SSH_SHELL_INTEGRATION_BUSY', '正在启用 Bash 命令识别，请稍候再输入');
+      if (status !== 'ready') throw sshError('SSH_TERMINAL_NOT_READY', tr("SSH 终端尚未就绪或已经关闭"));
+      if (integrationPending && !bootstrap) throw sshError('SSH_SHELL_INTEGRATION_BUSY', tr("正在启用 Bash 命令识别，请稍候再输入"));
       if (typeof content !== 'string' || !content.length || content.length > MAX_INPUT_BYTES || Buffer.byteLength(content) > MAX_INPUT_BYTES) {
-        throw sshError('SSH_TERMINAL_INPUT_INVALID', 'SSH 终端输入应为非空文本，单次不超过 64 KiB');
+        throw sshError('SSH_TERMINAL_INPUT_INVALID', tr("SSH 终端输入应为非空文本，单次不超过 64 KiB"));
       }
       const bytes = Buffer.from(content, 'utf8');
-      if (queuedItems >= MAX_QUEUE_ITEMS || queuedBytes + bytes.length > MAX_INPUT_BYTES) throw sshError('SSH_TERMINAL_BACKPRESSURE', 'SSH 终端发送队列已满，请稍候；本次输入尚未接受');
+      if (queuedItems >= MAX_QUEUE_ITEMS || queuedBytes + bytes.length > MAX_INPUT_BYTES) throw sshError('SSH_TERMINAL_BACKPRESSURE', tr("SSH 终端发送队列已满，请稍候；本次输入尚未接受"));
       const item = { bytes, settled: false, started: false, returned: false, callbackDone: false, drained: false };
       const promise = new Promise((resolve, reject) => { item.resolve = resolve; item.reject = reject; });
       queue.push(item); queuedBytes += bytes.length; queuedItems++; onChange(); pump();
@@ -168,34 +169,34 @@ function createSshTerminal({ sessionId, terminalId, title, cols, rows, assertCur
   async function resize(size) {
     assertCurrent();
     const next = terminalSize(size);
-    if (status !== 'ready') throw sshError('SSH_TERMINAL_NOT_READY', 'SSH 终端尚未就绪或已经关闭');
+    if (status !== 'ready') throw sshError('SSH_TERMINAL_NOT_READY', tr("SSH 终端尚未就绪或已经关闭"));
     try { channel.setWindow(next.rows, next.cols, 0, 0); }
-    catch { throw sshError('SSH_TERMINAL_RESIZE_FAILED', 'SSH 终端尺寸调整失败'); }
+    catch { throw sshError('SSH_TERMINAL_RESIZE_FAILED', tr("SSH 终端尺寸调整失败")); }
     cols = next.cols; rows = next.rows; onChange();
     return { cols, rows };
   }
 
   function startShellIntegration(nonce, timeoutMs = 15000, { allowOpening = false } = {}) {
     assertCurrent();
-    if (status !== 'ready' && !(allowOpening && status === 'opening') || queuedItems) throw sshError('SSH_SHELL_INTEGRATION_BUSY', '请等待终端输入发送完成，并确认处于空 Bash 提示符');
-    if (integrationAttempted) throw sshError('SSH_SHELL_INTEGRATION_EXISTS', '此终端已经尝试启用命令识别；如未成功，请新建终端后重试');
+    if (status !== 'ready' && !(allowOpening && status === 'opening') || queuedItems) throw sshError('SSH_SHELL_INTEGRATION_BUSY', tr("请等待终端输入发送完成，并确认处于空 Bash 提示符"));
+    if (integrationAttempted) throw sshError('SSH_SHELL_INTEGRATION_EXISTS', tr("此终端已经尝试启用命令识别；如未成功，请新建终端后重试"));
     integrationAttempted = true; integrationPending = true;
     const promise = new Promise((resolve, reject) => { integrationWait = { resolve, reject }; });
     promise.catch(() => {});
     integration.start(nonce);
     integrationTimer = setTimeout(() => integration.fail(allowOpening
-      ? '自动命令识别未能就绪，未重复启动终端；请检查 Shell 状态或新建终端重试' : undefined), timeoutMs);
+      ? tr("自动命令识别未能就绪，未重复启动终端；请检查 Shell 状态或新建终端重试") : undefined), timeoutMs);
     return promise;
   }
-  function failShellIntegration(message = '命令识别启用失败，原终端仍可使用；请确认 Bash 提示符后在新终端重试') { integration.fail(message); }
-  function disableShellIntegration() { settleIntegration(sshError('SSH_SHELL_INTEGRATION_CANCELLED', '命令识别已停用')); integration.disable(); return shellState(); }
+  function failShellIntegration(message = tr("命令识别启用失败，原终端仍可使用；请确认 Bash 提示符后在新终端重试")) { integration.fail(message); }
+  function disableShellIntegration() { settleIntegration(sshError('SSH_SHELL_INTEGRATION_CANCELLED', tr("命令识别已停用"))); integration.disable(); return shellState(); }
 
   return { snapshot, attach, read, write, resize, close, failOpen, startShellIntegration, failShellIntegration, disableShellIntegration,
     writeBootstrap: content => write({ content }, true) };
 }
 
 function terminalSize({ cols = 80, rows = 24 } = {}) {
-  if (!Number.isInteger(cols) || cols < 2 || cols > 1000 || !Number.isInteger(rows) || rows < 1 || rows > 500) throw sshError('SSH_TERMINAL_SIZE_INVALID', 'SSH 终端尺寸无效（列 2–1000，行 1–500）');
+  if (!Number.isInteger(cols) || cols < 2 || cols > 1000 || !Number.isInteger(rows) || rows < 1 || rows > 500) throw sshError('SSH_TERMINAL_SIZE_INVALID', tr("SSH 终端尺寸无效（列 2–1000，行 1–500）"));
   return { cols, rows };
 }
 

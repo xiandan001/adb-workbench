@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -7,7 +8,7 @@ const PREFIX = '\x1b]7777;AWB;';
 let script;
 
 function buildBashIntegrationScript(nonce) {
-  if (typeof nonce !== 'string' || !/^[a-f0-9]{64}$/.test(nonce)) throw new Error('SSH 命令识别标识无效');
+  if (typeof nonce !== 'string' || !/^[a-f0-9]{64}$/.test(nonce)) throw new Error(tr("SSH 命令识别标识无效"));
   script ??= fs.readFileSync(path.join(__dirname, '../assets/ssh-bash-integration.sh'), 'utf8');
   return script.replaceAll('@AWB_NONCE@', nonce);
 }
@@ -47,7 +48,7 @@ function createSshShellIntegration({ onData, onMarker = () => {}, onCommand = ()
     if (fields[0] !== nonce || fields.length > 3) return;
     const type = fields[1];
     if (type === 'X' && status === 'enabling') {
-      status = 'unsupported'; phase = 'unknown'; error = '命令识别需要 Bash 4.4+、已启用 Readline 和默认 Enter / Ctrl+J 提交绑定；自定义绑定或其他同类钩子保持不变'; changed(); return;
+      status = 'unsupported'; phase = 'unknown'; error = tr("命令识别需要 Bash 4.4+、已启用 Readline 和默认 Enter / Ctrl+J 提交绑定；自定义绑定或其他同类钩子保持不变"); changed(); return;
     }
     if (type === 'R' && status === 'enabling') { installed = true; status = 'ready'; phase = 'unknown'; changed(); return; }
     if (!installed || status !== 'ready') return;
@@ -115,11 +116,11 @@ function createSshShellIntegration({ onData, onMarker = () => {}, onCommand = ()
     flush();
   }
   function start(token) {
-    if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('SSH 命令识别标识无效');
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new Error(tr("SSH 命令识别标识无效"));
     nonce = token; enabled = true; installed = false; status = 'enabling'; phase = 'unknown';
     error = ''; commandAllowed = false; promptStarted = false; serializedPrompts = false; lastPromptSerial = 0; pendingPromptSerial = null; changed();
   }
-  function fail(message = '命令识别未收到 Bash 确认，请确认在空提示符后重新打开终端再试') {
+  function fail(message = tr("命令识别未收到 Bash 确认，请确认在空提示符后重新打开终端再试")) {
     enabled = false; status = 'error'; phase = 'unknown'; commandAllowed = false; error = message; changed();
   }
   function disable() { enabled = false; status = 'disabled'; phase = 'unknown'; commandAllowed = false; error = ''; changed(); }

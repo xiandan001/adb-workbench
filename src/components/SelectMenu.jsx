@@ -1,8 +1,10 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 
-export default function SelectMenu({ id, value, options, onChange, isDark, placeholder = '请选择', emptyText = '暂无可选项', compact = false, accent = 'emerald', disabled = false, className = '' }) {
+export default function SelectMenu({ id, ariaLabel, value, options, onChange, isDark, placeholder = tr("请选择"), emptyText = tr("暂无可选项"), compact = false, accent = 'emerald', disabled = false, className = '' }) {
+  useLocale();
   const listId = useId();
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
@@ -129,7 +131,7 @@ export default function SelectMenu({ id, value, options, onChange, isDark, place
     <div className={`min-w-0 ${className}`}>
       <button
         ref={triggerRef} id={id} type="button" value={String(value ?? '')} role="combobox"
-        aria-haspopup="listbox" aria-expanded={expanded} aria-controls={expanded ? listId : undefined}
+        aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={expanded} aria-controls={expanded ? listId : undefined}
         aria-activedescendant={expanded && currentIndex >= 0 ? `${listId}-${currentIndex}` : undefined}
         disabled={disabled} onKeyDown={onKeyDown} onClick={() => expanded ? setOpen(false) : openMenu()}
         onBlur={event => { if (!menuRef.current?.contains(event.relatedTarget)) setOpen(false); }}

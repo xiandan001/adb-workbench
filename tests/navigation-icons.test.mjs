@@ -13,6 +13,7 @@ const expected = new Map([['AI 工具管理', 'SlidersHorizontal'], ['AI 日志�
 
 function textOf(node) {
   if (node.type === 'JSXText') return node.value;
+  if (node.type === 'JSXExpressionContainer' && node.expression?.type === 'CallExpression' && node.expression.callee?.name === 'tr') return node.expression.arguments[0]?.value || '';
   return (node.children || []).map(textOf).join('');
 }
 

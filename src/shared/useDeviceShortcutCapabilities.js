@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 import { useEffect, useRef, useState } from 'react';
 import { CAPABILITY_REFRESH_MS, createCapabilityLoader } from './deviceShortcutCapabilities';
 
@@ -34,5 +35,5 @@ export default function useDeviceShortcutCapabilities(deviceId, isOnline, config
   if (!isOnline || result?.key !== key) return [];
   if (result.success) return result.checks;
   return (config?.slots || []).map(slot => ({ id: slot.id, status: slot.type === 'shell' ? 'confirm' : 'unknown',
-    reason: slot.type === 'shell' ? '自定义 ADB 命令无法预检，每次执行前均需确认' : result.error || '暂时无法检查设备，操作前仍会校验' }));
+    reason: slot.type === 'shell' ? tr("自定义 ADB 命令无法预检，每次执行前均需确认") : result.error || tr("暂时无法检查设备，操作前仍会校验") }));
 }

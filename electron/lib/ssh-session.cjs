@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { createSshTerminal, terminalSize, closeChannel, sshError } = require('./ssh-session-terminal.cjs');
 const { buildBashIntegrationScript } = require('./ssh-shell-integration.cjs');
@@ -10,7 +11,7 @@ const MAX_TERMINALS = 16;
 
 function createSshSessionService({ createClient, resolveProfile, verifyHostKey, onChange = () => {}, onShellCommand = () => {}, shouldRememberCommands = () => false,
   connectTimeoutMs = 20000, hostVerifyTimeoutMs = 90000, channelTimeoutMs = 15000, closeTimeoutMs = 3000, writeTimeoutMs = 10000, shellIntegrationTimeoutMs = 15000, shellCleanupTimeoutMs = 2000, shellProbeTimeoutMs = 3000 }) {
-  if (![createClient, resolveProfile, verifyHostKey].every(value => typeof value === 'function')) throw new Error('SSH 服务配置不完整');
+  if (![createClient, resolveProfile, verifyHostKey].every(value => typeof value === 'function')) throw new Error(tr("SSH 服务配置不完整"));
   const sessions = new Map();
   let revision = 0;
   let disposed = false;
@@ -18,15 +19,15 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   function notify() { revision++; try { onChange(); } catch {} }
   function find(id) {
     const session = sessions.get(id);
-    if (!session) throw sshError('SSH_SESSION_NOT_FOUND', 'SSH 会话不存在或已移除');
+    if (!session) throw sshError('SSH_SESSION_NOT_FOUND', tr("SSH 会话不存在或已移除"));
     return session;
   }
   function assertCurrent(session) {
-    if (disposed || sessions.get(session.id) !== session || session.closed || session.status === 'disconnecting' || session.controller.signal.aborted) throw sshError('SSH_SESSION_CLOSED', 'SSH 会话已断开，旧操作不会重播');
+    if (disposed || sessions.get(session.id) !== session || session.closed || session.status === 'disconnecting' || session.controller.signal.aborted) throw sshError('SSH_SESSION_CLOSED', tr("SSH 会话已断开，旧操作不会重播"));
   }
   function assertConnected(session) {
     assertCurrent(session);
-    if (session.status !== 'connected') throw sshError('SSH_SESSION_NOT_READY', 'SSH 会话尚未连接');
+    if (session.status !== 'connected') throw sshError('SSH_SESSION_NOT_READY', tr("SSH 会话尚未连接"));
   }
   function snapshot() {
     return { revision, sessions: [...sessions.values()].map(session => ({ id: session.id, name: session.name, profileId: session.profileId,
@@ -36,7 +37,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   }
 
   function stopSessionOperations(session) {
-    if (!session.controller.signal.aborted) session.controller.abort(sshError('SSH_SESSION_CLOSED', 'SSH 会话已断开，操作已取消'));
+    if (!session.controller.signal.aborted) session.controller.abort(sshError('SSH_SESSION_CLOSED', tr("SSH 会话已断开，操作已取消")));
     clearTimeout(session.timer);
     clearTimeout(session.closeTimer);
     for (const operation of [...session.operations]) operation.cancel();
@@ -51,7 +52,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
     stopSessionOperations(session);
     session.status = failure ? 'error' : 'disconnected';
     session.error = failure?.message || session.cleanupWarning || '';
-    session.connection.reject(failure || sshError('SSH_CONNECT_CANCELLED', 'SSH 连接已取消或断开'));
+    session.connection.reject(failure || sshError('SSH_CONNECT_CANCELLED', tr("SSH 连接已取消或断开")));
     session.closing?.resolve();
     notify();
   }
@@ -65,7 +66,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   function armConnectionTimeout(session, delay, hostPrompt = false) {
     clearTimeout(session.timer);
     session.timer = setTimeout(() => failConnection(session, sshError(hostPrompt ? 'SSH_HOST_KEY_TIMEOUT' : 'SSH_CONNECT_TIMEOUT',
-      hostPrompt ? 'SSH 主机指纹确认超时，连接已取消' : 'SSH 连接超时，请检查主机和网络')), delay);
+      hostPrompt ? tr("SSH 主机指纹确认超时，连接已取消") : tr("SSH 连接超时，请检查主机和网络"))), delay);
   }
 
   function hostVerifier(session, key, callback) {
@@ -77,7 +78,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
     };
     try {
       assertCurrent(session);
-      if (!Buffer.isBuffer(key) || key.length < 4 || key.length > 1024 * 1024) throw sshError('SSH_HOST_KEY_INVALID', 'SSH 主机密钥格式无效');
+      if (!Buffer.isBuffer(key) || key.length < 4 || key.length > 1024 * 1024) throw sshError('SSH_HOST_KEY_INVALID', tr("SSH 主机密钥格式无效"));
       const keyLength = key.readUInt32BE(0);
       const keyType = keyLength <= key.length - 4 && keyLength <= 200 ? key.subarray(4, keyLength + 4).toString('ascii') : 'unknown';
       session.keyType = /^[a-zA-Z0-9@._+-]+$/.test(keyType) ? keyType : 'unknown';
@@ -89,7 +90,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
         username: session.username, keyType: session.keyType, fingerprint: session.fingerprint, signal: session.controller.signal })).then(accepted => {
         if (session.closed || session.controller.signal.aborted) { answer(false); return; }
         if (accepted !== true) {
-          session.trustError = sshError('SSH_HOST_KEY_REJECTED', '未信任此 SSH 主机指纹，连接已取消');
+          session.trustError = sshError('SSH_HOST_KEY_REJECTED', tr("未信任此 SSH 主机指纹，连接已取消"));
           answer(false); failConnection(session, session.trustError); return;
         }
         session.hostVerified = true;
@@ -98,7 +99,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
         notify(); answer(true);
       }).catch(failure => {
         // This injected main-process verifier owns the trusted, non-secret fingerprint message.
-        session.trustError = sshError(failure?.code || 'SSH_HOST_KEY_REJECTED', String(failure?.message || 'SSH 主机指纹验证失败').slice(0, 500));
+        session.trustError = sshError(failure?.code || 'SSH_HOST_KEY_REJECTED', String(failure?.message || tr("SSH 主机指纹验证失败")).slice(0, 500));
         answer(false); if (!session.closed) failConnection(session, session.trustError);
       });
     } catch (failure) { session.trustError = failure; answer(false); failConnection(session, failure); }
@@ -117,8 +118,8 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
       client.on('error', failure => {
         if (session.closed) return;
         const safe = session.trustError || (failure?.level === 'client-authentication'
-          ? sshError('SSH_AUTH_FAILED', 'SSH 认证失败，请检查用户名、密码或私钥')
-          : sshError('SSH_CONNECTION_FAILED', 'SSH 连接中断，请检查网络与服务器状态'));
+          ? sshError('SSH_AUTH_FAILED', tr("SSH 认证失败，请检查用户名、密码或私钥"))
+          : sshError('SSH_CONNECTION_FAILED', tr("SSH 连接中断，请检查网络与服务器状态")));
         failConnection(session, safe);
       });
       client.on('close', () => finishClosed(session));
@@ -127,7 +128,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
       });
       client.on('ready', () => {
         if (session.closed || session.controller.signal.aborted) { try { client.destroy(); } catch {} return; }
-        if (!session.hostVerified) { failConnection(session, sshError('SSH_HOST_KEY_REJECTED', 'SSH 主机指纹尚未验证，已拒绝认证会话')); return; }
+        if (!session.hostVerified) { failConnection(session, sshError('SSH_HOST_KEY_REJECTED', tr("SSH 主机指纹尚未验证，已拒绝认证会话"))); return; }
         if (session.authenticated) return;
         session.authenticated = true;
         clearTimeout(session.timer); session.status = 'connected'; session.error = ''; notify();
@@ -141,16 +142,16 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
       for (const key of ['password', 'privateKey', 'passphrase']) if (profile[key] !== undefined) options[key] = profile[key];
       notify(); client.connect(options); client.setNoDelay?.(true);
     } catch {
-      if (!session.closed) failConnection(session, sshError('SSH_PROFILE_FAILED', 'SSH 连接配置不可用，请检查保存的连接信息与凭据'));
+      if (!session.closed) failConnection(session, sshError('SSH_PROFILE_FAILED', tr("SSH 连接配置不可用，请检查保存的连接信息与凭据")));
     }
   }
 
   function connect(args = {}) {
     try {
-      if (disposed) throw sshError('SSH_DISPOSED', 'SSH 服务正在退出');
+      if (disposed) throw sshError('SSH_DISPOSED', tr("SSH 服务正在退出"));
       const size = terminalSize(args);
-      if ([...sessions.values()].filter(session => !session.closed).length >= MAX_ACTIVE_SESSIONS) throw sshError('SSH_SESSION_LIMIT', '最多同时连接 16 个 SSH 会话');
-      if (sessions.size >= MAX_RETAINED_SESSIONS) throw sshError('SSH_HISTORY_LIMIT', '最多保留 64 个 SSH 会话，请先关闭不需要的旧会话');
+      if ([...sessions.values()].filter(session => !session.closed).length >= MAX_ACTIVE_SESSIONS) throw sshError('SSH_SESSION_LIMIT', tr("最多同时连接 16 个 SSH 会话"));
+      if (sessions.size >= MAX_RETAINED_SESSIONS) throw sshError('SSH_HISTORY_LIMIT', tr("最多保留 64 个 SSH 会话，请先关闭不需要的旧会话"));
       const session = { id: randomUUID(), name: 'SSH', profileId: undefined, host: '', port: 22, username: '', status: 'connecting', error: '',
         fingerprint: '', keyType: '', controller: new AbortController(), connection: deferred(), client: null,
         terminals: new Map(), nextTerminal: 1, operations: new Set(), sftp: null, sftpPromise: null, closed: false,
@@ -164,7 +165,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   function channelRequest(session, invoke, code, message, { timeoutCode = code, timeoutMessage = message } = {}) {
     const action = deferred();
     let settled = false;
-    const operation = { cancel: () => finish(sshError('SSH_SESSION_CLOSED', 'SSH 会话已断开，通道操作已取消')) };
+    const operation = { cancel: () => finish(sshError('SSH_SESSION_CLOSED', tr("SSH 会话已断开，通道操作已取消"))) };
     const timer = setTimeout(() => finish(sshError(timeoutCode, timeoutMessage)), channelTimeoutMs);
     function finish(failure, channel) {
       if (settled) { closeChannel(channel); return; }
@@ -173,7 +174,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
     }
     session.operations.add(operation);
     try { invoke((failure, channel) => {
-      if (settled || session.closed || session.controller.signal.aborted) { closeChannel(channel); finish(sshError('SSH_SESSION_CLOSED', 'SSH 会话已断开')); return; }
+      if (settled || session.closed || session.controller.signal.aborted) { closeChannel(channel); finish(sshError('SSH_SESSION_CLOSED', tr("SSH 会话已断开"))); return; }
       if (failure || !channel || typeof channel.on !== 'function') { closeChannel(channel); finish(sshError(code, message)); } else finish(null, channel);
     }); } catch { finish(sshError(code, message)); }
     return { promise: action.promise, cancel: operation.cancel };
@@ -181,7 +182,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
 
   function assertTerminal(session, terminal, id) {
     assertConnected(session);
-    if (session.terminals.get(id) !== terminal || terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', 'SSH 终端已关闭');
+    if (session.terminals.get(id) !== terminal || terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端已关闭"));
   }
   async function attachRequested(session, terminal, id) {
     const channel = await terminal.request.promise;
@@ -193,9 +194,9 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   async function openTerminal({ sessionId, cols, rows } = {}) {
     const session = find(sessionId); assertConnected(session);
     const size = terminalSize({ cols, rows });
-    if (session.terminals.size >= MAX_TERMINALS) throw sshError('SSH_TERMINAL_LIMIT', '每个 SSH 会话最多保留 16 个终端，请先关闭旧终端');
+    if (session.terminals.size >= MAX_TERMINALS) throw sshError('SSH_TERMINAL_LIMIT', tr("每个 SSH 会话最多保留 16 个终端，请先关闭旧终端"));
     const id = randomUUID();
-    const terminal = { view: createSshTerminal({ sessionId, terminalId: id, title: '终端 ' + session.nextTerminal++, ...size,
+    const terminal = { view: createSshTerminal({ sessionId, terminalId: id, title: tr('终端 {0}', { 0: session.nextTerminal++ }), ...size,
       assertCurrent: () => assertConnected(session), onChange: notify, writeTimeoutMs,
       onShellCommand: command => onShellCommand({ sessionId, terminalId: id, host: session.host, port: session.port,
         username: session.username, profileId: session.profileId, fingerprint: session.fingerprint, command }) }), request: null };
@@ -207,12 +208,12 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
       try {
         await runShellIntegration(session, terminal, id, { automatic: true, launch: async (bash, ownedPath, signal) => {
           assertTerminal(session, terminal, id);
-          if (signal.aborted) throw sshError('SSH_SHELL_INTEGRATION_CANCELLED', '命令识别准备已取消');
+          if (signal.aborted) throw sshError('SSH_SHELL_INTEGRATION_CANCELLED', tr("命令识别准备已取消"));
           launchAttempted = true;
           terminal.request = channelRequest(session,
             callback => session.client.exec(bashStartupCommand(bash, ownedPath), { pty: { term: 'xterm-256color', ...size } }, callback),
-            'SSH_AUTO_EXEC_REJECTED', '服务器不允许增强终端启动，将使用普通终端',
-            { timeoutCode: 'SSH_AUTO_EXEC_TIMEOUT', timeoutMessage: '增强终端启动结果未确认，请新建终端重试' });
+            'SSH_AUTO_EXEC_REJECTED', tr("服务器不允许增强终端启动，将使用普通终端"),
+            { timeoutCode: 'SSH_AUTO_EXEC_TIMEOUT', timeoutMessage: tr("增强终端启动结果未确认，请新建终端重试") });
           const cancel = () => terminal.request.cancel();
           signal.addEventListener('abort', cancel, { once: true });
           try {
@@ -231,12 +232,12 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
         // did not become ready. Never secretly start a second shell/program.
         if (launched) return { terminalId: id };
         if (launchAttempted && !rejected) {
-          terminal.view.failShellIntegration('增强终端启动结果未确认，未创建第二个终端；请新建终端重试');
+          terminal.view.failShellIntegration(tr("增强终端启动结果未确认，未创建第二个终端；请新建终端重试"));
           terminal.view.failOpen(); throw failure;
         }
       }
     }
-    terminal.request = channelRequest(session, callback => session.client.shell({ term: 'xterm-256color', ...size }, callback), 'SSH_SHELL_FAILED', '无法打开 SSH 终端；仍可使用文件功能');
+    terminal.request = channelRequest(session, callback => session.client.shell({ term: 'xterm-256color', ...size }, callback), 'SSH_SHELL_FAILED', tr("无法打开 SSH 终端；仍可使用文件功能"));
     try {
       await attachRequested(session, terminal, id);
       return { terminalId: id };
@@ -246,15 +247,15 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   function getTerminal(args) {
     const session = find(args?.sessionId);
     const terminal = session.terminals.get(args?.terminalId);
-    if (!terminal) throw sshError('SSH_TERMINAL_NOT_FOUND', 'SSH 终端不存在或已关闭');
+    if (!terminal) throw sshError('SSH_TERMINAL_NOT_FOUND', tr("SSH 终端不存在或已关闭"));
     return { session, terminal };
   }
   function terminalRead(args) { return getTerminal(args).terminal.view.read(args); }
-  async function terminalWrite(args) { const { session, terminal } = getTerminal(args); assertConnected(session); if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', 'SSH 终端正在关闭'); return terminal.view.write(args); }
-  async function terminalResize(args) { const { session, terminal } = getTerminal(args); assertConnected(session); if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', 'SSH 终端正在关闭'); return terminal.view.resize(args); }
+  async function terminalWrite(args) { const { session, terminal } = getTerminal(args); assertConnected(session); if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端正在关闭")); return terminal.view.write(args); }
+  async function terminalResize(args) { const { session, terminal } = getTerminal(args); assertConnected(session); if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端正在关闭")); return terminal.view.resize(args); }
   async function enableShellIntegration(args) {
     const { session, terminal } = getTerminal(args); assertConnected(session);
-    if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', 'SSH 终端正在关闭');
+    if (terminal.closingTask) throw sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端正在关闭"));
     return runShellIntegration(session, terminal, args.terminalId);
   }
   function runShellIntegration(session, terminal, terminalId, { automatic = false, launch } = {}) {
@@ -269,7 +270,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
       try {
         const assertHeld = () => {
           assertTerminal(session, terminal, terminalId);
-          if (!['opening', 'ready'].includes(terminal.view.snapshot().status)) throw sshError('SSH_TERMINAL_CLOSED', 'SSH 终端已关闭');
+          if (!['opening', 'ready'].includes(terminal.view.snapshot().status)) throw sshError('SSH_TERMINAL_CLOSED', tr("SSH 终端已关闭"));
         };
         const bash = automatic ? await probeBash(session.client, { signal: controller.signal, assertCurrent: assertHeld, timeoutMs: shellProbeTimeoutMs }) : null;
         await installBashIntegration({ getSftp: () => getSftp(session.id), signal: controller.signal,
@@ -283,7 +284,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
           session.cleanupWarning = error.message; session.error = error.message;
           terminal.view.failShellIntegration(error.message); notify();
         } else if (['opening', 'ready'].includes(state.status) && state.shellIntegration.status !== 'unsupported' && !controller.signal.aborted) {
-          terminal.view.failShellIntegration(automatic ? `未自动启用命令识别：${error.message}` : undefined);
+          terminal.view.failShellIntegration(automatic ? tr("未自动启用命令识别：{0}", { 0: error.message }) : undefined);
         }
         throw error;
       } finally {
@@ -324,7 +325,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
     try {
       const session = find(sessionId); assertConnected(session);
       if (session.sftpPromise) return session.sftpPromise;
-      const request = channelRequest(session, callback => session.client.sftp(callback), 'SSH_SFTP_FAILED', '无法打开 SFTP 文件通道');
+      const request = channelRequest(session, callback => session.client.sftp(callback), 'SSH_SFTP_FAILED', tr("无法打开 SFTP 文件通道"));
       const promise = request.promise.then(channel => {
         try { assertConnected(session); } catch (failure) { closeChannel(channel); throw failure; }
         session.sftp = channel;
@@ -345,7 +346,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
     notify();
     session.disconnectTask = (async () => {
       const failures = await Promise.all([...session.terminals.values()].map(cancelIntegration));
-      stopSessionOperations(session); session.connection.reject(sshError('SSH_CONNECT_CANCELLED', 'SSH 连接已取消或断开'));
+      stopSessionOperations(session); session.connection.reject(sshError('SSH_CONNECT_CANCELLED', tr("SSH 连接已取消或断开")));
       if (!session.client) finishClosed(session);
       else if (!session.closed) {
         session.closeTimer = setTimeout(() => { try { session.client.destroy(); } catch {} finishClosed(session); }, closeTimeoutMs);
@@ -360,7 +361,7 @@ function createSshSessionService({ createClient, resolveProfile, verifyHostKey, 
   }
   async function removeSession({ sessionId } = {}) {
     const session = find(sessionId);
-    if (!session.closed) throw sshError('SSH_SESSION_ACTIVE', '请先断开 SSH 会话再移除');
+    if (!session.closed) throw sshError('SSH_SESSION_ACTIVE', tr("请先断开 SSH 会话再移除"));
     sessions.delete(sessionId); notify();
   }
   function needsQuitConfirmation() { return [...sessions.values()].some(session => !session.closed); }

@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { randomUUID } = require('node:crypto');
 const { createSerialBuffer, RX_PENDING_IDLE_MS } = require('./serial-buffer.cjs');
 const { DEFAULT_CONFIG, normalizeConfig, encodeMessage } = require('./serial-policy.cjs');
@@ -11,7 +12,7 @@ const PORT_FIELDS = ['path', 'manufacturer', 'serialNumber', 'pnpId', 'locationI
 
 function createSerialService({ listPorts: enumerate, createPort, onChange = () => {}, now = Date.now,
   writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes, mergeReceive = true }) {
-  if (typeof enumerate !== 'function' || typeof createPort !== 'function') throw new Error('串口驱动未初始化');
+  if (typeof enumerate !== 'function' || typeof createPort !== 'function') throw new Error(tr("串口驱动未初始化"));
   const buffer = createSerialBuffer({ now, maxEntries, maxBytes, mergeReceive });
   const terminalBuffer = createSerialTerminalBuffer();
   const terminalQueue = [];
@@ -54,7 +55,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   }
 
   function assertRunning() {
-    if (disposed) throw new Error('串口服务正在退出，无法继续操作');
+    if (disposed) throw new Error(tr("串口服务正在退出，无法继续操作"));
   }
 
   function terminalRead(args) {
@@ -76,12 +77,12 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       const item = terminalQueue[index];
       if (session && item.session !== session) continue;
       terminalQueue.splice(index, 1);
-      finishTerminalItem(item, terminalError('SERIAL_TERMINAL_SESSION_CLOSED', '串口连接已断开，尚未写入的终端输入已取消，不会重播'));
+      finishTerminalItem(item, terminalError('SERIAL_TERMINAL_SESSION_CLOSED', tr("串口连接已断开，尚未写入的终端输入已取消，不会重播")));
     }
     if (terminalInFlight && (!session || terminalInFlight.session === session)) {
       finishTerminalItem(terminalInFlight, terminalInFlight.started
-        ? terminalError('SERIAL_TERMINAL_WRITE_UNKNOWN', '串口连接已断开，正在发送的终端输入结果无法确认；部分字节可能已发出')
-        : terminalError('SERIAL_TERMINAL_SESSION_CLOSED', '串口连接已断开，尚未写入的终端输入已取消，不会重播'));
+        ? terminalError('SERIAL_TERMINAL_WRITE_UNKNOWN', tr("串口连接已断开，正在发送的终端输入结果无法确认；部分字节可能已发出"))
+        : terminalError('SERIAL_TERMINAL_SESSION_CLOSED', tr("串口连接已断开，尚未写入的终端输入已取消，不会重播")));
     }
   }
 
@@ -97,14 +98,14 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     terminalInFlight = item;
     Promise.resolve().then(() => {
       if (item.settled || disposed || active !== item.session || item.session.cancelled || state.status !== 'connected') {
-        throw terminalError('SERIAL_TERMINAL_SESSION_CLOSED', '串口会话已结束，尚未写入的终端输入已取消');
+        throw terminalError('SERIAL_TERMINAL_SESSION_CLOSED', tr("串口会话已结束，尚未写入的终端输入已取消"));
       }
       item.started = true;
       return writeBytes(item.session, item.bytes, { terminal: true });
     }).then(
       result => finishTerminalItem(item, null, result),
       error => {
-        finishTerminalItem(item, terminalError('SERIAL_TERMINAL_WRITE_UNKNOWN', error.message || '终端发送结果无法确认'));
+        finishTerminalItem(item, terminalError('SERIAL_TERMINAL_WRITE_UNKNOWN', error.message || tr("终端发送结果无法确认")));
         cancelTerminalQueue(item.session);
       }
     ).finally(() => {
@@ -117,13 +118,13 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     try {
       assertRunning();
       const session = active;
-      if (!session || state.status !== 'connected' || session.cancelled) throw terminalError('SERIAL_TERMINAL_NOT_CONNECTED', '请先连接串口后再输入终端内容');
-      if (message?.sessionId !== session.id) throw terminalError('SERIAL_TERMINAL_SESSION_CHANGED', '串口会话已变化，旧终端输入不会发送');
+      if (!session || state.status !== 'connected' || session.cancelled) throw terminalError('SERIAL_TERMINAL_NOT_CONNECTED', tr("请先连接串口后再输入终端内容"));
+      if (message?.sessionId !== session.id) throw terminalError('SERIAL_TERMINAL_SESSION_CHANGED', tr("串口会话已变化，旧终端输入不会发送"));
       let bytes;
       try { bytes = encodeMessage({ mode: 'text', content: message.content, lineEnding: 'none' }); }
       catch (error) { throw terminalError('SERIAL_TERMINAL_INPUT_INVALID', error.message); }
       if (terminalPendingCount >= TERMINAL_QUEUE_ITEMS || terminalPendingBytes + bytes.length > TERMINAL_QUEUE_BYTES) {
-        throw terminalError('SERIAL_TERMINAL_BACKPRESSURE', '终端发送队列已满，请等待当前输入写入；本次输入尚未接受');
+        throw terminalError('SERIAL_TERMINAL_BACKPRESSURE', tr("终端发送队列已满，请等待当前输入写入；本次输入尚未接受"));
       }
       const item = { session, bytes, action: deferred(), settled: false, started: false };
       terminalQueue.push(item);
@@ -155,7 +156,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     assertRunning();
     try {
       const ports = await enumerate();
-      if (!Array.isArray(ports)) throw new Error('驱动返回的端口列表无效');
+      if (!Array.isArray(ports)) throw new Error(tr("驱动返回的端口列表无效"));
       const seen = new Set();
       return ports.filter(port => {
         if (!validPath(port?.path) || seen.has(port.path.toLowerCase())) return false;
@@ -165,7 +166,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
         .filter(key => typeof port[key] === 'string')
         .map(key => [key, port[key].slice(0, 512)])))
         .sort((a, b) => a.path.localeCompare(b.path, 'en', { numeric: true, sensitivity: 'base' }));
-    } catch (error) { throw new Error(`串口列表读取失败，请检查驱动后刷新：${brief(error)}`); }
+    } catch (error) { throw new Error(tr("串口列表读取失败，请检查驱动后刷新：{0}", { 0: brief(error) })); }
   }
 
   function finishStream(session) {
@@ -212,17 +213,17 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     };
     session.onError = error => {
       if (active !== session || session.released) return;
-      session.failure ||= `串口连接异常，已停止发送，请检查设备或驱动：${brief(error)}`;
+      session.failure ||= tr("串口连接异常，已停止发送，请检查设备或驱动：{0}", { 0: brief(error) });
       session.cancelled = true;
       session.openAction.reject(new Error(session.failure));
       requestClose(session).catch(() => {});
     };
     session.onClose = () => {
       if (session.released) return;
-      if (!session.cancelled) session.failure ||= '串口连接已断开，请检查串口线后手动连接';
+      if (!session.cancelled) session.failure ||= tr("串口连接已断开，请检查串口线后手动连接");
       session.cancelled = true;
-      session.openAction.reject(new Error(session.failure || '串口连接已取消'));
-      cancelWrite(session, '串口连接已断开，发送结果无法确认；已发送的部分数据无法撤回');
+      session.openAction.reject(new Error(session.failure || tr("串口连接已取消")));
+      cancelWrite(session, tr("串口连接已断开，发送结果无法确认；已发送的部分数据无法撤回"));
       if (session.openPending) return;
       session.closed = true;
       session.closeSignal?.resolve();
@@ -239,7 +240,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     session.openPending = false;
     session.openSucceeded = !error;
     if (error) {
-      session.failure ||= `串口打开失败，可能被占用、已拔出或参数不受支持：${brief(error)}`;
+      session.failure ||= tr("串口打开失败，可能被占用、已拔出或参数不受支持：{0}", { 0: brief(error) });
       session.openAction.reject(new Error(session.failure));
       session.nativeOpen.resolve();
       release(session);
@@ -249,7 +250,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     session.nativeOpen.resolve();
     if (session.cancelled || disposed) {
       session.cancelled = true;
-      session.openAction.reject(new Error('串口连接已取消，正在释放端口'));
+      session.openAction.reject(new Error(tr("串口连接已取消，正在释放端口")));
       if (!session.closePromise) requestClose(session).catch(() => {});
       return;
     }
@@ -262,8 +263,8 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
 
   async function connect({ path, config } = {}) {
     assertRunning();
-    if (active) throw new Error('请先断开并释放当前串口，再连接其他端口');
-    if (!validPath(path)) throw new Error('请选择有效的串口');
+    if (active) throw new Error(tr("请先断开并释放当前串口，再连接其他端口"));
+    if (!validPath(path)) throw new Error(tr("请选择有效的串口"));
     const normalized = normalizeConfig(config);
     flushReceive();
     const session = {
@@ -281,7 +282,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       observeSession(session);
       session.openTimer = setTimeout(() => {
         if (!session.openPending || session.released) return;
-        session.failure = '串口打开超时，等待驱动释放端口后才能再次连接';
+        session.failure = tr("串口打开超时，等待驱动释放端口后才能再次连接");
         session.cancelled = true;
         session.openAction.reject(new Error(session.failure));
         requestClose(session).catch(() => {});
@@ -297,8 +298,8 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (session.closePromise) return session.closePromise;
     session.cancelled = true;
     flushReceive();
-    session.openAction.reject(new Error(session.failure || '串口连接已取消，正在断开'));
-    cancelWrite(session, '串口正在断开，发送结果无法确认；已发送的部分数据无法撤回');
+    session.openAction.reject(new Error(session.failure || tr("串口连接已取消，正在断开")));
+    cancelWrite(session, tr("串口正在断开，发送结果无法确认；已发送的部分数据无法撤回"));
     cancelTerminalQueue(session);
     if (active === session) {
       state.status = 'disconnecting';
@@ -318,7 +319,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   async function closeSession(session) {
     try {
       if (session.openPending) {
-        await withTimeout(session.nativeOpen.promise, closeTimeoutMs, '等待串口打开结束超时，旧端口尚未释放，请稍后重试断开或重启应用');
+        await withTimeout(session.nativeOpen.promise, closeTimeoutMs, tr("等待串口打开结束超时，旧端口尚未释放，请稍后重试断开或重启应用"));
       }
       if (session.released) return snapshot();
       if (!session.openSucceeded) {
@@ -329,15 +330,15 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       const signal = session.closeSignal;
       try {
         session.port.close(error => {
-          if (error) signal.reject(new Error(`串口关闭失败，旧端口尚未释放，请重试断开：${brief(error)}`));
+          if (error) signal.reject(new Error(tr("串口关闭失败，旧端口尚未释放，请重试断开：{0}", { 0: brief(error) })));
           else {
             session.closed = true;
             signal.resolve();
             if (!session.released) release(session);
           }
         });
-      } catch (error) { signal.reject(new Error(`串口关闭失败，旧端口尚未释放：${brief(error)}`)); }
-      await withTimeout(signal.promise, closeTimeoutMs, '串口关闭超时，旧端口尚未释放，请重试断开或重启应用');
+      } catch (error) { signal.reject(new Error(tr("串口关闭失败，旧端口尚未释放：{0}", { 0: brief(error) }))); }
+      await withTimeout(signal.promise, closeTimeoutMs, tr("串口关闭超时，旧端口尚未释放，请重试断开或重启应用"));
       release(session);
       return snapshot();
     } catch (error) {
@@ -361,9 +362,9 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     try {
       assertRunning();
       const session = active;
-      if (!session || state.status !== 'connected' || session.cancelled) throw new Error('请先连接串口后再发送');
-      if (message?.sessionId !== session.id) throw new Error('串口连接会话已变化，请确认当前连接后重新发送');
-      if (session.write || terminalPendingCount) throw new Error('上一条数据仍在写入，请等待发送结果');
+      if (!session || state.status !== 'connected' || session.cancelled) throw new Error(tr("请先连接串口后再发送"));
+      if (message?.sessionId !== session.id) throw new Error(tr("串口连接会话已变化，请确认当前连接后重新发送"));
+      if (session.write || terminalPendingCount) throw new Error(tr("上一条数据仍在写入，请等待发送结果"));
       return writeBytes(session, encodeMessage(message));
     } catch (error) { return Promise.reject(error); }
   }
@@ -393,7 +394,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
         return;
       }
       if (!current()) {
-        action.reject(new Error('串口连接已变化，发送结果无法确认；已发送的部分数据无法撤回'));
+        action.reject(new Error(tr("串口连接已变化，发送结果无法确认；已发送的部分数据无法撤回")));
         return;
       }
       buffer.sealRawReceive();
@@ -406,13 +407,13 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     session.write = operation;
     state.sending = true;
     changed();
-    const uncertain = error => new Error(`写入串口失败，发送结果无法确认，已停止后续发送；部分数据可能已发出：${brief(error)}`);
-    const timer = setTimeout(() => complete(uncertain(new Error('等待写入或排空超时'))), writeTimeoutMs);
+    const uncertain = error => new Error(tr("写入串口失败，发送结果无法确认，已停止后续发送；部分数据可能已发出：{0}", { 0: brief(error) }));
+    const timer = setTimeout(() => complete(uncertain(new Error(tr("等待写入或排空超时")))), writeTimeoutMs);
     try {
       session.port.write(bytes, error => {
         if (finished) return;
         if (error) return complete(uncertain(error));
-        if (!current()) return complete(uncertain(new Error('串口连接已变化')));
+        if (!current()) return complete(uncertain(new Error(tr("串口连接已变化"))));
         try {
           session.port.drain(drainError => {
             if (finished) return;
@@ -441,7 +442,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   }
 
   function markSaved(exportedRevision) {
-    if (!Number.isSafeInteger(exportedRevision) || exportedRevision < 0 || exportedRevision > revision) throw new Error('保存的串口记录版本无效');
+    if (!Number.isSafeInteger(exportedRevision) || exportedRevision < 0 || exportedRevision > revision) throw new Error(tr("保存的串口记录版本无效"));
     const wasUnsaved = lastDataRevision > savedRevision;
     savedRevision = Math.max(savedRevision, exportedRevision);
     if (wasUnsaved !== (lastDataRevision > savedRevision)) changed();
@@ -494,7 +495,7 @@ function validPath(value) {
 }
 
 function brief(error) {
-  return String(error?.message || error || '未知错误').replace(/[\r\n\u0000-\u001f\u007f]+/g, ' ').slice(0, 240);
+  return String(error?.message || error || tr("未知错误")).replace(/[\r\n\u0000-\u001f\u007f]+/g, ' ').slice(0, 240);
 }
 
 function ignoreLateError() {}

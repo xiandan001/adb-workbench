@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -17,21 +18,21 @@ function treeHash(entries) {
 }
 function validateTree(tree) {
   if (tree === null) return null;
-  if (!tree || !Array.isArray(tree.entries) || tree.entries.length > 2048) throw fail('AI_TOOLS_SKILL_INVALID', '技能文件清单无效');
+  if (!tree || !Array.isArray(tree.entries) || tree.entries.length > 2048) throw fail('AI_TOOLS_SKILL_INVALID', tr("技能文件清单无效"));
   const names = new Set(); const directories = new Set(['']); let bytes = 0; let files = 0;
   for (const entry of sortEntries([...tree.entries])) {
-    if (!entry || typeof entry.path !== 'string' || entry.path.length > 1024 || !['file', 'directory'].includes(entry.type)) throw fail('AI_TOOLS_SKILL_INVALID', '技能文件清单无效');
+    if (!entry || typeof entry.path !== 'string' || entry.path.length > 1024 || !['file', 'directory'].includes(entry.type)) throw fail('AI_TOOLS_SKILL_INVALID', tr("技能文件清单无效"));
     const parts = entry.path.split('/');
-    if (parts.length > 9 || !parts.every(safePart) || names.has(entry.path.toLowerCase()) || !directories.has(parts.slice(0, -1).join('/').toLowerCase())) throw fail('AI_TOOLS_SKILL_PATH', '技能目录含不安全路径、重名或过深层级');
+    if (parts.length > 9 || !parts.every(safePart) || names.has(entry.path.toLowerCase()) || !directories.has(parts.slice(0, -1).join('/').toLowerCase())) throw fail('AI_TOOLS_SKILL_PATH', tr("技能目录含不安全路径、重名或过深层级"));
     names.add(entry.path.toLowerCase());
     if (entry.type === 'directory') { directories.add(entry.path.toLowerCase()); continue; }
-    if (!Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o777 || typeof entry.data !== 'string') throw fail('AI_TOOLS_SKILL_INVALID', '技能文件元数据无效');
+    if (!Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o777 || typeof entry.data !== 'string') throw fail('AI_TOOLS_SKILL_INVALID', tr("技能文件元数据无效"));
     const content = Buffer.from(entry.data, 'base64');
-    if (content.toString('base64') !== entry.data) throw fail('AI_TOOLS_SKILL_INVALID', '技能文件内容无效');
+    if (content.toString('base64') !== entry.data) throw fail('AI_TOOLS_SKILL_INVALID', tr("技能文件内容无效"));
     files += 1; bytes += content.length;
-    if (files > 1000 || bytes > MAX_BYTES) throw fail('AI_TOOLS_SKILL_LIMIT', '技能超过 1000 个文件或 16 MiB 限制');
+    if (files > 1000 || bytes > MAX_BYTES) throw fail('AI_TOOLS_SKILL_LIMIT', tr("技能超过 1000 个文件或 16 MiB 限制"));
   }
-  if (tree.hash !== treeHash(tree.entries) || tree.bytes !== bytes || tree.fileCount !== files) throw fail('AI_TOOLS_SKILL_INVALID', '技能文件校验失败');
+  if (tree.hash !== treeHash(tree.entries) || tree.bytes !== bytes || tree.fileCount !== files) throw fail('AI_TOOLS_SKILL_INVALID', tr("技能文件校验失败"));
   return tree;
 }
 
@@ -39,30 +40,30 @@ function scanTree(directory, io = fs) {
   assertSafeParents(path.join(directory, '_check'), io);
   let root;
   try { root = io.lstatSync(directory); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-  if (!root.isDirectory() || root.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', '技能根目录必须是普通目录，不能是链接');
+  if (!root.isDirectory() || root.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', tr("技能根目录必须是普通目录，不能是链接"));
   const entries = []; let bytes = 0; let fileCount = 0;
   const visit = (relative, depth) => {
-    if (depth > 8) throw fail('AI_TOOLS_SKILL_LIMIT', '技能目录超过 8 层限制');
+    if (depth > 8) throw fail('AI_TOOLS_SKILL_LIMIT', tr("技能目录超过 8 层限制"));
     const directoryPath = relative ? path.join(directory, ...relative.split('/')) : directory;
     const before = io.lstatSync(directoryPath);
-    if (!before.isDirectory() || before.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', '技能目录包含链接');
+    if (!before.isDirectory() || before.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', tr("技能目录包含链接"));
     const children = io.readdirSync(directoryPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'));
     for (const child of children) {
-      if (!safePart(child.name)) throw fail('AI_TOOLS_SKILL_PATH', '技能文件名称无效');
+      if (!safePart(child.name)) throw fail('AI_TOOLS_SKILL_PATH', tr("技能文件名称无效"));
       const name = relative ? `${relative}/${child.name}` : child.name; const file = path.join(directoryPath, child.name);
       const stat = io.lstatSync(file);
-      if (stat.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', '技能目录包含符号链接或目录链接，未导入');
+      if (stat.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_LINK', tr("技能目录包含符号链接或目录链接，未导入"));
       if (stat.isDirectory()) { entries.push({ path: name, type: 'directory' }); visit(name, depth + 1); }
       else {
-        if (!stat.isFile() || stat.nlink !== 1) throw fail('AI_TOOLS_SKILL_LINK', '技能包含硬链接或特殊文件，未导入');
-        if (++fileCount > 1000 || bytes + stat.size > MAX_BYTES) throw fail('AI_TOOLS_SKILL_LIMIT', '技能超过 1000 个文件或 16 MiB 限制');
+        if (!stat.isFile() || stat.nlink !== 1) throw fail('AI_TOOLS_SKILL_LINK', tr("技能包含硬链接或特殊文件，未导入"));
+        if (++fileCount > 1000 || bytes + stat.size > MAX_BYTES) throw fail('AI_TOOLS_SKILL_LIMIT', tr("技能超过 1000 个文件或 16 MiB 限制"));
         const read = readSafe(file, io, MAX_BYTES); bytes += read.bytes.length;
         entries.push({ path: name, type: 'file', mode: stat.mode & 0o777, data: read.bytes.toString('base64') });
       }
-      if (entries.length > 2048) throw fail('AI_TOOLS_SKILL_LIMIT', '技能目录条目过多');
+      if (entries.length > 2048) throw fail('AI_TOOLS_SKILL_LIMIT', tr("技能目录条目过多"));
     }
     const after = io.lstatSync(directoryPath);
-    if (before.ino !== after.ino || before.dev !== after.dev || before.mtimeMs !== after.mtimeMs || after.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_CHANGED', '技能目录在读取时发生变化，请重新选择');
+    if (before.ino !== after.ino || before.dev !== after.dev || before.mtimeMs !== after.mtimeMs || after.isSymbolicLink()) throw fail('AI_TOOLS_SKILL_CHANGED', tr("技能目录在读取时发生变化，请重新选择"));
   };
   visit('', 0);
   return validateTree({ entries: sortEntries(entries), bytes, fileCount, hash: treeHash(entries) });
@@ -70,22 +71,22 @@ function scanTree(directory, io = fs) {
 
 function skillMetadata(tree, sourceDirectory) {
   const entry = tree?.entries.find(row => row.type === 'file' && row.path.toLowerCase() === 'skill.md');
-  if (!entry) throw fail('AI_TOOLS_SKILL_REQUIRED', '所选目录必须直接包含 SKILL.md，不能导入整个项目或 vendor 目录');
+  if (!entry) throw fail('AI_TOOLS_SKILL_REQUIRED', tr("所选目录必须直接包含 SKILL.md，不能导入整个项目或 vendor 目录"));
   const bytes = Buffer.from(entry.data, 'base64');
-  if (bytes.length > 65536) throw fail('AI_TOOLS_SKILL_LIMIT', 'SKILL.md 超过 64 KiB 限制');
+  if (bytes.length > 65536) throw fail('AI_TOOLS_SKILL_LIMIT', tr("SKILL.md 超过 64 KiB 限制"));
   const content = bytes.toString('utf8');
-  if (!Buffer.from(content).equals(bytes) || content.includes('\0')) throw fail('AI_TOOLS_SKILL_TEXT', 'SKILL.md 必须是 UTF-8 纯文本');
+  if (!Buffer.from(content).equals(bytes) || content.includes('\0')) throw fail('AI_TOOLS_SKILL_TEXT', tr("SKILL.md 必须是 UTF-8 纯文本"));
   let meta = {};
   if (/^---\r?\n/.test(content)) {
     const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
-    if (!match) throw fail('AI_TOOLS_SKILL_METADATA', 'SKILL.md 元数据没有闭合');
+    if (!match) throw fail('AI_TOOLS_SKILL_METADATA', tr("SKILL.md 元数据没有闭合"));
     const doc = YAML.parseDocument(match[1], { uniqueKeys: true });
-    if (doc.errors.length || doc.warnings.length) throw fail('AI_TOOLS_SKILL_METADATA', 'SKILL.md 元数据格式无效');
-    try { meta = doc.toJS({ maxAliasCount: 0 }) || {}; } catch { throw fail('AI_TOOLS_SKILL_METADATA', 'SKILL.md 元数据不支持引用'); }
+    if (doc.errors.length || doc.warnings.length) throw fail('AI_TOOLS_SKILL_METADATA', tr("SKILL.md 元数据格式无效"));
+    try { meta = doc.toJS({ maxAliasCount: 0 }) || {}; } catch { throw fail('AI_TOOLS_SKILL_METADATA', tr("SKILL.md 元数据不支持引用")); }
   }
   const name = String(meta.name || path.basename(sourceDirectory)).trim().toLowerCase();
-  if (!SLUG.test(name)) throw fail('AI_TOOLS_SKILL_NAME', '技能名称只能使用小写字母、数字和短横线，长度 1–64');
-  if (meta.description !== undefined && typeof meta.description !== 'string') throw fail('AI_TOOLS_SKILL_METADATA', '技能描述必须是文本');
+  if (!SLUG.test(name)) throw fail('AI_TOOLS_SKILL_NAME', tr("技能名称只能使用小写字母、数字和短横线，长度 1–64"));
+  if (meta.description !== undefined && typeof meta.description !== 'string') throw fail('AI_TOOLS_SKILL_METADATA', tr("技能描述必须是文本"));
   return { name, description: (meta.description || '').slice(0, 512), content };
 }
 
@@ -102,7 +103,7 @@ function writeTree(directory, tree, io = fs) {
         finally { io.closeSync(fd); }
       }
     }
-    if (scanTree(directory, io)?.hash !== tree.hash) throw fail('AI_TOOLS_SKILL_CHANGED', '技能准备目录校验失败');
+    if (scanTree(directory, io)?.hash !== tree.hash) throw fail('AI_TOOLS_SKILL_CHANGED', tr("技能准备目录校验失败"));
   } catch (error) {
     try {
       const actual = io.lstatSync(directory); const partial = scanTree(directory, io);
@@ -124,12 +125,12 @@ function writeTree(directory, tree, io = fs) {
 function removeOwnedTree(directory, expectedHash, io = fs) {
   const current = scanTree(directory, io);
   if (!current) return;
-  if (!expectedHash || current.hash !== expectedHash) throw fail('AI_TOOLS_SKILL_CHANGED', '技能目录已变化，未删除');
+  if (!expectedHash || current.hash !== expectedHash) throw fail('AI_TOOLS_SKILL_CHANGED', tr("技能目录已变化，未删除"));
   for (const entry of [...current.entries].reverse()) {
     const destination = path.join(directory, ...entry.path.split('/')); assertSafeParents(destination, io);
     if (entry.type === 'file') {
       const actual = readSafe(destination, io, MAX_BYTES);
-      if (!actual.bytes || actual.bytes.toString('base64') !== entry.data || actual.mode !== entry.mode) throw fail('AI_TOOLS_SKILL_CHANGED', '技能文件在清理时发生变化，未删除');
+      if (!actual.bytes || actual.bytes.toString('base64') !== entry.data || actual.mode !== entry.mode) throw fail('AI_TOOLS_SKILL_CHANGED', tr("技能文件在清理时发生变化，未删除"));
       io.unlinkSync(destination);
     }
     else io.rmdirSync(destination);

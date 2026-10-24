@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const nodeOs = require('node:os');
 const { execFile: nativeExecFile } = require('node:child_process');
 
@@ -45,7 +46,7 @@ function createAppDiagnostics({ app, screen, os = nodeOs, execFile = nativeExecF
     const arch = safely(() => os.arch());
     const seconds = safely(uptime);
     const result = { collectedAt: now().toISOString(),
-      app: { name: '卓控台', version: versionText(safely(() => app.getVersion())), electron: versionText(versions.electron),
+      app: { name: tr("卓控台"), version: versionText(safely(() => app.getVersion())), electron: versionText(versions.electron),
         chrome: versionText(versions.chrome), node: versionText(versions.node), packaged: app?.isPackaged === true,
         uptimeSeconds: Number.isFinite(seconds) && seconds >= 0 ? Math.min(Math.floor(seconds), 315360000) : null },
       os: { platform: ['win32', 'darwin', 'linux', 'freebsd', 'openbsd', 'aix', 'sunos'].includes(platform) ? platform : null,

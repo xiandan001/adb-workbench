@@ -1,17 +1,18 @@
+import { tr } from '../shared/i18n.js';
 export const COMMAND_ACTIONS = [
-  { value: 'tab:devices', label: '打开设备列表' },
-  { value: 'tab:ssh', label: '打开 SSH 工作区' },
-  { value: 'tab:ai-tools', label: '打开 AI 工具管理' },
-  { value: 'environmentCheck', label: '打开环境自检弹窗' },
-  { value: 'tab:troubleshoot', label: '打开问题排查' },
-  { value: 'tab:artifacts', label: '打开产物中心' },
-  { value: 'tab:quality', label: '打开质量中心' },
-  { value: 'tab:history', label: '打开连接历史' },
-  { value: 'tab:tasks', label: '打开任务中心' },
-  { value: 'tab:performance', label: '打开性能监控' },
-  { value: 'tab:settings', label: '打开偏好设置' },
-  { value: 'logAnalyzer', label: '打开日志分析' },
-  { value: 'refreshDevices', label: '刷新设备列表' }
+  { value: 'tab:devices', get label() { return tr("打开设备列表"); } },
+  { value: 'tab:ssh', get label() { return tr("打开 SSH 工作区"); } },
+  { value: 'tab:ai-tools', get label() { return tr("打开 AI 工具管理"); } },
+  { value: 'environmentCheck', get label() { return tr("打开环境自检弹窗"); } },
+  { value: 'tab:troubleshoot', get label() { return tr("打开问题排查"); } },
+  { value: 'tab:artifacts', get label() { return tr("打开产物中心"); } },
+  { value: 'tab:quality', get label() { return tr("打开质量中心"); } },
+  { value: 'tab:history', get label() { return tr("打开连接历史"); } },
+  { value: 'tab:tasks', get label() { return tr("打开任务中心"); } },
+  { value: 'tab:performance', get label() { return tr("打开性能监控"); } },
+  { value: 'tab:settings', get label() { return tr("打开偏好设置"); } },
+  { value: 'logAnalyzer', get label() { return tr("打开日志分析"); } },
+  { value: 'refreshDevices', get label() { return tr("刷新设备列表"); } }
 ];
 
 export const DEFAULT_COMMAND_SHORTCUT = {
@@ -37,14 +38,14 @@ export function normalizeCommandSettings(value) {
           title: String(command.title || '').slice(0, 40),
           description: String(command.description || '').slice(0, 80),
           action: String(command.action || COMMAND_ACTIONS[0].value),
-          group: '自定义'
+          group: tr("自定义")
         }))
       : []
   };
 }
 
 export function actionLabel(action) {
-  return COMMAND_ACTIONS.find(item => item.value === action)?.label || '自定义命令';
+  return COMMAND_ACTIONS.find(item => item.value === action)?.label || tr("自定义命令");
 }
 
 export function normalizeCommandShortcut(value) {
@@ -85,7 +86,7 @@ export function isCommandShortcutMatch(event, shortcut) {
 
 export function formatCommandShortcut(shortcut) {
   const normalized = normalizeCommandShortcut(shortcut);
-  if (!normalized) return '未设置';
+  if (!normalized) return tr("未设置");
   const parts = [];
   if (normalized.ctrl) parts.push('Ctrl');
   if (normalized.alt) parts.push('Alt');

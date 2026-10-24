@@ -1,9 +1,10 @@
+import { tr } from './i18n.js';
 export const PINNED_DEVICES_KEY = 'adb-workbench.pinned-devices.v1';
 
 export function normalizePinnedDevices(value) {
   if (!Array.isArray(value) || value.length > 1000 || value.some(id => typeof id !== 'string'
     || !id.trim() || id.length > 300 || [...id].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))) {
-    throw new Error('常用设备数据无效');
+    throw new Error(tr("常用设备数据无效"));
   }
   return [...new Set(value)];
 }
@@ -12,7 +13,7 @@ function readStoredPins(storage) {
   const raw = storage.getItem(PINNED_DEVICES_KEY);
   if (raw === null || raw === undefined) return [];
   try { return normalizePinnedDevices(JSON.parse(raw)); }
-  catch { throw new Error('常用设备数据异常，原数据已保留，请通过数据迁移恢复后重试'); }
+  catch { throw new Error(tr("常用设备数据异常，原数据已保留，请通过数据迁移恢复后重试")); }
 }
 
 export function readPinnedDevices(storage = globalThis.localStorage) {

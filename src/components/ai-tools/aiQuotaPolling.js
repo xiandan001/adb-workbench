@@ -1,3 +1,4 @@
+import { tr } from '../../shared/i18n.js';
 export const QUOTA_REFRESH_MS = 60000;
 const MAX_BACKOFF = 300000;
 const signature = result => result ? JSON.stringify([result.status, result.observedAt, result.retryAt, result.reason]) : '';
@@ -45,7 +46,7 @@ export function createQuotaPoller({ query, clock = { now: Date.now, setTimeout: 
     clear(); const operation = { generation }; inFlight = operation; emit();
     let result;
     try { result = await query(); }
-    catch (failure) { result = { status: 'error', reason: failure.message || '额度查询失败' }; }
+    catch (failure) { result = { status: 'error', reason: failure.message || tr("额度查询失败") }; }
     finally {
       if (!disposed && operation.generation === generation) {
         if (result?.skipped || result?.cancelled || !result) due = clock.now() + 1000;

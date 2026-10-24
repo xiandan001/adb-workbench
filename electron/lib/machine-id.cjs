@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // electron/lib/machine-id.cjs
 // 采集 Windows 硬件指纹（CPU + 主板 + 磁盘 + MachineGuid），输出 SHA-256 机器码
 // 性能优化：正常路径将 4 个 PowerShell 查询合并为 1 次 JSON 输出（~2秒）
@@ -127,7 +128,7 @@ async function getMachineIdAsync() {
       const result = {
         success: false,
         error: 'hardware_fingerprint_insufficient',
-        message: '无法采集足够的硬件指纹（至少需要 2 个源）',
+        message: tr("无法采集足够的硬件指纹（至少需要 2 个源）"),
         sources
       };
       pendingPromise = null;
@@ -145,7 +146,7 @@ function getMachineIdSync() {
   if (cachedMachineId) {
     return { success: true, machineId: cachedMachineId, sources: cachedSources };
   }
-  return { success: false, error: 'not_ready', message: '机器码采集中，请稍后' };
+  return { success: false, error: 'not_ready', message: tr("机器码采集中，请稍后") };
 }
 
 // 启动时预采集（在 app.whenReady 中调用）

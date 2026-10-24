@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // 自动更新集成 - 使用 electron-updater 实现差分增量更新
 // 开发模式下不启用自动更新（electron-updater 需要签名后的应用才能工作）
 //
@@ -81,7 +82,7 @@ function getUpdaterHttpStatus(err) {
 }
 
 function compactUpdaterError(err) {
-  let message = err?.message || String(err || '未知错误');
+  let message = err?.message || String(err || tr("未知错误"));
   const cutMarkers = ['\n    at ', '\n at ', ', XML:', ' XML:', '<?xml', '<feed '];
   for (const marker of cutMarkers) {
     const index = message.indexOf(marker);
@@ -89,7 +90,7 @@ function compactUpdaterError(err) {
   }
   message = message.replace(/\s+/g, ' ').trim();
   if (message.length > 180) message = `${message.slice(0, 180)}...`;
-  return message || '未知错误';
+  return message || tr("未知错误");
 }
 
 function formatUpdaterError(err) {
@@ -97,42 +98,42 @@ function formatUpdaterError(err) {
   const statusCode = getUpdaterHttpStatus(err);
 
   if (/ERR_TIMED_OUT|ETIMEDOUT|Request timed out|net::ERR_TIMED_OUT/i.test(text)) {
-    return '网络超时，请重试';
+    return tr("网络超时，请重试");
   }
   if (/net::ERR_INTERNET_DISCONNECTED|ENETUNREACH|EHOSTUNREACH/i.test(text)) {
-    return '网络不可用，请检查网络后重试';
+    return tr("网络不可用，请检查网络后重试");
   }
   if (/EAI_AGAIN|ENOTFOUND/i.test(text)) {
-    return '网络解析失败，请检查网络后重试';
+    return tr("网络解析失败，请检查网络后重试");
   }
   if (/ECONNRESET|ECONNABORTED|EPIPE|net::ERR_NETWORK_CHANGED|net::ERR_CONNECTION_(?:RESET|CLOSED|TIMED_OUT)/i.test(text)) {
-    return '网络连接中断，请重试';
+    return tr("网络连接中断，请重试");
   }
   if (statusCode === 408) {
-    return '网络超时，请重试';
+    return tr("网络超时，请重试");
   }
   if (statusCode === 429) {
-    return '更新服务请求过于频繁，请稍后重试';
+    return tr("更新服务请求过于频繁，请稍后重试");
   }
   if (statusCode >= 500) {
-    return '更新服务暂时不可用，请稍后重试';
+    return tr("更新服务暂时不可用，请稍后重试");
   }
   if (statusCode === 403) {
-    return '更新服务访问受限，请稍后重试或联系管理员';
+    return tr("更新服务访问受限，请稍后重试或联系管理员");
   }
   if (statusCode === 404 || /ERR_UPDATER_CHANNEL_FILE_NOT_FOUND/i.test(text)) {
-    return '未找到更新信息，请稍后重试或联系管理员';
+    return tr("未找到更新信息，请稍后重试或联系管理员");
   }
   if (/ERR_UPDATER_INVALID_SIGNATURE|ERR_UPDATER_NO_CHECKSUM|checksum|sha512|signature/i.test(text)) {
-    return '更新包校验失败，请重新下载';
+    return tr("更新包校验失败，请重新下载");
   }
   if (/ERR_UPDATER_INVALID_UPDATE_INFO|Cannot parse update info|Cannot parse releases feed/i.test(text)) {
-    return '更新信息格式异常，请稍后重试或联系管理员';
+    return tr("更新信息格式异常，请稍后重试或联系管理员");
   }
   if (/Unable to find latest version on GitHub|ERR_UPDATER_LATEST_VERSION_NOT_FOUND/i.test(text)) {
-    return '更新服务连接失败，请稍后重试';
+    return tr("更新服务连接失败，请稍后重试");
   }
-  return '更新失败，请稍后重试';
+  return tr("更新失败，请稍后重试");
 }
 
 async function runUpdaterTaskWithRetry(action, task) {
@@ -248,11 +249,11 @@ function register(ipcMain) {
   // 事件仍会触发并通过 sendUpdaterEvent 转发，用于 UI 状态同步
   ipcMain.handle('updater:check', async () => {
     if (isDev) {
-      return { success: false, error: '开发模式不支持自动更新，请打包后使用' };
+      return { success: false, error: tr("开发模式不支持自动更新，请打包后使用") };
     }
     try {
       console.log('[Updater] 开始检查更新...');
-      const result = await runUpdaterTaskWithRetry('检查更新', () => autoUpdater.checkForUpdates());
+      const result = await runUpdaterTaskWithRetry(tr("检查更新"), () => autoUpdater.checkForUpdates());
       console.log('[Updater] checkForUpdates 返回:', result ? `有更新 v${result.updateInfo?.version}` : '无更新');
       if (result && result.updateInfo) {
         // 比较版本号：如果服务器版本高于当前版本，则有更新
@@ -278,13 +279,13 @@ function register(ipcMain) {
   // 下载更新
   ipcMain.handle('updater:download', async () => {
     if (isDev) {
-      return { success: false, error: '开发模式不支持自动更新' };
+      return { success: false, error: tr("开发模式不支持自动更新") };
     }
     try {
       console.log('[Updater] 开始下载更新...');
       updaterStatus.downloading = true;
       updaterStatus.downloaded = false;
-      await runUpdaterTaskWithRetry('下载更新', () => autoUpdater.downloadUpdate());
+      await runUpdaterTaskWithRetry(tr("下载更新"), () => autoUpdater.downloadUpdate());
       console.log('[Updater] 下载完成');
       return { success: true };
     } catch (err) {
@@ -300,7 +301,7 @@ function register(ipcMain) {
       app.quit();
       return { success: true };
     }
-    return { success: false, error: '更新尚未下载完成' };
+    return { success: false, error: tr("更新尚未下载完成") };
   });
 
   // 获取当前更新状态

@@ -1,4 +1,6 @@
+const { tr, setLocale, withLocale } = require('./localization.cjs');
 const { parentPort, workerData } = require('worker_threads');
+setLocale(workerData?.locale === 'en-US' ? 'en-US' : 'zh-CN');
 const { execFile } = require('child_process');
 
 const DEFAULT_THRESHOLDS = {
@@ -29,7 +31,7 @@ const snapshotRequestsByDevice = new Map();
 const looseProcs = new Set();
 
 parentPort.on('message', (message) => {
-  handleMessage(message).catch(error => {
+  withLocale(message?.locale, () => handleMessage(message)).catch(error => {
     if (message?.id) {
       parentPort.postMessage({ type: 'response', id: message.id, ok: false, error: error.message });
     } else {
@@ -155,7 +157,7 @@ async function collectCoreSnapshot(deviceId, options = {}) {
     fps: previous?.fps || buildEmptyFps(''),
     processes: previous?.processes || [],
     warnings: [],
-    sampleError: core.ok ? '' : core.error || core.stderr || '采样超时'
+    sampleError: core.ok ? '' : core.error || core.stderr || tr("采样超时")
   };
   if (options.forceHeavy) {
     const heavy = await collectHeavySnapshot(deviceId, options.includeProcesses === true, monitor);
@@ -469,11 +471,11 @@ function parseTop(text) {
 function buildWarnings(snapshot, value) {
   const warnings = [];
   if (snapshot.cpu.usage != null && snapshot.cpu.usage >= value.cpu) warnings.push({ type: 'cpu', label: `CPU ${snapshot.cpu.usage}%` });
-  if (snapshot.memory.usage != null && snapshot.memory.usage >= value.memory) warnings.push({ type: 'memory', label: `内存 ${snapshot.memory.usage}%` });
+  if (snapshot.memory.usage != null && snapshot.memory.usage >= value.memory) warnings.push({ type: 'memory', label: tr("内存 {0}%", { 0: snapshot.memory.usage }) });
   const temperature = snapshot.battery.temperature ?? snapshot.thermal.hottest;
-  if (temperature != null && temperature >= value.batteryTemp) warnings.push({ type: 'batteryTemp', label: `温度 ${temperature}°C` });
+  if (temperature != null && temperature >= value.batteryTemp) warnings.push({ type: 'batteryTemp', label: tr("温度 {0}°C", { 0: temperature }) });
   const highDisk = snapshot.disk.find(item => item.mount === '/data' && item.usage >= value.dataUsed);
-  if (highDisk) warnings.push({ type: 'disk', label: `存储空间 ${highDisk.usage}%` });
+  if (highDisk) warnings.push({ type: 'disk', label: tr("存储空间 {0}%", { 0: highDisk.usage }) });
   return warnings;
 }
 

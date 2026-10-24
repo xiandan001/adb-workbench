@@ -74,6 +74,7 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
         resizable: false, movable: false, minimizable: false, maximizable: false, fullscreen: false, fullscreenable: false,
         paintWhenInitiallyHidden: true,
         webPreferences: { preload: path.join(__dirname, '../startup/preload.cjs'), nodeIntegration: false,
+          additionalArguments: require('./localization.cjs').windowArguments(),
           contextIsolation: true, sandbox: true, devTools: false, backgroundThrottling: false } });
       overlay.setIgnoreMouseEvents(true);
       warmed = true;

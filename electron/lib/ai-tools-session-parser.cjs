@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { fail } = require('./ai-tools-file-safety.cjs');
 
 const number = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -7,7 +8,7 @@ const time = value => { const result = typeof value === 'number' ? value : Date.
 function content(value) {
   if (typeof value === 'string') return value;
   if (!Array.isArray(value)) return '';
-  return value.map(block => ['text', 'input_text', 'output_text'].includes(block?.type) ? text(block.text) : block?.type === 'tool_use' || block?.type === 'function_call' ? `[工具调用：${text(block.name)}]` : block?.type === 'tool_result' ? '[工具返回]' : '').filter(Boolean).join('\n');
+  return value.map(block => ['text', 'input_text', 'output_text'].includes(block?.type) ? text(block.text) : block?.type === 'tool_use' || block?.type === 'function_call' ? tr("[工具调用：{0}]", { 0: text(block.name) }) : block?.type === 'tool_result' ? tr("[工具返回]") : '').filter(Boolean).join('\n');
 }
 function normalizedUsage(value, names) {
   if (!value || typeof value !== 'object') return null;
@@ -18,8 +19,8 @@ const nativeNames = { input: 'input_tokens', output: 'output_tokens', cached: 'c
 function readRows(raw, format) {
   if (format === 'json') {
     let document;
-    try { document = JSON.parse(raw); } catch { throw fail('AI_TOOLS_SESSION_FORMAT', '会话 JSON 格式无效'); }
-    if (!document || typeof document !== 'object' || Array.isArray(document)) throw fail('AI_TOOLS_SESSION_FORMAT', '会话 JSON 必须为对象');
+    try { document = JSON.parse(raw); } catch { throw fail('AI_TOOLS_SESSION_FORMAT', tr("会话 JSON 格式无效")); }
+    if (!document || typeof document !== 'object' || Array.isArray(document)) throw fail('AI_TOOLS_SESSION_FORMAT', tr("会话 JSON 必须为对象"));
     return { document, rows: Array.isArray(document.messages) ? document.messages.slice(0, 20000) : [], invalid: 0, incomplete: document.messages?.length > 20000 };
   }
   const rows = []; let invalid = 0; let start = 0; let lineCount = 0;
@@ -36,11 +37,11 @@ function readRows(raw, format) {
 
 /** Read-only views: source text is never interpreted as markup, instructions or executable commands. */
 function parseSession(raw, toolId, format = 'jsonl') {
-  if (typeof raw !== 'string' || raw.includes('\0')) throw fail('AI_TOOLS_SESSION_FORMAT', '会话不是有效文本');
+  if (typeof raw !== 'string' || raw.includes('\0')) throw fail('AI_TOOLS_SESSION_FORMAT', tr("会话不是有效文本"));
   const decoded = readRows(raw, format); const messages = []; const seenMessages = new Set(); const usages = new Map();
   const meta = { sessionId: '', cwd: '', model: '', title: '', startedAt: null, updatedAt: null };
   let clipped = Boolean(decoded.incomplete); let characters = 0; let codexTotal = null; let codexCounterSeen = false;
-  const addUsage = (id, usage, model) => { if (usage) usages.set(short(id), { ...usage, model: short(model) || meta.model || '未知模型' }); };
+  const addUsage = (id, usage, model) => { if (usage) usages.set(short(id), { ...usage, model: short(model) || meta.model || tr("未知模型") }); };
   const addMessage = (id, role, value, timestamp) => {
     if (!['user', 'assistant', 'system', 'tool'].includes(role)) return;
     const body = content(value); if (!body) return;
@@ -103,7 +104,7 @@ function parseSession(raw, toolId, format = 'jsonl') {
   const uncounted = toolId === 'codex' && !codexCounterSeen && rows.some(row => row.type === 'token_usage_record');
   const aggregated = summarizeUsage([{ toolId, usage: [...usages.values()] }]);
   return { ...meta, messages, usage: aggregated.models, invalidLines: decoded.invalid, truncated: clipped, usageIncomplete: uncounted || Boolean(decoded.incomplete) || aggregated.incomplete,
-    note: uncounted ? '当前文件只有逐轮用量记录，未纳入累计统计' : '本地文件中的 token 统计，不代表服务商额度或最终账单' };
+    note: uncounted ? tr("当前文件只有逐轮用量记录，未纳入累计统计") : tr("本地文件中的 token 统计，不代表服务商额度或最终账单") };
 }
 
 function summarizeUsage(sessions) {
@@ -112,14 +113,14 @@ function summarizeUsage(sessions) {
     if (session.usage.length) sessionsWithUsage++;
     for (const usage of session.usage) {
       let key = `${session.toolId}:${usage.model}`; let model = usage.model;
-      if (!models.has(key) && models.size >= 64) { key = `${session.toolId}:bounded-other`; model = '其他模型（受容量限制合并）'; incomplete = true; }
+      if (!models.has(key) && models.size >= 64) { key = `${session.toolId}:bounded-other`; model = tr("其他模型（受容量限制合并）"); incomplete = true; }
       const row = models.get(key) || { toolId: session.toolId, model, input: null, output: null, cached: null, cacheWrite: null, observations: 0 };
       row.observations++;
       for (const field of ['input', 'output', 'cached', 'cacheWrite']) if (usage[field] !== null && Number.isSafeInteger(usage[field])) row[field] = Math.min(Number.MAX_SAFE_INTEGER, (row[field] ?? 0) + usage[field]);
       models.set(key, row);
     }
   }
-  return { sessionsWithUsage, models: [...models.values()], incomplete, note: '只统计本次读取到的本地会话；缓存 token 的计入方式因工具而异，不据此推算服务商余额。' };
+  return { sessionsWithUsage, models: [...models.values()], incomplete, note: tr("只统计本次读取到的本地会话；缓存 token 的计入方式因工具而异，不据此推算服务商余额。") };
 }
 
 module.exports = { parseSession, summarizeUsage };

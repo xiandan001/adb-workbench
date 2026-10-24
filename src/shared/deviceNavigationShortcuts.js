@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 import spec from '../../electron/lib/device-shortcuts-spec.json' with { type: 'json' };
 
 export const SHORTCUTS_KEY = spec.storageKey;
@@ -12,7 +13,7 @@ export function defaultDeviceShortcuts() {
 
 // Keep validation identical to device-shortcuts-policy.cjs, including during data migration.
 export function normalizeDeviceShortcuts(value) {
-  const fail = () => { throw new Error('快捷操作配置无效，请检查四个按钮的名称和操作'); };
+  const fail = () => { throw new Error(tr("快捷操作配置无效，请检查四个按钮的名称和操作")); };
   const hasControl = value => [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   const object = (item, keys) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)
@@ -48,7 +49,7 @@ export function readDeviceShortcuts(storage = globalThis.localStorage) {
   try {
     const raw = storage.getItem(SHORTCUTS_KEY);
     return { config: raw === null ? defaultDeviceShortcuts() : normalizeDeviceShortcuts(JSON.parse(raw)), error: '' };
-  } catch (error) { return { config: null, error: `快捷操作读取失败，原配置未改动：${error.message}` }; }
+  } catch (error) { return { config: null, error: tr("快捷操作读取失败，原配置未改动：{0}", { 0: error.message }) }; }
 }
 
 export function saveDeviceShortcuts(config, storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED))) {
@@ -69,27 +70,27 @@ export function createShortcutExecutor() {
   let busy = false;
   return async ({ api, deviceId, shortcut, confirmShell }) => {
     if (busy) return { skipped: true };
-    if (typeof deviceId !== 'string' || !deviceId.trim()) throw new Error('没有可操作的设备');
+    if (typeof deviceId !== 'string' || !deviceId.trim()) throw new Error(tr("没有可操作的设备"));
     const action = validateAction(shortcut);
     busy = true;
     try {
       if (action.type === 'shell' && (!confirmShell || !await confirmShell({ deviceId, command: action.command, label: action.label }))) return { cancelled: true };
       if (action.type === 'app') {
-        if (!api?.packageLaunch) throw new Error('设备控制需要在桌面应用中使用');
+        if (!api?.packageLaunch) throw new Error(tr("设备控制需要在桌面应用中使用"));
         const result = await api.packageLaunch({ deviceId, packageName: action.packageName });
-        if (!result?.ok) throw new Error(result?.error || '应用启动失败；可编辑此按钮选择其他应用');
+        if (!result?.ok) throw new Error(result?.error || tr("应用启动失败；可编辑此按钮选择其他应用"));
         return { ok: true };
       }
-      if (!api?.adbShell) throw new Error('设备控制需要在桌面应用中使用');
+      if (!api?.adbShell) throw new Error(tr("设备控制需要在桌面应用中使用"));
       const builtin = action.type === 'builtin' ? BUILTIN_SHORTCUTS.find(item => item.id === action.action) : null;
       if (builtin?.packageName) {
         const probe = await api.adbShell(deviceId, `pm path ${builtin.packageName}`);
-        if (!probe.success) throw new Error(probe.error || '无法读取设备应用信息');
-        if (!/^package:/m.test(probe.output || '')) throw new Error('设备未安装对应应用，请编辑此按钮替换操作');
+        if (!probe.success) throw new Error(probe.error || tr("无法读取设备应用信息"));
+        if (!/^package:/m.test(probe.output || '')) throw new Error(tr("设备未安装对应应用，请编辑此按钮替换操作"));
       }
       const result = await api.adbShell(deviceId, `${builtin?.command || action.command} 2>&1`);
       if (!result?.success || /(?:^|\n)\s*(?:Error(?:\s+type\s+\d+)?\s*:|Exception|java\.[\w.]+Exception)/i.test(result.output || '')) {
-        throw new Error(result?.error || result?.output || '设备未能执行指令');
+        throw new Error(result?.error || result?.output || tr("设备未能执行指令"));
       }
       return { ok: true };
     } finally { busy = false; }

@@ -5,13 +5,14 @@ import App from './App.jsx'
 import { restoreStartupData } from './shared/dataMigrationBootstrap'
 import StartupReady from './components/StartupReady'
 import UiMotionPreferences from './components/UiMotionPreferences'
+import { initializeLanguage, tr } from './shared/i18n.js'
 
-restoreStartupData().then(() => {
+restoreStartupData().then(initializeLanguage).then(() => {
   createRoot(document.getElementById('root')).render(
     <StrictMode><UiMotionPreferences /><App /><StartupReady /></StrictMode>,
   )
 }).catch(() => {
-  const description = '数据恢复未完成，已暂停启动以保护现有偏好。请保留恢复备份并重新启动应用。'
+  const description = tr('数据恢复未完成，已暂停启动以保护现有偏好。请保留恢复备份并重新启动应用。')
   if (window.__workbenchStartup) {
     window.__workbenchStartup.fail(description)
     return

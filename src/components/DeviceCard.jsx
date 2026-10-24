@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 import { useState, useEffect, useRef } from 'react';
 import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, Star } from 'lucide-react';
 import themes from '../data/themes';
@@ -19,6 +20,7 @@ import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflo
 import { recordingButtonState } from '../shared/recordingWorkspace';
 
 function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError, isPinned, onTogglePin }) {
+  useLocale();
   const isOnline = device.status === 'device';
   const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
   const [isEditing, setIsEditing] = useState(false);
@@ -290,13 +292,13 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                   onBlur={handleNameSubmit}
                   autoFocus
                   className="px-2 py-1 text-sm border border-emerald-400 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32"
-                  placeholder="输入设备名称"
+                  placeholder={tr("输入设备名称")}
                 />
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <h3 className={`text-lg font-bold ${t.text.replace('text-slate-700', 'text-slate-800').replace('text-pink-700', 'text-pink-800').replace('text-[#E8EAED]', 'text-[#E8EAED]')}`}>
-                  {deviceName || device.model || '未知设备'}
+                  {deviceName || device.model || tr("未知设备")}
                 </h3>
                 <button
                   onClick={() => {
@@ -304,16 +306,16 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                     setIsEditing(true);
                   }}
                   className="p-1 text-slate-400 hover:text-emerald-500 transition-colors"
-                  title="编辑名称"
+                  title={tr("编辑名称")}
                 >
                   <Pencil size={14} />
                 </button>
                 <button
                   type="button"
                   data-device-pin
-                  aria-label={isPinned ? '取消置顶' : '设为常用'}
+                  aria-label={isPinned ? tr("取消置顶") : tr("设为常用")}
                   aria-pressed={Boolean(isPinned)}
-                  title={isPinned ? '取消置顶' : '设为常用，优先显示'}
+                  title={isPinned ? tr("取消置顶") : tr("设为常用，优先显示")}
                   onClick={onTogglePin}
                   className={`rounded p-1 transition-colors ${isPinned ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
                 >
@@ -333,11 +335,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
 
         <div className="flex items-center gap-2">
           <button type="button" onClick={onSelectDevice} aria-pressed={isActive} className={`px-2 py-1 text-xs rounded border ${isActive ? 'text-emerald-500 border-emerald-500/40' : t.button.secondary}`}>
-            {isActive ? '当前设备' : '选用'}
+            {isActive ? tr("当前设备") : tr("选用")}
           </button>
           <button
             onClick={onDisconnect}
-            title="断开设备"
+            title={tr("断开设备")}
             className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
           >
             <Unplug size={20} />
@@ -348,7 +350,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             className={`${t.button.primary} disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors`}
           >
             {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-            <span>{scrcpyLoading ? '启动中...' : '开始投屏'}</span>
+            <span>{scrcpyLoading ? tr("启动中...") : tr("开始投屏")}</span>
           </button>
         </div>
       </div>
@@ -356,23 +358,23 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
       <div className={`device-card-actions ${t.text}`}>
         {operationError && (
           <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-            <span className="min-w-0 flex-1 break-words">{operationError}</span>
-            <button type="button" onClick={onDismissOperationError} className="shrink-0 underline">收起</button>
+            <span className="min-w-0 flex-1 break-words">{tr(operationError)}</span>
+            <button type="button" onClick={onDismissOperationError} className="shrink-0 underline">{tr("收起")}</button>
           </div>
         )}
         {!isOnline && (
           <div role="status" className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
             <p>{deviceConnectionHint(device.status)}</p>
-            <button type="button" onClick={onEnvironmentCheck} className="mt-1 underline underline-offset-2">打开环境自检</button>
+            <button type="button" onClick={onEnvironmentCheck} className="mt-1 underline underline-offset-2">{tr("打开环境自检")}</button>
           </div>
         )}
         <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} theme={t} />
-        <section className="device-control-section" aria-label="常用工具">
-          <h4 className={`device-control-heading ${t.textMuted}`}>常用工具</h4>
+        <section className="device-control-section" aria-label={tr("常用工具")}>
+          <h4 className={`device-control-heading ${t.textMuted}`}>{tr("常用工具")}</h4>
           <div className="device-tool-grid">
             <ControlButton
               icon={<Camera size={16} />}
-              label={isLoading(`screenshot_${device.id}`) ? '截图中...' : '截图'}
+              label={isLoading(`screenshot_${device.id}`) ? tr("截图中...") : tr("截图")}
               onClick={onScreenshot}
               disabled={!isOnline || isLoading(`screenshot_${device.id}`)}
               loading={isLoading(`screenshot_${device.id}`)}
@@ -391,7 +393,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Volume2 size={16} />}
-              label="音量+"
+              label={tr("音量+")}
               onClick={() => onCommand('input keyevent 24')}
               disabled={!isOnline}
               theme={t}
@@ -399,7 +401,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<VolumeX size={16} />}
-              label="音量-"
+              label={tr("音量-")}
               onClick={() => onCommand('input keyevent 25')}
               disabled={!isOnline}
               theme={t}
@@ -407,7 +409,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Package size={16} />}
-              label="APK管理"
+              label={tr("APK管理")}
               onClick={onApkManager}
               disabled={!isOnline}
               theme={t}
@@ -415,7 +417,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Terminal size={16} />}
-              label="终端"
+              label={tr("终端")}
               onClick={() => setShowTerminal(true)}
               disabled={!isOnline}
               theme={t}
@@ -424,7 +426,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             {/* 设备巡检报告与证据包导出入口 */}
             <ControlButton
               icon={<ClipboardCheck size={16} />}
-              label="巡检"
+              label={tr("巡检")}
               onClick={() => setShowInspection(true)}
               disabled={!isOnline}
               theme={t}
@@ -432,7 +434,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<RotateCcw size={16} />}
-              label={isLoading(`reboot_${device.id}`) ? '重启中...' : '重启'}
+              label={isLoading(`reboot_${device.id}`) ? tr("重启中...") : tr("重启")}
               onClick={onReboot}
               disabled={!isOnline || isLoading(`reboot_${device.id}`)}
               loading={isLoading(`reboot_${device.id}`)}
@@ -440,13 +442,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               isOnline={isOnline}
             />
           </div>
-          <label className={`mt-2 inline-flex items-center gap-2 text-xs ${t.textMuted}`} title="默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。">
-            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" />
-            录屏同时抓取日志<span className="text-[11px] opacity-75">不调用 AI · 上限 100 MB</span>
+          <label className={`mt-2 inline-flex items-center gap-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
+            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" />{tr("录屏同时抓取日志")}<span className="text-[11px] opacity-75">{tr("不调用 AI · 上限 100 MB")}</span>
           </label>
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
-        <section className="device-control-section" aria-label="设备维护">
+        <section className="device-control-section" aria-label={tr("设备维护")}>
           <button
             type="button"
             aria-expanded={maintenanceOpen}
@@ -457,13 +458,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             }}
             className={`device-control-heading device-maintenance-toggle ${t.textMuted}`}
           >
-            <ChevronDown size={14} className={maintenanceOpen ? '' : '-rotate-90'} />
-            设备维护
-          </button>
+            <ChevronDown size={14} className={maintenanceOpen ? '' : '-rotate-90'} />{tr("设备维护")}</button>
           {maintenanceOpen && <div className="device-tool-grid device-maintenance-grid">
             <ControlButton
               icon={<Shield size={16} />}
-              label={isLoading(`root_${device.id}`) ? 'Root中...' : 'Root'}
+              label={isLoading(`root_${device.id}`) ? tr("Root中...") : 'Root'}
               onClick={onRoot}
               disabled={!isOnline || isLoading(`root_${device.id}`)}
               loading={isLoading(`root_${device.id}`)}
@@ -472,7 +471,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Save size={16} />}
-              label={isLoading(`remount_${device.id}`) ? 'Remount中...' : 'Remount'}
+              label={isLoading(`remount_${device.id}`) ? tr("Remount中...") : 'Remount'}
               onClick={onRemount}
               disabled={!isOnline || isLoading(`remount_${device.id}`)}
               loading={isLoading(`remount_${device.id}`)}
@@ -481,7 +480,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Loader size={16} />}
-              label={isLoading(`loader_${device.id}`) ? 'Loader中...' : 'Loader'}
+              label={isLoading(`loader_${device.id}`) ? tr("Loader中...") : 'Loader'}
               onClick={onRebootLoader}
               disabled={!isOnline || isLoading(`loader_${device.id}`)}
               loading={isLoading(`loader_${device.id}`)}
@@ -490,7 +489,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             />
             <ControlButton
               icon={<Unlock size={16} />}
-              label={isLoading(`unlock_${device.id}`) ? 'Unlock中...' : 'Unlock'}
+              label={isLoading(`unlock_${device.id}`) ? tr("Unlock中...") : 'Unlock'}
               onClick={onUnlock}
               disabled={!isOnline || isLoading(`unlock_${device.id}`)}
               loading={isLoading(`unlock_${device.id}`)}
@@ -540,22 +539,20 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
       {showLegacyApkManager && showApkManager && (
         <div style={{ order: getPanelOrder('apk') }} className={`border-t p-4 ${isDarkTheme(t) ? 'bg-slate-800/30' : 'bg-slate-50'}`}>
           <h4 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${t.text}`}>
-            <Package size={16} />
-            APK 管理
-          </h4>
+            <Package size={16} />{tr("APK 管理")}</h4>
 
           {/* Install APK */}
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-2">
               <Download size={14} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-500' : t.primary === 'pink' ? 'text-pink-500' : t.primary === 'green' ? 'text-green-500' : t.primary === 'orange' ? 'text-orange-500' : 'text-emerald-500'} />
-              <span className={`text-sm font-medium ${t.text}`}>安装 APK</span>
+              <span className={`text-sm font-medium ${t.text}`}>{tr("安装 APK")}</span>
             </div>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 value={apkInstallPath}
                 readOnly
-                placeholder="点击选择 APK 文件..."
+                placeholder={tr("点击选择 APK 文件...")}
                 className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
               />
               <button
@@ -563,9 +560,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 disabled={isLoading(`install_${device.id}`)}
                 className={`px-4 py-2 text-sm border rounded-lg transition-colors flex items-center gap-1 ${t.button.secondary}`}
               >
-                <FolderOpen size={14} />
-                选择
-              </button>
+                <FolderOpen size={14} />{tr("选择")}</button>
               <button
                 onClick={onInstallApk}
                 disabled={!apkInstallPath || isLoading(`install_${device.id}`)}
@@ -576,7 +571,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 ) : (
                   <Download size={14} />
                 )}
-                {isLoading(`install_${device.id}`) ? '安装中...' : '安装'}
+                {isLoading(`install_${device.id}`) ? tr("安装中...") : tr("安装")}
               </button>
             </div>
           </div>
@@ -585,14 +580,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-2">
               <Upload size={14} className={t.primary === 'cyan' || t.primary === 'blue' ? 'text-blue-500' : t.primary === 'pink' ? 'text-pink-500' : t.primary === 'green' ? 'text-green-500' : t.primary === 'orange' ? 'text-orange-500' : 'text-blue-500'} />
-              <span className={`text-sm font-medium ${t.text}`}>推送文件到设备</span>
+              <span className={`text-sm font-medium ${t.text}`}>{tr("推送文件到设备")}</span>
             </div>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 value={apkPushPath}
                 readOnly
-                placeholder="点击选择文件..."
+                placeholder={tr("点击选择文件...")}
                 className={`flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
               />
               <button
@@ -600,15 +595,13 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 disabled={isLoading(`push_${device.id}`)}
                 className={`px-4 py-2 text-sm border rounded-lg transition-colors flex items-center gap-1 ${t.button.secondary}`}
               >
-                <FolderOpen size={14} />
-                选择
-              </button>
+                <FolderOpen size={14} />{tr("选择")}</button>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   value={apkPushRemotePath}
                   onChange={(e) => onPushPathChange?.(e.target.value)}
-                  aria-label="设备推送目标路径"
+                  aria-label={tr("设备推送目标路径")}
                   placeholder="/sdcard/"
                   readOnly={false}
                   className={`w-40 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white ${t.input}`}
@@ -620,7 +613,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                   onChange={path => onPushPathChange?.(path)}
                   isDark={isDarkTheme(t)}
                   accent={t.primary}
-                  placeholder="历史路径"
+                  placeholder={tr("历史路径")}
                   compact
                   className="w-36"
                 />}
@@ -635,7 +628,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 ) : (
                   <Upload size={14} />
                 )}
-                {isLoading(`push_${device.id}`) ? '推送中...' : '推送'}
+                {isLoading(`push_${device.id}`) ? tr("推送中...") : tr("推送")}
               </button>
             </div>
           </div>
@@ -644,7 +637,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Folder size={14} className="text-purple-500" />
-              <span className={`text-sm font-medium ${t.text}`}>浏览设备文件</span>
+              <span className={`text-sm font-medium ${t.text}`}>{tr("浏览设备文件")}</span>
               <div className="flex items-center gap-1 ml-auto">
                 <span className={`text-xs font-mono px-2 py-1 rounded select-all ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{apkBrowserPath}</span>
                 <button
@@ -652,10 +645,10 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                   onClick={(e) => {
                     e.stopPropagation();
                     navigator.clipboard.writeText(apkBrowserPath);
-                    showToast(`路径已复制: ${apkBrowserPath}`);
+                    showToast(tr("路径已复制: {0}", { 0: apkBrowserPath }));
                   }}
                   className={`p-1 transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-cyan-400' : 'text-[#9AA0A6] hover:text-emerald-500'}`}
-                  title="复制路径"
+                  title={tr("复制路径")}
                 >
                   <Copy size={14} />
                 </button>
@@ -665,9 +658,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               <button
                 onClick={() => onBrowsePath?.('/')}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
-              >
-                / (根目录)
-              </button>
+              >{tr("/ (根目录)")}</button>
               <button
                 onClick={() => onBrowsePath?.('/system/app')}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
@@ -691,9 +682,9 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             {/* File List */}
             <div className={`mt-3 border rounded-lg max-h-48 overflow-y-auto ${isDarkTheme(t) ? 'bg-slate-800/50 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
               {apkBrowserLoading ? (
-                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>加载中...</div>
+                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>{tr("加载中...")}</div>
               ) : apkBrowserItems.length === 0 ? (
-                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>暂无文件</div>
+                <div className={`p-4 text-center text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>{tr("暂无文件")}</div>
               ) : (
                 <div className={`divide-y ${isDarkTheme(t) ? 'divide-slate-700' : 'divide-slate-100'}`}>
                   {apkBrowserItems.map((item, index) => (
@@ -713,7 +704,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                           <File size={14} className="text-slate-400" />
                         )}
                         <span className={`text-sm ${item.name === '..' ? 'text-blue-500 font-medium' : item.name === '.' ? 'text-slate-400' : t.text}`}>
-                          {item.name === '.' ? '当前目录' : item.name === '..' ? '上一级目录' : item.name}
+                          {item.name === '.' ? tr("当前目录") : item.name === '..' ? tr("上一级目录") : item.name}
                         </span>
                       </div>
                       {!item.isDirectory && item.name !== '.' && item.name !== '..' ? (
@@ -723,14 +714,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                             onClick={(e) => {
                               e.stopPropagation();
                               navigator.clipboard.writeText(item.path);
-                              showToast(`路径已复制: ${item.path}`);
+                              showToast(tr("路径已复制: {0}", { 0: item.path }));
                             }}
                             className={`px-2 py-1 text-xs border rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ${t.button.secondary}`}
-                            title="复制路径"
+                            title={tr("复制路径")}
                           >
-                            <Copy size={12} />
-                            复制
-                          </button>
+                            <Copy size={12} />{tr("复制")}</button>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -745,7 +734,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                             ) : (
                               <Download size={12} />
                             )}
-                            {isLoading(`pull_${device.id}_${item.path}`) ? '拉取中' : '拉取'}
+                            {isLoading(`pull_${device.id}_${item.path}`) ? tr("拉取中") : tr("拉取")}
                           </button>
                         </div>
                       ) : item.isDirectory ? (
@@ -769,9 +758,9 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
           <div className={`flex items-center justify-between mb-3 ${t.terminal.accent} ${terminalFullscreen ? 'pb-3 border-b border-[#3E4145]' : ''}`}>
             <div className="flex items-center gap-2">
               <Terminal size={16} />
-              <span className="text-sm font-medium">终端 - {device.id}</span>
+              <span className="text-sm font-medium">{tr("终端 - {0}", { 0: device.id })}</span>
               {terminalFullscreen && (
-                <span className="text-xs text-slate-500 ml-2">（放大模式 · 按 Esc 或点击还原返回 · Ctrl+滚轮缩放）</span>
+                <span className="text-xs text-slate-500 ml-2">{tr("（放大模式 · 按 Esc 或点击还原返回 · Ctrl+滚轮缩放）")}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -782,7 +771,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                     onClick={() => setTerminalFontSize((s) => Math.max(10, s - 1))}
                     className="w-5 h-5 flex items-center justify-center hover:bg-[#5F6368] rounded text-[#E8EAED] disabled:opacity-30"
                     disabled={terminalFontSize <= 10}
-                    title="缩小 (Ctrl+-)"
+                    title={tr("缩小 (Ctrl+-)")}
                   >
                     -
                   </button>
@@ -791,25 +780,21 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                     onClick={() => setTerminalFontSize((s) => Math.min(28, s + 1))}
                     className="w-5 h-5 flex items-center justify-center hover:bg-[#5F6368] rounded text-[#E8EAED] disabled:opacity-30"
                     disabled={terminalFontSize >= 28}
-                    title="放大 (Ctrl+=)"
+                    title={tr("放大 (Ctrl+=)")}
                   >
                     +
                   </button>
                   <button
                     onClick={() => setTerminalFontSize(12)}
                     className="px-1.5 h-5 flex items-center justify-center hover:bg-[#5F6368] rounded text-[#9AA0A6] text-[10px]"
-                    title="重置 (Ctrl+0)"
-                  >
-                    重置
-                  </button>
+                    title={tr("重置 (Ctrl+0)")}
+                  >{tr("重置")}</button>
                 </div>
               )}
               <button
                 onClick={clearTerminal}
                 className="px-2 py-1 text-xs bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED] rounded transition-colors"
-              >
-                清空输出
-              </button>
+              >{tr("清空输出")}</button>
               {commandHistory.length > 0 && (
                 <button
                   onClick={() => {
@@ -821,15 +806,13 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                   }}
                   className="px-2 py-1 text-xs bg-[#3E4145] hover:bg-red-900/50 text-[#E8EAED] hover:text-red-400 rounded transition-colors flex items-center gap-1"
                 >
-                  <RotateCcw size={10} />
-                  清空历史命令
-                </button>
+                  <RotateCcw size={10} />{tr("清空历史命令")}</button>
               )}
               {/* 放大 / 还原按钮 */}
               <button
                 onClick={() => setTerminalFullscreen((v) => !v)}
                 className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-[#3E4145] rounded transition-colors"
-                title={terminalFullscreen ? '还原' : '放大'}
+                title={terminalFullscreen ? tr("还原") : tr("放大")}
               >
                 {terminalFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
@@ -858,7 +841,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             {terminalOutput.length === 0 ? (
               <div className="flex items-center gap-2 text-slate-500 select-text py-2">
                 <Terminal size={14} className="opacity-50" />
-                <span>输入命令并按 Enter 执行...</span>
+                <span>{tr("输入命令并按 Enter 执行...")}</span>
               </div>
             ) : (
               <div className="space-y-0.5">
@@ -896,14 +879,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
             {isExecuting && (
               <div className="flex items-center gap-2 px-2 py-1 text-amber-400 animate-pulse select-text">
                 <Loader2 size={12} className="animate-spin" />
-                <span className="text-xs">执行中...</span>
+                <span className="text-xs">{tr("执行中...")}</span>
               </div>
             )}
           </div>
 
           {/* Terminal Input */}
           <form onSubmit={handleTerminalSubmit} className="flex items-center gap-2">
-            <span className={`font-mono text-sm transition-colors ${suMode ? 'text-red-400' : 'text-emerald-400'}`} title={suMode ? 'ROOT 模式' : '普通模式'}>{suMode ? '#' : '$'}</span>
+            <span className={`font-mono text-sm transition-colors ${suMode ? 'text-red-400' : 'text-emerald-400'}`} title={suMode ? tr("ROOT 模式") : tr("普通模式")}>{suMode ? '#' : '$'}</span>
             <div className="flex-1 relative">
               <input
                 type="text"
@@ -913,7 +896,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 onFocus={handleTerminalFocus}
                 onBlur={handleTerminalBlur}
                 disabled={isExecuting || !isOnline}
-                placeholder={suMode ? '以 ROOT 身份执行命令...' : '输入 ADB Shell 命令...'}
+                placeholder={suMode ? tr("以 ROOT 身份执行命令...") : tr("输入 ADB Shell 命令...")}
                 className={`w-full px-3 py-2 pr-16 border rounded-lg font-mono text-sm focus:outline-none focus:ring-2 ${suMode ? 'focus:ring-red-500 focus:border-red-500' : 'focus:ring-emerald-500 focus:border-emerald-500'} placeholder-slate-500 disabled:opacity-50 ${t.terminal.bg.replace('bg-', 'bg-').replace('gradient-to-br', 'bg-').includes('gradient') ? 'bg-[#2D2F33] border-[#3E4145] text-[#E8EAED]' : t.terminal.text.includes('300') ? 'bg-[#2D2F33] border-[#3E4145] text-[#E8EAED]' : 'bg-[#202124] border-[#3E4145] text-[#E8EAED]'}`}
               />
               {/* SU 模式开关：紧凑胶囊，内嵌输入框右侧，不额外占行 */}
@@ -921,7 +904,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
                 type="button"
                 onClick={toggleSuMode}
                 disabled={!isOnline || isExecuting || suChecking}
-                title={suMode ? '已开启 ROOT 模式，点击关闭' : '开启 ROOT 模式'}
+                title={suMode ? tr("已开启 ROOT 模式，点击关闭") : tr("开启 ROOT 模式")}
                 className={`absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all disabled:opacity-40 ${
                   suMode
                     ? 'bg-red-500/20 text-red-400 border-red-500/40 shadow-[0_0_8px_-2px] shadow-red-500/40'
@@ -934,7 +917,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               {showHistory && commandHistory.length > 0 && (
                 <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#2D2F33] border border-[#3E4145] rounded-lg overflow-hidden shadow-lg max-h-40 overflow-y-auto z-50">
                   <div className="px-3 py-1 text-xs text-slate-500 border-b border-[#3E4145] flex items-center justify-between">
-                    <span>历史命令</span>
+                    <span>{tr("历史命令")}</span>
                     <span>{commandHistory.length}/100</span>
                   </div>
                   {commandHistory.slice(0, 10).map((cmd, index) => (
@@ -957,27 +940,23 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               <button
                 type="button"
                 onClick={handleCancelExecute}
-                title="中断当前命令"
+                title={tr("中断当前命令")}
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30"
               >
-                <X size={14} />
-                停止
-              </button>
+                <X size={14} />{tr("停止")}</button>
             ) : (
               <button
                 type="submit"
                 disabled={!terminalCommand.trim() || !isOnline}
                 className={`${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 disabled:opacity-50`}
               >
-                <Send size={14} />
-                执行
-              </button>
+                <Send size={14} />{tr("执行")}</button>
             )}
           </form>
 
           {/* Quick Commands */}
           <div className="mt-3 flex flex-wrap gap-2">
-            <span className="text-xs text-slate-500">快捷命令:</span>
+            <span className="text-xs text-slate-500">{tr("快捷命令:")}</span>
             {['pm list packages', 'getprop ro.build.version', 'dumpsys battery', 'cat /proc/meminfo', 'ls -la /data/'].map((cmd) => (
               <button
                 key={cmd}
@@ -1008,16 +987,16 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
       <DangerConfirmModal
         open={suUnsupportedOpen}
         theme={t}
-        title="设备暂不支持 su 命令"
-        message="检测到当前设备无法以 root 身份执行命令，可能原因："
+        title={tr("设备暂不支持 su 命令")}
+        message={tr("检测到当前设备无法以 root 身份执行命令，可能原因：")}
         bullets={[
-          '设备未 Root 或未安装权限管理（如 Magisk）',
-          '已 Root 但未给 ADB Shell 授权',
-          '使用了受限用户版本的系统镜像'
+          tr("设备未 Root 或未安装权限管理（如 Magisk）"),
+          tr("已 Root 但未给 ADB Shell 授权"),
+          tr("使用了受限用户版本的系统镜像")
         ]}
-        detail="请先完成 Root 并在设备端授权后，再开启 ROOT 模式。"
-        confirmLabel="知道了"
-        cancelLabel="关闭"
+        detail={tr("请先完成 Root 并在设备端授权后，再开启 ROOT 模式。")}
+        confirmLabel={tr("知道了")}
+        cancelLabel={tr("关闭")}
         tone="warning"
         onCancel={() => setSuUnsupportedOpen(false)}
         onConfirm={() => setSuUnsupportedOpen(false)}

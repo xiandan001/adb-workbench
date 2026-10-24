@@ -1,23 +1,25 @@
+import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 
 function DangerConfirmModal({
   open,
   theme,
-  title = '确认操作',
+  title = tr("确认操作"),
   message,
   detail,
   bullets = [],
-  confirmLabel = '确定',
-  cancelLabel = '取消',
+  confirmLabel = tr("确定"),
+  cancelLabel = tr("取消"),
   tone = 'danger',
   loading = false,
   rememberChoice = false,
-  rememberLabel = '下次不再提示',
+  rememberLabel = tr("下次不再提示"),
   onRememberChoiceChange,
   onCancel,
   onConfirm
 }) {
+  useLocale();
   if (!open) return null;
   const isDark = isDarkTheme(theme);
   const panel = isDark ? 'bg-[#202124] border-[#3E4145] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800';
@@ -42,7 +44,7 @@ function DangerConfirmModal({
             onClick={onCancel}
             disabled={loading}
             className={`rounded-lg p-2 transition-colors disabled:opacity-50 ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
-            title="关闭"
+            title={tr("关闭")}
           >
             <X size={18} />
           </button>

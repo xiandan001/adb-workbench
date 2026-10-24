@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const TOOLS = [
   ['claude', 'Claude Code', ['anthropic']],
   ['codex', 'Codex', ['openai-responses']],
@@ -13,7 +14,7 @@ const TOOLS = [
 function getAiToolsCatalog() {
   return TOOLS.map(([id, label, protocols]) => ({
     id, label, configSupported: Boolean(protocols), launchSupported: id === 'agy', protocols: [...(protocols || (id === 'agy' ? ['gemini'] : []))],
-    ...(protocols ? {} : { reason: '通过「项目与 CLI」的受管终端启动，使用独立配置目录，不修改全局登录配置。' }),
+    ...(protocols ? {} : { reason: tr("通过「项目与 CLI」的受管终端启动，使用独立配置目录，不修改全局登录配置。") }),
   }));
 }
 

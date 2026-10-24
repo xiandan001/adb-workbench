@@ -1,12 +1,13 @@
+import { tr } from './i18n.js';
 let sequence = 0;
 const pending = new Map(); const listeners = new Set();
 export function normalizeAppMessageOptions(input = {}) {
-  const buttons = input.buttons || ['确定']; const cancelId = input.cancelId ?? 0; const defaultId = input.defaultId ?? cancelId;
+  const buttons = input.buttons || [tr("确定")]; const cancelId = input.cancelId ?? 0; const defaultId = input.defaultId ?? cancelId;
   if (!Array.isArray(buttons) || !buttons.length || buttons.length > 6 || buttons.some(value => typeof value !== 'string' || value.length > 160)
-    || ![cancelId, defaultId].every(value => Number.isInteger(value) && value >= 0 && value < buttons.length)) throw new Error('确认对话框选项无效');
-  const options = { type: ['info', 'error', 'warning', 'question'].includes(input.type) ? input.type : 'question', title: input.title || '请确认', message: input.message || '', detail: input.detail || '',
+    || ![cancelId, defaultId].every(value => Number.isInteger(value) && value >= 0 && value < buttons.length)) throw new Error(tr("确认对话框选项无效"));
+  const options = { type: ['info', 'error', 'warning', 'question'].includes(input.type) ? input.type : 'question', title: input.title || tr("请确认"), message: input.message || '', detail: input.detail || '',
     buttons: [...buttons], defaultId, cancelId, checkboxLabel: input.checkboxLabel || '', checkboxChecked: Boolean(input.checkboxLabel && input.checkboxChecked) };
-  for (const [key, max] of Object.entries({ title: 240, message: 8000, detail: 64000, checkboxLabel: 400 })) if (typeof options[key] !== 'string' || options[key].length > max || options[key].includes('\0')) throw new Error('确认对话框内容无效');
+  for (const [key, max] of Object.entries({ title: 240, message: 8000, detail: 64000, checkboxLabel: 400 })) if (typeof options[key] !== 'string' || options[key].length > max || options[key].includes('\0')) throw new Error(tr("确认对话框内容无效"));
   return options;
 }
 export function subscribeAppMessages(listener) {
@@ -33,7 +34,7 @@ export function resolveAppMessage(requestId, result) {
   pending.delete(requestId); item.resolve({ response: result.response, checkboxChecked: result.checkboxChecked });
   for (const listener of listeners) listener({ type: 'cancel', requestId }); return true;
 }
-export async function confirmAppMessage({ confirmLabel = '确定', cancelLabel = '取消', confirmId = 1, ...input }) {
+export async function confirmAppMessage({ confirmLabel = tr("确定"), cancelLabel = tr("取消"), confirmId = 1, ...input }) {
   const result = await showAppMessage({ ...input, buttons: input.buttons || [cancelLabel, confirmLabel], defaultId: input.defaultId ?? 0, cancelId: input.cancelId ?? 0 });
   return result.response === confirmId;
 }

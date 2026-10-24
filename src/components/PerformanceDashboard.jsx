@@ -1,3 +1,4 @@
+import { tr, useLocale } from '../shared/i18n';
 // 性能监控面板：设备指标实时采样、曲线、阈值、告警和会员导出。
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -6,14 +7,15 @@ import { Activity, AlertTriangle, Check, ChevronDown, Cpu, Database, Download, F
 import { isDarkTheme } from '../shared/theme';
 import PerformanceTrendChart from './PerformanceTrendChart';
 
-const INTERVAL_OPTIONS = [
-  { value: 1000, label: '1 秒', description: '高频采样' },
-  { value: 3000, label: '3 秒', description: '更及时' },
-  { value: 5000, label: '5 秒', description: '均衡' },
-  { value: 10000, label: '10 秒', description: '低负载' }
-];
+const INTERVAL_OPTIONS = () => ([
+  { value: 1000, label: tr("1 秒"), description: tr("高频采样") },
+  { value: 3000, label: tr("3 秒"), description: tr("更及时") },
+  { value: 5000, label: tr("5 秒"), description: tr("均衡") },
+  { value: 10000, label: tr("10 秒"), description: tr("低负载") }
+]);
 
 function PerformanceDashboard({ devices, theme, vipStatus, performancePath, showToast, onOpenMemberCenter, onRefreshVipStatus, activeDeviceId, onActiveDeviceChange }) {
+  const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
   const hasVipAccess = vipStatus?.activated === true;
@@ -29,7 +31,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const [storedSnapshot, setSnapshot] = useState(null);
   const [storedHistory, setHistory] = useState([]);
   const snapshot = dataDeviceId === selectedDeviceId ? storedSnapshot : null;
-  const history = useMemo(() => dataDeviceId === selectedDeviceId ? storedHistory : [], [dataDeviceId, selectedDeviceId, storedHistory]);
+  const history = useMemo(() => { void locale; return dataDeviceId === selectedDeviceId ? storedHistory : []; }, [dataDeviceId, selectedDeviceId, storedHistory, locale]);
   const [thresholds, setThresholds] = useState({ cpu: 85, memory: 85, batteryTemp: 45, dataUsed: 90 });
   const [loading, setLoading] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
@@ -53,22 +55,23 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const selectedDevice = devices.find(device => device.id === selectedDeviceId);
   const selectedDeviceOnline = selectedDevice?.status === 'device';
   const deviceOptions = useMemo(() => {
+    void locale;
     const options = devices.map(device => ({
       value: device.id,
       label: device.name || device.id,
-      description: device.status === 'device' ? device.id : `${device.id} · ${device.status === 'unauthorized' ? '未授权' : '离线'}`,
+      description: device.status === 'device' ? device.id : `${device.id} · ${device.status === 'unauthorized' ? tr("未授权") : tr("离线")}`,
       disabled: device.status !== 'device',
       icon: Smartphone
     }));
-    if (selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)) options.unshift({ value: selectedDeviceId, label: selectedDeviceId, description: '离线 · 保留所选设备，不自动切换', disabled: true, icon: Smartphone });
-    if (!selectedDeviceId) options.unshift({ value: '', label: '请选择设备', description: '只操作明确选中的在线设备', disabled: true, icon: Smartphone });
+    if (selectedDeviceId && !devices.some(device => device.id === selectedDeviceId)) options.unshift({ value: selectedDeviceId, label: selectedDeviceId, description: tr("离线 · 保留所选设备，不自动切换"), disabled: true, icon: Smartphone });
+    if (!selectedDeviceId) options.unshift({ value: '', label: tr("请选择设备"), description: tr("只操作明确选中的在线设备"), disabled: true, icon: Smartphone });
     return options;
-  }, [devices, selectedDeviceId]);
-  const intervalOptions = useMemo(() => INTERVAL_OPTIONS.map(option => ({
+  }, [devices, selectedDeviceId, locale]);
+  const intervalOptions = useMemo(() => { void locale; return INTERVAL_OPTIONS().map(option => ({
     ...option,
-    description: option.value < 5000 && !isVip ? `${option.description} · 会员` : option.description
-  })), [isVip]);
-  const chartPoints = useMemo(() => history.slice(-80).map(item => ({
+    description: option.value < 5000 && !isVip ? tr("{0} · 会员", { 0: option.description }) : option.description
+  })); }, [isVip, locale]);
+  const chartPoints = useMemo(() => { void locale; return history.slice(-80).map(item => ({
     timestamp: item.timestamp,
     cpu: item.cpu?.usage,
     memory: item.memory?.usage,
@@ -76,7 +79,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
     temp: getDeviceTemperature(item),
     foregroundFps: item.fps?.foreground?.fps,
     surfaceFps: item.fps?.surfaceFlinger?.fps
-  })), [history]);
+  })); }, [history, locale]);
   const dataDisk = getDataDisk(snapshot);
   const deviceTemperature = getDeviceTemperature(snapshot);
   // 当前 FPS 指标快照。
@@ -205,7 +208,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 
   const requireVip = (featureName) => {
     if (isVip) return true;
-    showToast?.(`${featureName}需要会员版`);
+    showToast?.(tr("{0}需要会员版", { 0: featureName }));
     onOpenMemberCenter?.();
     return false;
   };
@@ -216,10 +219,10 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
     if (!targetDeviceId || !selectedDeviceOnline) return;
     if (intervalMs < 5000 && !hasVipAccess) {
       if (isVipLoading) {
-        showToast?.('正在加载会员状态，请稍后再试');
+        showToast?.(tr("正在加载会员状态，请稍后再试"));
         onRefreshVipStatus?.();
       } else {
-        requireVip('高频采样');
+        requireVip(tr("高频采样"));
       }
       return;
     }
@@ -240,12 +243,12 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         });
         runningDeviceRef.current = targetDeviceId;
         refreshPerformanceState(targetDeviceId, { replaceHistory: false });
-        showToast?.('性能监控已启动');
+        showToast?.(tr("性能监控已启动"));
       } else {
-        showToast?.(`启动失败：${res.error || '未知错误'}`);
+        showToast?.(tr("启动失败：{0}", { 0: res.error || tr("未知错误") }));
       }
     } catch (error) {
-      if (deviceContextRef.current === context) showToast?.(`启动失败：${error.message || '未知错误'}`);
+      if (deviceContextRef.current === context) showToast?.(tr("启动失败：{0}", { 0: error.message || tr("未知错误") }));
     } finally {
       if (monitorActionRef.current === action) { monitorActionRef.current = null; setLoading(false); }
     }
@@ -265,14 +268,14 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
         flushSync(() => setRunning(false));
         if (runningDeviceRef.current === targetDeviceId) runningDeviceRef.current = '';
         refreshPerformanceState(targetDeviceId, { replaceHistory: false });
-        showToast?.('性能监控已停止');
+        showToast?.(tr("性能监控已停止"));
       } else {
-        showToast?.(`停止失败：${res.error || '未知错误'}`);
+        showToast?.(tr("停止失败：{0}", { 0: res.error || tr("未知错误") }));
         refreshPerformanceState(targetDeviceId, { replaceHistory: false });
       }
     } catch (error) {
       if (deviceContextRef.current === context) {
-        showToast?.(`停止失败：${error.message || '未知错误'}`);
+        showToast?.(tr("停止失败：{0}", { 0: error.message || tr("未知错误") }));
         refreshPerformanceState(targetDeviceId, { replaceHistory: false });
       }
     } finally {
@@ -301,7 +304,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
       if (res.ok) {
         applyPerformanceSnapshot(res.snapshot);
       } else {
-        showToast?.(`采样失败：${res.error || '未知错误'}`);
+        showToast?.(tr("采样失败：{0}", { 0: res.error || tr("未知错误") }));
       }
     } finally {
       if (monitorActionRef.current === action) { monitorActionRef.current = null; setLoading(false); }
@@ -309,30 +312,30 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   };
 
   const exportHistory = async () => {
-    if (!requireVip('性能数据导出')) return;
+    if (!requireVip(tr("性能数据导出"))) return;
     const context = deviceContextRef.current;
     const res = await window.electronAPI.perfExport({ deviceId: selectedDeviceId, outputBaseDir: performancePath || undefined });
     if (deviceContextRef.current !== context) return;
     if (res.ok) {
       setExportResult({ deviceId: selectedDeviceId, path: res.path || '' });
-      showToast?.(`已导出：${res.path}`);
+      showToast?.(tr("已导出：{0}", { 0: res.path }));
     }
-    else showToast?.(`导出失败：${res.error || '未知错误'}`);
+    else showToast?.(tr("导出失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
   const exportReport = async () => {
-    if (!requireVip('性能分析报告')) return;
+    if (!requireVip(tr("性能分析报告"))) return;
     const context = deviceContextRef.current;
     try {
       const res = await window.electronAPI.perfReport({ deviceId: selectedDeviceId, outputBaseDir: performancePath || undefined, includeAiSummary });
       if (deviceContextRef.current !== context) return;
       if (res.ok) {
         if (res.task) setReportTask(res.task);
-        showToast?.('性能报告已在后台生成');
+        showToast?.(tr("性能报告已在后台生成"));
       }
-      else showToast?.(`报告生成失败：${res.error || '未知错误'}`);
+      else showToast?.(tr("报告生成失败：{0}", { 0: res.error || tr("未知错误") }));
     } catch (e) {
-      if (deviceContextRef.current === context) showToast?.(`报告生成失败：${e.message || '未知错误'}`);
+      if (deviceContextRef.current === context) showToast?.(tr("报告生成失败：{0}", { 0: e.message || tr("未知错误") }));
     }
   };
 
@@ -341,7 +344,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
     if (!folder) return;
     await window.electronAPI?.ensureFolder?.(folder);
     const res = await window.electronAPI?.openFolder?.(folder);
-    if (res && !res.success && !res.ok) showToast?.(`打开目录失败：${res.error || '未知错误'}`);
+    if (res && !res.success && !res.ok) showToast?.(tr("打开目录失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
   const getDefaultPerformanceDir = async () => {
@@ -350,15 +353,15 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   };
 
   const saveThresholds = async () => {
-    if (!requireVip('阈值设置')) return;
+    if (!requireVip(tr("阈值设置"))) return;
     setSavingThresholds(true);
     try {
       const res = await window.electronAPI.perfSetThresholds({ thresholds });
       if (res.ok) {
         setThresholds(res.thresholds);
-        showToast?.('阈值已保存');
+        showToast?.(tr("阈值已保存"));
       } else {
-        showToast?.(`保存失败：${res.error || '未知错误'}`);
+        showToast?.(tr("保存失败：{0}", { 0: res.error || tr("未知错误") }));
       }
     } finally {
       setSavingThresholds(false);
@@ -379,8 +382,8 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                 <Gauge size={20} />
               </div>
               <div className="min-w-0">
-                <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>性能监控</h3>
-                <div className={`text-sm mt-1 truncate ${muted}`}>{selectedDevice?.name || selectedDeviceId || '未选择设备'}</div>
+                <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("性能监控")}</h3>
+                <div className={`text-sm mt-1 truncate ${muted}`}>{selectedDevice?.name || selectedDeviceId || tr("未选择设备")}</div>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[minmax(220px,1fr)_140px_auto] gap-2 w-full 2xl:w-auto 2xl:min-w-[620px]">
@@ -396,7 +399,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                 options={intervalOptions}
                 onChange={(value) => {
                   if (value < 5000 && !isVip) {
-                    requireVip('高频采样');
+                    requireVip(tr("高频采样"));
                     return;
                   }
                   setIntervalMs(value);
@@ -406,21 +409,15 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
               />
               {running ? (
                 <button onClick={stopMonitor} disabled={loading} className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
-                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Square size={16} />}
-                  停止
-                </button>
+                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Square size={16} />}{tr("停止")}</button>
               ) : (
                 <button onClick={startMonitor} disabled={!selectedDeviceOnline || loading} className="px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap">
-                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
-                  开始
-                </button>
+                  {loading ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}{tr("开始")}</button>
               )}
             </div>
           </div>
 
-          {selectedDeviceId && !selectedDeviceOnline && <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-500">
-            所选设备 {selectedDeviceId} {selectedDevice?.status === 'unauthorized' ? '未授权' : '已离线'}。保留当前设备和已有结果，不会自动切换到其他设备。
-          </div>}
+          {selectedDeviceId && !selectedDeviceOnline && <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-500">{tr("所选设备 ")}{selectedDeviceId} {selectedDevice?.status === 'unauthorized' ? tr("未授权") : tr("已离线")}{tr("。保留当前设备和已有结果，不会自动切换到其他设备。")}</div>}
           <div className={`rounded-lg border p-3 flex flex-col xl:flex-row xl:items-center gap-3 ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
             <label className={`inline-flex items-center gap-2 w-fit rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'} ${muted}`}>
               <input
@@ -428,27 +425,19 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                 checked={includeAiSummary}
                 onChange={(e) => setIncludeAiSummary(e.target.checked)}
                 className="h-4 w-4 accent-emerald-500"
-              />
-              报告包含 AI 分析
-            </label>
-            <div className={`min-w-0 flex-1 truncate text-xs ${muted}`}>保存目录：{performancePath || '默认 %APPDATA%/adb-workbench/performance-monitor/'}</div>
+              />{tr("报告包含 AI 分析")}</label>
+            <div className={`min-w-0 flex-1 truncate text-xs ${muted}`}>{tr("保存目录：")}{performancePath || tr("默认 %APPDATA%/adb-workbench/performance-monitor/")}</div>
             <div className="flex flex-wrap gap-2">
               <button onClick={takeSnapshot} disabled={!selectedDeviceOnline || loading} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-                采样
-              </button>
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />{tr("采样")}</button>
               <button onClick={exportHistory} disabled={!selectedDeviceId || history.length === 0} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
-                {isVip ? <Download size={15} /> : <Lock size={15} />}
-                导出
-              </button>
+                {isVip ? <Download size={15} /> : <Lock size={15} />}{tr("导出")}</button>
               <button onClick={exportReport} disabled={!selectedDeviceId || history.length === 0 || reportActive} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${isVip ? (isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white') : 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'}`}>
                 {isVip ? (reportActive ? <RefreshCw size={15} className="animate-spin" /> : <FileText size={15} />) : <Lock size={15} />}
-                {reportActive ? '生成中' : '报告'}
+                {reportActive ? tr("生成中") : tr("报告")}
               </button>
               <button onClick={() => openPerformanceDir('')} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}>
-                <FolderOpen size={15} />
-                打开目录
-              </button>
+                <FolderOpen size={15} />{tr("打开目录")}</button>
             </div>
           </div>
         </div>
@@ -457,18 +446,18 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
       {!selectedDeviceId ? (
         <div className={`py-20 rounded-xl border border-dashed text-center ${isDark ? 'border-[#3E4145] text-[#80868B]' : 'border-slate-300 text-slate-400'}`}>
           <Smartphone size={44} className="mx-auto mb-3 opacity-50" />
-          <div>暂无在线设备</div>
+          <div>{tr("暂无在线设备")}</div>
         </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard icon={<Cpu size={20} />} label="CPU" value={formatPercent(snapshot?.cpu?.usage)} sub={running ? '实时' : '最近采样'} color="emerald" theme={t} />
-            <MetricCard icon={<Activity size={20} />} label="内存" value={formatPercent(snapshot?.memory?.usage)} sub={formatKb(snapshot?.memory?.usedKb, snapshot?.memory?.totalKb)} color="sky" theme={t} />
-            <MetricCard icon={<Database size={20} />} label="存储空间" value={formatPercent(dataDisk?.usage)} sub={formatKb(dataDisk?.usedKb, dataDisk?.sizeKb)} color="amber" theme={t} />
-            <MetricCard icon={<Thermometer size={20} />} label="温度" value={formatTemp(deviceTemperature)} sub={formatBatterySub(snapshot?.battery)} color="red" theme={t} />
+            <MetricCard icon={<Cpu size={20} />} label="CPU" value={formatPercent(snapshot?.cpu?.usage)} sub={running ? tr("实时") : tr("最近采样")} color="emerald" theme={t} />
+            <MetricCard icon={<Activity size={20} />} label={tr("内存")} value={formatPercent(snapshot?.memory?.usage)} sub={formatKb(snapshot?.memory?.usedKb, snapshot?.memory?.totalKb)} color="sky" theme={t} />
+            <MetricCard icon={<Database size={20} />} label={tr("存储空间")} value={formatPercent(dataDisk?.usage)} sub={formatKb(dataDisk?.usedKb, dataDisk?.sizeKb)} color="amber" theme={t} />
+            <MetricCard icon={<Thermometer size={20} />} label={tr("温度")} value={formatTemp(deviceTemperature)} sub={formatBatterySub(snapshot?.battery)} color="red" theme={t} />
             {/* 展示前台应用 FPS 与当前屏幕 SurfaceFlinger 合成 FPS。 */}
-            <MetricCard icon={<Gauge size={20} />} label="前台 FPS" value={formatFps(foregroundFps?.fps)} sub={formatForegroundFpsSub(foregroundFps)} color="violet" theme={t} />
-            <MetricCard icon={<Zap size={20} />} label="合成 FPS" value={formatFps(surfaceFlingerFps?.fps)} sub={formatSurfaceFpsSub(surfaceFlingerFps)} color="cyan" theme={t} />
+            <MetricCard icon={<Gauge size={20} />} label={tr("前台 FPS")} value={formatFps(foregroundFps?.fps)} sub={formatForegroundFpsSub(foregroundFps)} color="violet" theme={t} />
+            <MetricCard icon={<Zap size={20} />} label={tr("合成 FPS")} value={formatFps(surfaceFlingerFps?.fps)} sub={formatSurfaceFpsSub(surfaceFlingerFps)} color="cyan" theme={t} />
           </div>
 
           {snapshot?.warnings?.length > 0 && (
@@ -484,18 +473,16 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             <div className={`p-4 rounded-xl border shadow-sm ${panelClass}`}>
               <div className="flex flex-col gap-2 text-sm">
                 {lastExportPath && (
-                  <PathRow label="最近导出" path={lastExportPath} isDark={isDark} onOpen={() => openPerformanceDir(lastExportPath)} />
+                  <PathRow label={tr("最近导出")} path={lastExportPath} isDark={isDark} onOpen={() => openPerformanceDir(lastExportPath)} />
                 )}
                 {lastReportPath && (
-                  <PathRow label="最近报告" path={lastReportPath} isDark={isDark} onOpen={() => openPerformanceDir(lastReportPath)} />
+                  <PathRow label={tr("最近报告")} path={lastReportPath} isDark={isDark} onOpen={() => openPerformanceDir(lastReportPath)} />
                 )}
                 {lastReportAiSummary && !lastReportAiSummary.skipped && (
                   lastReportAiSummary.ok ? (
-                    <div className={`rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#202124] border-[#3E4145] text-[#9AA0A6]' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                      AI 分析已写入最近报告
-                    </div>
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#202124] border-[#3E4145] text-[#9AA0A6]' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{tr("AI 分析已写入最近报告")}</div>
                   ) : (
-                    <div className="text-xs text-amber-500">AI 分析未生成：{lastReportAiSummary.error || '未知错误'}</div>
+                    <div className="text-xs text-amber-500">{tr("AI 分析未生成：")}{lastReportAiSummary.error || tr("未知错误")}</div>
                   )
                 )}
               </div>
@@ -505,25 +492,23 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>趋势</h3>
+                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("趋势")}</h3>
               </div>
               <PerformanceTrendChart points={chartPoints} isDark={isDark} />
             </div>
 
             <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>阈值</h3>
-                {!isVip && <span className="text-xs text-amber-400 flex items-center gap-1"><Lock size={12} />会员</span>}
+                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("阈值")}</h3>
+                {!isVip && <span className="text-xs text-amber-400 flex items-center gap-1"><Lock size={12} />{tr("会员")}</span>}
               </div>
               <div className="space-y-4">
                 <ThresholdInput label="CPU" value={thresholds.cpu} suffix="%" onChange={(value) => setThresholds(prev => ({ ...prev, cpu: value }))} isDark={isDark} />
-                <ThresholdInput label="内存" value={thresholds.memory} suffix="%" onChange={(value) => setThresholds(prev => ({ ...prev, memory: value }))} isDark={isDark} />
-                <ThresholdInput label="电池温度" value={thresholds.batteryTemp} suffix="°C" onChange={(value) => setThresholds(prev => ({ ...prev, batteryTemp: value }))} isDark={isDark} />
-                <ThresholdInput label="存储空间" value={thresholds.dataUsed} suffix="%" onChange={(value) => setThresholds(prev => ({ ...prev, dataUsed: value }))} isDark={isDark} />
+                <ThresholdInput label={tr("内存")} value={thresholds.memory} suffix="%" onChange={(value) => setThresholds(prev => ({ ...prev, memory: value }))} isDark={isDark} />
+                <ThresholdInput label={tr("电池温度")} value={thresholds.batteryTemp} suffix="°C" onChange={(value) => setThresholds(prev => ({ ...prev, batteryTemp: value }))} isDark={isDark} />
+                <ThresholdInput label={tr("存储空间")} value={thresholds.dataUsed} suffix="%" onChange={(value) => setThresholds(prev => ({ ...prev, dataUsed: value }))} isDark={isDark} />
                 <button onClick={saveThresholds} disabled={savingThresholds} className="w-full px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2">
-                  {savingThresholds ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-                  保存阈值
-                </button>
+                  {savingThresholds ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}{tr("保存阈值")}</button>
               </div>
             </div>
           </div>
@@ -531,26 +516,24 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
           <div className={`rounded-xl border shadow-sm overflow-hidden ${panelClass}`}>
             <div className={`px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
               <h3 className={`text-base font-semibold flex items-center gap-2 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                <Zap size={17} className="text-yellow-500" />
-                进程占用
-              </h3>
-              {!isVip && <button onClick={() => requireVip('进程占用明细')} className="text-xs text-amber-400 flex items-center gap-1"><Lock size={12} />会员</button>}
+                <Zap size={17} className="text-yellow-500" />{tr("进程占用")}</h3>
+              {!isVip && <button onClick={() => requireVip(tr("进程占用明细"))} className="text-xs text-amber-400 flex items-center gap-1"><Lock size={12} />{tr("会员")}</button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className={isDark ? 'bg-[#2D2F33] text-[#9AA0A6]' : 'bg-slate-50 text-slate-500'}>
                   <tr>
                     <th className="text-left px-5 py-3 font-medium">PID</th>
-                    <th className="text-left px-5 py-3 font-medium">进程</th>
+                    <th className="text-left px-5 py-3 font-medium">{tr("进程")}</th>
                     <th className="text-right px-5 py-3 font-medium">CPU</th>
-                    <th className="text-right px-5 py-3 font-medium">内存</th>
+                    <th className="text-right px-5 py-3 font-medium">{tr("内存")}</th>
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${isDark ? 'divide-[#3E4145]' : 'divide-slate-100'}`}>
                   {!isVip ? (
-                    <tr><td colSpan="4" className={`px-5 py-8 text-center ${muted}`}>会员版可查看进程占用明细</td></tr>
+                    <tr><td colSpan="4" className={`px-5 py-8 text-center ${muted}`}>{tr("会员版可查看进程占用明细")}</td></tr>
                   ) : (snapshot?.processes || []).length === 0 ? (
-                    <tr><td colSpan="4" className={`px-5 py-8 text-center ${muted}`}>暂无进程数据</td></tr>
+                    <tr><td colSpan="4" className={`px-5 py-8 text-center ${muted}`}>{tr("暂无进程数据")}</td></tr>
                   ) : snapshot.processes.map(proc => (
                     <tr key={`${proc.pid}-${proc.name}`} className={isDark ? 'text-[#E8EAED]' : 'text-slate-700'}>
                       <td className="px-5 py-3 font-mono text-xs">{proc.pid}</td>
@@ -570,6 +553,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
 }
 
 function MetricCard({ icon, label, value, sub, color, theme }) {
+  useLocale();
   const isDark = isDarkTheme(theme);
   const colorClass = {
     emerald: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
@@ -592,6 +576,7 @@ function MetricCard({ icon, label, value, sub, color, theme }) {
 }
 
 function PathRow({ label, path, isDark, onOpen }) {
+  useLocale();
   return (
     <div className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
       <span className={`shrink-0 font-medium ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{label}</span>
@@ -600,14 +585,13 @@ function PathRow({ label, path, isDark, onOpen }) {
         type="button"
         onClick={onOpen}
         className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
-      >
-        打开
-      </button>
+      >{tr("打开")}</button>
     </div>
   );
 }
 
 function CustomSelect({ value, options, onChange, isDark, className = '' }) {
+  useLocale();
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -758,6 +742,7 @@ function findEnabledIndex(options, currentIndex, direction) {
 }
 
 function ThresholdInput({ label, value, suffix, onChange, isDark }) {
+  useLocale();
   return (
     <label className="block">
       <div className={`flex items-center justify-between mb-1 text-sm ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
@@ -783,18 +768,18 @@ function formatFps(value) {
 }
 
 function formatForegroundFpsSub(fps) {
-  if (!fps) return '前台应用 -';
+  if (!fps) return tr("前台应用 -");
   if (fps.packageName) return fps.packageName;
-  if (fps.error) return '前台应用不可用';
-  return '等待前台应用';
+  if (fps.error) return tr("前台应用不可用");
+  return tr("等待前台应用");
 }
 
 function formatSurfaceFpsSub(fps) {
   if (!fps) return 'SurfaceFlinger -';
-  if (fps.layer) return `刷新率 ${formatFps(fps.refreshRate)}`;
-  if (fps.refreshRate != null) return `刷新率 ${formatFps(fps.refreshRate)}`;
-  if (fps.error) return '合成数据不可用';
-  return '等待合成数据';
+  if (fps.layer) return tr("刷新率 {0}", { 0: formatFps(fps.refreshRate) });
+  if (fps.refreshRate != null) return tr("刷新率 {0}", { 0: formatFps(fps.refreshRate) });
+  if (fps.error) return tr("合成数据不可用");
+  return tr("等待合成数据");
 }
 
 function formatKb(used, total) {
@@ -814,9 +799,9 @@ function getDeviceTemperature(snapshot) {
 }
 
 function formatBatterySub(battery) {
-  if (!battery) return '电量 -';
-  if (battery.present === false) return '无电池设备';
-  return `电量 ${battery.level ?? '-'}%`;
+  if (!battery) return tr("电量 -");
+  if (battery.present === false) return tr("无电池设备");
+  return tr("电量 {0}%", { 0: battery.level ?? '-' });
 }
 
 function getFolderFromPath(filePath) {

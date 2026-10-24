@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // One-click troubleshooting wizard backend.
 
 const { app, shell } = require('electron');
@@ -47,10 +48,10 @@ let lastTask = null;
 
 function register(ipcMain) {
   ipcMain.handle('troubleshooting:start', async (event, args) => {
-    if (currentTask) return { ok: false, error: '已有问题排查任务正在执行，请先等待或取消当前任务' };
+    if (currentTask) return { ok: false, error: tr("已有问题排查任务正在执行，请先等待或取消当前任务") };
 
     const deviceId = normalizeDeviceId(args?.deviceId);
-    if (!deviceId) return { ok: false, error: '请选择在线设备' };
+    if (!deviceId) return { ok: false, error: tr("请选择在线设备") };
 
     const task = {
       id: `trouble-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -82,7 +83,7 @@ function register(ipcMain) {
         sendDone(task, result);
       })
       .catch((error) => {
-        const result = { ok: false, error: error.message || '问题排查失败' };
+        const result = { ok: false, error: error.message || tr("问题排查失败") };
         task.status = 'failed';
         task.result = result;
         lastTask = publicTask(task);
@@ -103,7 +104,7 @@ function register(ipcMain) {
       try { currentTask.currentProc.kill(); } catch {}
     }
     lastTask = publicTask(currentTask);
-    sendProgress(currentTask, 'cancel', 'running', '正在取消当前排查任务');
+    sendProgress(currentTask, 'cancel', 'running', tr("正在取消当前排查任务"));
     return { ok: true, cancelled: true };
   });
 
@@ -112,7 +113,7 @@ function register(ipcMain) {
   });
 
   ipcMain.handle('troubleshooting:openFolder', async (event, folderPath) => {
-    if (!folderPath || typeof folderPath !== 'string') return { ok: false, error: '目录路径不能为空' };
+    if (!folderPath || typeof folderPath !== 'string') return { ok: false, error: tr("目录路径不能为空") };
     const error = await shell.openPath(folderPath);
     return error ? { ok: false, error } : { ok: true };
   });
@@ -130,7 +131,7 @@ async function runTroubleshooting(task) {
     deviceId: task.deviceId,
     deviceLabel: task.deviceLabel,
     issueType: task.issueType,
-    issueLabel: ISSUE_TYPES[task.issueType].label,
+    issueLabel: tr(ISSUE_TYPES[task.issueType].label),
     packageName: task.packageName,
     startedAt: task.startedAt,
     outputDir,
@@ -151,7 +152,7 @@ async function runTroubleshooting(task) {
     startedAt: task.startedAt
   });
 
-  await runStep(task, 'device', '检查设备连接', async () => {
+  await runStep(task, 'device', tr("检查设备连接"), async () => {
     const state = await runAdb(task, ['-s', task.deviceId, 'get-state'], COMMAND_TIMEOUT_MS);
     const devices = await runAdb(task, ['devices', '-l'], COMMAND_TIMEOUT_MS);
     const props = await runAdb(task, ['-s', task.deviceId, 'shell', 'getprop ro.product.model; getprop ro.build.version.release; getprop ro.build.display.id'], COMMAND_TIMEOUT_MS);
@@ -162,38 +163,38 @@ async function runTroubleshooting(task) {
     context.checks.push({
       key: 'device',
       ok: online,
-      label: online ? '设备在线，可执行 ADB 命令' : '设备不可用',
-      detail: online ? task.deviceId : state.error || state.stderr || 'ADB 未返回 device 状态'
+      label: online ? tr("设备在线，可执行 ADB 命令") : tr("设备不可用"),
+      detail: online ? task.deviceId : state.error || state.stderr || tr("ADB 未返回 device 状态")
     });
-    if (!online) throw new Error(state.error || state.stderr || '设备不在线或未授权');
+    if (!online) throw new Error(state.error || state.stderr || tr("设备不在线或未授权"));
     return { detail: context.device.model || task.deviceId };
   });
 
   if (task.cancelled) return finishCancelled(task, context);
 
   if (task.packageName) {
-    await runStep(task, 'package', '读取应用包信息', async () => {
+    await runStep(task, 'package', tr("读取应用包信息"), async () => {
       const detail = await packageManager.getPackageDetail(task.deviceId, task.packageName);
       context.packageDetail = detail;
       const detailPath = path.join(rawDir, 'package-detail.json');
       await writeJson(detailPath, detail);
-      context.artifacts.push({ type: 'json', label: '应用详情', path: detailPath });
+      context.artifacts.push({ type: 'json', label: tr("应用详情"), path: detailPath });
       context.checks.push({
         key: 'package',
         ok: true,
-        label: '已找到目标应用',
+        label: tr("已找到目标应用"),
         detail: `${detail.packageName || task.packageName} ${detail.versionName || ''}`.trim()
       });
       return { detail: detail.versionName || detail.apkPath || task.packageName };
     });
   } else {
-    markStep(task, 'package', 'skipped', '未填写包名，已跳过应用定向检查');
-    context.checks.push({ key: 'package', ok: true, skipped: true, label: '未填写包名', detail: '本次执行通用排查' });
+    markStep(task, 'package', 'skipped', tr("未填写包名，已跳过应用定向检查"));
+    context.checks.push({ key: 'package', ok: true, skipped: true, label: tr("未填写包名"), detail: tr("本次执行通用排查") });
   }
 
   if (task.cancelled) return finishCancelled(task, context);
 
-  await runStep(task, 'performance', '采集性能快照', async () => {
+  await runStep(task, 'performance', tr("采集性能快照"), async () => {
     const snapshot = await performanceMonitor.collectSnapshot(task.deviceId, vipStatus.activated === true, {
       timeoutMs: 12000,
       fallbackToLegacy: true
@@ -201,12 +202,12 @@ async function runTroubleshooting(task) {
     context.performance = snapshot;
     const snapshotPath = path.join(rawDir, 'performance-snapshot.json');
     await writeJson(snapshotPath, snapshot);
-    context.artifacts.push({ type: 'json', label: '性能快照', path: snapshotPath });
+    context.artifacts.push({ type: 'json', label: tr("性能快照"), path: snapshotPath });
     const warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
     context.checks.push({
       key: 'performance',
       ok: warnings.length === 0,
-      label: warnings.length ? `发现 ${warnings.length} 项性能告警` : '性能快照未发现阈值告警',
+      label: warnings.length ? tr("发现 {0} 项性能告警", { 0: warnings.length }) : tr("性能快照未发现阈值告警"),
       detail: summarizePerformance(snapshot)
     });
     return { detail: summarizePerformance(snapshot) };
@@ -214,29 +215,29 @@ async function runTroubleshooting(task) {
 
   if (task.cancelled) return finishCancelled(task, context);
 
-  await runStep(task, 'logs', '抓取并筛选关键日志', async () => {
+  await runStep(task, 'logs', tr("抓取并筛选关键日志"), async () => {
     const log = await runAdb(task, ['-s', task.deviceId, 'logcat', '-d', '-v', 'threadtime', '-t', '600'], LOG_TIMEOUT_MS);
     const logText = log.stdout || log.stderr || '';
     const logPath = path.join(rawDir, 'logcat-tail.txt');
     await writeText(logPath, logText);
-    context.artifacts.push({ type: 'text', label: '最近日志', path: logPath });
+    context.artifacts.push({ type: 'text', label: tr("最近日志"), path: logPath });
     context.logSummary = analyzeLogs(logText, task.issueType, task.packageName);
     const excerptPath = path.join(rawDir, 'matched-log-excerpt.txt');
     await writeText(excerptPath, context.logSummary.matchedLines.join('\n'));
-    context.artifacts.push({ type: 'text', label: '命中日志片段', path: excerptPath });
+    context.artifacts.push({ type: 'text', label: tr("命中日志片段"), path: excerptPath });
     context.checks.push({
       key: 'logs',
       ok: context.logSummary.matchedCount === 0,
-      label: context.logSummary.matchedCount ? `命中 ${context.logSummary.matchedCount} 条可疑日志` : '最近日志未命中高风险关键词',
-      detail: context.logSummary.topPatterns.join('、') || '无明显异常关键词'
+      label: context.logSummary.matchedCount ? tr("命中 {0} 条可疑日志", { 0: context.logSummary.matchedCount }) : tr("最近日志未命中高风险关键词"),
+      detail: context.logSummary.topPatterns.join('、') || tr("无明显异常关键词")
     });
-    return { detail: `${context.logSummary.matchedCount} 条命中` };
+    return { detail: tr("{0} 条命中", { 0: context.logSummary.matchedCount }) };
   });
 
   if (task.cancelled) return finishCancelled(task, context);
 
   if (task.includeInspection && vipStatus.activated === true) {
-    await runStep(task, 'inspection', '生成巡检报告和证据包', async () => {
+    await runStep(task, 'inspection', tr("生成巡检报告和证据包"), async () => {
       const inspectionTask = createSilentInspectionTask(task);
       const result = await inspection.runInspection(inspectionTask, {
         deviceId: task.deviceId,
@@ -246,20 +247,20 @@ async function runTroubleshooting(task) {
         outputBaseDir: path.join(outputDir, 'inspection')
       });
       context.inspection = result;
-      if (result.reportPath) context.artifacts.push({ type: 'report', label: '巡检报告', path: result.reportPath });
-      if (result.zipPath) context.artifacts.push({ type: 'zip', label: '巡检证据包', path: result.zipPath });
+      if (result.reportPath) context.artifacts.push({ type: 'report', label: tr("巡检报告"), path: result.reportPath });
+      if (result.zipPath) context.artifacts.push({ type: 'zip', label: tr("巡检证据包"), path: result.zipPath });
       context.checks.push({
         key: 'inspection',
         ok: result.ok !== false && !result.cancelled,
-        label: result.ok === false ? '巡检执行失败' : '巡检报告已生成',
+        label: result.ok === false ? tr("巡检执行失败") : tr("巡检报告已生成"),
         detail: result.reportPath || result.error || ''
       });
-      return { detail: result.reportPath || '巡检完成' };
+      return { detail: result.reportPath || tr("巡检完成") };
     });
   } else {
-    const detail = vipStatus.activated === true ? '已按用户选择跳过巡检' : '当前为基础版，巡检证据包需会员版';
+    const detail = vipStatus.activated === true ? tr("已按用户选择跳过巡检") : tr("当前为基础版，巡检证据包需会员版");
     markStep(task, 'inspection', 'skipped', detail);
-    context.checks.push({ key: 'inspection', ok: true, skipped: true, label: '巡检已跳过', detail });
+    context.checks.push({ key: 'inspection', ok: true, skipped: true, label: tr("巡检已跳过"), detail });
   }
 
   await prepareAiSummary(task, context);
@@ -271,10 +272,10 @@ async function runStep(task, stepId, label, action) {
   markStep(task, stepId, 'running', label);
   try {
     const result = await action();
-    markStep(task, stepId, 'success', result?.detail || `${label}完成`);
+    markStep(task, stepId, 'success', result?.detail || tr("{0}完成", { 0: label }));
     return result;
   } catch (error) {
-    markStep(task, stepId, 'failed', error.message || `${label}失败`);
+    markStep(task, stepId, 'failed', error.message || tr("{0}失败", { 0: label }));
     throw error;
   }
 }
@@ -282,21 +283,21 @@ async function runStep(task, stepId, label, action) {
 async function prepareAiSummary(task, context) {
   if (!task.includeAiSummary) {
     context.aiSummary = { ok: false, skipped: true, summary: '' };
-    markStep(task, 'aiSummary', 'skipped', '未勾选 AI 总结');
+    markStep(task, 'aiSummary', 'skipped', tr("未勾选 AI 总结"));
     return;
   }
 
-  markStep(task, 'aiSummary', 'running', '正在生成 AI 总结');
+  markStep(task, 'aiSummary', 'running', tr("正在生成 AI 总结"));
   try {
     context.aiSummary = await buildTroubleshootingAiSummary(context);
     if (context.aiSummary?.ok) {
-      markStep(task, 'aiSummary', 'success', 'AI 总结已写入报告');
+      markStep(task, 'aiSummary', 'success', tr("AI 总结已写入报告"));
     } else {
-      markStep(task, 'aiSummary', 'skipped', `AI 总结未生成：${context.aiSummary?.error || '未知错误'}`);
+      markStep(task, 'aiSummary', 'skipped', tr("AI 总结未生成：{0}", { 0: context.aiSummary?.error || tr("未知错误") }));
     }
   } catch (error) {
-    context.aiSummary = { ok: false, error: error.message || 'AI 总结异常', summary: '' };
-    markStep(task, 'aiSummary', 'skipped', `AI 总结未生成：${context.aiSummary.error}`);
+    context.aiSummary = { ok: false, error: error.message || tr("AI 总结异常"), summary: '' };
+    markStep(task, 'aiSummary', 'skipped', tr("AI 总结未生成：{0}", { 0: context.aiSummary.error }));
   }
 }
 
@@ -331,15 +332,15 @@ async function finishCancelled(task, context) {
     cancelled: true,
     taskId: task.id,
     status: 'cancelled',
-    title: '排查已取消',
-    message: '已保留取消前采集到的结果。',
-    suggestions: ['可打开产物目录查看已生成文件。'],
+    title: tr("排查已取消"),
+    message: tr("已保留取消前采集到的结果。"),
+    suggestions: [tr("可打开产物目录查看已生成文件。")],
     outputDir: context.outputDir,
     reportPath: path.join(context.outputDir, 'troubleshooting-report.md'),
     summaryPath: path.join(context.outputDir, 'troubleshooting-summary.json'),
     checks: context.checks,
     artifacts: context.artifacts,
-    aiSummary: { ok: false, skipped: true, summary: '', error: '任务已取消，未生成 AI 总结' },
+    aiSummary: { ok: false, skipped: true, summary: '', error: tr("任务已取消，未生成 AI 总结") },
     startedAt: context.startedAt,
     endedAt: new Date().toISOString()
   };
@@ -352,34 +353,34 @@ function buildConclusion(context) {
   const failed = context.checks.filter(item => item.ok === false && !item.skipped);
   const suggestions = [];
   if (failed.some(item => item.key === 'device')) {
-    suggestions.push('先确认设备授权弹窗已允许，并尝试重新插拔 USB 或执行 adb kill-server 后重试。');
+    suggestions.push(tr("先确认设备授权弹窗已允许，并尝试重新插拔 USB 或执行 adb kill-server 后重试。"));
   }
   if (failed.some(item => item.key === 'package')) {
-    suggestions.push('确认包名是否正确，或先在 App 包管理中搜索应用后复制包名。');
+    suggestions.push(tr("确认包名是否正确，或先在 App 包管理中搜索应用后复制包名。"));
   }
   if (failed.some(item => item.key === 'logs')) {
-    suggestions.push('优先查看命中日志片段，结合 crash/ANR 关键词定位最近一次异常。');
+    suggestions.push(tr("优先查看命中日志片段，结合 crash/ANR 关键词定位最近一次异常。"));
   }
   if (failed.some(item => item.key === 'performance')) {
-    suggestions.push('查看性能快照中的 CPU、内存、温度或存储告警，再按进程占用继续排查。');
+    suggestions.push(tr("查看性能快照中的 CPU、内存、温度或存储告警，再按进程占用继续排查。"));
   }
   if (context.inspection?.reportPath) {
-    suggestions.push('打开巡检报告，核对系统属性、窗口状态、日志和截图证据。');
+    suggestions.push(tr("打开巡检报告，核对系统属性、窗口状态、日志和截图证据。"));
   }
   if (suggestions.length === 0) {
-    suggestions.push('本次未发现明确高风险信号，建议复现问题后立即重新执行一键排查。');
+    suggestions.push(tr("本次未发现明确高风险信号，建议复现问题后立即重新执行一键排查。"));
   }
   if (failed.length === 0) {
     return {
       status: 'healthy',
-      title: '未发现明显高风险信号',
-      message: '设备、性能和最近日志未命中明确异常，可在复现后重新采集。',
+      title: tr("未发现明显高风险信号"),
+      message: tr("设备、性能和最近日志未命中明确异常，可在复现后重新采集。"),
       suggestions
     };
   }
   return {
     status: failed.length >= 2 ? 'warning' : 'attention',
-    title: `发现 ${failed.length} 项需要关注的问题`,
+    title: tr("发现 {0} 项需要关注的问题", { 0: failed.length }),
     message: failed.map(item => item.label).join('；'),
     suggestions
   };
@@ -387,96 +388,96 @@ function buildConclusion(context) {
 
 function buildReport(context, summary) {
   const lines = [
-    '# 一键问题排查报告',
+    tr("# 一键问题排查报告"),
     '',
-    `- 设备：${context.deviceLabel || context.deviceId}`,
-    `- 设备 ID：${context.deviceId}`,
-    `- 问题类型：${context.issueLabel}`,
-    `- 应用包名：${context.packageName || '未填写'}`,
-    `- 应用版本：${context.appVersion}`,
-    `- 开始时间：${context.startedAt}`,
-    `- 结束时间：${summary.endedAt}`,
+    tr("- 设备：{0}", { 0: context.deviceLabel || context.deviceId }),
+    tr("- 设备 ID：{0}", { 0: context.deviceId }),
+    tr("- 问题类型：{0}", { 0: context.issueLabel }),
+    tr("- 应用包名：{0}", { 0: context.packageName || tr("未填写") }),
+    tr("- 应用版本：{0}", { 0: context.appVersion }),
+    tr("- 开始时间：{0}", { 0: context.startedAt }),
+    tr("- 结束时间：{0}", { 0: summary.endedAt }),
     '',
-    '## 结论',
+    tr("## 结论"),
     '',
     `${summary.title}。${summary.message}`,
     '',
-    '## 建议',
+    tr("## 建议"),
     '',
     ...summary.suggestions.map(item => `- ${item}`),
     '',
-    '## 检查项',
+    tr("## 检查项"),
     ''
   ];
 
   for (const check of summary.checks) {
-    const state = check.skipped ? '跳过' : check.ok ? '通过' : '关注';
+    const state = check.skipped ? tr("跳过") : check.ok ? tr("通过") : tr("关注");
     lines.push(`- ${state}：${check.label}${check.detail ? ` - ${check.detail}` : ''}`);
   }
 
-  lines.push('', '## 设备信息', '');
+  lines.push('', tr("## 设备信息"), '');
   if (context.device) {
-    lines.push(`- 型号：${context.device.model || '-'}`);
+    lines.push(tr("- 型号：{0}", { 0: context.device.model || '-' }));
     lines.push(`- Android：${context.device.android || '-'}`);
-    lines.push(`- 构建：${context.device.build || '-'}`);
+    lines.push(tr("- 构建：{0}", { 0: context.device.build || '-' }));
   } else {
-    lines.push('- 未采集到设备属性。');
+    lines.push(tr("- 未采集到设备属性。"));
   }
 
   if (context.packageDetail) {
-    lines.push('', '## 应用信息', '');
-    lines.push(`- 包名：${context.packageDetail.packageName || context.packageName}`);
-    lines.push(`- 版本名：${context.packageDetail.versionName || '-'}`);
-    lines.push(`- 版本号：${context.packageDetail.versionCode || '-'}`);
-    lines.push(`- APK 路径：${context.packageDetail.apkPath || context.packageDetail.path || '-'}`);
+    lines.push('', tr("## 应用信息"), '');
+    lines.push(tr("- 包名：{0}", { 0: context.packageDetail.packageName || context.packageName }));
+    lines.push(tr("- 版本名：{0}", { 0: context.packageDetail.versionName || '-' }));
+    lines.push(tr("- 版本号：{0}", { 0: context.packageDetail.versionCode || '-' }));
+    lines.push(tr("- APK 路径：{0}", { 0: context.packageDetail.apkPath || context.packageDetail.path || '-' }));
   }
 
   if (context.performance) {
-    lines.push('', '## 性能快照', '');
+    lines.push('', tr("## 性能快照"), '');
     lines.push(`- ${summarizePerformance(context.performance)}`);
     const warnings = Array.isArray(context.performance.warnings) ? context.performance.warnings : [];
     for (const item of warnings) {
-      lines.push(`- 告警：${item.label || item.type || '性能指标'} ${item.value ?? ''}${item.limit ? ` > ${item.limit}` : ''}`);
+      lines.push(tr("- 告警：{0} {1}{2}", { 0: item.label || item.type || tr("性能指标"), 1: item.value ?? '', 2: item.limit ? ` > ${item.limit}` : '' }));
     }
   }
 
   if (context.logSummary) {
-    lines.push('', '## 日志命中', '');
-    lines.push(`- 命中数量：${context.logSummary.matchedCount}`);
+    lines.push('', tr("## 日志命中"), '');
+    lines.push(tr("- 命中数量：{0}", { 0: context.logSummary.matchedCount }));
     for (const line of context.logSummary.matchedLines.slice(0, 20)) {
       lines.push(`- ${line}`);
     }
   }
 
   if (context.inspection?.reportPath) {
-    lines.push('', '## 巡检产物', '');
-    lines.push(`- 巡检报告：${context.inspection.reportPath}`);
-    if (context.inspection.zipPath) lines.push(`- 证据包：${context.inspection.zipPath}`);
+    lines.push('', tr("## 巡检产物"), '');
+    lines.push(tr("- 巡检报告：{0}", { 0: context.inspection.reportPath }));
+    if (context.inspection.zipPath) lines.push(tr("- 证据包：{0}", { 0: context.inspection.zipPath }));
   }
 
-  lines.push('', '## 产物清单', '');
+  lines.push('', tr("## 产物清单"), '');
   if (summary.artifacts.length === 0) {
-    lines.push('- 无额外产物。');
+    lines.push(tr("- 无额外产物。"));
   } else {
     for (const artifact of summary.artifacts) {
       lines.push(`- ${artifact.label}：${artifact.path}`);
     }
   }
 
-  lines.push('', '## AI 总结', '', ...formatAiSummaryLines(summary.aiSummary), '');
+  lines.push('', tr("## AI 总结"), '', ...formatAiSummaryLines(summary.aiSummary), '');
 
   return `${lines.join('\n')}\n`;
 }
 
 function formatAiSummaryLines(aiSummary) {
-  if (!aiSummary) return ['- 未勾选 AI 总结'];
-  if (aiSummary.skipped) return [`- ${aiSummary.error || '未勾选 AI 总结'}`];
-  if (!aiSummary.ok) return [`- AI 总结未生成：${aiSummary.error || '未知错误'}`];
+  if (!aiSummary) return [tr("- 未勾选 AI 总结")];
+  if (aiSummary.skipped) return [`- ${aiSummary.error || tr("未勾选 AI 总结")}`];
+  if (!aiSummary.ok) return [tr("- AI 总结未生成：{0}", { 0: aiSummary.error || tr("未知错误") })];
   const lines = String(aiSummary.summary || '')
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map(line => line.trimEnd());
-  return lines.some(Boolean) ? lines : ['- AI 总结为空'];
+  return lines.some(Boolean) ? lines : [tr("- AI 总结为空")];
 }
 
 function buildTroubleshootingAiSummary(context) {
@@ -512,14 +513,14 @@ function buildTroubleshootingAiSummary(context) {
   return aiAnalyze.generateAiSummary({
     timeoutMs: 60000,
     temperature: 0.2,
-    systemPrompt: '你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。',
+    systemPrompt: tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
     userContent: [
-      '请为以下一键问题排查报告生成可直接追加到 Markdown 报告末尾的 AI 总结。',
-      '输出要求：',
-      '1. 使用简体中文。',
-      '2. 包含：总体判断、关键证据、优先排查建议。',
-      '3. 不要输出 Markdown 一级/二级标题，报告中已有“AI 总结”标题。',
-      '4. 不要编造未提供的数据。',
+      tr("请为以下一键问题排查报告生成可直接追加到 Markdown 报告末尾的 AI 总结。"),
+      tr("输出要求："),
+      tr("1. 使用简体中文。"),
+      tr("2. 包含：总体判断、关键证据、优先排查建议。"),
+      tr("3. 不要输出 Markdown 一级/二级标题，报告中已有“AI 总结”标题。"),
+      tr("4. 不要编造未提供的数据。"),
       '',
       JSON.stringify(payload, null, 2)
     ].join('\n')
@@ -558,7 +559,7 @@ function summarizePerformance(snapshot) {
   const dataDisk = Array.isArray(snapshot?.disk) ? snapshot.disk.find(item => item.mount === '/data') || snapshot.disk[0] : null;
   const disk = formatMetric(dataDisk?.usage, '%');
   const temp = formatMetric(snapshot?.battery?.temperature ?? snapshot?.thermal?.hottest, '°C');
-  return `CPU ${cpu}，内存 ${memory}，存储 ${disk}，温度 ${temp}`;
+  return tr("CPU {0}，内存 {1}，存储 {2}，温度 {3}", { 0: cpu, 1: memory, 2: disk, 3: temp });
 }
 
 function formatMetric(value, unit) {
@@ -576,12 +577,12 @@ function parseDeviceProps(text) {
 
 function createStepState(options = {}) {
   return [
-    { id: 'device', label: '设备连接', status: 'pending', detail: '' },
-    { id: 'package', label: '应用信息', status: 'pending', detail: '' },
-    { id: 'performance', label: '性能快照', status: 'pending', detail: '' },
-    { id: 'logs', label: '关键日志', status: 'pending', detail: '' },
-    { id: 'inspection', label: '巡检证据', status: 'pending', detail: '' },
-    { id: 'aiSummary', label: 'AI 总结', status: 'pending', detail: '' }
+    { id: 'device', label: tr("设备连接"), status: 'pending', detail: '' },
+    { id: 'package', label: tr("应用信息"), status: 'pending', detail: '' },
+    { id: 'performance', label: tr("性能快照"), status: 'pending', detail: '' },
+    { id: 'logs', label: tr("关键日志"), status: 'pending', detail: '' },
+    { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' },
+    { id: 'aiSummary', label: tr("AI 总结"), status: 'pending', detail: '' }
   ].filter(step => {
     if (step.id === 'inspection') return options.includeInspection !== false;
     if (step.id === 'aiSummary') return options.includeAiSummary === true;
@@ -688,9 +689,9 @@ function runAdb(task, args, timeoutMs) {
       return {
         ok: false,
         error: task.cancelled
-          ? '用户取消'
+          ? tr("用户取消")
           : res.timedOut
-            ? `命令超时（${Math.round((timeoutMs || COMMAND_TIMEOUT_MS) / 1000)} 秒）`
+            ? tr("命令超时（{0} 秒）", { 0: Math.round((timeoutMs || COMMAND_TIMEOUT_MS) / 1000) })
             : (res.error || 'ADB command failed'),
         stdout: res.stdout || '',
         stderr: res.stderr || ''
@@ -701,7 +702,7 @@ function runAdb(task, args, timeoutMs) {
 }
 
 function ensureNotCancelled(task) {
-  if (task.cancelled) throw new Error('用户取消');
+  if (task.cancelled) throw new Error(tr("用户取消"));
 }
 
 async function writeText(filePath, content) {

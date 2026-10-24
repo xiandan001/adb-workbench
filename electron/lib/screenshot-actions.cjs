@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -25,13 +26,13 @@ function createScreenshotActions({ nativeImage, clipboard, shell }) {
 
   async function perform({ path: filePath, action } = {}) {
     try {
-      if (typeof filePath !== 'string' || !['copy', 'open', 'folder'].includes(action)) throw new Error('无效的截图操作');
+      if (typeof filePath !== 'string' || !['copy', 'open', 'folder'].includes(action)) throw new Error(tr("无效的截图操作"));
       const target = path.resolve(filePath);
-      if (!screenshots.has(target)) throw new Error('仅可操作本次启动后生成的截图');
-      if (fs.realpathSync(target) !== screenshots.get(target) || !fs.statSync(target).isFile()) throw new Error('截图路径已变化，请重新截图');
+      if (!screenshots.has(target)) throw new Error(tr("仅可操作本次启动后生成的截图"));
+      if (fs.realpathSync(target) !== screenshots.get(target) || !fs.statSync(target).isFile()) throw new Error(tr("截图路径已变化，请重新截图"));
       if (action === 'copy') {
         const image = nativeImage.createFromPath(target);
-        if (image.isEmpty()) throw new Error('截图无法读取');
+        if (image.isEmpty()) throw new Error(tr("截图无法读取"));
         clipboard.writeImage(image);
       } else if (action === 'folder') {
         shell.showItemInFolder(target);

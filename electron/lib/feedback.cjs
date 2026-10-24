@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const path = require('node:path');
 const { exact, fail } = require('./feedback-policy.cjs');
 const { createFeedbackService } = require('./feedback-service.cjs');
@@ -12,14 +13,14 @@ function createFeedbackController({ service, auth, logger, getOwner }) {
   function authorize(event) {
     const owner = getOwner();
     if (disposed || !owner || owner.isDestroyed() || owner.webContents.isDestroyed() || !owner.webContents.mainFrame
-      || event?.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) throw fail('FEEDBACK_OWNER', '请在卓控台主窗口进行问题上报');
+      || event?.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) throw fail('FEEDBACK_OWNER', tr("请在卓控台主窗口进行问题上报"));
     return true;
   }
   const guardFor = event => () => authorize(event);
   async function invoke(event, kind, value) {
     try {
       const guard = guardFor(event); guard();
-      if (!['preview', 'submit', 'open-issue'].includes(kind) && value !== undefined && !exact(value, [])) throw fail('FEEDBACK_INPUT', '此操作不接受额外参数');
+      if (!['preview', 'submit', 'open-issue'].includes(kind) && value !== undefined && !exact(value, [])) throw fail('FEEDBACK_INPUT', tr("此操作不接受额外参数"));
       let result;
       if (kind === 'context') result = await service.context(guard);
       else if (kind === 'preview') result = await service.preview(value, guard);
@@ -32,7 +33,7 @@ function createFeedbackController({ service, auth, logger, getOwner }) {
       guard(); return { ok: true, ...result };
     } catch (error) {
       const known = typeof error?.code === 'string' && error.code.startsWith('FEEDBACK_');
-      return { ok: false, error: { code: known ? error.code : 'FEEDBACK_FAILED', message: known ? error.message : '问题上报操作未完成，请重试' }, ...(error?.uncertain === true ? { uncertain: true } : {}) };
+      return { ok: false, error: { code: known ? error.code : 'FEEDBACK_FAILED', message: known ? error.message : tr("问题上报操作未完成，请重试") }, ...(error?.uncertain === true ? { uncertain: true } : {}) };
     }
   }
   return {

@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const { createSshProfileStore } = require('./ssh-profiles.cjs');
 const { createSshController } = require('./ssh-controller.cjs');
 const { createSshCommandHistory } = require('./ssh-command-history.cjs');
@@ -21,10 +22,10 @@ function register(ipcMain) {
       try { return !history.list(identity).paused; } catch { return false; }
     },
     verifyHostKey: challenge => profiles.verifyHostKey(challenge, async () => {
-      const result = await ask({ type: 'warning', title: '首次连接：核对 SSH 主机指纹',
+      const result = await ask({ type: 'warning', title: tr("首次连接：核对 SSH 主机指纹"),
         message: `${challenge.username}@${challenge.host}:${challenge.port}`,
-        detail: `此主机尚未被信任，请与服务器管理员核对以下指纹。\n\n${challenge.keyType}\n${challenge.fingerprint}\n\n确认后会将指纹保存在本机；以后指纹变化将拒绝连接。`,
-        buttons: ['取消连接', '指纹正确，信任并连接'], defaultId: 0, cancelId: 0, noLink: true });
+        detail: tr("此主机尚未被信任，请与服务器管理员核对以下指纹。\n\n{0}\n{1}\n\n确认后会将指纹保存在本机；以后指纹变化将拒绝连接。", { 0: challenge.keyType, 1: challenge.fingerprint }),
+        buttons: [tr("取消连接"), tr("指纹正确，信任并连接")], defaultId: 0, cancelId: 0, noLink: true });
       return result.response === 1 && !challenge.signal?.aborted;
     }), onChange: () => controller?.publish(), onShellCommand: event => { void controller?.recordShellCommand(event); } });
   const watchedFileSessions = new Set();

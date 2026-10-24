@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // Report and artifact center: read-only index over generated local outputs.
 
 const { app, shell, dialog, BrowserWindow } = require('electron');
@@ -20,7 +21,7 @@ function register(ipcMain) {
   });
 
   ipcMain.handle('artifacts:openPath', async (event, targetPath) => {
-    if (!targetPath || typeof targetPath !== 'string') return { ok: false, error: '路径不能为空' };
+    if (!targetPath || typeof targetPath !== 'string') return { ok: false, error: tr("路径不能为空") };
     const error = await shell.openPath(targetPath);
     return error ? { ok: false, error } : { ok: true };
   });
@@ -28,7 +29,7 @@ function register(ipcMain) {
   ipcMain.handle('artifacts:preview', async (event, { id, name } = {}) => {
     try {
       const item = (await listArtifacts()).find(entry => entry.id === id);
-      if (!item) throw new Error('产物已不存在，请刷新列表后重试');
+      if (!item) throw new Error(tr("产物已不存在，请刷新列表后重试"));
       return { ok: true, ...await (name ? previewArtifact(item, name) : artifactDetails(item)) };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -47,18 +48,18 @@ function register(ipcMain) {
   ipcMain.handle('artifacts:export', async (event, { id } = {}) => {
     try {
       const item = (await listArtifacts()).find(entry => entry.id === id);
-      if (!item) return { ok: false, error: '产物已不存在，请刷新列表后重试' };
+      if (!item) return { ok: false, error: tr("产物已不存在，请刷新列表后重试") };
       const name = String(item.title || 'evidence').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').slice(0, 70);
       const owner = BrowserWindow.fromWebContents(event.sender);
       const options = {
-        title: '导出证据包', defaultPath: path.join(app.getPath('downloads'), `${name}-evidence.zip`),
-        filters: [{ name: 'ZIP 证据包', extensions: ['zip'] }]
+        title: tr("导出证据包"), defaultPath: path.join(app.getPath('downloads'), `${name}-evidence.zip`),
+        filters: [{ name: tr("ZIP 证据包"), extensions: ['zip'] }]
       };
       const result = await (owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options));
       if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
       return { ok: true, ...await exportArtifact(item, result.filePath) };
     } catch (error) {
-      return { ok: false, error: error.message || '证据包导出失败' };
+      return { ok: false, error: error.message || tr("证据包导出失败") };
     }
   });
 }
@@ -110,8 +111,8 @@ async function scanTroubleshooting(baseDir) {
     return {
       id: `troubleshooting:${dir}`,
       type: 'troubleshooting',
-      typeLabel: '问题排查',
-      title: summary.title || '一键问题排查报告',
+      typeLabel: tr("问题排查"),
+      title: summary.title || tr("一键问题排查报告"),
       subtitle: summary.message || summary.status || path.basename(dir),
       status: summary.status || (summary.ok ? 'success' : 'attention'),
       deviceId: deviceFromSummary(summary),
@@ -141,9 +142,9 @@ async function scanInspection(baseDirs) {
     return {
       id: `inspection:${dir}`,
       type: 'inspection',
-      typeLabel: '设备巡检',
-      title: analysis.summary || '设备巡检报告',
-      subtitle: `${summary.successCount ?? metadata.successCount ?? 0} 成功 / ${summary.failedCount ?? metadata.failedCount ?? 0} 失败`,
+      typeLabel: tr("设备巡检"),
+      title: analysis.summary || tr("设备巡检报告"),
+      subtitle: tr("{0} 成功 / {1} 失败", { 0: summary.successCount ?? metadata.successCount ?? 0, 1: summary.failedCount ?? metadata.failedCount ?? 0 }),
       status: metadata.cancelled ? 'cancelled' : analysis.severity || 'normal',
       deviceId: summary.deviceId || metadata.deviceId || '',
       createdAt: summary.startedAt || metadata.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
@@ -169,8 +170,8 @@ async function scanPerformance(baseDirs) {
       items.push({
         id: `performance:${file}`,
         type: 'performance',
-        typeLabel: isReport ? '性能报告' : '性能数据',
-        title: isReport ? '性能分析报告' : '性能采样数据',
+        typeLabel: isReport ? tr("性能报告") : tr("性能数据"),
+        title: isReport ? tr("性能分析报告") : tr("性能采样数据"),
         subtitle: name,
         status: isReport ? 'report' : 'data',
         deviceId: parseDeviceFromPerformanceName(name),
@@ -201,9 +202,9 @@ async function scanTaskCenter(baseDirs) {
     return {
       id: `task:${dir}`,
       type: 'task',
-      typeLabel: result.mode === 'stress' ? '自动化压测' : '任务中心',
+      typeLabel: result.mode === 'stress' ? tr("自动化压测") : tr("任务中心"),
       title: result.scriptName || path.basename(dir),
-      subtitle: result.status ? `状态：${result.status}` : '任务产物',
+      subtitle: result.status ? tr("状态：{0}", { 0: result.status }) : tr("任务产物"),
       status: result.status || 'done',
       deviceId: deviceRuns.map(item => typeof item === 'string' ? item : item?.deviceId).filter(Boolean).join(', '),
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
@@ -230,9 +231,9 @@ async function scanRegression(baseDirs) {
     return {
       id: `regression:${dir}`,
       type: 'regression',
-      typeLabel: '回归差异',
-      title: result.name || '回归差异报告',
-      subtitle: diff.summary || (result.status ? `状态：${result.status}` : path.basename(dir)),
+      typeLabel: tr("回归差异"),
+      title: result.name || tr("回归差异报告"),
+      subtitle: diff.summary || (result.status ? tr("状态：{0}", { 0: result.status }) : path.basename(dir)),
       status: result.status || 'done',
       deviceId: result.deviceId || '',
       createdAt: result.comparedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
@@ -258,9 +259,9 @@ async function scanDeviceGuard(baseDirs) {
     return {
       id: `deviceGuard:${dir}`,
       type: 'deviceGuard',
-      typeLabel: '设备守护',
-      title: result.name || '设备守护报告',
-      subtitle: `事件 ${Array.isArray(result.events) ? result.events.length : 0} 项 / 采样 ${result.tickCount || 0} 次`,
+      typeLabel: tr("设备守护"),
+      title: result.name || tr("设备守护报告"),
+      subtitle: tr("事件 {0} 项 / 采样 {1} 次", { 0: Array.isArray(result.events) ? result.events.length : 0, 1: result.tickCount || 0 }),
       status: result.status || 'done',
       deviceId: result.deviceId || '',
       createdAt: result.startedAt || stat?.birthtime?.toISOString() || stat?.mtime?.toISOString(),
@@ -289,7 +290,7 @@ async function recentDirectories(baseDir) {
 
 async function deleteArtifacts(args) {
   const ids = normalizeIds(args?.ids || args?.id);
-  if (ids.length === 0) throw new Error('请选择要删除的产物');
+  if (ids.length === 0) throw new Error(tr("请选择要删除的产物"));
 
   const items = await listArtifacts();
   const itemById = new Map(items.map(item => [item.id, item]));
@@ -299,17 +300,17 @@ async function deleteArtifacts(args) {
   for (const id of ids) {
     const item = itemById.get(id);
     if (!item) {
-      failed.push({ id, error: '产物不存在或已不在当前列表中' });
+      failed.push({ id, error: tr("产物不存在或已不在当前列表中") });
       continue;
     }
     const deletePath = String(item.deletePath || '').trim();
     if (!deletePath) {
-      failed.push({ id, title: item.title, error: '产物缺少可删除路径' });
+      failed.push({ id, title: item.title, error: tr("产物缺少可删除路径") });
       continue;
     }
     const resolvedPath = path.resolve(deletePath);
     if (!exists(resolvedPath)) {
-      failed.push({ id, title: item.title, path: resolvedPath, error: '文件或目录不存在' });
+      failed.push({ id, title: item.title, path: resolvedPath, error: tr("文件或目录不存在") });
       continue;
     }
     if (!targetByPath.has(resolvedPath)) {
@@ -325,7 +326,7 @@ async function deleteArtifacts(args) {
       await shell.trashItem(target.path);
       deleted.push(target);
     } catch (error) {
-      failed.push({ ids: target.ids, title: target.title, path: target.path, error: error.message || '移入回收站失败' });
+      failed.push({ ids: target.ids, title: target.title, path: target.path, error: error.message || tr("移入回收站失败") });
     }
   }
 

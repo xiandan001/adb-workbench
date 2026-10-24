@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
@@ -16,13 +17,13 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
   async function read() {
     try {
       const stat = await fs.promises.lstat(indexPath);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) throw new Error('最近文件索引无效，请保留原文件后检查');
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) throw new Error(tr("最近文件索引无效，请保留原文件后检查"));
       const data = JSON.parse(await fs.promises.readFile(indexPath, 'utf8'));
-      if (data.version !== 1 || !Array.isArray(data.items) || data.items.some(item => !validItem(item))) throw new Error('最近文件索引格式无效');
+      if (data.version !== 1 || !Array.isArray(data.items) || data.items.some(item => !validItem(item))) throw new Error(tr("最近文件索引格式无效"));
       return data.items;
     } catch (error) {
       if (error.code === 'ENOENT') return [];
-      if (error.code === 'EACCES' || error.code === 'EPERM') throw mediaError('MEDIA_INDEX_UNAVAILABLE', '最近文件记录暂时无法读取，请检查访问权限后重试');
+      if (error.code === 'EACCES' || error.code === 'EPERM') throw mediaError('MEDIA_INDEX_UNAVAILABLE', tr("最近文件记录暂时无法读取，请检查访问权限后重试"));
       throw error;
     }
   }
@@ -30,9 +31,9 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
   async function resolveFile(item, log = false) {
     const file = log ? item.logPath : item.path;
     const expected = log ? item.logRealPath : item.realPath;
-    if (!file || !expected) throw new Error('文件未记录或已不存在');
+    if (!file || !expected) throw new Error(tr("文件未记录或已不存在"));
     const stat = await fs.promises.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || await fs.promises.realpath(file) !== expected) throw new Error('文件位置已变化，请从保存目录检查');
+    if (!stat.isFile() || stat.isSymbolicLink() || await fs.promises.realpath(file) !== expected) throw new Error(tr("文件位置已变化，请从保存目录检查"));
     return { path: file, stat };
   }
 
@@ -60,11 +61,11 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
   }
 
   async function addNow(input) {
-    if (!['image', 'video'].includes(input.type) || typeof input.deviceId !== 'string' || !input.deviceId) throw new Error('媒体类型或设备无效');
+    if (!['image', 'video'].includes(input.type) || typeof input.deviceId !== 'string' || !input.deviceId) throw new Error(tr("媒体类型或设备无效"));
     const file = path.resolve(input.path);
-    if (!(input.type === 'image' ? /\.png$/i : /\.mp4$/i).test(file)) throw new Error('不支持的媒体文件类型');
+    if (!(input.type === 'image' ? /\.png$/i : /\.mp4$/i).test(file)) throw new Error(tr("不支持的媒体文件类型"));
     const stat = await fs.promises.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || !stat.size) throw new Error('媒体文件不存在或内容为空');
+    if (!stat.isFile() || stat.isSymbolicLink() || !stat.size) throw new Error(tr("媒体文件不存在或内容为空"));
     const items = await read();
     const item = {
       id: randomUUID(), type: input.type, deviceId: input.deviceId, path: file,
@@ -74,10 +75,10 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
     };
     if (input.logPath) {
       const logPath = path.resolve(input.logPath);
-      if (path.dirname(logPath) !== path.dirname(file) || path.extname(logPath).toLowerCase() !== '.log') throw new Error('关联日志必须位于录屏保存目录');
+      if (path.dirname(logPath) !== path.dirname(file) || path.extname(logPath).toLowerCase() !== '.log') throw new Error(tr("关联日志必须位于录屏保存目录"));
       try {
         const logStat = await fs.promises.lstat(logPath);
-        if (!logStat.isFile() || logStat.isSymbolicLink()) throw new Error('关联日志文件无效');
+        if (!logStat.isFile() || logStat.isSymbolicLink()) throw new Error(tr("关联日志文件无效"));
         Object.assign(item, { logPath, logRealPath: await fs.promises.realpath(logPath), logBytes: logStat.size, logTruncated: input.logTruncated === true });
       } catch (error) {
         // A removed optional log must not prevent a successfully saved video from being indexed.
@@ -134,12 +135,12 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
   }
 
   async function performNow({ id, action } = {}) {
-    if (!['open', 'folder', 'copy', 'log'].includes(action)) throw new Error('无效的文件操作');
+    if (!['open', 'folder', 'copy', 'log'].includes(action)) throw new Error(tr("无效的文件操作"));
     const items = await read();
     const item = items.find(entry => entry.id === id);
-    if (!item) throw mediaError('MEDIA_RECORD_MISSING', '该文件不在最近记录中，请刷新列表或从保存目录查看');
+    if (!item) throw mediaError('MEDIA_RECORD_MISSING', tr("该文件不在最近记录中，请刷新列表或从保存目录查看"));
     const media = await resolveForAction(items, item);
-    if (action === 'log' && !item.logPath) throw mediaError('MEDIA_LOG_MISSING', '关联日志已移动或删除，日志入口已移除');
+    if (action === 'log' && !item.logPath) throw mediaError('MEDIA_LOG_MISSING', tr("关联日志已移动或删除，日志入口已移除"));
     const target = action === 'log' ? await resolveForAction(items, item, true) : media;
     try {
       if (action === 'folder') {
@@ -147,13 +148,13 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
         return;
       }
       if (action === 'copy') {
-        if (item.type !== 'image') throw mediaError('MEDIA_ACTION_INVALID', '只有截图可以复制为图片');
+        if (item.type !== 'image') throw mediaError('MEDIA_ACTION_INVALID', tr("只有截图可以复制为图片"));
         const image = nativeImage.createFromPath(target.path);
-        if (image.isEmpty()) throw mediaError('MEDIA_UNREADABLE', '截图暂时无法读取，请稍后重试');
+        if (image.isEmpty()) throw mediaError('MEDIA_UNREADABLE', tr("截图暂时无法读取，请稍后重试"));
         clipboard.writeImage(image);
       } else {
         const error = await shell.openPath(target.path);
-        if (error) throw mediaError('MEDIA_OPEN_FAILED', '文件暂时无法打开，请检查文件访问权限和默认打开程序');
+        if (error) throw mediaError('MEDIA_OPEN_FAILED', tr("文件暂时无法打开，请检查文件访问权限和默认打开程序"));
       }
     } catch (error) {
       // A file may disappear after the first check but before the OS opens it.
@@ -183,17 +184,17 @@ async function classifyFileError(error, file, log = false, realFile = file) {
         if (!root.isDirectory()) throw new Error('Storage root unavailable');
       }
     } catch {
-      return { missing: false, error: mediaError('MEDIA_STORAGE_UNAVAILABLE', '存储位置暂时不可用，请重新连接磁盘或网络位置后重试') };
+      return { missing: false, error: mediaError('MEDIA_STORAGE_UNAVAILABLE', tr("存储位置暂时不可用，请重新连接磁盘或网络位置后重试")) };
     }
   }
   return { missing: isMissing(error), error: fileError(error, log) };
 }
 
 function fileError(error, log = false) {
-  const subject = log ? '关联日志' : '文件';
-  if (isMissing(error)) return mediaError(log ? 'MEDIA_LOG_MISSING' : 'MEDIA_FILE_MISSING', `${subject}已移动或删除，${log ? '日志入口已移除' : '已从最近文件中移除'}`);
-  if (error?.code === 'EACCES' || error?.code === 'EPERM') return mediaError('MEDIA_ACCESS_DENIED', `${subject}暂时无法读取，请检查访问权限后重试`);
-  return mediaError('MEDIA_UNREADABLE', `${subject}暂时无法读取或位置已变化，请检查保存目录后重试`);
+  const subject = log ? tr("关联日志") : tr("文件");
+  if (isMissing(error)) return mediaError(log ? 'MEDIA_LOG_MISSING' : 'MEDIA_FILE_MISSING', tr("{0}已移动或删除，{1}", { 0: subject, 1: log ? tr("日志入口已移除") : tr("已从最近文件中移除") }));
+  if (error?.code === 'EACCES' || error?.code === 'EPERM') return mediaError('MEDIA_ACCESS_DENIED', tr("{0}暂时无法读取，请检查访问权限后重试", { 0: subject }));
+  return mediaError('MEDIA_UNREADABLE', tr("{0}暂时无法读取或位置已变化，请检查保存目录后重试", { 0: subject }));
 }
 
 function validItem(item) {

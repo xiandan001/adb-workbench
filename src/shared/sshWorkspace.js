@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export const SSH_LAYOUT_KEY = 'adb-workbench.ssh-layout.v1';
 export const MAX_SSH_DOCUMENTS = 12;
 const MAX_OPEN_BYTES = 64 * 1024 * 1024;
@@ -16,9 +17,9 @@ export function sshWorkspaceReducer(state, action) {
     const index = current.documents.findIndex(item => item.path === source.path);
     if (index >= 0 && action.type !== 'replace-document') next = { ...current, activeDocumentId: current.documents[index].documentId };
     else {
-      if (index < 0 && current.documents.length >= MAX_SSH_DOCUMENTS) throw new Error(`每个 SSH 会话最多打开 ${MAX_SSH_DOCUMENTS} 个文件，请先关闭不需要的标签`);
+      if (index < 0 && current.documents.length >= MAX_SSH_DOCUMENTS) throw new Error(tr("每个 SSH 会话最多打开 {0} 个文件，请先关闭不需要的标签", { 0: MAX_SSH_DOCUMENTS }));
       const heldBytes = Object.values(state.sessions).flatMap(item => item.documents).reduce((total, item) => total + (item.text?.length || 0) * 2 + (item.dataUrl?.length || 0), 0);
-      if (heldBytes + (source.text?.length || 0) * 2 + (source.dataUrl?.length || 0) > MAX_OPEN_BYTES) throw new Error('打开的 SSH 文件已达到内存上限，请关闭部分预览后重试');
+      if (heldBytes + (source.text?.length || 0) * 2 + (source.dataUrl?.length || 0) > MAX_OPEN_BYTES) throw new Error(tr("打开的 SSH 文件已达到内存上限，请关闭部分预览后重试"));
       const document = { ...source, draft: source.text || '', savedText: source.text || '', dirty: false, saving: false, error: '', errorCode: '' };
       const documents = [...current.documents];
       if (index < 0) documents.push(document); else documents[index] = document;
@@ -68,16 +69,16 @@ export function sshWorkspaceReducer(state, action) {
 export function dirtySshPaths(session) { return (session?.documents || []).filter(item => item.dirty).map(item => item.path); }
 
 export function normalizeSshLayout(value) {
-  if (!value || value.version !== 1 || !Number.isFinite(value.files) || !Number.isFinite(value.editor) || typeof value.transfersOpen !== 'boolean') throw new Error('SSH 布局数据无效');
+  if (!value || value.version !== 1 || !Number.isFinite(value.files) || !Number.isFinite(value.editor) || typeof value.transfersOpen !== 'boolean') throw new Error(tr("SSH 布局数据无效"));
   const appearance = value.appearance === undefined ? 'current' : value.appearance;
-  if (!['current', 'classic'].includes(appearance)) throw new Error('SSH 布局主题无效');
+  if (!['current', 'classic'].includes(appearance)) throw new Error(tr("SSH 布局主题无效"));
   return { version: 1, files: Math.max(0.18, Math.min(0.45, value.files)), editor: Math.max(0.25, Math.min(0.75, value.editor)), transfersOpen: value.transfersOpen, appearance };
 }
 
 export function readSshLayout(storage = globalThis.localStorage) {
   const raw = storage.getItem(SSH_LAYOUT_KEY);
   if (raw === null || raw === undefined) return { ...DEFAULT_SSH_LAYOUT };
-  try { return normalizeSshLayout(JSON.parse(raw)); } catch { throw new Error('SSH 布局数据异常，原内容已保留'); }
+  try { return normalizeSshLayout(JSON.parse(raw)); } catch { throw new Error(tr("SSH 布局数据异常，原内容已保留")); }
 }
 
 export function saveSshLayout(value, storage = globalThis.localStorage) {
@@ -93,7 +94,7 @@ export function remoteParent(path) {
 }
 
 export function remoteChild(parent, name) {
-  if (typeof name !== 'string' || !name || ['.', '..'].includes(name) || name.includes('/') || name.includes('\0')) throw new Error('远端名称无效');
+  if (typeof name !== 'string' || !name || ['.', '..'].includes(name) || name.includes('/') || name.includes('\0')) throw new Error(tr("远端名称无效"));
   return `${String(parent || '/').replace(/\/+$/, '')}/${name}`;
 }
 
@@ -127,7 +128,7 @@ export function clearSshDirectoryLoading(nodes) {
     ? { ...node, loading: false, loaded: false, cursor: undefined, truncated: false } : node]));
 }
 
-export function sshResult(result, fallback = 'SSH 操作未完成') {
+export function sshResult(result, fallback = tr("SSH 操作未完成")) {
   if (!result?.success) throw Object.assign(new Error(result?.error || fallback), { code: result?.code || '' });
   return result;
 }

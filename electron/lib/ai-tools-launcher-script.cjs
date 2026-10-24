@@ -1,4 +1,5 @@
 const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+const { tr } = require('./localization.cjs');
 const encode = script => Buffer.from(script, 'utf16le').toString('base64');
 function buildLaunchScript({ executable, args }) { return `$ErrorActionPreference = 'Stop'\n& ${[executable, ...args].map(quote).join(' ')}\n`; }
 
@@ -36,13 +37,13 @@ try {
   $global:LASTEXITCODE = 0
   ${buildLaunchScript({ executable, args })}
   $awbExitCode = 0
-  if ($LASTEXITCODE -ne 0) { $awbExitCode = 1; Write-Host ('CLI 退出码：{0}。请查看上方 CLI 输出。' -f $LASTEXITCODE) -ForegroundColor Red }
+  if ($LASTEXITCODE -ne 0) { $awbExitCode = 1; Write-Host (${quote(tr('CLI 退出码：{0}。请查看上方 CLI 输出。'))} -f $LASTEXITCODE) -ForegroundColor Red }
 } catch {
   if (-not $awbAllowed -and $null -ne $awbWriter) {
     try { $awbWriter.WriteLine((@{ nonce = ${quote(nonce)}; state = 'failed'; pid = $PID; parentPid = $awbParent } | ConvertTo-Json -Compress)) } catch {}
   }
   if ($awbAllowed) { $awbExitCode = 1 }
-  Write-Host 'CLI 未能启动或已中止，请检查安装、项目目录与上方输出。不会自动重试。' -ForegroundColor Red
+  Write-Host ${quote(tr('CLI 未能启动或已中止，请检查安装、项目目录与上方输出。不会自动重试。'))} -ForegroundColor Red
 } finally {
   if ($null -ne $awbWriter) { $awbWriter.Dispose() }
   if ($null -ne $awbPipe) { $awbPipe.Dispose() }

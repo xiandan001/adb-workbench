@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // 设备巡检报告与证据包导出：独立主进程模块，避免扩大现有 ADB/日志模块职责
 
 const { app, shell } = require('electron');
@@ -44,14 +45,14 @@ const STANDARD_STEPS = [
 function register(ipcMain) {
   ipcMain.handle('inspection:start', async (event, args) => {
     if (currentTask) {
-      return { ok: false, error: '已有巡检任务正在执行，请先等待或取消当前任务' };
+      return { ok: false, error: tr("已有巡检任务正在执行，请先等待或取消当前任务") };
     }
     const status = await vip.getStatusAsync();
     if (!status.activated) {
-      return { ok: false, code: 'vip_required', error: '设备巡检为会员专属功能，请先开通会员' };
+      return { ok: false, code: 'vip_required', error: tr("设备巡检为会员专属功能，请先开通会员") };
     }
     const deviceId = String(args?.deviceId || '').trim();
-    if (!deviceId) return { ok: false, error: '设备 ID 不能为空' };
+    if (!deviceId) return { ok: false, error: tr("设备 ID 不能为空") };
 
     const task = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -76,7 +77,7 @@ function register(ipcMain) {
         outputBaseDir: args?.outputBaseDir
       })
       .catch((error) => {
-        const payload = { ok: false, error: error.message || '巡检异常', deviceId, outputDir: null, reportPath: null, zipPath: null };
+        const payload = { ok: false, error: error.message || tr("巡检异常"), deviceId, outputDir: null, reportPath: null, zipPath: null };
         task.status = 'failed';
         task.result = payload;
         lastTaskState = publicInspectionTask(task);
@@ -111,7 +112,7 @@ function register(ipcMain) {
 
   ipcMain.handle('inspection:openFolder', async (event, folderPath) => {
     if (!folderPath || typeof folderPath !== 'string') {
-      return { ok: false, error: '目录路径不能为空' };
+      return { ok: false, error: tr("目录路径不能为空") };
     }
     const error = await shell.openPath(folderPath);
     return error ? { ok: false, error } : { ok: true };
@@ -131,8 +132,8 @@ async function runInspection(task, options) {
 
   const startedAt = new Date();
   const steps = [
-    ...STANDARD_STEPS,
-    ...(options.includeBugreport ? [{ id: 'bugreport', label: '生成 bugreport', kind: 'bugreport', file: 'bugreport.zip', timeout: BUGREPORT_TIMEOUT_MS }] : [])
+    ...STANDARD_STEPS.map(step => ({ ...step, label: tr(step.label) })),
+    ...(options.includeBugreport ? [{ id: 'bugreport', label: tr("生成 bugreport"), kind: 'bugreport', file: 'bugreport.zip', timeout: BUGREPORT_TIMEOUT_MS }] : [])
   ];
   const results = [];
   const errors = [];
@@ -153,7 +154,7 @@ async function runInspection(task, options) {
 
   const deviceState = await runAdb(task, ['-s', options.deviceId, 'get-state'], STANDARD_TIMEOUT_MS);
   if (!deviceState.ok || !String(deviceState.stdout).trim().includes('device')) {
-    return finishEarly(task, outputDir, state, errors, `设备 ${options.deviceId} 不在线或不可用`);
+    return finishEarly(task, outputDir, state, errors, tr("设备 {0} 不在线或不可用", { 0: options.deviceId }));
   }
 
   for (let i = 0; i < steps.length; i++) {
@@ -175,7 +176,7 @@ async function runInspection(task, options) {
 
   const cancelled = task.cancelled;
   if (cancelled) {
-    errors.push({ id: 'cancelled', label: '用户取消', error: '巡检已取消，后续步骤未执行' });
+    errors.push({ id: 'cancelled', label: tr("用户取消"), error: tr("巡检已取消，后续步骤未执行") });
   }
 
   const endedAt = new Date();
@@ -207,7 +208,7 @@ async function runInspection(task, options) {
     await createZip(outputDir, zipPath);
   } catch (e) {
     zipError = e.message;
-    errors.push({ id: 'zip', label: '证据包打包', error: zipError });
+    errors.push({ id: 'zip', label: tr("证据包打包"), error: zipError });
     await writeJson(errorsPath, errors);
     await writeJson(summaryPath, buildSummary({ ...finalState, failedCount: errors.length }, results, errors));
     await fs.promises.writeFile(reportPath, buildReport({ ...finalState, failedCount: errors.length }, results, errors, dirs), 'utf8');
@@ -230,7 +231,7 @@ async function runInspection(task, options) {
 }
 
 async function finishEarly(task, outputDir, state, errors, error) {
-  errors.push({ id: 'preflight', label: '巡检预检查', error });
+  errors.push({ id: 'preflight', label: tr("巡检预检查"), error });
   const analysis = buildAnalysis([], errors);
   const aiSummary = state.includeAiSummary ? await buildInspectionAiSummary(state, [], errors, analysis) : { ok: false, skipped: true, summary: '' };
   const finalState = { ...state, endedAt: new Date().toISOString(), cancelled: false, successCount: 0, failedCount: errors.length, analysis, aiSummary, steps: [] };
@@ -264,7 +265,7 @@ async function executeStep(task, deviceId, step, dirs) {
   if (step.kind === 'bugreport') {
     return captureBugreport(task, deviceId, step, dirs.bugreport);
   }
-  return { id: step.id, label: step.label, ok: false, error: '未知巡检步骤类型' };
+  return { id: step.id, label: step.label, ok: false, error: tr("未知巡检步骤类型") };
 }
 
 async function saveTextResult(step, res, rawDir) {
@@ -277,7 +278,7 @@ async function saveTextResult(step, res, rawDir) {
     ok: res.ok,
     file: filePath,
     bytes: Buffer.byteLength(content || '', 'utf8'),
-    error: res.ok ? null : (res.error || res.stderr || `命令退出码 ${res.code}`)
+    error: res.ok ? null : (res.error || res.stderr || tr("命令退出码 {0}", { 0: res.code }))
   };
 }
 
@@ -313,7 +314,7 @@ async function captureBugreport(task, deviceId, step, bugreportDir) {
 }
 
 async function runAdb(task, args, timeoutMs) {
-  if (task.cancelled) return { ok: false, error: '用户取消' };
+  if (task.cancelled) return { ok: false, error: tr("用户取消") };
   let currentProc = null;
   const res = await runRuntimeAdb(args, {
     timeoutMs,
@@ -325,9 +326,9 @@ async function runAdb(task, args, timeoutMs) {
   });
   if (task.currentProc === currentProc) task.currentProc = null;
   const error = task.cancelled
-    ? '用户取消'
+    ? tr("用户取消")
     : res.timedOut
-      ? `命令超时（${Math.round(timeoutMs / 1000)} 秒）`
+      ? tr("命令超时（{0} 秒）", { 0: Math.round(timeoutMs / 1000) })
       : (res.ok ? null : (res.error || res.stderr || 'ADB command failed'));
   return {
     ok: res.ok && !error,
@@ -364,80 +365,80 @@ function buildReport(state, results, errors, dirs) {
   const windowInfo = raw('window');
 
   const lines = [
-    '# 设备巡检报告',
+    tr("# 设备巡检报告"),
     '',
-    '## 巡检概要',
+    tr("## 巡检概要"),
     '',
-    `- 应用版本：${state.appVersion}`,
-    `- 设备 ID：${state.deviceId}`,
-    `- 开始时间：${state.startedAt}`,
-    `- 结束时间：${state.endedAt || ''}`,
-    `- 执行结果：${state.cancelled ? '用户取消' : errors.length > 0 ? '完成（存在失败项）' : '完成'}`,
-    `- 成功项：${state.successCount}`,
-    `- 失败项：${errors.length}`,
-    `- 导出目录：${dirs.root}`,
+    tr("- 应用版本：{0}", { 0: state.appVersion }),
+    tr("- 设备 ID：{0}", { 0: state.deviceId }),
+    tr("- 开始时间：{0}", { 0: state.startedAt }),
+    tr("- 结束时间：{0}", { 0: state.endedAt || '' }),
+    tr("- 执行结果：{0}", { 0: state.cancelled ? tr("用户取消") : errors.length > 0 ? tr("完成（存在失败项）") : tr("完成") }),
+    tr("- 成功项：{0}", { 0: state.successCount }),
+    tr("- 失败项：{0}", { 0: errors.length }),
+    tr("- 导出目录：{0}", { 0: dirs.root }),
     '',
-    '## 健康结论',
+    tr("## 健康结论"),
     '',
-    `- 结论：${state.analysis?.summary || '未生成'}`,
-    `- 风险等级：${state.analysis?.severity || 'unknown'}`,
+    tr("- 结论：{0}", { 0: state.analysis?.summary || tr("未生成") }),
+    tr("- 风险等级：{0}", { 0: state.analysis?.severity || 'unknown' }),
     '',
     ...((state.analysis?.findings || []).length === 0
-      ? ['- 未发现明确风险项', '']
+      ? [tr("- 未发现明确风险项"), '']
       : state.analysis.findings.map(item => `- [${item.severity}] ${item.label}：${item.detail}`).concat('')),
-    '## 设备信息',
+    tr("## 设备信息"),
     '',
-    `- 品牌：${prop(getprop, 'ro.product.brand') || '-'}`,
-    `- 厂商：${prop(getprop, 'ro.product.manufacturer') || '-'}`,
-    `- 型号：${prop(getprop, 'ro.product.model') || '-'}`,
-    `- 设备：${prop(getprop, 'ro.product.device') || '-'}`,
-    `- 产品名：${prop(getprop, 'ro.product.name') || '-'}`,
+    tr("- 品牌：{0}", { 0: prop(getprop, 'ro.product.brand') || '-' }),
+    tr("- 厂商：{0}", { 0: prop(getprop, 'ro.product.manufacturer') || '-' }),
+    tr("- 型号：{0}", { 0: prop(getprop, 'ro.product.model') || '-' }),
+    tr("- 设备：{0}", { 0: prop(getprop, 'ro.product.device') || '-' }),
+    tr("- 产品名：{0}", { 0: prop(getprop, 'ro.product.name') || '-' }),
     `- Android：${prop(getprop, 'ro.build.version.release') || '-'} (SDK ${prop(getprop, 'ro.build.version.sdk') || '-'})`,
-    `- 构建号：${prop(getprop, 'ro.build.display.id') || '-'}`,
-    `- 指纹：${prop(getprop, 'ro.build.fingerprint') || '-'}`,
+    tr("- 构建号：{0}", { 0: prop(getprop, 'ro.build.display.id') || '-' }),
+    tr("- 指纹：{0}", { 0: prop(getprop, 'ro.build.fingerprint') || '-' }),
     `- ABI：${prop(getprop, 'ro.product.cpu.abi') || '-'}`,
-    `- 序列号：${prop(getprop, 'ro.serialno') || '-'}`,
-    `- 分辨率：${firstMatch(display, /Physical size:\s*(.+)/) || '-'}`,
-    `- 密度：${firstMatch(display, /Physical density:\s*(.+)/) || '-'}`,
+    tr("- 序列号：{0}", { 0: prop(getprop, 'ro.serialno') || '-' }),
+    tr("- 分辨率：{0}", { 0: firstMatch(display, /Physical size:\s*(.+)/) || '-' }),
+    tr("- 密度：{0}", { 0: firstMatch(display, /Physical density:\s*(.+)/) || '-' }),
     '',
-    '## 系统状态',
+    tr("## 系统状态"),
     '',
-    `- Root 状态：${idText.includes('uid=0') ? 'root' : idText ? '非 root 或 shell 用户' : '-'}`,
-    `- 内存总量：${firstMatch(meminfo, /^MemTotal:\s*(.+)$/m) || '-'}`,
-    `- 可用内存：${firstMatch(meminfo, /^MemAvailable:\s*(.+)$/m) || '-'}`,
-    `- 电量：${firstMatch(battery, /^\s*level:\s*(.+)$/m) || '-'}`,
-    `- 电池温度：${formatBatteryTemp(firstMatch(battery, /^\s*temperature:\s*(.+)$/m))}`,
+    tr("- Root 状态：{0}", { 0: idText.includes('uid=0') ? 'root' : idText ? tr("非 root 或 shell 用户") : '-' }),
+    tr("- 内存总量：{0}", { 0: firstMatch(meminfo, /^MemTotal:\s*(.+)$/m) || '-' }),
+    tr("- 可用内存：{0}", { 0: firstMatch(meminfo, /^MemAvailable:\s*(.+)$/m) || '-' }),
+    tr("- 电量：{0}", { 0: firstMatch(battery, /^\s*level:\s*(.+)$/m) || '-' }),
+    tr("- 电池温度：{0}", { 0: formatBatteryTemp(firstMatch(battery, /^\s*temperature:\s*(.+)$/m)) }),
     '',
-    '## 当前前台信息',
+    tr("## 当前前台信息"),
     '',
     `- Resumed Activity：${firstMatch(activity, /mResumedActivity:\s*(.+)/) || firstMatch(activity, /topResumedActivity=([^\n]+)/) || '-'}`,
     `- Focused Window：${firstMatch(windowInfo, /mCurrentFocus=([^\n]+)/) || firstMatch(windowInfo, /mFocusedApp=([^\n]+)/) || '-'}`,
     '',
-    '## 日志与附件',
+    tr("## 日志与附件"),
     '',
-    ...results.map(r => `- ${r.ok ? '成功' : '失败'}：${r.label}${r.file ? `（${relative(dirs.root, r.file)}，${formatBytes(r.bytes || fileSize(r.file))}）` : ''}${r.error ? `：${r.error}` : ''}`),
+    ...results.map(r => `- ${r.ok ? tr("成功") : tr("失败")}：${r.label}${r.file ? `（${relative(dirs.root, r.file)}，${formatBytes(r.bytes || fileSize(r.file))}）` : ''}${r.error ? `：${r.error}` : ''}`),
     '',
-    '## 失败项',
+    tr("## 失败项"),
     ''
   ];
 
   if (errors.length === 0) {
-    lines.push('- 无');
+    lines.push(tr("- 无"));
   } else {
-    errors.forEach(e => lines.push(`- ${e.label || e.id}：${e.error || '未知错误'}`));
+    errors.forEach(e => lines.push(`- ${e.label || e.id}：${e.error || tr("未知错误")}`));
   }
 
   lines.push(
     '',
-    '## 证据包说明',
+    tr("## 证据包说明"),
     '',
-    '- `raw/`：ADB 命令原始输出。',
-    '- `media/`：屏幕截图等图片证据。',
-    '- `bugreport/`：用户勾选后生成的 bugreport。',
-    '- `metadata.json`：巡检元数据。',
-    '- `errors.json`：失败项机器可读记录。',
+    tr("- `raw/`：ADB 命令原始输出。"),
+    tr("- `media/`：屏幕截图等图片证据。"),
+    tr("- `bugreport/`：用户勾选后生成的 bugreport。"),
+    tr("- `metadata.json`：巡检元数据。"),
+    tr("- `errors.json`：失败项机器可读记录。"),
     '',
-    '## AI 分析',
+    tr("## AI 分析"),
     '',
     ...formatAiAnalysisLines(state.aiSummary),
     ''
@@ -463,12 +464,12 @@ function buildSummary(state, results, errors) {
 }
 
 function formatAiAnalysisLines(aiSummary) {
-  if (!aiSummary || aiSummary.skipped) return ['- 未勾选 AI 分析'];
-  if (!aiSummary.ok) return [`- AI 分析未生成：${aiSummary.error || '未知错误'}`];
+  if (!aiSummary || aiSummary.skipped) return [tr("- 未勾选 AI 分析")];
+  if (!aiSummary.ok) return [tr("- AI 分析未生成：{0}", { 0: aiSummary.error || tr("未知错误") })];
   const lines = String(aiSummary.summary || '')
     .split(/\r?\n/)
     .map(line => line.trimEnd());
-  return lines.some(Boolean) ? lines : ['- AI 分析为空'];
+  return lines.some(Boolean) ? lines : [tr("- AI 分析为空")];
 }
 
 function buildAnalysis(results, errors) {
@@ -483,24 +484,24 @@ function buildAnalysis(results, errors) {
   const disk = raw('disk');
 
   if (Number.isFinite(batteryTemp) && batteryTemp >= 450) {
-    findings.push({ severity: 'high', label: '设备温度偏高', detail: `${(batteryTemp / 10).toFixed(1)}°C` });
+    findings.push({ severity: 'high', label: tr("设备温度偏高"), detail: `${(batteryTemp / 10).toFixed(1)}°C` });
   }
   if (memTotal > 0 && memAvailable > 0) {
     const availableRatio = memAvailable / memTotal;
     if (availableRatio < 0.15) {
-      findings.push({ severity: 'medium', label: '可用内存偏低', detail: `可用 ${formatKbValue(memAvailable)} / 总计 ${formatKbValue(memTotal)}` });
+      findings.push({ severity: 'medium', label: tr("可用内存偏低"), detail: tr("可用 {0} / 总计 {1}", { 0: formatKbValue(memAvailable), 1: formatKbValue(memTotal) }) });
     }
   }
   if (/FATAL EXCEPTION|ANR in |native crash|Fatal signal/i.test(logcatCrash + '\n' + logcatMain)) {
-    findings.push({ severity: 'high', label: '日志中存在崩溃或 ANR 线索', detail: '请查看 raw/logcat-crash.txt 与 raw/logcat-main.txt' });
+    findings.push({ severity: 'high', label: tr("日志中存在崩溃或 ANR 线索"), detail: tr("请查看 raw/logcat-crash.txt 与 raw/logcat-main.txt") });
   }
   if (/(?:\s|^)(9[0-9]|100)%\s+\/data\b/m.test(disk)) {
-    findings.push({ severity: 'medium', label: '/data 分区使用率偏高', detail: '请查看 raw/df.txt' });
+    findings.push({ severity: 'medium', label: tr("/data 分区使用率偏高"), detail: tr("请查看 raw/df.txt") });
   }
   errors
     .filter(item => item.id !== 'cancelled')
     .slice(0, 5)
-    .forEach(item => findings.push({ severity: 'low', label: `${item.label || item.id} 未完成`, detail: item.error || '未知错误' }));
+    .forEach(item => findings.push({ severity: 'low', label: tr("{0} 未完成", { 0: item.label || item.id }), detail: item.error || tr("未知错误") }));
 
   const severity = findings.some(item => item.severity === 'high')
     ? 'high'
@@ -508,8 +509,8 @@ function buildAnalysis(results, errors) {
       ? 'medium'
       : findings.length > 0 ? 'low' : 'normal';
   const summary = severity === 'normal'
-    ? '标准巡检未发现明确风险项'
-    : `发现 ${findings.length} 个需要关注的风险项`;
+    ? tr("标准巡检未发现明确风险项")
+    : tr("发现 {0} 个需要关注的风险项", { 0: findings.length });
   return { severity, summary, findings };
 }
 
@@ -517,34 +518,34 @@ async function buildInspectionAiSummary(state, results, errors, analysis) {
   const artifacts = results
     .filter(item => item.file)
     .slice(0, 20)
-    .map(item => `- ${item.label}: ${item.ok ? '成功' : '失败'} ${item.file || ''} ${item.error || ''}`)
+    .map(item => `- ${item.label}: ${item.ok ? tr("成功") : tr("失败")} ${item.file || ''} ${item.error || ''}`)
     .join('\n');
   const findings = (analysis.findings || [])
     .map(item => `- [${item.severity}] ${item.label}: ${item.detail}`)
-    .join('\n') || '- 无';
+    .join('\n') || tr("- 无");
   const failures = errors
     .slice(0, 12)
-    .map(item => `- ${item.label || item.id}: ${item.error || '未知错误'}`)
-    .join('\n') || '- 无';
+    .map(item => `- ${item.label || item.id}: ${item.error || tr("未知错误")}`)
+    .join('\n') || tr("- 无");
   const prompt = [
-    `设备 ID: ${state.deviceId}`,
-    `应用版本: ${state.appVersion}`,
-    `巡检结果: ${analysis.summary}`,
-    `风险等级: ${analysis.severity}`,
+    tr("设备 ID: {0}", { 0: state.deviceId }),
+    tr("应用版本: {0}", { 0: state.appVersion }),
+    tr("巡检结果: {0}", { 0: analysis.summary }),
+    tr("风险等级: {0}", { 0: analysis.severity }),
     '',
-    '风险项:',
+    tr("风险项:"),
     findings,
     '',
-    '失败项:',
+    tr("失败项:"),
     failures,
     '',
-    '附件摘要:',
-    artifacts || '- 无',
+    tr("附件摘要:"),
+    artifacts || tr("- 无"),
     '',
-    '请输出一段面向 Android 调试人员的巡检 AI 总结，包含：总体结论、优先关注项、下一步建议。不要编造未提供的证据。'
+    tr("请输出一段面向 Android 调试人员的巡检 AI 总结，包含：总体结论、优先关注项、下一步建议。不要编造未提供的证据。")
   ].join('\n');
   return aiAnalyze.generateAiSummary({
-    systemPrompt: '你是 Android 设备巡检报告助手，只根据给定巡检摘要输出简洁、可执行的中文结论。',
+    systemPrompt: tr("你是 Android 设备巡检报告助手，只根据给定巡检摘要输出简洁、可执行的中文结论。"),
     userContent: prompt,
     timeoutMs: 60000,
     temperature: 0.2
@@ -557,7 +558,7 @@ async function createZip(rootDir, zipPath) {
     `$dest = '${escapePs(zipPath)}'`,
     `if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }`,
     `$items = Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -ne 'evidence-package.zip' }`,
-    `if (-not $items) { throw '没有可打包的证据文件' }`,
+    `if (-not $items) { throw '${escapePs(tr('没有可打包的证据文件'))}' }`,
     `$items | Compress-Archive -DestinationPath $dest -Force`
   ].join('; ');
   await new Promise((resolve, reject) => {
@@ -620,7 +621,7 @@ function publicInspectionTask(task) {
 }
 
 function toErrorRecord(step, result) {
-  return { id: step.id, label: step.label, error: result.error || '未知错误', file: result.file || null };
+  return { id: step.id, label: step.label, error: result.error || tr("未知错误"), file: result.file || null };
 }
 
 function prop(text, key) {

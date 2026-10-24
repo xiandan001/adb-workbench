@@ -1,8 +1,9 @@
+const { tr } = require('./localization.cjs');
 const spec = require('./device-shortcuts-spec.json');
 
 // This synchronous migration validator mirrors the renderer validator; contract tests cover both.
 function normalizeDeviceShortcuts(value) {
-  const fail = () => { throw new Error('快捷操作配置无效，请检查四个按钮的名称和操作'); };
+  const fail = () => { throw new Error(tr("快捷操作配置无效，请检查四个按钮的名称和操作")); };
   const hasControl = value => [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   const object = (item, keys) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)

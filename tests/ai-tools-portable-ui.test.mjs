@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { parse } from '@babel/parser';
+import { tr } from '../src/shared/i18n.js';
 
 const file = new URL('../src/components/ai-tools/AiPortablePanel.jsx', import.meta.url);
 const source = fs.readFileSync(file, 'utf8');
@@ -10,7 +11,7 @@ const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
 function pure(name) {
   const node = ast.program.body.find(item => item.type === 'FunctionDeclaration' && item.id.name === name);
   assert.ok(node, `missing ${name}`);
-  return vm.runInNewContext(`(${source.slice(node.start, node.end)})`, { TextEncoder, Date });
+  return vm.runInNewContext(`(${source.slice(node.start, node.end)})`, { TextEncoder, Date, tr });
 }
 
 test('portable password validation uses UTF-8 byte limits and requires exact confirmation only on export', () => {

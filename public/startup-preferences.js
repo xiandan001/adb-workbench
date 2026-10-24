@@ -15,6 +15,7 @@
   document.documentElement.dataset.reducedMotion = String(effectiveReducedMotion);
   document.documentElement.dataset.startupAnimation = String(startupAnimation);
   const api = window.electronAPI;
+  document.documentElement.lang = api?.initialLanguage === 'en-US' ? 'en-US' : 'zh-CN';
   const nativeDesktop = ['startupPresentationPreferences', 'startupPresentationReady', 'startupPresentationFailed'].every(name => typeof api?.[name] === 'function');
   document.documentElement.dataset.nativeDesktop = String(nativeDesktop);
   if (nativeDesktop) {

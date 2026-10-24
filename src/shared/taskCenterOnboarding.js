@@ -1,3 +1,4 @@
+import { tr } from './i18n.js';
 export const ONBOARDING_STAGES = Object.freeze({
   WELCOME: 'welcome',
   RECORDING_ENTRY: 'recording_entry',
@@ -44,32 +45,32 @@ const GUIDE_BY_STAGE = Object.freeze({
   [ONBOARDING_STAGES.RECORDING_ENTRY]: {
     selector: '[data-task-center-guide="recording-entry"]',
     step: 1,
-    title: '进入录制操作',
-    description: '点击“录制操作”，进入简化录制页面。'
+    get title() { return tr("进入录制操作"); },
+    get description() { return tr("点击“录制操作”，进入简化录制页面。"); }
   },
   [ONBOARDING_STAGES.DEVICE_SELECT]: {
     selector: '[data-task-center-guide="device-select"]',
     step: 2,
-    title: '选择在线设备',
-    description: '点击一台在线设备，后续录制和回放都会使用它。'
+    get title() { return tr("选择在线设备"); },
+    get description() { return tr("点击一台在线设备，后续录制和回放都会使用它。"); }
   },
   [ONBOARDING_STAGES.SNAPSHOT]: {
     selector: '[data-task-center-guide="snapshot"]',
     step: 3,
-    title: '读取真实界面',
-    description: '点击“读取界面”，获取当前设备画面。'
+    get title() { return tr("读取真实界面"); },
+    get description() { return tr("点击“读取界面”，获取当前设备画面。"); }
   },
   [ONBOARDING_STAGES.RECORD_TAP]: {
     selector: '[data-task-center-guide="preview"]',
     step: 4,
-    title: '录制一次安全点击',
-    description: '在设备画面中点击一个你确认安全的位置；该点击会真实发送到设备。'
+    get title() { return tr("录制一次安全点击"); },
+    get description() { return tr("在设备画面中点击一个你确认安全的位置；该点击会真实发送到设备。"); }
   },
   [ONBOARDING_STAGES.REPLAY]: {
     selector: '[data-task-center-guide="replay"]',
     step: 5,
-    title: '回放刚才的点击',
-    description: '点击“开始回放”，在这台设备上执行一次刚录制的操作。'
+    get title() { return tr("回放刚才的点击"); },
+    get description() { return tr("点击“开始回放”，在这台设备上执行一次刚录制的操作。"); }
   }
 });
 

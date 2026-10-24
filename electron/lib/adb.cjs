@@ -1,3 +1,4 @@
+const { tr } = require('./localization.cjs');
 // ADB / scrcpy 操作 IPC handlers
 // 录屏生命周期由 screen-recording 模块管理。
 
@@ -209,7 +210,7 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
       settle(() => {
         resolve({
           success: true,
-          message: retriedWithoutAudio ? 'Scrcpy 已使用无音频模式启动' : 'Scrcpy 已启动'
+          message: retriedWithoutAudio ? tr("Scrcpy 已使用无音频模式启动") : tr("Scrcpy 已启动")
         });
       });
     };
@@ -233,7 +234,7 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
     function handleError(error) {
       settle(() => {
         console.error('Scrcpy spawn error:', error);
-        reject(new Error(`Scrcpy 启动失败: ${error.message}`));
+        reject(new Error(tr("Scrcpy 启动失败: {0}", { 0: error.message })));
       });
     }
 
@@ -246,7 +247,7 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
       if (code !== 0) {
         const lastOutput = output.trim().split(/\r?\n/).slice(-3).join('；');
         const suffix = lastOutput ? `，${lastOutput}` : '';
-        settle(() => reject(new Error(`Scrcpy 启动失败，退出码: ${code ?? signal ?? 'unknown'}${suffix}`)));
+        settle(() => reject(new Error(tr("Scrcpy 启动失败，退出码: {0}{1}", { 0: code ?? signal ?? 'unknown', 1: suffix }))));
       }
     }
 
@@ -388,7 +389,7 @@ function register(ipcMain) {
       return fillMissingDeviceModels(parseAdbDevices(output));
     } catch (error) {
       console.error('ADB error:', error);
-      throw new Error('ADB is not installed or not running.');
+      throw new Error(tr('ADB 未安装或未运行。'));
     }
   });
 
@@ -396,7 +397,7 @@ function register(ipcMain) {
     try {
       const scrcpyPath = await findScrcpyPath();
       if (!scrcpyPath) {
-        throw new Error('Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH');
+        throw new Error(tr("Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH"));
       }
 
       const args = buildScrcpyArgs(deviceId, settings);
@@ -470,16 +471,16 @@ function register(ipcMain) {
         return { success: true, output: result.stdout };
       }
       if (result.status === 'fail') {
-        return { success: false, error: result.stderr || `命令执行失败（退出码异常）`, output: result.stdout };
+        return { success: false, error: result.stderr || tr("命令执行失败（退出码异常）"), output: result.stdout };
       }
       if (result.status === 'timeout') {
-        const hint = `命令执行超时（${SHELL_TIMEOUT_MS / 1000} 秒），可能进入了交互式 Shell（如 su/sh/top），已自动结束`;
+        const hint = tr("命令执行超时（{0} 秒），可能进入了交互式 Shell（如 su/sh/top），已自动结束", { 0: SHELL_TIMEOUT_MS / 1000 });
         return { success: false, error: hint, output: result.stdout || result.stderr };
       }
       if (result.status === 'cancelled') {
-        return { success: false, cancelled: true, error: '命令已中断', output: result.stdout };
+        return { success: false, cancelled: true, error: tr("命令已中断"), output: result.stdout };
       }
-      return { success: false, error: result.stderr || '命令启动失败' };
+      return { success: false, error: result.stderr || tr("命令启动失败") };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -506,7 +507,7 @@ function register(ipcMain) {
         const media = await recordMedia({ type: 'image', deviceId, path: localPath, createdAt: Date.now() });
         return { success: true, output, ...saved, mediaId: media.id };
       } catch (error) {
-        return { success: true, output, ...saved, historyWarning: `截图已保存，但最近文件记录失败：${error.message}` };
+        return { success: true, output, ...saved, historyWarning: tr("截图已保存，但最近文件记录失败：{0}", { 0: error.message }) };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -520,7 +521,7 @@ function register(ipcMain) {
         detached: true,
         stdio: 'ignore'
       }).unref();
-      return { success: true, message: '设备正在重启' };
+      return { success: true, message: tr("设备正在重启") };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -533,7 +534,7 @@ function register(ipcMain) {
         detached: true,
         stdio: 'ignore'
       }).unref();
-      return { success: true, message: '设备正在进入loader模式' };
+      return { success: true, message: tr("设备正在进入loader模式") };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -546,31 +547,31 @@ function register(ipcMain) {
       const unlockPlan = await resolveUnlockPlan(deviceId);
       const reboot = await runTool(adbCommand, ['-s', deviceId, 'reboot', 'bootloader'], UNLOCK_ADB_REBOOT_TIMEOUT_MS);
       if (!reboot.success) {
-        return { success: false, error: `进入 bootloader 失败：${reboot.error}` };
+        return { success: false, error: tr("进入 bootloader 失败：{0}", { 0: reboot.error }) };
       }
 
       const unlock = await runTool(fastbootCommand, unlockPlan.unlockArgs, UNLOCK_FASTBOOT_COMMAND_TIMEOUT_MS);
       if (!unlock.success) {
-        return { success: false, error: `Unlock 失败：${unlock.error}` };
+        return { success: false, error: tr("Unlock 失败：{0}", { 0: unlock.error }) };
       }
       if (!hasFastbootFinished(unlock.output)) {
-        return { success: false, error: `Unlock 未检测到 Finished 标识：${unlock.output || '无输出'}` };
+        return { success: false, error: tr("Unlock 未检测到 Finished 标识：{0}", { 0: unlock.output || tr("无输出") }) };
       }
 
       for (let rebootIndex = 1; rebootIndex <= unlockPlan.rebootCount; rebootIndex += 1) {
         const fastbootReboot = await runTool(fastbootCommand, ['reboot'], 30000);
-        const rebootLabel = unlockPlan.rebootCount > 1 ? `第 ${rebootIndex} 次` : '';
+        const rebootLabel = unlockPlan.rebootCount > 1 ? tr("第 {0} 次", { 0: rebootIndex }) : '';
         if (!fastbootReboot.success) {
-          return { success: false, error: `Unlock 已执行，但${rebootLabel}重启失败：${fastbootReboot.error}` };
+          return { success: false, error: tr("Unlock 已执行，但{0}重启失败：{1}", { 0: rebootLabel, 1: fastbootReboot.error }) };
         }
         if (!hasFastbootFinished(fastbootReboot.output)) {
-          return { success: false, error: `Unlock 已执行，但${rebootLabel}重启未检测到 Finished 标识：${fastbootReboot.output || '无输出'}` };
+          return { success: false, error: tr("Unlock 已执行，但{0}重启未检测到 Finished 标识：{1}", { 0: rebootLabel, 1: fastbootReboot.output || tr("无输出") }) };
         }
       }
 
       return {
         success: true,
-        message: 'Unlock 已完成，设备正在重启'
+        message: tr("Unlock 已完成，设备正在重启")
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -582,9 +583,9 @@ function register(ipcMain) {
     try {
       const output = await runAdbText(['-s', deviceId, 'root']);
       if (output.includes('restarting') || output.includes('running as root')) {
-        return { success: true, message: output || 'Root 权限获取成功' };
+        return { success: true, message: output || tr("Root 权限获取成功") };
       } else {
-        return { success: false, error: output || 'Root 权限获取失败，设备可能不支持或未解锁' };
+        return { success: false, error: output || tr("Root 权限获取失败，设备可能不支持或未解锁") };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -596,9 +597,9 @@ function register(ipcMain) {
     try {
       const output = await runAdbText(['-s', deviceId, 'remount']);
       if (output.includes('remount') || output.includes('succeeded') || output.includes('success')) {
-        return { success: true, message: output || 'Remount 成功' };
+        return { success: true, message: output || tr("Remount 成功") };
       } else {
-        return { success: false, error: output || 'Remount 失败，可能需要先执行 root' };
+        return { success: false, error: output || tr("Remount 失败，可能需要先执行 root") };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -626,9 +627,9 @@ function register(ipcMain) {
     try {
       const output = await runAdbText(['-s', deviceId, 'install', '-r', '-d', apkPath], { timeoutMs: 120000 });
       if (output.includes('Success')) {
-        return { success: true, message: '安装成功' };
+        return { success: true, message: tr("安装成功") };
       } else {
-        return { success: false, error: output || '安装失败' };
+        return { success: false, error: output || tr("安装失败") };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -640,9 +641,9 @@ function register(ipcMain) {
     try {
       const output = await runAdbText(['-s', deviceId, 'push', localPath, remotePath], { timeoutMs: 120000 });
       if (output.includes('pushed') || output.includes('pushing')) {
-        return { success: true, message: '推送成功' };
+        return { success: true, message: tr("推送成功") };
       } else {
-        return { success: false, error: output || '推送失败' };
+        return { success: false, error: output || tr("推送失败") };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -654,11 +655,11 @@ function register(ipcMain) {
     try {
       const output = await runAdbText(['-s', deviceId, 'pull', remotePath, localPath], { timeoutMs: 120000 });
       if (output.includes('pulled') || output.includes('pulling')) {
-        return { success: true, message: `拉取成功！\n设备: ${remotePath}\n本地: ${localPath}` };
+        return { success: true, message: tr("拉取成功！\n设备: {0}\n本地: {1}", { 0: remotePath, 1: localPath }) };
       } else if (output.includes('does not exist')) {
-        return { success: false, error: '文件不存在' };
+        return { success: false, error: tr("文件不存在") };
       } else {
-        return { success: false, error: output || '拉取失败' };
+        return { success: false, error: output || tr("拉取失败") };
       }
     } catch (error) {
       return { success: false, error: error.message };

@@ -1,5 +1,10 @@
 (() => {
   const bridge = window.startupOverlay;
+  const messages = { '卓控台启动': 'Starting Workbench' };
+  const tr = source => bridge?.initialLanguage === 'en-US' && Object.hasOwn(messages, source) ? messages[source] : source;
+  if (bridge?.initialLanguage === 'en-US') {
+    document.documentElement.lang = 'en-US'; document.title = tr('卓控台启动');
+  }
   let started = false; let finished = false; let disposed = false; let frame;
   const finish = () => {
     if (finished || disposed) return; finished = true;
