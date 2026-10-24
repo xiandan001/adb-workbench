@@ -1,5 +1,9 @@
 {
   "不支持的界面语言": "Unsupported interface language",
+  "当前暂无可下载的更新，请先检查更新": "No update is currently available to download. Check for updates first.",
+  "请在主窗口设置自动更新": "Configure automatic updates from the main window",
+  "自动更新设置无效": "Invalid automatic update settings",
+  "自动更新服务已停止": "The automatic update service has stopped",
   "请在应用窗口读取语言设置": "Read language settings from an application window",
   "只能在主窗口修改语言": "Change the language from the main window",
   "语言设置参数无效": "Invalid language settings",

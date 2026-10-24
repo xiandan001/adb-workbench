@@ -191,6 +191,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('changelog:show', listener);
   },
   // 自动更新 API
+  configureAutoUpdates: enabled => ipcRenderer.invoke('updater:configure-auto', { enabled }),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),

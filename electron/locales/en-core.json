@@ -1,4 +1,8 @@
 {
+  "自动检查更新": "Automatically check for updates",
+  "启动 3 秒后检查，之后每 2 小时自动检测新版本": "Check 3 seconds after launch, then every 2 hours",
+  "自动检查设置未能应用，请重试": "Automatic update settings could not be applied. Please try again.",
+  "自动更新支持启动后每两小时定时检查新版本": "Automatic updates check for new versions every two hours after launch",
   "卓控台启动": "Starting Workbench",
   "AI 供应商与凭据": "AI providers and credentials",
   "提示词": "Prompts",

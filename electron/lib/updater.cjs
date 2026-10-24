@@ -4,12 +4,14 @@ const { tr } = require('./localization.cjs');
 //
 // 该模块管理 updaterStatus 状态缓存，并通过 sendUpdaterEvent 将事件转发到渲染进程
 
-const { app } = require('electron');
+const { app, powerMonitor } = require('electron');
+const { types } = require('node:util');
 const { autoUpdater } = require('electron-updater');
 const ctx = require('./app-context.cjs');
 const { isDev } = ctx;
 const { getAppVersion, compareVersions } = require('./version.cjs');
 const { cleanupAndroidToolProcesses } = require('./android-tool-cleanup.cjs');
+const { createUpdatePoller } = require('./update-poller.cjs');
 
 const UPDATER_MAX_RETRIES = 2;
 const UPDATER_RETRY_DELAYS_MS = [2000, 5000];
@@ -32,6 +34,7 @@ autoUpdater.requestHeaders = {
 let updaterStatus = {
   checking: false,
   available: false,
+  notAvailable: false,
   downloading: false,
   progress: null,        // { percent, transferred, total, bytesPerSecond }
   downloaded: false,
@@ -40,17 +43,28 @@ let updaterStatus = {
 };
 let quitAndInstallInProgress = false;
 let updateInstallPrepared = false;
+let checkFlight = null;
+let downloadFlight = null;
+let updatePoller = null;
+let pollingDisposed = false;
 
 // 自动更新事件转发到渲染进程（同时发送到主窗口 + Log Analyzer 窗口）
 function sendUpdaterEvent(eventName, payload) {
-  const mainWindow = ctx.getMainWindow();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('updater:event', { eventName, payload });
+  for (const window of [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()]) {
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed?.()) continue;
+    try { window.webContents.send('updater:event', { eventName, payload }); }
+    catch { /* A renderer closing cannot invalidate a native update operation. */ }
   }
-  const logAnalyzerWindow = ctx.getLogAnalyzerWindow();
-  if (logAnalyzerWindow && !logAnalyzerWindow.isDestroyed()) {
-    logAnalyzerWindow.webContents.send('updater:event', { eventName, payload });
-  }
+}
+
+function fullUpdaterStatus() { return { ...updaterStatus, currentVersion: getAppVersion() }; }
+function updateState(patch) {
+  Object.assign(updaterStatus, patch);
+  sendUpdaterEvent('state', fullUpdaterStatus());
+}
+function checkResultFromState() {
+  if (updaterStatus.error && !updaterStatus.downloaded) return { success: false, error: updaterStatus.error };
+  return { success: true, available: updaterStatus.available, notAvailable: updaterStatus.notAvailable, info: updaterStatus.info };
 }
 
 function sleep(ms) {
@@ -191,47 +205,41 @@ function quitAndInstallPreparedUpdate() {
 // 绑定 autoUpdater 事件（在模块加载时绑定一次，与原 main.cjs 行为一致）
 function setupAutoUpdater() {
   autoUpdater.on('checking-for-update', () => {
-    updaterStatus.checking = true;
-    updaterStatus.available = false;
-    updaterStatus.error = null;
+    if (updaterStatus.downloaded) return;
+    updateState({ checking: true, available: false, notAvailable: false, error: null });
     sendUpdaterEvent('checking-for-update');
   });
 
   autoUpdater.on('update-available', (info) => {
-    updaterStatus.checking = false;
-    updaterStatus.available = true;
-    updaterStatus.info = info;
+    if (updaterStatus.downloaded) return;
+    updateState({ checking: false, available: true, notAvailable: false, info, error: null });
     sendUpdaterEvent('update-available', info);
   });
 
   autoUpdater.on('update-not-available', (info) => {
-    updaterStatus.checking = false;
-    updaterStatus.available = false;
-    updaterStatus.info = info;
+    if (updaterStatus.downloaded) return;
+    updateState({ checking: false, available: false, notAvailable: true, info, error: null });
     sendUpdaterEvent('update-not-available', info);
   });
 
   autoUpdater.on('error', (err) => {
-    updaterStatus.checking = false;
-    updaterStatus.downloading = false;
-    updaterStatus.error = formatUpdaterError(err);
+    updateState({ checking: false, downloading: false, error: formatUpdaterError(err) });
     sendUpdaterEvent('error', updaterStatus.error);
   });
 
   autoUpdater.on('download-progress', (progress) => {
-    updaterStatus.progress = {
+    if (updaterStatus.downloaded) return;
+    updateState({ downloading: true, progress: {
       percent: progress.percent,
       transferred: progress.transferred,
       total: progress.total,
       bytesPerSecond: progress.bytesPerSecond
-    };
+    } });
     sendUpdaterEvent('download-progress', updaterStatus.progress);
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    updaterStatus.downloading = false;
-    updaterStatus.downloaded = true;
-    updaterStatus.info = info;
+    updateState({ checking: false, downloading: false, downloaded: true, available: true, notAvailable: false, info, error: null });
     sendUpdaterEvent('update-downloaded', info);
   });
 }
@@ -239,61 +247,94 @@ function setupAutoUpdater() {
 // 在模块加载时立即绑定事件（保持与原 main.cjs 顶层绑定的行为一致）
 setupAutoUpdater();
 
+function checkForUpdates() {
+  if (isDev) return Promise.resolve({ success: false, error: tr('开发模式不支持自动更新，请打包后使用') });
+  if (updaterStatus.downloaded) return Promise.resolve(checkResultFromState());
+  // Reuse the original check first: a download may itself be waiting for it.
+  if (checkFlight) return checkFlight;
+  if (downloadFlight) return downloadFlight.then(() => checkResultFromState());
+  const flight = Promise.resolve().then(async () => {
+    updateState({ checking: true, available: false, notAvailable: false, error: null });
+    try {
+      const result = await runUpdaterTaskWithRetry(tr('检查更新'), () => autoUpdater.checkForUpdates());
+      if (updaterStatus.downloaded) return checkResultFromState();
+      const info = result?.updateInfo || null;
+      const available = Boolean(info && compareVersions(info.version, getAppVersion()) > 0 && result.isUpdateAvailable !== false);
+      updateState({ checking: false, available, notAvailable: !available, info, error: null });
+      return checkResultFromState();
+    } catch (error) {
+      updateState({ checking: false, error: formatUpdaterError(error) });
+      return { success: false, error: updaterStatus.error };
+    }
+  }).finally(() => { if (checkFlight === flight) checkFlight = null; });
+  checkFlight = flight;
+  return flight;
+}
+
+function downloadUpdate() {
+  if (isDev) return Promise.resolve({ success: false, error: tr('开发模式不支持自动更新') });
+  if (updaterStatus.downloaded) return Promise.resolve({ success: true });
+  if (downloadFlight) return downloadFlight;
+  const pendingCheck = checkFlight;
+  const flight = Promise.resolve().then(async () => {
+    // Capture the existing check, never wait for a new check that might join this download.
+    if (pendingCheck) {
+      const result = await pendingCheck;
+      if (!result.success) return result;
+      if (!result.available) return { success: false, error: tr('当前暂无可下载的更新，请先检查更新') };
+    }
+    if (updaterStatus.downloaded) return { success: true };
+    updateState({ checking: false, downloading: true, progress: null, error: null });
+    try {
+      await runUpdaterTaskWithRetry(tr('下载更新'), () => autoUpdater.downloadUpdate());
+      updateState({ downloading: false, downloaded: true, available: true, notAvailable: false, error: null });
+      return { success: true };
+    } catch (error) {
+      updateState({ downloading: false, error: formatUpdaterError(error) });
+      return { success: false, error: updaterStatus.error };
+    }
+  }).finally(() => { if (downloadFlight === flight) downloadFlight = null; });
+  downloadFlight = flight;
+  return flight;
+}
+
+function configureAuto(event, value) {
+  const main = ctx.getMainWindow();
+  if (!main || main.isDestroyed() || main.webContents.isDestroyed() || !main.webContents.mainFrame
+    || event?.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) {
+    return { success: false, error: tr('请在主窗口设置自动更新') };
+  }
+  if (!value || typeof value !== 'object' || types.isProxy(value) || Array.isArray(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return { success: false, error: tr('自动更新设置无效') };
+  const descriptor = Object.getOwnPropertyDescriptor(value, 'enabled');
+  if (Reflect.ownKeys(value).length !== 1 || !descriptor || !Object.hasOwn(descriptor, 'value') || typeof descriptor.value !== 'boolean') {
+    return { success: false, error: tr('自动更新设置无效') };
+  }
+  if (pollingDisposed) return { success: false, error: tr('自动更新服务已停止') };
+  updatePoller.setEnabled(descriptor.value);
+  return { success: true, enabled: descriptor.value };
+}
+
 // 自动更新 IPC handlers
 // electron-updater 打包后会自动读取 resources/app-update.yml 中的 publish 配置
 // 无需手动检测 electron-builder.json（该文件打包后不存在于 asar 中）
 
 function register(ipcMain) {
-  // 检查更新（手动触发）
-  // 直接使用 checkForUpdates() 返回值判断，不依赖事件监听器
-  // 事件仍会触发并通过 sendUpdaterEvent 转发，用于 UI 状态同步
-  ipcMain.handle('updater:check', async () => {
-    if (isDev) {
-      return { success: false, error: tr("开发模式不支持自动更新，请打包后使用") };
-    }
-    try {
-      console.log('[Updater] 开始检查更新...');
-      const result = await runUpdaterTaskWithRetry(tr("检查更新"), () => autoUpdater.checkForUpdates());
-      console.log('[Updater] checkForUpdates 返回:', result ? `有更新 v${result.updateInfo?.version}` : '无更新');
-      if (result && result.updateInfo) {
-        // 比较版本号：如果服务器版本高于当前版本，则有更新
-        const currentVersion = getAppVersion();
-        const serverVersion = result.updateInfo.version;
-        const hasUpdate = compareVersions(serverVersion, currentVersion) > 0;
-        console.log(`[Updater] 当前: ${currentVersion}, 服务器: ${serverVersion}, 有更新: ${hasUpdate}`);
-        return {
-          success: true,
-          available: hasUpdate,
-          notAvailable: !hasUpdate,
-          info: result.updateInfo
-        };
-      }
-      // result 为 null，表示没有更新
-      return { success: true, available: false, notAvailable: true, info: null };
-    } catch (err) {
-      console.error('[Updater] 检查更新失败:', err);
-      return { success: false, error: formatUpdaterError(err) };
-    }
-  });
-
-  // 下载更新
-  ipcMain.handle('updater:download', async () => {
-    if (isDev) {
-      return { success: false, error: tr("开发模式不支持自动更新") };
-    }
-    try {
-      console.log('[Updater] 开始下载更新...');
-      updaterStatus.downloading = true;
-      updaterStatus.downloaded = false;
-      await runUpdaterTaskWithRetry(tr("下载更新"), () => autoUpdater.downloadUpdate());
-      console.log('[Updater] 下载完成');
-      return { success: true };
-    } catch (err) {
-      console.error('[Updater] 下载失败:', err);
-      updaterStatus.downloading = false;
-      return { success: false, error: formatUpdaterError(err) };
-    }
-  });
+  if (!updatePoller) {
+    updatePoller = createUpdatePoller({
+      canRun: () => !isDev && !updaterStatus.downloaded && !quitAndInstallInProgress,
+      run: async isCurrent => {
+        const result = await checkForUpdates();
+        if (result.success && result.available && isCurrent() && !updaterStatus.downloaded) await downloadUpdate();
+      },
+    });
+    const wake = () => updatePoller.wake();
+    powerMonitor.on('resume', wake);
+    app.once('will-quit', () => { pollingDisposed = true; updatePoller.dispose(); powerMonitor.removeListener('resume', wake); });
+  }
+  ipcMain.handle('updater:configure-auto', configureAuto);
+  ipcMain.handle('updater:check', checkForUpdates);
+  ipcMain.handle('updater:download', downloadUpdate);
 
   // 安装更新（退出应用并安装）
   ipcMain.handle('updater:install', async () => {
@@ -306,7 +347,7 @@ function register(ipcMain) {
 
   // 获取当前更新状态
   ipcMain.handle('updater:status', async () => {
-    return { ...updaterStatus, currentVersion: getAppVersion() };
+    return fullUpdaterStatus();
   });
 }
 

@@ -7,6 +7,7 @@ const CHANGELOGS = {
     title: 'v4.7.2',
     date: '2026-10-24',
     items: [
+      { type: 'feature', get text() { return tr('自动更新支持启动后每两小时定时检查新版本'); } },
       { type: 'feature', get text() { return tr("新增简体中文与 English 语言切换，支持保存选择并同步应用窗口"); } },
       { type: 'improve', get text() { return tr("优化多语言界面与提示信息的展示体验"); } },
       { type: 'improve', get text() { return tr("优化用户体验"); } }

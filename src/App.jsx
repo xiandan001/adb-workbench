@@ -23,6 +23,7 @@ import LanguagePreferences from './components/LanguagePreferences';
 import { tr, useLocale, getLocale } from './shared/i18n.js';
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
+import { observeUpdaterState } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
@@ -748,87 +749,24 @@ function App() {
     fetchVersionAndChangelog();
   }, []);
 
-  // 监听自动更新事件
-  // 只处理下载相关事件：download-progress 和 update-downloaded。
-  // 检查状态（checking / available / notAvailable）由 IPC 调用方直接管理，
-  // 避免 electron-updater 事件与 IPC 返回值之间的竞态覆盖。
-  useEffect(() => {
-    if (!window.electronAPI?.onUpdaterEvent) return;
-    const cleanup = window.electronAPI.onUpdaterEvent((data) => {
-      const { eventName, payload } = data;
-      setUpdaterState(prev => {
-        switch (eventName) {
-          case 'download-progress':
-            return { ...prev, downloading: true, progress: payload };
-          case 'update-downloaded':
-            return { ...prev, downloading: false, downloaded: true, info: payload };
-          default:
-            return prev;
-        }
-      });
-    });
-    return cleanup;
-  }, []);
+  // Main-process state is authoritative, including checks while this page is hidden.
+  useEffect(() => observeUpdaterState(window.electronAPI, setUpdaterState), []);
 
   // 自动更新开关变化时持久化 + 启动时自动检查
   useEffect(() => {
     localStorage.setItem('autoUpdateEnabled', autoUpdateEnabled ? 'true' : 'false');
   }, [autoUpdateEnabled]);
 
-  // 自动更新依赖 autoUpdateEnabled，避免开关变化后启动检查仍使用旧状态。
-  // 应用启动后自动检查更新（仅在开关开启时）
-  // 发现新版本后自动下载，下载完成后左下角显示安装图标
+  // The main process owns the startup delay and two-hour timer across page changes.
   useEffect(() => {
-    if (!autoUpdateEnabled) return;
-    if (!window.electronAPI?.checkForUpdates) return;
-    const timer = setTimeout(async () => {
-      try {
-        console.log('[AutoUpdate] 开始自动检查更新...');
-        // 直接管理检查状态，不依赖 electron-updater 事件
-        setUpdaterState(prev => ({
-          ...prev,
-          checking: true,
-          available: false,
-          notAvailable: false,
-          error: null
-        }));
-        const res = await window.electronAPI.checkForUpdates();
-        console.log('[AutoUpdate] 检查结果:', res);
-        // 如果服务器未配置或开发模式，静默失败
-        if (!res?.success) {
-          console.log('[AutoUpdate] 自动检查跳过:', res?.error);
-          setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || tr("检查失败") }));
-          return;
-        }
-        // 使用 IPC 返回值更新检查状态
-        setUpdaterState(prev => ({
-          ...prev,
-          checking: false,
-          available: !!res.available,
-          notAvailable: !!res.notAvailable,
-          info: res.info || prev.info
-        }));
-        // 发现有新版本，自动下载
-        if (res.available) {
-          console.log('[AutoUpdate] 发现新版本 v' + res.info?.version + '，开始自动下载...');
-          // 标记正在下载
-          setUpdaterState(prev => ({ ...prev, downloading: true }));
-          const dlRes = await window.electronAPI?.downloadUpdate?.();
-          console.log('[AutoUpdate] 下载结果:', dlRes);
-          if (dlRes && !dlRes.success) {
-            console.error('[AutoUpdate] 下载失败:', dlRes.error);
-            setUpdaterState(prev => ({ ...prev, downloading: false, error: dlRes.error }));
-          }
-          // 下载成功后 update-downloaded 事件会触发，由 onUpdaterEvent 处理 downloaded 状态
-        } else {
-          console.log('[AutoUpdate] 当前已是最新版本');
-        }
-      } catch (err) {
-        console.error('[AutoUpdate] 自动检查更新异常:', err);
-        setUpdaterState(prev => ({ ...prev, checking: false, error: err.message }));
-      }
-    }, 3000); // 启动 3 秒后检查
-    return () => clearTimeout(timer);
+    if (!window.electronAPI?.configureAutoUpdates) return;
+    let active = true;
+    Promise.resolve().then(() => { if (active) return window.electronAPI.configureAutoUpdates(autoUpdateEnabled); }).then(result => {
+      if (active && !result?.success) setUpdaterState(previous => ({ ...previous, error: result?.error || tr('自动检查设置未能应用，请重试') }));
+    }).catch(() => {
+      if (active) setUpdaterState(previous => ({ ...previous, error: tr('自动检查设置未能应用，请重试') }));
+    });
+    return () => { active = false; };
   }, [autoUpdateEnabled]);
 
   const handleScreenRecordStart = async (deviceId, options = {}) => {
@@ -2702,13 +2640,14 @@ function App() {
                     {/* 自动更新开关 */}
                     <div className={`flex items-center justify-between py-2 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'} border-b`}>
                       <div>
-                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("启动时自动检查更新")}</span>
-                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("应用启动 3 秒后自动检测新版本")}</p>
+                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr('自动检查更新')}</span>
+                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr('启动 3 秒后检查，之后每 2 小时自动检测新版本')}</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input
                           type="checkbox"
                           checked={autoUpdateEnabled}
+                          aria-label={tr('自动检查更新')}
                           onChange={(e) => setAutoUpdateEnabled(e.target.checked)}
                           className="sr-only peer"
                         />
@@ -2722,7 +2661,7 @@ function App() {
                       {updaterState.error && (
                         <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'}`}>
                           <AlertCircle size={14} />
-                          <span className="flex-1">{updaterState.error}</span>
+                          <span className="flex-1">{tr(updaterState.error)}</span>
                         </div>
                       )}
 
