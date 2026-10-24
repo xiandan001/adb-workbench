@@ -1,10 +1,16 @@
 (() => {
   const bridge = window.startupOverlay;
-  const messages = { '卓控台启动': 'Starting Workbench' };
-  const tr = source => bridge?.initialLanguage === 'en-US' && Object.hasOwn(messages, source) ? messages[source] : source;
-  if (bridge?.initialLanguage === 'en-US') {
-    document.documentElement.lang = 'en-US'; document.title = tr('卓控台启动');
-  }
+  const messagesByLocale = {
+    'en-US': { '卓控台': 'Veylo', '卓控台启动': 'Starting Veylo' },
+    'zh-TW': { '卓控台': '卓控臺', '卓控台启动': '卓控臺啟動' },
+    'ja-JP': { '卓控台': 'Veylo', '卓控台启动': 'Veylo を起動' },
+    'ko-KR': { '卓控台': 'Veylo', '卓控台启动': 'Veylo 시작' },
+  };
+  const language = Object.hasOwn(messagesByLocale, bridge?.initialLanguage) ? bridge.initialLanguage : 'zh-CN';
+  const messages = messagesByLocale[language];
+  const tr = source => messages && Object.hasOwn(messages, source) ? messages[source] : source;
+  document.documentElement.lang = language;
+  document.title = tr('卓控台启动');
   let started = false; let finished = false; let disposed = false; let frame;
   const finish = () => {
     if (finished || disposed) return; finished = true;
@@ -47,7 +53,7 @@
       const mask = document.createElement('canvas'); mask.width = 460; mask.height = 280; const ink = mask.getContext('2d');
       ink.strokeStyle = '#fff'; ink.lineWidth = 5; ink.beginPath(); ink.roundRect(201, 24, 58, 96, 13); ink.stroke();
       ink.beginPath(); ink.moveTo(218, 39); ink.lineTo(242, 39); ink.stroke(); ink.beginPath(); ink.arc(230, 104, 2.5, 0, Math.PI * 2); ink.fillStyle = '#fff'; ink.fill();
-      ink.font = '600 54px "Microsoft YaHei", sans-serif'; ink.textAlign = 'center'; ink.fillText('卓控台', 230, 203);
+      ink.font = '600 54px "Microsoft YaHei", sans-serif'; ink.textAlign = 'center'; ink.fillText(tr('卓控台'), 230, 203);
       const pixels = ink.getImageData(0, 0, mask.width, mask.height).data;
       for (let py = 0; py < mask.height; py += 4) for (let px = 0; px < mask.width; px += 4) if (pixels[(py * mask.width + px) * 4 + 3] > 100) sources.push({ x: center.x + px - 230, y: center.y + py - 140 });
       if (!sources.length) throw new Error('Startup artwork is unavailable');

@@ -8,6 +8,7 @@ const { parse } = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const directory = new URL('../src/components/', import.meta.url);
 const catalog = JSON.parse(fs.readFileSync(new URL('../electron/locales/en-workspace.json', import.meta.url), 'utf8'));
+const componentCatalog = Object.assign({}, ...['backend', 'tools', 'workspace', 'core'].map(domain => JSON.parse(fs.readFileSync(new URL(`../electron/locales/en-${domain}.json`, import.meta.url), 'utf8'))));
 const files = fs.readdirSync(directory).filter(file => file.endsWith('.jsx') && file !== 'LanguagePreferences.jsx');
 const source = name => fs.readFileSync(new URL(name, directory), 'utf8');
 const tokens = message => [...message.matchAll(/\{\d+\}/g)].map(match => match[0]).sort();
@@ -17,7 +18,7 @@ test('workspace translations have complete English copy and unchanged interpolat
   for (const [key, value] of Object.entries(catalog)) {
     assert.equal(typeof value, 'string', key); assert.ok(value.trim(), key);
     assert.deepEqual(tokens(value), tokens(key), key);
-    assert.doesNotMatch(value.replaceAll('卓控台', ''), /[\u3400-\u9fff]/, key);
+    assert.doesNotMatch(value, /[\u3400-\u9fff]/, key);
   }
 });
 
@@ -40,7 +41,7 @@ test('every explicit component message is catalogued and no parameter is passed 
           assert.match(text.slice(Math.max(0, node.start - 130), node.start), /script\.id === 'default-smoke-test' && script\.createdAt === 'builtin' && script\.updatedAt === 'builtin' \? $/);
           return;
         }
-        assert.ok(Object.hasOwn(catalog, node.arguments[0].value), `${file}: ${node.arguments[0].value}`);
+        assert.ok(Object.hasOwn(componentCatalog, node.arguments[0].value), `${file}: ${node.arguments[0].value}`);
       },
     });
     if (messages) assert.match(text, /useLocale\(\)/, file);

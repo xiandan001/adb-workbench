@@ -1,27 +1,72 @@
 [
   {
-    "file": "src/App.jsx",
-    "id": "7917149e494941ae07217c09",
-    "kind": "brand",
-    "reason": "The product brand remains identical in both interface languages."
+    "file": "src/components/InitialLanguageDialog.jsx",
+    "id": "4bb79d431df2b1816810dd57",
+    "kind": "raw",
+    "reason": "First-run language choices deliberately use their native-language self-names.",
+    "source": "简体中文"
+  },
+  {
+    "file": "src/components/InitialLanguageDialog.jsx",
+    "id": "6a7d566003ed05474f8a9ca1",
+    "kind": "raw",
+    "reason": "First-run language choices deliberately use their native-language self-names.",
+    "source": "繁體中文"
+  },
+  {
+    "file": "src/components/InitialLanguageDialog.jsx",
+    "id": "0cc787fd59a5ddf3a01630a7",
+    "kind": "raw",
+    "reason": "First-run language choices deliberately use their native-language self-names.",
+    "source": "English"
+  },
+  {
+    "file": "src/components/InitialLanguageDialog.jsx",
+    "id": "b496dab6169f5a2e0317421e",
+    "kind": "raw",
+    "reason": "First-run language choices deliberately use their native-language self-names.",
+    "source": "日本語"
+  },
+  {
+    "file": "src/components/InitialLanguageDialog.jsx",
+    "id": "55f3abb19ad79722127f7875",
+    "kind": "raw",
+    "reason": "First-run language choices deliberately use their native-language self-names.",
+    "source": "한국어"
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "af0969bccdf6ae4b2be7d850",
+    "kind": "raw",
+    "reason": "Language selector options intentionally use their native-language self-names.",
+    "source": "繁體中文"
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "9597f9e7ad49e4a08756b989",
+    "kind": "raw",
+    "reason": "Language selector options intentionally use their native-language self-names.",
+    "source": "English"
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "b1a48f115cc9ca5d00e2c0f5",
+    "kind": "raw",
+    "reason": "Language selector options intentionally use their native-language self-names.",
+    "source": "日本語"
+  },
+  {
+    "file": "src/components/LanguagePreferences.jsx",
+    "id": "1cc3189fa9ba25cfcd5ff730",
+    "kind": "raw",
+    "reason": "Language selector options intentionally use their native-language self-names.",
+    "source": "한국어"
   },
   {
     "file": "src/components/LanguagePreferences.jsx",
     "id": "b7b03d3c7d6d93d31f5dd93c",
     "kind": "raw",
     "reason": "Language names are intentionally displayed in their native language."
-  },
-  {
-    "file": "src/components/LanguagePreferences.jsx",
-    "id": "3c650c1a4cad14f5e8c9660a",
-    "kind": "raw",
-    "reason": "This bilingual selector heading must be recognizable in either language."
-  },
-  {
-    "file": "src/components/LanguagePreferences.jsx",
-    "id": "d68276b6a11dbeab512a3bbb",
-    "kind": "raw",
-    "reason": "This bilingual accessible label must be recognizable in either language."
   },
   {
     "file": "src/components/ai-tools/AiCliConfigEditor.jsx",
@@ -280,6 +325,7 @@
   {
     "file": "electron/lib/ai-tools-config-desktop.cjs",
     "id": "c7df72627af401fe1b349f34",
+    "kind": "machine",
     "reason": "Persisted Desktop profile ownership marker; changing it by locale would invalidate ownership checks and could replace foreign configuration.",
     "source": "卓控台 AI 工具"
   },
@@ -565,12 +611,6 @@
     "id": "19bcc36e346b2c9317b2f2b7",
     "reason": "Developer-only dependency/configuration contract failure; application callers provide validated values, not a displayed UI message.",
     "source": "Invalid diagnostic log configuration"
-  },
-  {
-    "file": "electron/lib/application-menu.cjs",
-    "id": "3eb1be34d576f53445901f76",
-    "reason": "Fixed product brand/logo, identical in both supported languages.",
-    "source": "卓控台"
   },
   {
     "file": "electron/lib/auto-diagnose.cjs",
@@ -1820,6 +1860,7 @@
   {
     "file": "electron/lib/startup-settings-policy.cjs",
     "id": "037b32f9c6c84eb43b7f131a",
+    "kind": "machine",
     "reason": "Exact operating-system login-item ownership name; must not change with language.",
     "source": "卓控台"
   },
@@ -2010,6 +2051,7 @@
   {
     "file": "electron/main.cjs",
     "id": "b4522780a437ffa12e13cc78",
+    "kind": "machine",
     "reason": "Exact legacy data directory name used for migration; not a display label.",
     "source": "卓控台"
   },
@@ -2024,12 +2066,6 @@
     "id": "aa4e25a89ecf152a1abb0fb5",
     "reason": "Internal validation/recovery sentinel caught and replaced by a localized public failure; preserve parsing and security control flow.",
     "source": "Invalid target rectangle"
-  },
-  {
-    "file": "electron/startup/particles.js",
-    "id": "aef66b75e7a5b67d0a8e59fc",
-    "reason": "Fixed product brand/logo, identical in both supported languages.",
-    "source": "卓控台"
   },
   {
     "file": "electron/startup/particles.js",

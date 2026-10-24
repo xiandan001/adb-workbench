@@ -104,6 +104,7 @@ if (!gotTheLock) {
 function createWindow() {
   const presentStartup = !startupPresented;
   const mainWindow = new BrowserWindow({
+    title: tr('卓控台'),
     width: 1600,
     height: 900,
     minWidth: 900,
@@ -121,6 +122,11 @@ function createWindow() {
     }
   });
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.on('page-title-updated', event => event.preventDefault());
+  const removeTitleListener = localization.onLocaleChanged(locale => {
+    if (!mainWindow.isDestroyed()) mainWindow.setTitle(tr('卓控台', {}, locale));
+  });
+  mainWindow.once('closed', removeTitleListener);
   startupPresented = true;
   ctx.setMainWindow(mainWindow);
   const presentation = presentStartup ? createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow }) : null;
@@ -159,7 +165,7 @@ app.whenReady().then(async () => {
   if (dataMigration.hasPendingImport()) {
     try { await dataMigration.prepareStartup(); }
     catch (error) {
-      await localization.initialize();
+      try { await localization.initialize(); } catch { /* Preserve the migration failure as the primary startup error. */ }
       dialog.showErrorBox(tr('数据迁移未完成'), tr('为保护现有数据，应用暂未启动。请保留数据目录中的恢复备份后重试。\n{0}', { 0: error.message }));
       app.exit(1);
       return;
@@ -167,7 +173,13 @@ app.whenReady().then(async () => {
   }
 
   // 检测版本升级：必须在 createWindow() 之前执行。
-  await localization.initialize();
+  try { await localization.initialize(); }
+  catch {
+    // No renderer/profile storage may be created before the first-run marker is durable.
+    dialog.showErrorBox(tr('语言设置保存失败，请重试'), tr('语言设置保存失败，原语言未改变。请重试。'));
+    app.exit(1);
+    return;
+  }
   installApplicationMenu({ Menu, getMainWindow: ctx.getMainWindow, getLogAnalyzerWindow: ctx.getLogAnalyzerWindow });
   // 因为 createWindow() 会立即加载页面，渲染进程会马上调用 app:checkChangelog
   // 查询 pendingChangelog；如果此时还没设置标志位，弹窗就会丢失。

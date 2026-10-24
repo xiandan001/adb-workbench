@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.3': {
+    title: 'v4.7.3',
+    date: '2026-10-24',
+    items: [
+      { type: 'feature', get text() { return tr('新增繁体中文、日语和韩语，支持五种界面语言'); } },
+      { type: 'feature', get text() { return tr('首次安装可选择应用语言，更新说明随所选语言显示'); } },
+      { type: 'improve', get text() { return tr('应用品牌名称随界面语言显示，优化多语言启动与窗口体验'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.2': {
     title: 'v4.7.2',
     date: '2026-10-24',

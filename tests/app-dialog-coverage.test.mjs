@@ -21,15 +21,23 @@ test('application confirmation and message flows do not regress to system or bro
   assert.deepEqual(offenders, [], 'Route user confirmations through the themed app dialog host');
 });
 
-test('the only native error box is the fatal startup failure before the app UI is available', () => {
+test('native error boxes are limited to fatal migration or first-language persistence failures before the UI exists', () => {
   const errors = [];
   for (const file of scripts(new URL('../electron/', import.meta.url))) {
     const source = readFileSync(file, 'utf8');
     for (const match of source.matchAll(/\bshowErrorBox\s*\(([^\n]+)/g)) errors.push({ file: file.pathname.split('/').at(-1), text: match[1] });
   }
-  assert.equal(errors.length, 1);
-  assert.equal(errors[0].file, 'main.cjs');
-  assert.match(errors[0].text, /数据迁移未完成/);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.every(error => error.file === 'main.cjs'));
+  assert.equal(errors.filter(error => error.text.includes('数据迁移未完成')).length, 1);
+  assert.equal(errors.filter(error => error.text.includes('语言设置保存失败，请重试')).length, 1);
+  const source = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+  const startup = source.indexOf('app.whenReady().then');
+  const firstWindow = source.indexOf('createWindow();', startup);
+  for (const match of source.matchAll(/dialog\.showErrorBox\([^\n]+\);/g)) {
+    assert.ok(match.index > startup && match.index < firstWindow);
+    assert.match(source.slice(match.index + match[0].length, match.index + match[0].length + 100), /^\s*app\.exit\(1\);\s*return;/);
+  }
 });
 
 test('the shared dialog host stays mounted at app root across workspace changes', () => {

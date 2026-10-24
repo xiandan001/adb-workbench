@@ -3,10 +3,11 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Pause, Play, Save, Trash2, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { formatAscii, formatHex } from '../shared/serialFormat';
+import { SUPPORTED_LOCALES } from '../shared/localeStore';
 
 const ROW_HEIGHT = 56;
 const VIEW_HEIGHT = 224;
-const timeFormats = new Map(['zh-CN', 'en-US'].map(locale => [locale, new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false })]));
+const timeFormats = new Map(SUPPORTED_LOCALES.map(locale => [locale, new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3, hour12: false })]));
 const timeFormat = { format: value => timeFormats.get(getLocale()).format(value) };
 const directionLabel = direction => direction === 'RX' ? tr("接收 RX") : tr("发送 TX");
 const recordLabel = entry => entry.kind === 'frame' ? tr("完整报文") : entry.kind === 'pending' ? tr("待补齐") : entry.parts > 1 ? tr("合并 {0} 段", { 0: entry.parts }) : '';

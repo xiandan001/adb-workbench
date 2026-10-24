@@ -1,9 +1,12 @@
 {
+  "首次安装可选择应用语言，更新说明随所选语言显示": "Choose your app language on first launch, with release notes shown in the selected language",
+  "新增繁体中文、日语和韩语，支持五种界面语言": "Added Traditional Chinese, Japanese and Korean, bringing the interface to five languages",
+  "应用品牌名称随界面语言显示，优化多语言启动与窗口体验": "Localized app branding and improved multilingual startup and window display",
   "自动检查更新": "Automatically check for updates",
   "启动 3 秒后检查，之后每 2 小时自动检测新版本": "Check 3 seconds after launch, then every 2 hours",
   "自动检查设置未能应用，请重试": "Automatic update settings could not be applied. Please try again.",
   "自动更新支持启动后每两小时定时检查新版本": "Automatic updates check for new versions every two hours after launch",
-  "卓控台启动": "Starting Workbench",
+  "卓控台启动": "Starting Veylo",
   "AI 供应商与凭据": "AI providers and credentials",
   "提示词": "Prompts",
   "Skills 技能库": "Skills library",
@@ -637,7 +640,7 @@
   "优化质量中心刷新体验": "Improved Quality Center refresh behavior",
   "新增质量中心：支持回归差异报告、一键验收套餐和设备守护": "Added Quality Center with regression comparison reports, one-click acceptance suites and device guarding",
   "连接历史入口调整到设备列表，并支持从历史页返回设备列表": "Moved connection history into Devices and added a way back from history",
-  "应用更名为“卓控台”，安装包和更新包更名为 adb-workbench": "Renamed the application to 卓控台 and installer/update packages to adb-workbench",
+  "应用更名为“卓控台”，安装包和更新包更名为 adb-workbench": "Renamed the application to Veylo and installer/update packages to adb-workbench",
   "优化投屏启动体验：音频不兼容设备会自动使用无音频模式启动": "Devices with unsupported audio automatically start mirroring without audio",
   "开始投屏按钮新增启动中状态，避免重复点击": "The Start mirroring button shows progress to prevent duplicate launches",
   "新增设备解锁 Unlock：在设备列表中支持 OEM 解锁确认后执行设备解锁流程": "Added device Unlock, with OEM unlocking confirmation before the procedure",
@@ -754,5 +757,11 @@
   "清新海洋": "Fresh ocean",
   "自然森林": "Natural forest",
   "落日余晖": "Sunset glow",
-  "数据恢复未完成，已暂停启动以保护现有偏好。请保留恢复备份并重新启动应用。": "Data recovery is incomplete. Startup is paused to protect your preferences. Keep the recovery backup and restart the application."
+  "数据恢复未完成，已暂停启动以保护现有偏好。请保留恢复备份并重新启动应用。": "Data recovery is incomplete. Startup is paused to protect your preferences. Keep the recovery backup and restart the application.",
+  "选择应用语言": "Choose your language",
+  "欢迎使用 {0}": "Welcome to {0}",
+  "请选择显示语言，之后可以在偏好设置中修改。": "Choose the display language. You can change it later in Preferences.",
+  "应用语言": "App language",
+  "确认并继续": "Confirm and continue",
+  "正在保存语言…": "Saving language…"
 }

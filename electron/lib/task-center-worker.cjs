@@ -1,8 +1,8 @@
-const { tr, getLocale, setLocale, withLocale } = require('./localization.cjs');
+const { tr, getLocale, setLocale, withLocale, normalizeLocale } = require('./localization.cjs');
 // Task center worker: executes replay and stress tasks away from the Electron main thread.
 
 const { parentPort, workerData } = require('worker_threads');
-setLocale(workerData?.locale === 'en-US' ? 'en-US' : 'zh-CN');
+setLocale(normalizeLocale(workerData?.locale));
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');

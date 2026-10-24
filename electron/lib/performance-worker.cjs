@@ -1,6 +1,6 @@
-const { tr, setLocale, withLocale } = require('./localization.cjs');
+const { tr, setLocale, withLocale, normalizeLocale } = require('./localization.cjs');
 const { parentPort, workerData } = require('worker_threads');
-setLocale(workerData?.locale === 'en-US' ? 'en-US' : 'zh-CN');
+setLocale(normalizeLocale(workerData?.locale));
 const { execFile } = require('child_process');
 
 const DEFAULT_THRESHOLDS = {

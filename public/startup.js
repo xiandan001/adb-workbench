@@ -1,18 +1,57 @@
 /* Runs before the application module; only fixed lifecycle notifications, no data access. */
 (() => {
   // This pre-bundle script localizes only its own fixed nodes, never application or user content.
-  const language = window.electronAPI?.initialLanguage === 'en-US' ? 'en-US' : 'zh-CN';
-  const messages = {
-    '卓控台启动中': 'Starting Workbench',
-    '连接设备 · 专注调试': 'Connect devices · Focus on debugging',
-    '正在准备工作区': 'Preparing your workspace',
-    '重新尝试': 'Try again',
-    '仍在准备工作区': 'Still preparing your workspace',
-    '启动比平时稍慢，可继续等待或重试。': 'Startup is taking longer than usual. You can wait or try again.',
-    '工作区未能完成加载，请重新尝试；如果问题持续，请重新启动应用。': 'The workspace could not finish loading. Try again, or restart the app if the problem persists.',
-    '启动未完成': 'Startup incomplete',
+  const messagesByLocale = {
+    'en-US': {
+      '卓控台': 'Veylo',
+      '卓控台启动中': 'Starting Veylo',
+      '连接设备 · 专注调试': 'Connect devices · Focus on debugging',
+      '正在准备工作区': 'Preparing your workspace',
+      '重新尝试': 'Try again',
+      '仍在准备工作区': 'Still preparing your workspace',
+      '启动比平时稍慢，可继续等待或重试。': 'Startup is taking longer than usual. You can wait or try again.',
+      '工作区未能完成加载，请重新尝试；如果问题持续，请重新启动应用。': 'The workspace could not finish loading. Try again, or restart the app if the problem persists.',
+      '启动未完成': 'Startup incomplete',
+    },
+    'zh-TW': {
+      '卓控台': '卓控臺',
+      '卓控台启动中': '卓控臺啟動中',
+      '连接设备 · 专注调试': '連接裝置 · 專注除錯',
+      '正在准备工作区': '正在準備工作區',
+      '重新尝试': '重試',
+      '仍在准备工作区': '仍在準備工作區',
+      '启动比平时稍慢，可继续等待或重试。': '啟動比平常稍慢，您可以繼續等待或重試。',
+      '工作区未能完成加载，请重新尝试；如果问题持续，请重新启动应用。': '工作區未能完成載入，請重試；若問題持續，請重新啟動應用程式。',
+      '启动未完成': '啟動未完成',
+    },
+    'ja-JP': {
+      '卓控台': 'Veylo',
+      '卓控台启动中': 'Veylo を起動中',
+      '连接设备 · 专注调试': 'デバイスを接続 · デバッグに集中',
+      '正在准备工作区': 'ワークスペースを準備しています',
+      '重新尝试': '再試行',
+      '仍在准备工作区': '引き続きワークスペースを準備しています',
+      '启动比平时稍慢，可继续等待或重试。': '起動に通常より時間がかかっています。そのまま待つか、再試行してください。',
+      '工作区未能完成加载，请重新尝试；如果问题持续，请重新启动应用。': 'ワークスペースを読み込めませんでした。再試行してください。問題が続く場合はアプリを再起動してください。',
+      '启动未完成': '起動が完了していません',
+    },
+    'ko-KR': {
+      '卓控台': 'Veylo',
+      '卓控台启动中': 'Veylo 시작 중',
+      '连接设备 · 专注调试': '기기 연결 · 디버깅에 집중',
+      '正在准备工作区': '작업 공간을 준비하고 있습니다',
+      '重新尝试': '다시 시도',
+      '仍在准备工作区': '계속 작업 공간을 준비하고 있습니다',
+      '启动比平时稍慢，可继续等待或重试。': '시작하는 데 평소보다 시간이 걸리고 있습니다. 기다리거나 다시 시도하세요.',
+      '工作区未能完成加载，请重新尝试；如果问题持续，请重新启动应用。': '작업 공간을 불러오지 못했습니다. 다시 시도하세요. 문제가 계속되면 앱을 다시 시작하세요.',
+      '启动未完成': '시작이 완료되지 않았습니다',
+    },
   };
-  const tr = source => language === 'en-US' && Object.hasOwn(messages, source) ? messages[source] : source;
+  const language = Object.hasOwn(messagesByLocale, window.electronAPI?.initialLanguage) ? window.electronAPI.initialLanguage : 'zh-CN';
+  const messages = messagesByLocale[language];
+  const tr = source => messages && Object.hasOwn(messages, source) ? messages[source] : source;
+  document.documentElement.lang = language;
+  document.title = tr('卓控台');
   const stage = document.getElementById('app-startup');
   const root = document.getElementById('root');
   const status = document.getElementById('startup-status');

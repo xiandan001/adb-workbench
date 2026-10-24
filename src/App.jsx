@@ -20,7 +20,8 @@ import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
 import StartupPreferences from './components/StartupPreferences';
 import LanguagePreferences from './components/LanguagePreferences';
-import { tr, useLocale, getLocale } from './shared/i18n.js';
+import InitialLanguageDialog from './components/InitialLanguageDialog';
+import { tr, useLocale, getLocale, useLanguageSelectionPending } from './shared/i18n.js';
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { observeUpdaterState } from './shared/updaterState.js';
@@ -53,6 +54,8 @@ const getOperationErrorMessage = (error) => {
 
 function App() {
   const locale = useLocale();
+  const languageSelectionPending = useLanguageSelectionPending();
+  useEffect(() => { document.title = tr('卓控台'); }, [locale]);
   const [devices, setDevices] = useState([]);
   const [deviceQuery, setDeviceQuery] = useState('');
   const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
@@ -703,10 +706,13 @@ function App() {
   // 同时保留 localStorage fallback：即使 main 进程时序或 IPC 异常，也能通过
   // localStorage.lastAppVersion 与当前版本的差异判断是否需要显示弹窗。
   useEffect(() => {
+    if (languageSelectionPending) return undefined;
+    let active = true;
     const fetchVersionAndChangelog = async () => {
       let currentVersion = '';
       if (window.electronAPI?.getVersion) {
         currentVersion = await window.electronAPI.getVersion();
+        if (!active) return;
         setAppVersion(currentVersion);
       }
 
@@ -717,6 +723,7 @@ function App() {
       if (window.electronAPI?.checkChangelog) {
         try {
           const result = await window.electronAPI.checkChangelog();
+          if (!active) return;
           if (result?.needsShow && result?.version) {
             needsShow = true;
             targetVersion = result.version;
@@ -725,6 +732,8 @@ function App() {
           console.warn('[Changelog] checkChangelog 查询失败:', e);
         }
       }
+
+      if (!active) return;
 
       // 2. fallback：localStorage 中记录的版本与当前版本不同
       const lastVersion = localStorage.getItem('lastAppVersion');
@@ -746,8 +755,9 @@ function App() {
         localStorage.setItem('lastAppVersion', currentVersion);
       }
     };
-    fetchVersionAndChangelog();
-  }, []);
+    void fetchVersionAndChangelog().catch(error => console.warn('[Changelog] Unable to read version information:', error));
+    return () => { active = false; };
+  }, [languageSelectionPending]);
 
   // Main-process state is authoritative, including checks while this page is hidden.
   useEffect(() => observeUpdaterState(window.electronAPI, setUpdaterState), []);
@@ -1385,6 +1395,7 @@ function App() {
   return (
     <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
+      {languageSelectionPending && <InitialLanguageDialog theme={t} isDark={isDark} />}
       {feedbackOpen && <FeedbackDialog theme={t} currentPage={activeTab} onClose={() => setFeedbackOpen(false)} />}
       {/* Toast 提示 */}
       {toast && (
@@ -1401,7 +1412,7 @@ function App() {
         onRun={runGlobalCommand}
       />
       {/* 更新说明弹窗（版本升级后首次打开时显示，放在顶层确保任何页面都能弹出） */}
-      {showChangelog && changelogContent && (
+      {!languageSelectionPending && showChangelog && changelogContent && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className={`w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden ${isDarkTheme(t) ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
             <div className="relative px-6 py-5 bg-gradient-to-br from-cyan-500/20 via-purple-500/20 to-emerald-500/20 border-b border-[#3E4145]/50">
@@ -1418,6 +1429,7 @@ function App() {
                 </div>
                 <button
                   onClick={() => setShowChangelog(false)}
+                  aria-label={tr('关闭')}
                   className={`p-1.5 rounded-lg transition-colors ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:bg-slate-100 hover:text-slate-600'}`}
                 >
                   <X size={20} />
@@ -1444,11 +1456,11 @@ function App() {
                 );
               })}
             </div>
-            <div className={`px-6 py-4 border-t flex items-center justify-between ${isDarkTheme(t) ? 'border-[#3E4145] bg-[#202124]/50' : 'border-slate-100 bg-slate-50'}`}>
-              <span className={`text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("感谢使用，如有问题请反馈")}</span>
+            <div className={`px-6 py-4 border-t flex items-center justify-between gap-4 ${isDarkTheme(t) ? 'border-[#3E4145] bg-[#202124]/50' : 'border-slate-100 bg-slate-50'}`}>
+              <span className={`min-w-0 flex-1 text-xs ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr("感谢使用，如有问题请反馈")}</span>
               <button
                 onClick={() => setShowChangelog(false)}
-                className={`px-5 py-2 text-sm font-medium rounded-lg transition-all active:scale-95 shadow-sm ${
+                className={`shrink-0 whitespace-nowrap px-5 py-2 text-sm font-medium rounded-lg transition-all active:scale-95 shadow-sm ${
                   isDarkTheme(t)
                     ? 'bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-600 hover:to-emerald-600 text-white'
                     : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white'
@@ -1563,14 +1575,14 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className="w-56 lg:w-60 shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]">
+      <div className={`${locale === 'ja-JP' ? 'w-72' : 'w-56 lg:w-60'} shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]`}>
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <Smartphone size={28} />
-          <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">卓控台</h1>
+          <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">{tr('卓控台')}</h1>
           <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button>span]:whitespace-nowrap [&>button>svg]:shrink-0">
           <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">{tr("设备与诊断")}</div>
           <button
             onClick={() => setActiveTab('devices')}

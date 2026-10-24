@@ -1,9 +1,12 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
-let initialLanguage = typeof process !== 'undefined' && process.argv?.includes('--app-language=en-US') ? 'en-US' : 'zh-CN';
+const supportedLanguages = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'];
+let initialLanguage = supportedLanguages.find(locale => typeof process !== 'undefined' && process.argv?.includes(`--app-language=${locale}`)) || 'zh-CN';
+let initialLanguagePending = false;
 try {
   // A same-window reload keeps its original argv. This fixed, read-only memory lookup prevents a stale first frame.
   const current = ipcRenderer.sendSync?.('language:initial');
-  if (current?.locale === 'en-US' || current?.locale === 'zh-CN') initialLanguage = current.locale;
+  if (supportedLanguages.includes(current?.locale)) initialLanguage = current.locale;
+  initialLanguagePending = current?.languageSelectionPending === true;
 } catch { /* The validated launch argument remains the fail-open default. */ }
 
 // 安全 listener 包装：隔离 callback 异常，避免影响后续 IPC 事件处理
@@ -17,6 +20,7 @@ const safeListener = (callback) => (event, ...args) => {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   initialLanguage,
+  initialLanguagePending,
   languageGet: () => ipcRenderer.invoke('language:get'),
   languageSet: value => ipcRenderer.invoke('language:set', value),
   onLanguageChanged: callback => {

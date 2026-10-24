@@ -1,4 +1,4 @@
-const { tr, setLocale } = require('./localization.cjs');
+const { tr, setLocale, normalizeLocale } = require('./localization.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
@@ -92,7 +92,7 @@ function open(args) {
   return { ...parsed, messages, messageCount: parsed.messages.length, offset, hasMore: parsed.messages.length > offset + 50 };
 }
 parentPort.on('message', request => {
-  setLocale(request.locale === 'en-US' ? 'en-US' : 'zh-CN');
+  setLocale(normalizeLocale(request.locale));
   try {
     const result = request.command === 'scan' ? scan() : request.command === 'list' ? list(request.args || {}) : request.command === 'open' ? open(request.args || {})
       : request.command === 'archive-index' ? indexArchive(request.args || {}) : request.command === 'scan-finish' ? finishScan() : null;

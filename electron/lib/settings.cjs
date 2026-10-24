@@ -7,14 +7,19 @@ const path = require('path');
 const { randomUUID } = require('node:crypto');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
 const { tr } = require('./localization.cjs');
+const { defaultLocale, supportedLocales } = require('../locales/locale-config.json');
 
 const SETTINGS_FILE = 'settings.json';
 const CUSTOM_THEMES_FILE = 'customThemes.json';
 let settingsWriteQueue = Promise.resolve();
 
 const SETTING_KEYS = {
-  locale: { fallback: 'zh-CN', sanitize: value => {
-    if (!['zh-CN', 'en-US'].includes(value)) throw new Error(tr('不支持的界面语言'));
+  locale: { fallback: defaultLocale, sanitize: value => {
+    if (!supportedLocales.includes(value)) throw new Error(tr('不支持的界面语言'));
+    return value;
+  } },
+  languageSelectionPending: { fallback: false, sanitize: value => {
+    if (typeof value !== 'boolean') throw new Error(tr('语言设置参数无效'));
     return value;
   } },
   screenshotPath: { fallback: null },
@@ -43,7 +48,7 @@ function register(ipcMain) {
 
   ipcMain.handle('settings:savePatch', async (event, patch) => {
     try {
-      if (patch && Object.hasOwn(patch, 'locale')) throw new Error(tr('请通过语言设置修改界面语言'));
+      if (patch && (Object.hasOwn(patch, 'locale') || Object.hasOwn(patch, 'languageSelectionPending'))) throw new Error(tr('请通过语言设置修改界面语言'));
       await writeSettingsPatch(patch || {});
       return { success: true };
     } catch (error) {
@@ -177,6 +182,10 @@ function getSettingsPath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE);
 }
 
+function hasExistingLanguageProfile() {
+  return fs.existsSync(getSettingsPath()) || fs.existsSync(path.join(app.getPath('userData'), 'Local Storage'));
+}
+
 function getCustomThemesPath() {
   return path.join(app.getPath('userData'), CUSTOM_THEMES_FILE);
 }
@@ -185,4 +194,4 @@ function cloneFallback(value) {
   return Array.isArray(value) ? value.slice() : value;
 }
 
-module.exports = { register, readSettings, writeSettingsPatch };
+module.exports = { register, readSettings, writeSettingsPatch, hasExistingLanguageProfile };

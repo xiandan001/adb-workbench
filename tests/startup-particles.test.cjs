@@ -24,7 +24,7 @@ function harness({ native = true, missingContext = false, emptyMask = false, thr
   const host = makeCanvas('host');
   const window = { addEventListener: (name, callback) => events.set(name, callback), removeEventListener: name => events.delete(name) };
   if (native) window.startupOverlay = { onPlay(callback) { play = callback; return () => {}; }, ready() { ready++; }, finished() { finished++; } };
-  vm.runInNewContext(source('particles.js'), { window, document: { getElementById: () => host, createElement: () => makeCanvas(++creations === 1 ? 'mask' : 'sprite') },
+  vm.runInNewContext(source('particles.js'), { window, document: { documentElement: {}, getElementById: () => host, createElement: () => makeCanvas(++creations === 1 ? 'mask' : 'sprite') },
     innerWidth: 1920, innerHeight: 1080, devicePixelRatio: ratio,
     requestAnimationFrame: callback => { frames.set(++sequence, callback); return sequence; }, cancelAnimationFrame: id => frames.delete(id) });
   return { host, draws, strokes, colors, labels, frames, events, play: value => play(value), ready: () => ready, finished: () => finished,

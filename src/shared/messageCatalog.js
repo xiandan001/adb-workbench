@@ -18,19 +18,21 @@ function pattern(message) {
 // Retained application messages can be re-rendered after a language switch.
 // This is never applied to arbitrary DOM nodes, logs, commands or user content.
 export function createMessageTranslator(entries) {
-  const catalog = new Map(entries);
+  const catalogs = new Map(Object.entries(Array.isArray(entries) ? { 'en-US': entries } : entries).map(([locale, values]) => [locale, new Map(values)]));
+  const sources = new Set([...catalogs.values()].flatMap(catalog => [...catalog.keys()]));
   const reverse = new Map();
   const templates = [];
   const recent = new Map();
-  for (const [source, english] of catalog) {
-    if (!reverse.has(english)) reverse.set(english, source);
+  for (const source of sources) {
+    const translations = new Set([...catalogs.values()].map(catalog => catalog.get(source)).filter(value => typeof value === 'string'));
+    for (const translated of translations) if (!reverse.has(translated)) reverse.set(translated, source);
     if (parameters(source).length) {
       templates.push({ source, ...pattern(source) });
-      if (english !== source) templates.push({ source, ...pattern(english) });
+      for (const translated of translations) if (translated !== source) templates.push({ source, ...pattern(translated) });
     }
   }
   function resolve(text) {
-    if (catalog.has(text)) return { source: text, params: {} };
+    if (sources.has(text)) return { source: text, params: {} };
     if (recent.has(text)) return recent.get(text);
     if (reverse.has(text)) return { source: reverse.get(text), params: {} };
     // Avoid unbounded work for large external diagnostic messages.
@@ -44,10 +46,10 @@ export function createMessageTranslator(entries) {
   }
   return (text, params = {}, locale = 'zh-CN') => {
     if (typeof text !== 'string') return text;
-    const descriptor = catalog.has(text) ? { source: text, params } : resolve(text);
+    const descriptor = sources.has(text) ? { source: text, params } : resolve(text);
     if (!descriptor) return text;
     const source = descriptor.source;
-    const message = locale === 'en-US' ? catalog.get(source) : source;
+    const message = catalogs.get(locale)?.get(source) ?? source;
     const result = message.replace(/\{(\d+)\}/g, (token, index) => Object.prototype.hasOwnProperty.call(descriptor.params, index) ? String(descriptor.params[index] ?? '') : token);
     if (result !== source && result.length <= 8192 && parameters(source).length) {
       recent.set(result, descriptor);

@@ -6,7 +6,7 @@ function installApplicationMenu({ Menu, platform = process.platform, getMainWind
     const item = (role, label) => ({ role, label });
     const separator = { type: 'separator' };
     const template = [
-      ...(platform === 'darwin' ? [{ role: 'appMenu', label: '卓控台', submenu: [item('about', trFor('关于')), separator,
+      ...(platform === 'darwin' ? [{ role: 'appMenu', label: trFor('卓控台'), submenu: [item('about', trFor('关于')), separator,
         item('services', trFor('服务')), separator, item('hide', trFor('隐藏应用')), item('hideOthers', trFor('隐藏其他应用')), item('unhide', trFor('显示全部')), separator, item('quit', trFor('退出'))] }] : []),
       { label: trFor('文件'), submenu: [platform === 'darwin' ? item('close', trFor('关闭窗口')) : item('quit', trFor('退出'))] },
       { label: trFor('编辑'), submenu: [item('undo', trFor('撤销')), item('redo', trFor('重做')), separator, item('cut', trFor('剪切')),

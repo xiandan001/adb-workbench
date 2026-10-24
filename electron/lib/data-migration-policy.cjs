@@ -1,4 +1,5 @@
 const { tr } = require('./localization.cjs');
+const { supportedLocales } = require('../locales/locale-config.json');
 const { normalizeSession } = require('./log-sessions.cjs');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
 const { normalizeDeviceShortcuts } = require('./device-shortcuts-policy.cjs');
@@ -216,7 +217,7 @@ function sanitizeSettings(value) {
   object(value, tr("设置"));
   const next = {};
   if (value.locale !== undefined) {
-    if (!['zh-CN', 'en-US'].includes(value.locale)) invalid(tr("界面语言"));
+    if (!supportedLocales.includes(value.locale)) invalid(tr("界面语言"));
     next.locale = value.locale;
   }
   if (value.pushRemotePathHistory !== undefined) {

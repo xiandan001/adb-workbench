@@ -1,0 +1,5 @@
+{
+  "defaultLocale": "zh-CN",
+  "supportedLocales": ["zh-CN", "zh-TW", "en-US", "ja-JP", "ko-KR"],
+  "catalogPrefixes": { "zh-TW": "tw", "en-US": "en", "ja-JP": "ja", "ko-KR": "ko" }
+}

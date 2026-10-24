@@ -1,9 +1,9 @@
-const { tr, setLocale } = require('./localization.cjs');
+const { tr, setLocale, normalizeLocale } = require('./localization.cjs');
 const http = require('node:http');
 const https = require('node:https');
 const { timingSafeEqual } = require('node:crypto');
 const { parentPort, workerData } = require('node:worker_threads');
-setLocale(workerData?.locale === 'en-US' ? 'en-US' : 'zh-CN');
+setLocale(normalizeLocale(workerData?.locale));
 
 const config = workerData.config; const requests = new Set(); const sockets = new Set(); const grants = new Map(); const metrics = new Map();
 let count = 0; let authSequence = 0; let closing = false; let inFlight = 0;

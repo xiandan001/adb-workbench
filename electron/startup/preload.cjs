@@ -1,7 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const supportedLanguages = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'];
 
 contextBridge.exposeInMainWorld('startupOverlay', Object.freeze({
-  initialLanguage: typeof process !== 'undefined' && process.argv?.includes('--app-language=en-US') ? 'en-US' : 'zh-CN',
+  initialLanguage: supportedLanguages.find(locale => typeof process !== 'undefined' && process.argv?.includes(`--app-language=${locale}`)) || 'zh-CN',
   ready: () => ipcRenderer.send('startup-overlay:ready'),
   finished: () => ipcRenderer.send('startup-overlay:finished'),
   onPlay: callback => {
