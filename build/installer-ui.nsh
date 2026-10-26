@@ -1,5 +1,7 @@
 ; Display-only native skin; electron-builder retains its install/update/uninstall engine.
-!ifndef BUILD_UNINSTALLER
+!ifdef BUILD_UNINSTALLER
+  !include "installer-uninstall-ui.nsh"
+!else
   ; Render at the system DPI instead of letting Windows enlarge a 96-DPI bitmap.
   ManifestDPIAware true
   !include LogicLib.nsh

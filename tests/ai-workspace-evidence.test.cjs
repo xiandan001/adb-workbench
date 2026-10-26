@@ -38,8 +38,8 @@ test('readonly ADB diagnostics bind every command to the supplied device and rej
   const result = await adapter.collect({ deviceId: 'fixture:5555', selectedChecks: ['device_info', 'logcat_snapshot', 'performance_snapshot'] });
   assert.equal(result.entries.length, 3);
   assert.ok(calls.length > 5);
-  assert.ok(calls.every(call => call.args[0] === '-s' && call.args[1] === 'fixture:5555' && call.options.maxBuffer <= 128 * 1024));
-  assert.ok(calls.some(call => call.args.join(' ').includes('logcat -d -v threadtime -t 400')));
+  assert.ok(calls.every(call => call.args[0] === '-s' && call.args[1] === 'fixture:5555' && call.options.maxBuffer <= (call.args.includes('logcat') ? 2 * 1024 * 1024 : 128 * 1024)));
+  assert.ok(calls.some(call => call.args.join(' ').includes('logcat -d -v threadtime -t 2000')));
   assert.ok(!calls.some(call => call.args.includes('-c') || call.args.includes('reboot')));
   const before = calls.length;
   for (const args of [{ deviceId: 'fixture;reboot', selectedChecks: ['device_info'] }, { deviceId: 'fixture', selectedChecks: ['shell'] }]) {
@@ -62,8 +62,8 @@ test('cancelling diagnostics kills only the child owned by this collection', asy
 test('empty, oversized and missing buffered sources cannot produce a misleading preview', async () => {
   const adapter = createEvidenceAdapter({});
   await assert.rejects(adapter.collect({}), error => error.code === 'AI_EVIDENCE_EMPTY');
-  await assert.rejects(adapter.collect({ text: 'x'.repeat(49153) }), error => error.code === 'AI_EVIDENCE_INPUT');
+  await assert.rejects(adapter.collect({ text: 'x'.repeat(512 * 1024 + 1) }), error => error.code === 'AI_EVIDENCE_INPUT');
   await assert.rejects(adapter.collect({ sourceIds: ['unknown'] }), error => error.code === 'AI_SOURCE_CHANGED');
   const result = await adapter.collect({ text: 'x'.repeat(10000) });
-  assert.equal(result.truncated, true); assert.ok(result.entries[0].text.length <= 8192);
+  assert.equal(result.truncated, false); assert.equal(result.entries[0].text, '[L1] ' + 'x'.repeat(10000));
 });

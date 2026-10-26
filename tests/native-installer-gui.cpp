@@ -12,6 +12,7 @@
 #include <vector>
 
 namespace qa {
+#include "installer-copy.generated.h"
 constexpr int kCapacity = 1024;
 enum ControlId { Primary = 300, Secondary, Browse, Cancel, Path, Shortcut, Details, Copy, Keep, Exit, Language };
 struct Stack { Stack* next; wchar_t text[1]; };
@@ -23,6 +24,7 @@ int okCommands = 0, cancelCommands = 0, checks = 0;
 std::wstring fixture;
 bool folderSeen = false;
 bool offscreen = false;
+bool uninstallOnly = false;
 ULONGLONG folderStart = 0;
 
 void Check(bool condition, const char* name) {
@@ -129,7 +131,18 @@ Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
     draw.itemAction = ODA_DRAWENTIRE; draw.hwndItem = window; draw.hDC = memory; draw.rcItem = area;
     SendMessageW(GetParent(window), WM_DRAWITEM, draw.CtlID, reinterpret_cast<LPARAM>(&draw));
     captured = TRUE;
-  } else if (method == 3) captured = BitBlt(memory, 0, 0, capture.width, capture.height, reference, 0, 0, SRCCOPY | CAPTUREBLT);
+  } else if (method == 3) {
+    for (int attempt = 0; attempt < 3 && !captured; ++attempt) {
+      if (attempt) {
+        // A cross-process page transition may invalidate a previously acquired
+        // window DC. Retry only API failure, never a failed visual assertion.
+        ReleaseDC(window, reference); Pump(40); reference = GetDC(window);
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME);
+        std::printf("INFO reacquired window DC after BitBlt failure, attempt=%d\n", attempt + 1);
+      }
+      captured = BitBlt(memory, 0, 0, capture.width, capture.height, reference, 0, 0, SRCCOPY | CAPTUREBLT);
+    }
+  }
   else captured = PrintWindow(window, memory, PW_CLIENTONLY | 2);
   GdiFlush();
   capture.pixels.assign(static_cast<DWORD*>(bits), static_cast<DWORD*>(bits) + capture.width * capture.height);
@@ -141,7 +154,7 @@ Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
   const auto colored = std::count_if(capture.pixels.begin(), capture.pixels.end(), [](DWORD color) {
     return (color & 0xffffff) != 0 && (color & 0xffffff) != 0xffffff;
   });
-  if (method == 0) Check(colored > std::min<size_t>(3000, capture.pixels.size() / 100), "native screenshot contains rendered content");
+  if (method == 0 || (method == 3 && window == parent)) Check(colored > std::min<size_t>(3000, capture.pixels.size() / 100), "native screenshot contains rendered content");
   else std::printf("INFO capture diagnostic method=%d coloredPixels=%zu\n", method, colored);
   return capture;
 }
@@ -427,6 +440,39 @@ void FooterChecks(int locale, bool mirrorEngineCancel = false) {
   }
   WriteEvidence(L"footer-" + std::to_wstring(locale) + L".json", records + "]}\n");
 }
+void UninstallCopyFits(int locale) {
+  const int localeIds[] = {2052, 1028, 1033, 1041, 1042};
+  int row = 0;
+  while (row < 4 && localeIds[row] != locale) ++row;
+  struct CopyArea { const wchar_t* key; float width, height, size; bool bold; };
+  const CopyArea areas[] = {
+    {L"unWelcomeLabel", 446, 24, 12, false}, {L"unInstallLabel", 446, 24, 12, false}, {L"unFinishLabel", 446, 24, 12, false},
+    {L"unWelcomeTitle", 446, 55, 29, true}, {L"unInstallTitle", 446, 55, 29, true}, {L"unFinishTitle", 446, 55, 29, true}, {L"unFailedTitle", 446, 55, 29, true},
+    {L"unWelcomeBody", 446, 65, 13, false}, {L"unInstallBody", 446, 65, 13, false}, {L"unFinishBody", 446, 65, 13, false}, {L"unFailedBody", 446, 65, 13, false},
+    {L"unRetention", 446, 36, 11, false}, {L"unWaitingStage", 446, 48, 11, false}, {L"unInstalled", 416, 26, 14, false},
+    {L"unCancelTitle", 360, 36, 22, true}, {L"unCancelBody", 360, 48, 13, false},
+    {L"unRemove", 434, 24, 14, true}, {L"unContinue", 158, 24, 14, true}, {L"unExit", 158, 24, 12, false}
+  };
+  HDC dc = GetDC(skin);
+  std::string output = "{\"locale\":" + std::to_string(locale) + ",\"copy\":[";
+  for (const auto& area : areas) {
+    const wchar_t* value = nullptr;
+    for (size_t index = 0; index < kSkinStringCount; ++index) if (wcscmp(kSkinStringKeys[index], area.key) == 0) value = kSkinStrings[row][index];
+    Check(value != nullptr, "uninstall measurement uses the production translation catalog");
+    Gdiplus::Graphics graphics(dc);
+    Gdiplus::FontFamily family(L"Segoe UI");
+    Gdiplus::Font font(&family, area.size, area.bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::StringFormat format; format.SetTrimming(Gdiplus::StringTrimmingNone);
+    Gdiplus::RectF bounds{}; int fitted = 0, lines = 0;
+    graphics.MeasureString(value, -1, &font, Gdiplus::RectF(0, 0, area.width, area.height), &format, &bounds, &fitted, &lines);
+    std::printf("INFO uninstall locale=%d key=%ls chars=%d/%zu lines=%d height=%.2f/%.2f\n", locale, area.key, fitted, wcslen(value), lines, bounds.Height, area.height);
+    Check(fitted == static_cast<int>(wcslen(value)) && bounds.Height <= area.height + 1, "localized uninstall copy fits its actual painted area without truncation");
+    if (output.back() != '[') output += ',';
+    output += "{\"key\":" + Json(area.key) + ",\"text\":" + Json(value) + ",\"fitted\":" + std::to_string(fitted) + ",\"lines\":" + std::to_string(lines) + ",\"height\":" + std::to_string(bounds.Height) + "}";
+  }
+  ReleaseDC(skin, dc);
+  WriteEvidence(L"uninstall-copy-" + std::to_wstring(locale) + L".json", output + "]}\n");
+}
 DWORD WINAPI ConfigureOnWorker(void* result) {
   try { Call("Stage", {L"configuring"}, false); *static_cast<bool*>(result) = true; }
   catch (...) { *static_cast<bool*>(result) = false; }
@@ -615,6 +661,42 @@ int Run() {
   SendMessageW(details, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&item));
   library = LoadLibraryExW((fixture + L"\\VeyloInstaller.dll").c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
   Check(library != nullptr, "x86 fixture DLL loaded");
+  if (uninstallOnly) {
+    const auto target = fixture + L"\\Veylo";
+    for (int locale : {2052, 1028, 1033, 1041, 1042}) {
+      Initialize(locale); Page(L"uninstall-confirm", target);
+      UninstallCopyFits(locale);
+      for (int id : {Secondary, Browse, Path, Shortcut, Language}) Check(!IsWindowVisible(Control(id)), "uninstall never exposes installation-only controls");
+      Check(Call("GetPath").empty(), "uninstall cannot validate or change the installation path");
+      Check(ParentEvidence(L"uninstall-confirm-" + std::to_wstring(locale)), "uninstall confirmation has no native page leakage");
+      const int before = okCommands;
+      Click(Primary);
+      Check(okCommands == before + 1 && Call("GetLaunch") == L"0", "uninstall confirmation forwards one engine action without launch intent");
+      Page(L"uninstall", target);
+      SendMessageW(progress, PBM_SETRANGE32, 0, 1000);
+      SendMessageW(progress, PBM_SETPOS, 400, 0); Pump(250);
+      Check(ParentEvidence(L"uninstall-progress-" + std::to_wstring(locale)), "uninstall progress observes the hidden native engine");
+      EnableWindow(GetDlgItem(parent, IDCANCEL), FALSE); Pump(250);
+      Check(!IsWindowEnabled(Control(Cancel)), "uninstall cancellation respects the engine lock");
+      const int cancelled = cancelCommands;
+      SendMessageW(parent, WM_CLOSE, 0, 0); Pump();
+      Check(cancelCommands == cancelled && !IsWindowVisible(Control(Keep)), "close cannot interrupt an engine-locked uninstall");
+      EnableWindow(GetDlgItem(parent, IDCANCEL), TRUE); Pump(250);
+      Click(Details); FooterChecks(locale); Click(Details);
+      Page(L"uninstall-finish", target);
+      Check(!IsWindowVisible(Control(Secondary)), "uninstall completion has no launch-later action");
+      Check(ParentEvidence(L"uninstall-finish-" + std::to_wstring(locale)), "uninstall completion has no native page leakage");
+      Click(Primary);
+      Check(Call("GetLaunch") == L"0" && okCommands == before + 2, "uninstall completion forwards close and never launches app");
+      Page(L"uninstall", target); Call("Failed", {}, false); Pump();
+      Check(!IsWindowVisible(Control(Primary)) && IsWindowVisible(Control(Cancel)), "uninstall failure offers close without a success action");
+      Check(ParentEvidence(L"uninstall-failure-" + std::to_wstring(locale)), "uninstall failure remains in the custom skin");
+      Dispose();
+    }
+    DestroyWindow(parent); FreeLibrary(library);
+    std::printf("RESULT %d uninstall skin checks passed on a private desktop\n", checks);
+    return 0;
+  }
   Check(Call("Init", {L"0", fixture + L"\\icon.png", L"1033", Version()}) == L"error", "wrong host handle rejected without corrupting stack");
   bool foreignThreadRejected = false;
   HANDLE foreignThread = CreateThread(nullptr, 0, RejectForeignGuiThread, &foreignThreadRejected, 0, nullptr);
@@ -675,17 +757,20 @@ int Run() {
 }
 }
 #include "native-installer-fixture-driver.h"
+#include "native-uninstaller-fixture-driver.h"
 int wmain(int argc, wchar_t** argv) {
   if (argc != 2 && argc != 3 && argc != 7) return 2;
   qa::fixture = argv[1];
   qa::offscreen = argc == 3 && wcscmp(argv[2], L"--offscreen") == 0;
+  qa::uninstallOnly = argc == 3 && wcscmp(argv[2], L"--uninstall-ui") == 0;
   HANDLE watchdog = CreateThread(nullptr, 0, qa::Watchdog, nullptr, 0, nullptr);
   if (watchdog) CloseHandle(watchdog);
   Gdiplus::GdiplusStartupInput startup;
   ULONG_PTR token = 0;
   Gdiplus::GdiplusStartup(&token, &startup, nullptr);
   try {
-    const int result = argc == 7 && wcscmp(argv[2], L"--fixture") == 0 ? qa::RunFixture(argv[3], argv[4], _wtoi(argv[5]), argv[6]) : qa::Run();
+    const int result = argc == 7 && wcscmp(argv[2], L"--fixture") == 0 ? qa::RunFixture(argv[3], argv[4], _wtoi(argv[5]), argv[6]) :
+      argc == 7 && wcscmp(argv[2], L"--uninstall-fixture") == 0 ? qa::RunUninstallFixture(argv[3], argv[4], _wtoi(argv[5]), argv[6]) : qa::Run();
     Gdiplus::GdiplusShutdown(token); return result;
   }
   catch (const std::exception& error) { std::fprintf(stderr, "FAIL %s (Win32=%lu)\n", error.what(), GetLastError()); return 1; }

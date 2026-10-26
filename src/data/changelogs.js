@@ -3,6 +3,19 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.8': {
+    title: 'v4.7.8',
+    date: '2026-10-26',
+    items: [
+      { type: 'feature', get text() { return tr('新增与安装器一致的自定义卸载界面，支持五种语言'); } },
+      { type: 'feature', get text() { return tr('AI 工作区支持证据筛选、分析历史与报告导出'); } },
+      { type: 'feature', get text() { return tr('支持连续追问、基于分析结论生成回归测试任务'); } },
+      { type: 'feature', get text() { return tr('新增日志行级引用与修复前后对比分析'); } },
+      { type: 'improve', get text() { return tr('近期设备日志采集提升至 2,000 行，完善证据容量提示'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.7': {
     title: 'v4.7.7',
     date: '2026-10-26',

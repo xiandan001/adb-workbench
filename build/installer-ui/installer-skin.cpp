@@ -56,7 +56,7 @@ struct State {
   ULONGLONG lastSampleAt = 0, lastDetailsAt = 0, displayedElapsed = 0;
   bool displayedDeterminate = false;
   float scale = 1;
-  bool custom = false, launch = false, animate = true, failed = false;
+  bool custom = false, launch = false, animate = true, failed = false, uninstall = false;
   bool cancelOverlay = false, showingDetails = false, bypassCancel = false, forwardingNext = false;
   bool concealPending = false;
   ULONGLONG start = 0;
@@ -218,7 +218,11 @@ const wchar_t* T(const wchar_t* key) {
     if (wcscmp(key, kSkinStringKeys[i]) == 0) return kSkinStrings[s.locale][i];
   return L"";
 }
+const wchar_t* ActionText(const wchar_t* install, const wchar_t* uninstall) {
+  return T(s.uninstall ? uninstall : install);
+}
 const wchar_t* PhaseText(InstallPhase phase) {
+  if (s.uninstall) return T(phase == InstallPhase::Completed ? L"unPhaseCompleted" : L"unPhaseRemoving");
   return T(phase == InstallPhase::Configuring ? L"phaseConfiguring" :
     phase == InstallPhase::Completed ? L"phaseCompleted" : L"phaseDeploying");
 }
@@ -230,7 +234,7 @@ std::wstring CurrentStatus() {
   return std::wstring(PhaseText(s.installation.phase)) + L" · " + T(L"elapsed") + L" " + DurationText(s.installation.Elapsed(GetTickCount64()));
 }
 void ApplyInstallStage(WPARAM stage) {
-  if (s.mode != Mode::Install || s.failed) return;
+  if (s.mode != Mode::Install || s.failed || s.uninstall) return;
   if (stage != static_cast<WPARAM>(InstallPhase::Deploying) && stage != static_cast<WPARAM>(InstallPhase::Configuring)) return;
   s.installation.SetPhase(static_cast<InstallPhase>(stage), GetTickCount64());
   if (s.showingDetails && !s.cancelOverlay) ReadDetails();
@@ -283,19 +287,19 @@ void SetButton(HWND window, const wchar_t* key) { SetWindowTextW(window, T(key))
 void Layout() {
   if (!s.window) return;
   const bool welcome = s.mode == Mode::Welcome, finish = s.mode == Mode::Finish;
-  SetButton(s.primary, finish ? L"launch" : L"install");
+  SetButton(s.primary, s.uninstall ? (finish ? L"close" : L"unRemove") : (finish ? L"launch" : L"install"));
   SetButton(s.secondary, finish ? L"later" : s.custom ? L"collapse" : L"custom");
-  SetButton(s.details, s.showingDetails ? L"hideDetails" : L"details");
+  SetWindowTextW(s.details, s.showingDetails ? ActionText(L"hideDetails", L"unHideDetails") : ActionText(L"details", L"unDetails"));
   SetButton(s.cancel, s.failed ? L"close" : L"cancel");
   SetButton(s.browse, L"browse"); SetButton(s.copy, L"copy");
-  SetButton(s.keep, L"continue"); SetButton(s.exit, L"exit");
-  SetWindowTextW(s.shortcut, T(L"shortcut")); SetWindowTextW(s.parent, T(L"title"));
-  Place(s.language, 578, 7, 150, 200, welcome);
+  SetWindowTextW(s.keep, ActionText(L"continue", L"unContinue")); SetWindowTextW(s.exit, ActionText(L"exit", L"unExit"));
+  SetWindowTextW(s.shortcut, T(L"shortcut")); SetWindowTextW(s.parent, ActionText(L"title", L"unTitle"));
+  Place(s.language, 578, 7, 150, 200, welcome && !s.uninstall);
   Place(s.primary, 282, 354, 446, 46, welcome || (finish && !s.failed));
-  Place(s.secondary, 282, 410, welcome ? 310 : 446, 34, welcome || (finish && !s.failed));
-  Place(s.path, 284, 240, 342, 32, welcome && s.custom);
-  Place(s.browse, 634, 239, 94, 34, welcome && s.custom);
-  Place(s.shortcut, 282, 284, 446, 30, welcome && s.custom);
+  Place(s.secondary, 282, 410, welcome ? 310 : 446, 34, !s.uninstall && (welcome || (finish && !s.failed)));
+  Place(s.path, 284, 240, 342, 32, welcome && s.custom && !s.uninstall);
+  Place(s.browse, 634, 239, 94, 34, welcome && s.custom && !s.uninstall);
+  Place(s.shortcut, 282, 284, 446, 30, welcome && s.custom && !s.uninstall);
   Place(s.cancel, 628, 410, 100, 32, !finish || s.failed);
   Place(s.details, 282, 410, 190, 32, s.mode == Mode::Install || s.failed);
   Place(s.detailEdit, 282, 152, 446, 240, s.showingDetails);
@@ -314,7 +318,8 @@ void Layout() {
 
 void DrawText(Gdiplus::Graphics& graphics, const std::wstring& text, float x, float y,
               float width, float height, float size, COLORREF color, bool bold = false,
-              Gdiplus::StringAlignment align = Gdiplus::StringAlignmentNear, bool singleLine = false) {
+              Gdiplus::StringAlignment align = Gdiplus::StringAlignmentNear, bool singleLine = false,
+              bool pathEllipsis = false) {
   Gdiplus::FontFamily family(L"Segoe UI");
   Gdiplus::Font font(&family, size, bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
   Gdiplus::SolidBrush brush(Color(color));
@@ -322,6 +327,11 @@ void DrawText(Gdiplus::Graphics& graphics, const std::wstring& text, float x, fl
   format.SetAlignment(align);
   if (singleLine) format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
   format.SetTrimming(singleLine ? Gdiplus::StringTrimmingNone : Gdiplus::StringTrimmingEllipsisCharacter);
+  if (pathEllipsis) {
+    // Uninstall paths are read-only and may be much longer than two lines.
+    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+    format.SetTrimming(Gdiplus::StringTrimmingEllipsisPath);
+  }
   graphics.DrawString(text.c_str(), -1, &font, Gdiplus::RectF(x, y, width, height), &format, &brush);
 }
 void Line(Gdiplus::Graphics& graphics, float x, float y, float width, COLORREF color = kBorder) {
@@ -377,25 +387,25 @@ void PaintTo(HWND window, HDC dc) {
     graphics.Clear(Color(kBackground));
     DrawBrand(graphics);
     const bool welcome = s.mode == Mode::Welcome, finish = s.mode == Mode::Finish;
-    DrawText(graphics, T(welcome ? L"welcomeLabel" : finish ? L"finishLabel" : L"installLabel"), 282, 39, 446, 24, 12, kAccent);
-    DrawText(graphics, T(s.failed ? L"failedTitle" : welcome ? L"welcomeTitle" : finish ? L"finishTitle" : L"installTitle"), 282, 77, 446, 55, 29, kText, true);
+    DrawText(graphics, ActionText(welcome ? L"welcomeLabel" : finish ? L"finishLabel" : L"installLabel", welcome ? L"unWelcomeLabel" : finish ? L"unFinishLabel" : L"unInstallLabel"), 282, 39, 446, 24, 12, kAccent);
+    DrawText(graphics, ActionText(s.failed ? L"failedTitle" : welcome ? L"welcomeTitle" : finish ? L"finishTitle" : L"installTitle", s.failed ? L"unFailedTitle" : welcome ? L"unWelcomeTitle" : finish ? L"unFinishTitle" : L"unInstallTitle"), 282, 77, 446, 55, 29, kText, true);
     if (!s.showingDetails) {
-      DrawText(graphics, T(s.failed ? L"failedBody" : welcome ? L"welcomeBody" : finish ? L"finishBody" : L"installBody"), 282, 137, 446, 65, 13, kMuted);
+      DrawText(graphics, ActionText(s.failed ? L"failedBody" : welcome ? L"welcomeBody" : finish ? L"finishBody" : L"installBody", s.failed ? L"unFailedBody" : welcome ? L"unWelcomeBody" : finish ? L"unFinishBody" : L"unInstallBody"), 282, 137, 446, 65, 13, kMuted);
       if (welcome) {
         DrawText(graphics, T(L"pathLabel"), 282, 211, 446, 24, 12, kMuted);
         if (!s.custom) {
-          DrawText(graphics, s.installPath, 282, 241, 446, 45, 13, kText);
+          DrawText(graphics, s.installPath, 282, 241, 446, 45, 13, kText, false, Gdiplus::StringAlignmentNear, false, s.uninstall);
           Line(graphics, 282, 294, 446);
         }
-        DrawText(graphics, s.error.empty() ? T(L"pathSafety") : s.error, 282, 318, 446, 36, 11,
+        DrawText(graphics, s.error.empty() ? ActionText(L"pathSafety", L"unRetention") : s.error, 282, 318, 446, 36, 11,
           s.error.empty() ? kMuted : RGB(255, 150, 145));
       } else if (finish && !s.failed) {
         Line(graphics, 282, 218, 446);
-        DrawText(graphics, std::wstring(L"✓  ") + T(L"installed"), 282, 240, 446, 26, 14, kAccent);
-        DrawText(graphics, s.installPath, 282, 278, 446, 45, 12, kMuted);
+        DrawText(graphics, std::wstring(L"✓  ") + ActionText(L"installed", L"unInstalled"), 282, 240, 446, 26, 14, kAccent);
+        DrawText(graphics, s.installPath, 282, 278, 446, 45, 12, kMuted, false, Gdiplus::StringAlignmentNear, false, s.uninstall);
         Line(graphics, 282, 325, 446);
       } else if (!s.failed) {
-        DrawText(graphics, T(L"progress"), 282, 239, 320, 25, 13, kMuted);
+        DrawText(graphics, ActionText(L"progress", L"unProgress"), 282, 239, 320, 25, 13, kMuted);
         const auto now = GetTickCount64();
         const bool determinate = s.installation.Determinate(now);
         if (determinate) DrawText(graphics, std::to_wstring(s.installation.Percent()) + L"%", 654, 235, 74, 30, 18, kText, true, Gdiplus::StringAlignmentFar);
@@ -408,7 +418,7 @@ void PaintTo(HWND window, HDC dc) {
           if (right > left) graphics.FillRectangle(&fill, 282 + left, 281.0f, right - left, 5.0f);
         }
         DrawText(graphics, CurrentStatus(), 282, 306, 446, 24, 12, kMuted);
-        if (!determinate) DrawText(graphics, T(L"waitingStage"), 282, 334, 446, 48, 11, kMuted);
+        if (!determinate) DrawText(graphics, ActionText(L"waitingStage", L"unWaitingStage"), 282, 334, 446, 48, 11, kMuted);
       }
     }
     if (s.showingDetails) DrawText(graphics, CurrentStatus(), 282, 126, 446, 22, 11, kMuted);
@@ -421,8 +431,8 @@ void PaintTo(HWND window, HDC dc) {
       graphics.FillRectangle(&scrim, 0, 0, kWidth, kHeight);
       graphics.FillRectangle(&panel, 270, 160, 420, 190);
       graphics.DrawRectangle(&border, 270, 160, 420, 190);
-      DrawText(graphics, T(L"cancelTitle"), 300, 184, 360, 36, 22, kText, true);
-      DrawText(graphics, T(L"cancelBody"), 300, 230, 360, 48, 13, kMuted);
+      DrawText(graphics, ActionText(L"cancelTitle", L"unCancelTitle"), 300, 184, 360, 36, 22, kText, true);
+      DrawText(graphics, ActionText(L"cancelBody", L"unCancelBody"), 300, 230, 360, 48, 13, kMuted);
     }
   }
   BitBlt(dc, 0, 0, client.right, client.bottom, buffer, 0, 0, SRCCOPY);
@@ -525,16 +535,16 @@ void ReadDetails() {
       }
     }
   }
-  std::wstring output = std::wstring(T(L"stageHistory")) + L"\r\n";
+  std::wstring output = std::wstring(ActionText(L"stageHistory", L"unStageHistory")) + L"\r\n";
   for (std::size_t index = 0; index < s.installation.historyCount; ++index) {
     const auto& entry = s.installation.history[index];
     output += L"[" + DurationText(entry.elapsedSeconds) + L"] " + PhaseText(entry.phase) + L"\r\n";
   }
-  if (s.failed) output += std::wstring(T(L"failedTitle")) + L"\r\n";
+  if (s.failed) output += std::wstring(ActionText(L"failedTitle", L"unFailedTitle")) + L"\r\n";
   output += L"\r\n";
   output += s.installation.sampleValid ? std::wstring(T(L"engineSnapshot")) + L" " + std::to_wstring(s.installation.Percent()) + L"%\r\n" : std::wstring(T(L"engineUnknown")) + L"\r\n";
   output += L"\r\n";
-  output += nativeOutput.empty() ? T(L"engineNoLogs") : std::wstring(T(L"engineDetails")) + L"\r\n" + nativeOutput;
+  output += nativeOutput.empty() ? ActionText(L"engineNoLogs", L"unEngineNoLogs") : std::wstring(ActionText(L"engineDetails", L"unEngineDetails")) + L"\r\n" + nativeOutput;
   if (output.size() > 32768) output.resize(32768);
   if (Text(s.detailEdit, 32768) == output) return;
   DWORD selectionStart = 0, selectionEnd = 0;
@@ -588,17 +598,18 @@ void Command(int id) {
   }
   switch (id) {
     case Primary:
-      if (s.mode == Mode::Welcome && !Validate()) break;
-      s.launch = s.mode == Mode::Finish;
+      if (s.mode == Mode::Welcome && !s.uninstall && !Validate()) break;
+      s.launch = s.mode == Mode::Finish && !s.uninstall;
       ForwardNext(); break;
     case Secondary:
+      if (s.uninstall) break;
       if (s.mode == Mode::Finish) { s.launch = false; ForwardNext(); }
       else {
         if (s.custom && !Validate()) break;
         s.custom = !s.custom; Layout(); if (s.custom) SetFocus(s.path);
       }
       break;
-    case Browse: BrowseFolder(); break;
+    case Browse: if (!s.uninstall) BrowseFolder(); break;
     case Cancel: RequestCancel(); break;
     case Details: s.showingDetails = !s.showingDetails; if (s.showingDetails) ReadDetails(); Layout(); break;
     case Copy: CopyDetails(); break;
@@ -664,9 +675,9 @@ LRESULT CALLBACK ParentProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
       const int id = GetDlgCtrlID(focused);
       if (id == Secondary || id == Browse || id == Cancel || id == Details || id == Copy) { Command(id); return 0; }
     }
-    if (s.mode == Mode::Finish) s.launch = true;
+    if (s.mode == Mode::Finish) s.launch = !s.uninstall;
   }
-  if (message == WM_COMMAND && LOWORD(wParam) == IDOK && s.mode == Mode::Welcome && !Validate()) return 0;
+  if (message == WM_COMMAND && LOWORD(wParam) == IDOK && s.mode == Mode::Welcome && !s.uninstall && !Validate()) return 0;
   return DefSubclassProc(window, message, wParam, lParam);
 }
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -685,7 +696,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_PRINTCLIENT: PaintTo(window, reinterpret_cast<HDC>(wParam)); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_COMMAND:
-      if (LOWORD(wParam) == Language && HIWORD(wParam) == CBN_SELCHANGE) {
+      if (LOWORD(wParam) == Language && HIWORD(wParam) == CBN_SELCHANGE && !s.uninstall) {
         const auto selected = SendMessageW(s.language, CB_GETCURSEL, 0, 0);
         if (selected >= 0 && selected < 5) { s.locale = static_cast<int>(selected); s.error.clear(); Layout(); }
       }
@@ -790,11 +801,16 @@ SKIN_EXPORT(Init) {
 SKIN_EXPORT(Page) {
   const auto mode = skin::Pop(stack, stringSize), path = skin::Pop(stack, stringSize), folder = skin::Pop(stack, stringSize);
   const auto progress = skin::Handle(skin::Pop(stack, stringSize)), details = skin::Handle(skin::Pop(stack, stringSize));
-  if (!skin::s.window || parent != skin::s.parent || (mode != L"welcome" && mode != L"install" && mode != L"finish")) { skin::Push(stack, stringSize, L"error"); return; }
-  if (mode == L"install" && skin::s.mode != skin::Mode::Install) {
+  const bool uninstall = mode == L"uninstall-confirm" || mode == L"uninstall" || mode == L"uninstall-finish";
+  const bool welcome = mode == L"welcome" || mode == L"uninstall-confirm";
+  const bool finish = mode == L"finish" || mode == L"uninstall-finish";
+  if (!skin::s.window || parent != skin::s.parent || (!uninstall && mode != L"welcome" && mode != L"install" && mode != L"finish")) { skin::Push(stack, stringSize, L"error"); return; }
+  skin::s.uninstall = uninstall;
+  if (uninstall) { skin::s.custom = false; skin::s.launch = false; }
+  if (!welcome && !finish && skin::s.mode != skin::Mode::Install) {
     skin::s.installation.Start(GetTickCount64()); skin::s.lastSampleAt = 0; skin::s.lastDetailsAt = 0;
   }
-  if (mode == L"finish") {
+  if (finish) {
     // A worker's posted stage can otherwise be overtaken by NSIS's synchronous
     // install-done notification. Consume only this skin's fixed stage messages.
     MSG message{};
@@ -802,7 +818,7 @@ SKIN_EXPORT(Page) {
       skin::ApplyInstallStage(message.wParam);
     skin::s.installation.SetPhase(skin::InstallPhase::Completed, GetTickCount64());
   }
-  skin::s.mode = mode == L"welcome" ? skin::Mode::Welcome : mode == L"finish" ? skin::Mode::Finish : skin::Mode::Install;
+  skin::s.mode = welcome ? skin::Mode::Welcome : finish ? skin::Mode::Finish : skin::Mode::Install;
   skin::s.installPath = path; skin::s.folderName = folder;
   if (skin::s.initialPath.empty()) skin::s.initialPath = path;
   SetWindowTextW(skin::s.path, path.c_str());
@@ -823,7 +839,7 @@ SKIN_EXPORT(Stage) {
   if (window && GetWindowThreadProcessId(window, &processId) && processId == GetCurrentProcessId())
     PostMessageW(window, skin::kInstallStageMessage, static_cast<WPARAM>(phase), 0);
 }
-SKIN_EXPORT(GetPath) { skin::Push(stack, stringSize, skin::s.window && skin::Validate() ? skin::s.installPath : L""); }
+SKIN_EXPORT(GetPath) { skin::Push(stack, stringSize, skin::s.window && !skin::s.uninstall && skin::Validate() ? skin::s.installPath : L""); }
 SKIN_EXPORT(GetShortcut) { skin::Push(stack, stringSize, SendMessageW(skin::s.shortcut, BM_GETCHECK, 0, 0) == BST_CHECKED ? L"1" : L"0"); }
 SKIN_EXPORT(GetLaunch) { skin::Push(stack, stringSize, skin::s.launch ? L"1" : L"0"); }
 SKIN_EXPORT(GetLanguage) { skin::Push(stack, stringSize, std::to_wstring(skin::kLanguageIds[skin::s.locale])); }

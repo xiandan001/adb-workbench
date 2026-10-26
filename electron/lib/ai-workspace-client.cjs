@@ -2,7 +2,7 @@ const https = require('node:https');
 const { tr } = require('./localization.cjs');
 const { analysisMessages } = require('./analysis-language.cjs');
 
-const LIMITS = Object.freeze({ timeoutMs: 90000, inputBytes: 128 * 1024, responseBytes: 256 * 1024, outputBytes: 64 * 1024, maxTokens: 4096 });
+const LIMITS = Object.freeze({ timeoutMs: 90000, inputBytes: require('./ai-workspace-limits.cjs').inputBytes, responseBytes: 256 * 1024, outputBytes: 64 * 1024, maxTokens: 4096 });
 
 function builtinConfig() {
   const keys = require('./ai-keys.cjs');

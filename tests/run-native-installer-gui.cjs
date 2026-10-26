@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 assert.equal(process.platform, 'win32', 'Native GUI QA requires Windows');
 const fixtureMode = process.argv[2] === '--fixture';
 const offscreenMode = process.argv[2] === '--offscreen';
+const uninstallMode = process.argv[2] === '--uninstall-ui';
 const fixtureExecutable = fixtureMode ? fs.realpathSync(process.argv[3]) : null;
 const installPath = fixtureMode ? path.resolve(process.argv[4]) : null;
 const fixtureManifest = fixtureMode ? JSON.parse(fs.readFileSync(path.join(path.dirname(fixtureExecutable), 'manifest.json'), 'utf8')) : null;
@@ -21,7 +22,7 @@ if (fixtureMode) {
   assert.equal(fixtureManifest.hooksSha256, crypto.createHash('sha256').update(fs.readFileSync(fixtureManifest.hooksFile)).digest('hex'), 'Fixture hooks snapshot changed');
   assert.ok(['install', 'cancel', 'updated'].includes(process.argv[6] || 'install'), 'Fixture action must be install, cancel or updated');
 }
-const source = path.resolve(fixtureMode ? fixtureManifest.pluginDll : !offscreenMode && process.argv[2] || path.join(root, 'build/generated/installer-ui/VeyloInstaller.dll'));
+const source = path.resolve(fixtureMode ? fixtureManifest.pluginDll : uninstallMode ? process.argv[3] || path.join(root, 'build/generated/installer-ui/VeyloInstaller.dll') : !offscreenMode && process.argv[2] || path.join(root, 'build/generated/installer-ui/VeyloInstaller.dll'));
 fs.mkdirSync(path.join(root, '.superpowers'), { recursive: true });
 const fixture = fs.mkdtempSync(path.join(root, '.superpowers/native-installer-qa-'));
 const binary = fs.readFileSync(source);
@@ -31,7 +32,7 @@ if (fixtureMode) assert.equal(fixtureManifest.dllSha256, dllSha256, 'Re-prepare 
 fs.copyFileSync(source, path.join(fixture, 'VeyloInstaller.dll'));
 fs.copyFileSync(path.join(root, 'assets/brand/icon-256.png'), path.join(fixture, 'icon.png'));
 const safetySentinels = [];
-if (!fixtureMode && !offscreenMode) {
+if (!fixtureMode && !offscreenMode && !uninstallMode) {
   for (const directory of ['Existing/Veylo', 'Other/Veylo', 'ParentWithPersonalFile', 'ReparseTarget', 'RealParent']) {
     const target = path.join(fixture, directory);
     fs.mkdirSync(target, { recursive: true });
@@ -52,7 +53,9 @@ if (!fixtureMode && !offscreenMode) {
   fs.symlinkSync(path.join(fixture, 'ReparseTarget'), path.join(fixture, 'Reparse/Veylo'), 'junction');
   fs.symlinkSync(path.join(fixture, 'RealParent'), path.join(fixture, 'LinkedParent'), 'junction');
 }
-const harnessSourceSha256 = crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'native-installer-gui.cpp'))).update(fs.readFileSync(path.join(__dirname, 'native-installer-fixture-driver.h'))).update('msvc-x86-c++17-static-crt-v1').digest('hex');
+const copyCatalog = fs.readFileSync(path.join(root, 'build/installer-ui/strings.json'), 'utf8');
+fs.writeFileSync(path.join(fixture, 'installer-copy.generated.h'), require('../scripts/build-installer-ui.cjs').compileStrings(JSON.parse(copyCatalog)));
+const harnessSourceSha256 = crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'native-installer-gui.cpp'))).update(fs.readFileSync(path.join(__dirname, 'native-installer-fixture-driver.h'))).update(fs.readFileSync(path.join(__dirname, 'native-uninstaller-fixture-driver.h'))).update(copyCatalog).update('msvc-x86-c++17-static-crt-v1').digest('hex');
 const reuseIndex = process.argv.indexOf('--reuse-harness');
 const reusedHarness = reuseIndex >= 0 ? path.resolve(process.argv[reuseIndex + 1]) : null;
 if (reusedHarness) {
@@ -66,10 +69,10 @@ if (reusedHarness) {
   const visualStudio = cp.execFileSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8', windowsHide: true }).trim();
   assert.ok(visualStudio, 'MSVC x86 Build Tools are required');
   const vcvars = path.join(visualStudio, 'VC/Auxiliary/Build/vcvarsall.bat');
-  const command = `call "${vcvars}" x86 >nul && cl.exe /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE /Fo"${path.join(fixture, 'harness.obj')}" "${path.join(__dirname, 'native-installer-gui.cpp')}" /link /OUT:"${path.join(fixture, 'harness.exe')}" user32.lib gdi32.lib comctl32.lib gdiplus.lib ole32.lib`;
+  const command = `call "${vcvars}" x86 >nul && cl.exe /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE /I"${fixture}" /Fo"${path.join(fixture, 'harness.obj')}" "${path.join(__dirname, 'native-installer-gui.cpp')}" /link /OUT:"${path.join(fixture, 'harness.exe')}" user32.lib gdi32.lib comctl32.lib gdiplus.lib ole32.lib`;
   cp.execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${command}"`], { cwd: fixture, windowsHide: true, windowsVerbatimArguments: true, stdio: 'inherit', timeout: 120000 });
 }
-const argumentsForHarness = fixtureMode ? [fixture, '--fixture', fixtureExecutable, installPath, process.argv[5] || '1033', process.argv[6] || 'install'] : offscreenMode ? [fixture, '--offscreen'] : [fixture];
+const argumentsForHarness = fixtureMode ? [fixture, '--fixture', fixtureExecutable, installPath, process.argv[5] || '1033', process.argv[6] || 'install'] : offscreenMode ? [fixture, '--offscreen'] : uninstallMode ? [fixture, '--uninstall-ui'] : [fixture];
 const environment = { ...process.env, VEYLO_QA_VERSION: `${fixtureManifest?.version || require('../package.json').version} QA`, VEYLO_UPDATE_LANGUAGE: '' };
 environment.VEYLO_QA_PAYLOAD_KIND = fixtureManifest?.payloadKind || 'nsis-file';
 if (fixtureMode) {
@@ -115,7 +118,7 @@ const stderr = (execution.stderr || '').replace(/\r\n/g, '\n');
 fs.writeFileSync(path.join(fixture, 'stdout.txt'), stdout, 'utf8');
 fs.writeFileSync(path.join(fixture, 'stderr.txt'), stderr, 'utf8');
 const summary = {
-  mode: fixtureMode ? `nsis-fixture-${process.argv[6] || 'install'}` : offscreenMode ? 'five-locale-offscreen-capture' : 'dll-functional',
+  mode: fixtureMode ? `nsis-fixture-${process.argv[6] || 'install'}` : offscreenMode ? 'five-locale-offscreen-capture' : uninstallMode ? 'uninstall-dll-functional' : 'dll-functional',
   harnessSourceSha256,
   harnessSha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(fixture, 'harness.exe'))).digest('hex'),
   reusedHarness,

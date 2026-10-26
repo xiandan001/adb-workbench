@@ -3,6 +3,8 @@
 The x86 Unicode NSIS plugin only paints the installer and handles its controls.
 electron-builder retains the installation, elevation, update and uninstall engine.
 The application identity, executable filename and existing profile directories remain stable.
+The same skin renders uninstall confirmation, real engine progress, completion and failure.
+Uninstall mode has no path editor, shortcut options, language picker or app-launch action.
 
 ## Build
 
@@ -32,3 +34,13 @@ Run `node --test tests/native-installer-skin.test.cjs tests/nsis-installer-hooks
 `node tests/run-installer-hooks-fixture.cjs` uses a unique HKCU test key and a dedicated
 `.superpowers/` directory; it does not launch the production installer or change PATH.
 Never use the production installer as a UI-only test: its existing setup hooks manage bundled tools.
+
+`node tests/run-uninstaller-hooks-fixture.cjs` builds a private test DLL under `.superpowers/`
+without changing the product DLL. Pass `--dll <frozen-dll>` to verify the exact release bytes.
+It compiles the real `BUILD_UNINSTALLER` skin, stock assisted-page sequence and stock init
+functions into a `WriteUninstaller` fixture. Only its synthetic section deletes named test
+files and its UUID HKCU key; production deletion and PATH hooks are never included.
+Five locales, text measurements, whole-parent screenshots, cancel, failure, receipt/profile
+fallback, `/S` and `/S /KEEP_APP_DATA --updated` are checked on private desktops with sentinels.
+The normal production deletion engine and explicit `--delete-app-data` behavior are unchanged;
+bare `--updated` does not acquire new silent-mode behavior.

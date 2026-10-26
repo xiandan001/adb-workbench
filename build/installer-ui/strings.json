@@ -1,5 +1,12 @@
 {
   "zh-CN": {
+    "unTitle": "卓控台卸载", "unWelcomeLabel": "管理已安装的工作台", "unWelcomeTitle": "确认卸载卓控台？", "unWelcomeBody": "将从此电脑移除应用。准备好后，点击下方按钮开始。",
+    "unRemove": "确认卸载", "unRetention": "默认保留应用数据；显式传入的数据删除选项仍然生效。",
+    "unInstallLabel": "正在移除工作台", "unInstallTitle": "正在卸载", "unInstallBody": "正在移除应用文件，请稍候。", "unProgress": "卸载进度", "unDetails": "卸载详情", "unHideDetails": "返回卸载进度",
+    "unFinishLabel": "操作完成", "unFinishTitle": "卸载完成", "unFinishBody": "应用已移除。感谢使用卓控台。", "unInstalled": "应用已卸载",
+    "unCancelTitle": "退出卸载？", "unCancelBody": "卸载尚未完成。确认后将退出当前卸载操作。", "unContinue": "继续卸载", "unExit": "退出卸载",
+    "unFailedTitle": "卸载未完成", "unFailedBody": "请查看卸载详情，确认应用已关闭及文件权限后重试。",
+    "unPhaseRemoving": "正在移除应用", "unPhaseCompleted": "卸载完成", "unWaitingStage": "正在等待当前阶段完成，请保持卸载器开启。", "unStageHistory": "卸载阶段记录", "unEngineDetails": "卸载引擎信息（最近 200 行）", "unEngineNoLogs": "本阶段未提供逐文件日志；卸载阶段记录仍会更新。",
     "phaseDeploying": "正在准备和部署应用", "phaseConfiguring": "正在完成安装设置", "phaseCompleted": "安装完成", "elapsed": "已用时", "waitingStage": "正在等待当前阶段完成，请保持安装器开启。", "stageHistory": "安装阶段记录", "engineSnapshot": "最近报告的引擎进度：", "engineUnknown": "暂未获取到可量化的引擎进度。", "engineDetails": "安装引擎信息（最近 200 行）", "engineNoLogs": "本阶段未提供逐文件日志；安装阶段记录仍会更新。",
     "title": "卓控台安装", "brand": "卓控台", "tagline": "连接设备，洞察问题。", "tagline2": "让每一次调试更轻松。",
     "feature1": "设备连接与投屏", "feature2": "串口与 SSH 工作区", "feature3": "内置 AI · 智能排障",
@@ -12,6 +19,13 @@
     "failedTitle": "安装未完成", "failedBody": "请查看安装详情，确认磁盘空间及文件权限后重试。", "close": "关闭", "copy": "复制详情", "copied": "已复制", "detailsEmpty": "暂无安装详情。"
   },
   "zh-TW": {
+    "unTitle": "卓控臺解除安裝", "unWelcomeLabel": "管理已安裝的工作臺", "unWelcomeTitle": "確認移除卓控臺？", "unWelcomeBody": "將從此電腦移除應用程式。準備好後，點選下方按鈕開始。",
+    "unRemove": "確認解除安裝", "unRetention": "預設保留應用程式資料；明確傳入的資料刪除選項仍然有效。",
+    "unInstallLabel": "正在移除工作臺", "unInstallTitle": "正在解除安裝", "unInstallBody": "正在移除應用程式檔案，請稍候。", "unProgress": "解除安裝進度", "unDetails": "解除安裝詳細資料", "unHideDetails": "返回移除進度",
+    "unFinishLabel": "操作完成", "unFinishTitle": "解除安裝完成", "unFinishBody": "應用程式已移除。感謝使用卓控臺。", "unInstalled": "應用程式已解除安裝",
+    "unCancelTitle": "結束解除安裝？", "unCancelBody": "解除安裝尚未完成。確認後將結束目前的移除操作。", "unContinue": "繼續解除安裝", "unExit": "結束解除安裝",
+    "unFailedTitle": "解除安裝未完成", "unFailedBody": "請查看詳細資料，確認應用程式已關閉及檔案權限後重試。",
+    "unPhaseRemoving": "正在移除應用程式", "unPhaseCompleted": "解除安裝完成", "unWaitingStage": "正在等候目前階段完成，請保持解除安裝程式開啟。", "unStageHistory": "解除安裝階段記錄", "unEngineDetails": "解除安裝引擎資訊（最近 200 行）", "unEngineNoLogs": "此階段未提供逐檔日誌；解除安裝階段記錄仍會更新。",
     "phaseDeploying": "正在準備及部署應用程式", "phaseConfiguring": "正在完成安裝設定", "phaseCompleted": "安裝完成", "elapsed": "已耗時", "waitingStage": "正在等候目前階段完成，請保持安裝程式開啟。", "stageHistory": "安裝階段記錄", "engineSnapshot": "最近回報的引擎進度：", "engineUnknown": "尚未取得可量化的引擎進度。", "engineDetails": "安裝引擎資訊（最近 200 行）", "engineNoLogs": "此階段未提供逐檔日誌；安裝階段記錄仍會更新。",
     "title": "卓控臺安裝", "brand": "卓控臺", "tagline": "連接裝置，洞察問題。", "tagline2": "讓每一次除錯更輕鬆。",
     "feature1": "裝置連接與投影", "feature2": "序列埠與 SSH 工作區", "feature3": "內建 AI · 智慧排障",
@@ -24,6 +38,13 @@
     "failedTitle": "安裝未完成", "failedBody": "請查看安裝詳細資料，確認磁碟空間及檔案權限後重試。", "close": "關閉", "copy": "複製詳細資料", "copied": "已複製", "detailsEmpty": "尚無安裝詳細資料。"
   },
   "en-US": {
+    "unTitle": "Uninstall Veylo", "unWelcomeLabel": "MANAGE YOUR WORKSPACE", "unWelcomeTitle": "Remove Veylo?", "unWelcomeBody": "This will remove the application from this computer. Continue when you are ready.",
+    "unRemove": "Uninstall Veylo", "unRetention": "App data is kept by default. Explicit data-removal options still apply.",
+    "unInstallLabel": "REMOVING YOUR WORKSPACE", "unInstallTitle": "Uninstalling", "unInstallBody": "Application files are being removed. Please wait.", "unProgress": "Uninstall progress", "unDetails": "Uninstall details", "unHideDetails": "Back to progress",
+    "unFinishLabel": "OPERATION COMPLETE", "unFinishTitle": "Uninstall complete", "unFinishBody": "The application has been removed. Thank you for using Veylo.", "unInstalled": "Application uninstalled",
+    "unCancelTitle": "Exit uninstall?", "unCancelBody": "Uninstallation is not complete. Confirm to exit this operation.", "unContinue": "Continue uninstall", "unExit": "Exit uninstall",
+    "unFailedTitle": "Uninstall incomplete", "unFailedBody": "Check the details, close the application and verify file permissions before retrying.",
+    "unPhaseRemoving": "Removing the application", "unPhaseCompleted": "Uninstall completed", "unWaitingStage": "Waiting for this step to finish. Please keep the uninstaller open.", "unStageHistory": "Uninstall stage history", "unEngineDetails": "Uninstall engine details (last 200 lines)", "unEngineNoLogs": "This stage provides no per-file log. Uninstall stage history will continue to update.",
     "phaseDeploying": "Preparing and deploying the app", "phaseConfiguring": "Finishing installation settings", "phaseCompleted": "Installation completed", "elapsed": "Elapsed", "waitingStage": "Waiting for this step to finish. Please keep setup open.", "stageHistory": "Installation stage history", "engineSnapshot": "Last reported engine progress:", "engineUnknown": "No measurable engine progress is available yet.", "engineDetails": "Installation engine details (last 200 lines)", "engineNoLogs": "This stage provides no per-file log. Stage history will continue to update.",
     "title": "Veylo Setup", "brand": "Veylo", "tagline": "Connect devices. Find answers.", "tagline2": "Make every debug session easier.",
     "feature1": "Device connection & mirroring", "feature2": "Serial & SSH workspace", "feature3": "Built-in AI troubleshooting",
@@ -36,6 +57,13 @@
     "failedTitle": "Installation incomplete", "failedBody": "Check the installation details, disk space and file permissions before retrying.", "close": "Close", "copy": "Copy details", "copied": "Copied", "detailsEmpty": "No installation details yet."
   },
   "ja-JP": {
+    "unTitle": "Veylo のアンインストール", "unWelcomeLabel": "ワークスペースの管理", "unWelcomeTitle": "Veylo を削除しますか？", "unWelcomeBody": "このコンピューターからアプリを削除します。準備ができたら下のボタンで開始してください。",
+    "unRemove": "アンインストール", "unRetention": "通常はアプリデータを保持します。明示的なデータ削除オプションは引き続き有効です。",
+    "unInstallLabel": "ワークスペースを削除中", "unInstallTitle": "アンインストール中", "unInstallBody": "アプリのファイルを削除しています。しばらくお待ちください。", "unProgress": "削除の進行状況", "unDetails": "削除の詳細", "unHideDetails": "進行状況に戻る",
+    "unFinishLabel": "操作が完了しました", "unFinishTitle": "アンインストール完了", "unFinishBody": "アプリを削除しました。Veylo のご利用ありがとうございました。", "unInstalled": "アプリを削除しました",
+    "unCancelTitle": "削除を終了しますか？", "unCancelBody": "アンインストールは完了していません。確認すると現在の操作を終了します。", "unContinue": "削除を続ける", "unExit": "削除を終了",
+    "unFailedTitle": "アンインストール未完了", "unFailedBody": "詳細を確認し、アプリを閉じてファイルのアクセス権を確認してから再試行してください。",
+    "unPhaseRemoving": "アプリを削除しています", "unPhaseCompleted": "アンインストール完了", "unWaitingStage": "現在の処理が終わるまで、アンインストール画面を開いたままお待ちください。", "unStageHistory": "削除段階の記録", "unEngineDetails": "削除エンジンの詳細（直近 200 行）", "unEngineNoLogs": "この段階ではファイル別のログは提供されません。削除段階の記録は引き続き更新されます。",
     "phaseDeploying": "アプリの準備・配置中", "phaseConfiguring": "インストール設定を仕上げています", "phaseCompleted": "インストール完了", "elapsed": "経過時間", "waitingStage": "現在の処理が終わるまで、セットアップを開いたままお待ちください。", "stageHistory": "インストール段階の記録", "engineSnapshot": "エンジンが最後に報告した進捗：", "engineUnknown": "数値化できるエンジンの進捗はまだ取得できていません。", "engineDetails": "インストールエンジンの詳細（直近 200 行）", "engineNoLogs": "この段階ではファイル別のログは提供されません。段階の記録は引き続き更新されます。",
     "title": "Veylo セットアップ", "brand": "Veylo", "tagline": "デバイスをつなぎ、問題を見極める。", "tagline2": "毎日のデバッグを、もっと快適に。",
     "feature1": "デバイス接続とミラーリング", "feature2": "シリアル・SSH ワークスペース", "feature3": "内蔵 AI によるトラブル診断",
@@ -48,6 +76,13 @@
     "failedTitle": "インストール未完了", "failedBody": "詳細、ディスクの空き容量、ファイルのアクセス権を確認して再試行してください。", "close": "閉じる", "copy": "詳細をコピー", "copied": "コピーしました", "detailsEmpty": "インストールの詳細はまだありません。"
   },
   "ko-KR": {
+    "unTitle": "Veylo 제거", "unWelcomeLabel": "작업 공간 관리", "unWelcomeTitle": "Veylo를 제거할까요?", "unWelcomeBody": "이 컴퓨터에서 앱을 제거합니다. 준비가 되면 아래 버튼을 눌러 시작하세요.",
+    "unRemove": "Veylo 제거", "unRetention": "앱 데이터는 기본적으로 유지됩니다. 명시적으로 전달한 데이터 삭제 옵션은 계속 적용됩니다.",
+    "unInstallLabel": "작업 공간 제거 중", "unInstallTitle": "제거 중", "unInstallBody": "앱 파일을 제거하고 있습니다. 잠시 기다려 주세요.", "unProgress": "제거 진행 상황", "unDetails": "제거 세부 정보", "unHideDetails": "진행 상황으로 돌아가기",
+    "unFinishLabel": "작업 완료", "unFinishTitle": "제거 완료", "unFinishBody": "앱이 제거되었습니다. Veylo를 이용해 주셔서 감사합니다.", "unInstalled": "앱 제거 완료",
+    "unCancelTitle": "제거를 종료할까요?", "unCancelBody": "제거가 완료되지 않았습니다. 확인하면 현재 제거 작업을 종료합니다.", "unContinue": "제거 계속", "unExit": "제거 종료",
+    "unFailedTitle": "제거 미완료", "unFailedBody": "세부 정보를 확인하고 앱을 닫은 다음 파일 권한을 확인한 후 다시 시도하세요.",
+    "unPhaseRemoving": "앱 제거 중", "unPhaseCompleted": "제거 완료", "unWaitingStage": "현재 단계가 완료될 때까지 제거 프로그램을 열어 두세요.", "unStageHistory": "제거 단계 기록", "unEngineDetails": "제거 엔진 세부 정보 (최근 200줄)", "unEngineNoLogs": "이 단계에서는 파일별 로그를 제공하지 않습니다. 제거 단계 기록은 계속 업데이트됩니다.",
     "phaseDeploying": "앱 준비 및 배포 중", "phaseConfiguring": "설치 설정 마무리 중", "phaseCompleted": "설치 완료", "elapsed": "경과 시간", "waitingStage": "현재 단계가 완료될 때까지 설치 프로그램을 열어 두세요.", "stageHistory": "설치 단계 기록", "engineSnapshot": "최근 보고된 엔진 진행률:", "engineUnknown": "아직 수치로 표시할 엔진 진행률을 가져오지 못했습니다.", "engineDetails": "설치 엔진 세부 정보 (최근 200줄)", "engineNoLogs": "이 단계에서는 파일별 로그를 제공하지 않습니다. 설치 단계 기록은 계속 업데이트됩니다.",
     "title": "Veylo 설치", "brand": "Veylo", "tagline": "기기를 연결하고, 문제를 파악하세요.", "tagline2": "모든 디버깅을 더 편리하게.",
     "feature1": "기기 연결 및 화면 미러링", "feature2": "시리얼 및 SSH 작업 공간", "feature3": "내장 AI · 스마트 문제 해결",

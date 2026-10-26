@@ -124,12 +124,14 @@ test('real loopback transport enforces redirects, byte limit, timeout and cancel
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => { server.closeAllConnections(); server.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const network = createAiToolsNetwork({ transport: http.request, allowLoopback: true, maxBytes: 100, timeoutMs: 50 });
+  // Successful loopback I/O is not a 50 ms performance benchmark under CI load.
+  const network = createAiToolsNetwork({ transport: http.request, allowLoopback: true, maxBytes: 100, timeoutMs: 1000 });
   assert.deepEqual(JSON.parse((await network.requestJson({ url: base })).body), { okay: true });
   await assert.rejects(network.requestJson({ url: base + '/redirect' }), { code: 'AI_TOOLS_NETWORK_REDIRECT' });
   await assert.rejects(network.requestJson({ url: base + '/large' }), { code: 'AI_TOOLS_NETWORK_TOO_LARGE' });
   await assert.rejects(network.requestJson({ url: base + '/invalid-utf8' }), { code: 'AI_TOOLS_NETWORK_RESPONSE' });
-  await assert.rejects(network.requestJson({ url: base + '/wait' }), { code: 'AI_TOOLS_NETWORK_TIMEOUT' });
+  const shortDeadline = createAiToolsNetwork({ transport: http.request, allowLoopback: true, maxBytes: 100, timeoutMs: 50 });
+  await assert.rejects(shortDeadline.requestJson({ url: base + '/wait' }), { code: 'AI_TOOLS_NETWORK_TIMEOUT' });
   const controller = new AbortController(); const waiting = network.requestJson({ url: base + '/wait', signal: controller.signal }); controller.abort();
   await assert.rejects(waiting, { code: 'AI_TOOLS_CANCELLED' });
 });

@@ -1,16 +1,18 @@
 const { createHash } = require('node:crypto');
 const { tr } = require('./localization.cjs');
 const { redactText } = require('./feedback-policy.cjs');
+const limits = require('./ai-workspace-limits.cjs');
+const { normalizeSelection, selectLines } = require('./ai-workspace-selection.cjs');
 
-const MAX_SOURCE_BYTES = 8 * 1024;
-const MAX_EVIDENCE_BYTES = 48 * 1024;
+const MAX_SOURCE_BYTES = limits.sourceBytes;
+const MAX_EVIDENCE_BYTES = limits.evidenceBytes;
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const digest = value => createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
 
 function checks() {
   return [
     { id: 'device_info', label: tr('设备基础信息'), description: tr('只读采集型号、Android 版本和启动时长。') },
-    { id: 'logcat_snapshot', label: tr('近期设备日志'), description: tr('只读最近 400 行日志，不清空或持续抓取。') },
+    { id: 'logcat_snapshot', label: tr('近期设备日志'), description: tr('只读最近 2000 行日志，不清空或持续抓取。') },
     { id: 'performance_snapshot', label: tr('性能基础读数'), description: tr('只读内存、CPU 统计和存储空间。') },
   ];
 }
@@ -24,25 +26,78 @@ function sanitize(value) {
   return redactText(stripControls(value)).replace(/((?:--)?(?:password|passwd|api[_-]?key|access[_-]?token|secret)\s+)[^\s]+/gi, '$1[REDACTED]');
 }
 
-function boundedText(value, bytes = MAX_SOURCE_BYTES) {
-  const input = Buffer.from(String(value), 'utf8');
-  if (input.length <= bytes) return { text: input.toString('utf8'), truncated: false };
+function boundedText(value, bytes = 8 * 1024) {
+  const string = String(value);
+  let startCharacter = Math.max(0, string.length - bytes);
+  if (startCharacter && /[\uDC00-\uDFFF]/.test(string[startCharacter])) startCharacter++;
+  const input = Buffer.from(string.slice(startCharacter), 'utf8');
+  if (input.length <= bytes) return { text: input.toString('utf8'), truncated: startCharacter > 0 };
   // Keep recent evidence; never cut into a UTF-8 continuation byte.
   let start = input.length - bytes;
   while (start < input.length && (input[start] & 0xc0) === 0x80) start++;
   return { text: input.subarray(start).toString('utf8'), truncated: true };
 }
 
-function freezeEntry(source, index, now) {
-  const original = stripControls(source.text);
-  const safe = sanitize(original);
-  const limited = boundedText(safe);
-  const originalLines = original.split('\n'), safeLines = safe.split('\n');
+function captureRows(rows, read) {
+  const parts = []; let size = 0, clipped = false;
+  for (let index = rows.length - 1; index >= 0 && parts.length < limits.captureRecords; index--) {
+    const available = limits.logcatBufferBytes - size - (parts.length ? 1 : 0);
+    if (available < 1) break;
+    const limited = boundedText(read(rows[index]), available);
+    parts.push(limited.text); size += Buffer.byteLength(limited.text) + (parts.length > 1 ? 1 : 0);
+    if (limited.truncated) { clipped = true; break; }
+  }
+  const truncated = clipped || parts.length < rows.length;
+  return { text: parts.reverse().join('\n'), truncated,
+    ...(truncated ? { windowInfo: { originalRecords: rows.length, retainedRecords: parts.length, byteLimit: limits.logcatBufferBytes } } : {}) };
+}
+
+function freezeEntry(source, index, now, selection = normalizeSelection()) {
+  // Bound both bytes and line objects before regex/split work. A single buffered
+  // record can contain many lines, so the record limit alone is insufficient.
+  const capture = boundedText(source.text, limits.logcatBufferBytes);
+  let recent = capture.text, cut = recent.length, lines = 0;
+  while (cut > 0 && lines < limits.captureRecords) { cut = recent.lastIndexOf('\n', cut - 1); if (cut < 0) break; lines++; }
+  const lineWindowed = lines === limits.captureRecords && cut >= 0;
+  if (lineWindowed) recent = recent.slice(cut + 1);
+  const windowed = Boolean(source.windowInfo || capture.truncated || lineWindowed);
+  const original = stripControls(recent);
+  const selected = selectLines(original, source.kind, selection);
+  // Preserve one-to-one line positions even when a multiline key is redacted.
+  const mask = block => block.split(/\r\n?|\n/).map(() => '[REDACTED]').join('\n');
+  const protectedLines = original.replace(/-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\n]*PRIVATE KEY-----|$)/g, mask)
+    .replace(/^[\s\S]*?-----END [^-\n]*PRIVATE KEY-----/, mask).replace(/\r\n?/g, '\n').split('\n');
+  let rows = selected.indexes.map(position => ({ position, text: sanitize(protectedLines[position]) }));
+  const textBudget = MAX_SOURCE_BYTES - selection.maxLines * 10;
+  let bytes = rows.reduce((total, row) => total + Buffer.byteLength(row.text) + 1, -1);
+  let first = 0;
+  while (bytes > textBudget && first < rows.length - 1) bytes -= Buffer.byteLength(rows[first++].text) + 1;
+  rows = rows.slice(first);
+  let cutLine = false;
+  if (rows.length === 1 && Buffer.byteLength(rows[0].text) > textBudget) {
+    rows[0].text = boundedText(rows[0].text, textBudget).text; cutLine = true;
+  }
+  const events = [];
+  rows.forEach((row, line) => {
+    const event = selected.observations[row.position];
+    if (event && events.length < 256) events.push({ line: line + 1, timestamp: event.timestamp, clockBasis: event.clockBasis });
+  });
+  const uncertain = rows.some(row => !selected.observations[row.position]
+    || selected.observations[row.position].clockBasis !== 'explicit-offset');
   return { id: `E${index + 1}`, source: source.kind, label: sanitize(source.label),
+    evidenceKind: source.checkId ? `adb:${source.checkId}` : source.kind,
     target: sanitize(source.target || ''), capturedAt: new Date(source.capturedAt ?? now).toISOString(),
     timeBasis: source.timeBasis || tr('采集时间；内容中的设备时钟未经同步'),
-    text: limited.text, truncated: Boolean(source.truncated || limited.truncated),
-    redactions: original === safe ? 0 : Math.max(1, originalLines.filter((line, i) => line !== safeLines[i]).length) };
+    text: rows.map((row, line) => `[L${line + 1}] ${row.text}`).join('\n'), numbered: true,
+    targetKey: source.kind === 'adb' || source.deviceId ? digest(`device:${source.deviceId || source.target}`)
+      : source.target && source.kind !== 'text' && source.target !== tr('文件来源') ? digest(`${source.kind}:${source.target}`) : null,
+    truncated: Boolean(source.truncated || windowed || cutLine || rows.length < selected.selectedLineCount),
+    redactions: rows.filter(row => row.text !== selected.lines[row.position]).length,
+    lineCount: rows.length, originalLineCount: selected.originalLineCount,
+    selectedLineCount: selected.selectedLineCount, retainedLineCount: rows.length,
+    ...(windowed ? { selectionWarning: tr('仅筛选最近的有界缓冲窗口；行数与行号只覆盖此窗口，更早的匹配可能未包含。'),
+      ...(source.windowInfo ? { windowInfo: source.windowInfo } : {}) } : { originalLineNumbers: rows.map(row => row.position + 1) }), events,
+    ...(uncertain || selected.omittedUnknownTimeLines ? { timeWarning: tr('时间仅代表各来源自身时钟；无年份或未知时间的内容不能确定跨源先后关系。时间筛选会排除无法匹配的时间行。') } : {}) };
 }
 
 function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), getSsh = () => [], readSsh, runAdb, now = Date.now }) {
@@ -53,7 +108,8 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
       const id = `log:${digest(`${log.source}:${log.deviceId || ''}:${log.identity}`)}`;
       result.push({ id, label: log.source === 'file' ? tr('已打开的日志文件') : tr('ADB 日志缓冲'), kind: 'log',
         detail: log.deviceId || tr('文件来源'), read: () => ({ kind: 'log', label: log.source === 'file' ? tr('已打开的日志文件') : tr('ADB 日志缓冲'),
-          target: log.deviceId || tr('文件来源'), text: log.entries.map(row => row.raw || '').join('\n'), truncated: log.truncated }) });
+          target: log.deviceId || tr('文件来源'), deviceId: log.deviceId || null,
+          ...captureRows(log.entries, row => row.raw || ''), ...(log.truncated ? { truncated: true } : {}) }) });
     }
     for (const [workspace, state] of Object.entries(getSerial())) {
       const rows = (state.entries || []).filter(row => row.sessionId === state.sessionId);
@@ -62,8 +118,8 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
       result.push({ id: `serial:${workspace}:${digest(state.sessionId)}`, kind: 'serial', label, detail: state.path,
         read: () => ({ kind: 'serial', label, target: `${state.path} · ${workspace}`,
           timeBasis: tr('每行前缀为本机接收或发送时间，非设备事件时间'),
-          text: rows.slice(-1000).map(row => `[${row.time}] ${row.direction}: ${row.text || row.hex || ''}`).join('\n'),
-          truncated: rows.length > 1000 || Number(state.evicted) > 0 }) });
+          ...captureRows(rows, row => `[${row.time}] ${row.direction}: ${boundedText(row.text || row.hex || '', limits.logcatBufferBytes).text}`),
+          ...(Number(state.evicted) > 0 ? { truncated: true } : {}) }) });
     }
     for (const item of getSsh()) {
       result.push({ id: `ssh:${digest(`${item.sessionId}:${item.terminalId}`)}`, kind: 'ssh', label: item.title,
@@ -74,13 +130,13 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     return result;
   }
 
-  async function adbRead(deviceId, args, signal) {
+  async function adbRead(deviceId, args, signal, maxBuffer = 128 * 1024) {
     if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
     let child;
     const stop = () => { try { child?.kill(); } catch {} };
     signal?.addEventListener('abort', stop, { once: true });
     try {
-      const result = await runAdb(['-s', deviceId, ...args], { timeoutMs: 12000, maxBuffer: 128 * 1024,
+      const result = await runAdb(['-s', deviceId, ...args], { timeoutMs: 12000, maxBuffer,
         isCancelled: () => Boolean(signal?.aborted), onProcess: process => { child = process; if (signal?.aborted) stop(); } });
       if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
       if (!result.ok) throw fail('AI_EVIDENCE_ADB', tr('设备读取失败，请检查所选设备的连接和授权后重试。'));
@@ -88,10 +144,11 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     } finally { signal?.removeEventListener('abort', stop); }
   }
 
-  async function collect({ deviceId, selectedChecks = [], sourceIds = [], text = '', signal }) {
+  async function collect({ deviceId, selectedChecks = [], sourceIds = [], text = '', selection: requestedSelection, signal }) {
+    const selection = normalizeSelection(requestedSelection);
     if (!Array.isArray(selectedChecks) || selectedChecks.length > 3 || selectedChecks.some(id => !checks().some(check => check.id === id))
       || new Set(selectedChecks).size !== selectedChecks.length || !Array.isArray(sourceIds) || sourceIds.length > 8 || new Set(sourceIds).size !== sourceIds.length
-      || typeof text !== 'string' || Buffer.byteLength(text) > 48 * 1024) throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
+      || typeof text !== 'string' || Buffer.byteLength(text) > MAX_SOURCE_BYTES) throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
     if (selectedChecks.length && (typeof deviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(deviceId))) throw fail('AI_DEVICE_REQUIRED', tr('请选择有效的目标设备。'));
     // Snapshot buffered sources before awaiting any device read. Re-listing also
     // rejects a source whose session/file changed after the selection was shown.
@@ -114,7 +171,7 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
           }
           values.push(`uptime: ${(await adbRead(deviceId, ['shell', 'cat', '/proc/uptime'], signal)).trim()}`);
           output = values.join('\n');
-        } else if (id === 'logcat_snapshot') output = await adbRead(deviceId, ['logcat', '-d', '-v', 'threadtime', '-t', '400'], signal);
+        } else if (id === 'logcat_snapshot') output = await adbRead(deviceId, ['logcat', '-d', '-v', 'threadtime', '-t', '2000'], signal, limits.logcatBufferBytes);
         else {
           const values = [];
           for (const args of [['shell', 'cat', '/proc/meminfo'], ['shell', 'cat', '/proc/stat'], ['shell', 'df', '/data']]) {
@@ -122,18 +179,23 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
           }
           output = values.join('\n');
         }
-        raw.push({ kind: 'adb', label: checks().find(check => check.id === id).label, target: deviceId, text: output, capturedAt: now() });
+        raw.push({ kind: 'adb', checkId: id, label: checks().find(check => check.id === id).label, target: deviceId, text: output, capturedAt: now() });
       }
       if ((await adbRead(deviceId, ['get-state'], signal)).trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
     }
     if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
     if (!raw.length || raw.every(item => !item.text.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
-    const entries = raw.map((item, index) => freezeEntry(item, index, now()));
+    const entries = raw.map((item, index) => freezeEntry(item, index, now(), selection));
+    if (entries.every(entry => !entry.text.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
     const bytes = Buffer.byteLength(JSON.stringify(entries));
-    if (bytes > MAX_EVIDENCE_BYTES) throw fail('AI_EVIDENCE_LIMIT', tr('证据总量超过 48 KiB，请减少来源后重新生成预览。'));
-    return { entries, bytes, truncated: entries.some(item => item.truncated) };
+    if (bytes > MAX_EVIDENCE_BYTES) throw fail('AI_EVIDENCE_LIMIT', tr('证据总量超过 1 MiB，请减少来源或缩小选段后重新生成预览。'));
+    return { entries, bytes, selection, truncated: entries.some(item => item.truncated) };
   }
-  return { list: () => descriptors().map(({ read: _read, ...item }) => item), collect };
+  return { list: () => descriptors().map(({ read: _read, ...item }) => item), collect,
+    async verifyTarget(deviceId, signal) {
+      if (typeof deviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(deviceId)) throw fail('AI_DEVICE_REQUIRED', tr('请选择有效的目标设备。'));
+      if ((await adbRead(deviceId, ['get-state'], signal)).trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
+    } };
 }
 
-module.exports = { createEvidenceAdapter, checks, sanitize, boundedText, freezeEntry, MAX_EVIDENCE_BYTES };
+module.exports = { createEvidenceAdapter, checks, sanitize, boundedText, freezeEntry, MAX_SOURCE_BYTES, MAX_EVIDENCE_BYTES };

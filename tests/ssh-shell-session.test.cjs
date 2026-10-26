@@ -105,12 +105,12 @@ test('real SSH/SFTP enable uses one PTY, removes its own script, and publishes o
   assert.ok(!JSON.stringify(service.terminalRead({ ...host, terminalId: first, offset: 0 })).includes(scripts[0].token));
 });
 
-async function pendingBootstrap(t) {
+async function pendingBootstrap(t, cleanupTimeoutMs = 1000) {
   let sourced = false;
   const server = await startTestServer({ banner: false, onShellData: ({ data }) => { if (data.toString().startsWith(' . ')) sourced = true; } });
   const service = createSshSessionService({ createClient: () => new Client(),
     resolveProfile: async () => ({ host: server.host, port: server.port, username: server.username, password: server.password }),
-    verifyHostKey: async () => true, shellIntegrationTimeoutMs: 3000, shellCleanupTimeoutMs: 30 });
+    verifyHostKey: async () => true, shellIntegrationTimeoutMs: 3000, shellCleanupTimeoutMs: cleanupTimeoutMs });
   t.after(async () => { await service.dispose(); await server.close(); });
   const host = await service.connect(); const terminalId = service.snapshot().sessions[0].terminals[0].id;
   const enabling = service.enableShellIntegration({ ...host, terminalId });
@@ -153,7 +153,8 @@ test('natural network loss reports the exact possibly retained script without ex
   assert.doesNotMatch(JSON.stringify(state), /[a-f0-9]{64}/);
 });
 test('stalled cleanup cannot hang disconnect; connection closes and warning remains visible', async t => {
-  const h = await pendingBootstrap(t); const sftp = await h.service.getSftp(h.host.sessionId);
+  // Keep the short deadline specifically for the deliberately stalled cleanup.
+  const h = await pendingBootstrap(t, 30); const sftp = await h.service.getSftp(h.host.sessionId);
   sftp.unlink = () => {};
   await assert.rejects(h.service.disconnect(h.host), { code: 'SSH_SHELL_CLEANUP_FAILED' }); await h.rejected;
   const state = h.service.snapshot().sessions[0];
