@@ -2273,8 +2273,22 @@ function readScripts() {
 }
 
 function writeScripts(scripts) {
-  scriptsCache = scripts;
-  writeJson(getDataPath(SCRIPTS_FILE), { version: 1, scripts });
+  const target = getDataPath(SCRIPTS_FILE);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, 'wx', 0o600);
+    fs.writeFileSync(descriptor, JSON.stringify({ version: 1, scripts }, null, 2), 'utf8');
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.renameSync(temporary, target);
+    scriptsCache = scripts;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
 }
 
 function readHistory() {
@@ -2524,4 +2538,14 @@ function cleanup() {
   }
 }
 
-module.exports = { register, cleanup, runInlineScript };
+function saveAiDraft(draft) {
+  const { parseTask } = require('./ai-workspace-schema.cjs');
+  const valid = parseTask(JSON.stringify(draft));
+  const timestamp = new Date().toISOString();
+  const script = { ...normalizeScript({ ...valid, id: `ai-${crypto.randomUUID()}`, continueOnError: false,
+    report: { includeAiSummary: false, includePerformance: false } }), createdAt: timestamp, updatedAt: timestamp };
+  writeScripts([script, ...readScripts()]);
+  return script;
+}
+
+module.exports = { register, cleanup, runInlineScript, saveAiDraft };

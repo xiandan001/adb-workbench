@@ -1,10 +1,12 @@
 const { tr } = require('./localization.cjs');
+const { StringDecoder } = require('node:string_decoder');
 const { createSshProfileStore } = require('./ssh-profiles.cjs');
 const { createSshController } = require('./ssh-controller.cjs');
 const { createSshCommandHistory } = require('./ssh-command-history.cjs');
 const { ask } = require('./app-message-dialog.cjs');
 
 let controller;
+let analysisSessions;
 function register(ipcMain) {
   const { app, dialog, safeStorage, shell } = require('electron');
   const { Client } = require('ssh2');
@@ -28,6 +30,7 @@ function register(ipcMain) {
         buttons: [tr("取消连接"), tr("指纹正确，信任并连接")], defaultId: 0, cancelId: 0, noLink: true });
       return result.response === 1 && !challenge.signal?.aborted;
     }), onChange: () => controller?.publish(), onShellCommand: event => { void controller?.recordShellCommand(event); } });
+  analysisSessions = sessions;
   const watchedFileSessions = new Set();
   const files = createSshFiles({ getSftp: id => {
     const context = sessions.getSessionContext(id);
@@ -46,6 +49,22 @@ function register(ipcMain) {
 }
 module.exports = {
   register,
+  getAnalysisSources: () => (analysisSessions?.snapshot().sessions || []).flatMap(session => session.terminals
+    .filter(terminal => terminal.endOffset > terminal.startOffset)
+    .map(terminal => ({ sessionId: session.id, terminalId: terminal.id, name: session.name, host: session.host,
+      title: terminal.title, startOffset: terminal.startOffset, endOffset: terminal.endOffset }))),
+  readAnalysisTerminal: item => {
+    // Narrow read-only adapter: never expose profiles, credentials or write handles.
+    const result = analysisSessions.terminalRead({ sessionId: item.sessionId, terminalId: item.terminalId,
+      offset: Math.max(item.startOffset, item.endOffset - 8192) });
+    const bytes = Buffer.from(result.hex, 'hex');
+    let start = 0;
+    while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
+    // A snapshot can begin or end inside an in-flight UTF-8 character. Do not
+    // fabricate replacement glyphs; omit only those incomplete boundary bytes.
+    const text = new StringDecoder('utf8').write(bytes.subarray(start));
+    return { text, truncated: item.endOffset > 8192 || result.truncated || Buffer.byteLength(text) < bytes.length };
+  },
   needsQuitConfirmation: () => controller?.needsQuitConfirmation() || false,
   confirmQuit: ask => controller?.confirmQuit(ask) ?? true,
   reserveForMigration: () => controller?.reserveForMigration() || (() => {}),

@@ -49,7 +49,7 @@ function harness() {
       const item = { reveals: 0, disposals: 0, reveal() { this.reveals++; calls.push('reveal'); }, dispose() { this.disposals++; calls.push('dispose'); } };
       presentations.push(item); return item;
     },
-    startupSettings: cleanupModule('settings'), aiAnalyze: { resetAiState: () => {} }, mcp: { closeMcpServer: () => {} },
+    startupSettings: cleanupModule('settings'), aiAnalyze: { resetAiState: () => {} }, aiWorkspace: cleanupModule('ai-workspace'), mcp: { closeMcpServer: () => {} },
     performanceMonitor: cleanupModule('performance'), taskCenter: cleanupModule('tasks'), deviceGuard: cleanupModule('guard'), adb: { stopAllShellProcs: () => {} },
   };
   vm.createContext(context);

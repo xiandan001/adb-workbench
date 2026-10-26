@@ -4,15 +4,27 @@ const { tr } = require('./localization.cjs');
 // 性能优化：正常路径将 4 个 PowerShell 查询合并为 1 次 JSON 输出（~2秒）
 
 const { execFile } = require('child_process');
-const crypto = require('crypto');
 const path = require('path');
+const { app, safeStorage } = require('electron');
+const { normalize, hashMachineId, candidateMachineIds, createIdentityStore } = require('./machine-identity.cjs');
 
 let cachedMachineId = null;
 let cachedSources = null;
+let cachedEvidence = null;
+let cachedCandidates = new Set();
 let pendingPromise = null;
+let lastRecoveryAttempt = 0;
+let identityStore = null;
+
+function getIdentityStore() {
+  if (!identityStore) identityStore = createIdentityStore({
+    file: path.join(app.getPath('userData'), 'machine-identity.dat'), safeStorage
+  });
+  return identityStore;
+}
 
 // 单次 PowerShell 脚本：一次性采集全部 4 源，输出 JSON（用 ConvertTo-Json 避免转义问题）
-const PS_SCRIPT = "$ErrorActionPreference='SilentlyContinue'; [ordered]@{cpu=(Get-CimInstance Win32_Processor).ProcessorId;board=(Get-CimInstance Win32_BaseBoard).SerialNumber;disk=(Get-CimInstance Win32_DiskDrive|Select-Object -First 1).SerialNumber;guid=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography').MachineGuid} | ConvertTo-Json -Compress";
+const PS_SCRIPT = "$ErrorActionPreference='SilentlyContinue'; $disks=@(Get-CimInstance Win32_DiskDrive); [ordered]@{cpu=(Get-CimInstance Win32_Processor).ProcessorId;board=(Get-CimInstance Win32_BaseBoard).SerialNumber;disk=($disks|Select-Object -First 1).SerialNumber;guid=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography').MachineGuid;disks=@($disks.SerialNumber)} | ConvertTo-Json -Compress";
 const POWERSHELL_EXE = process.env.SystemRoot
   ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   : 'powershell.exe';
@@ -27,14 +39,6 @@ function execFileAsync(file, args, timeout = 10000) {
       resolve(err ? '' : stdout.trim());
     });
   });
-}
-
-// 规范化硬件字符串：去空白、转大写、过滤空值
-function normalize(s) {
-  if (!s) return '';
-  const v = String(s).trim().toUpperCase();
-  if (['', '0', 'NONE', 'NULL', 'TO BE FILLED BY O.E.M.', 'DEFAULT'].includes(v)) return '';
-  return v;
 }
 
 // 异步采集所有硬件源（仅 1 个 PowerShell 进程）
@@ -56,7 +60,8 @@ async function collectSourcesAsync() {
     cpu: normalize(parsed.cpu),
     board: normalize(parsed.board),
     disk: normalize(parsed.disk),
-    guid: normalize(parsed.guid)
+    guid: normalize(parsed.guid),
+    disks: Array.isArray(parsed.disks) ? parsed.disks.slice(0, 32).map(normalize).filter(Boolean) : []
   };
 }
 
@@ -67,7 +72,7 @@ function parseRegistryValue(output, valueName) {
 }
 
 async function readRegistryValue(key, valueName) {
-  const output = await execFileAsync(REG_EXE, ['query', key, '/v', valueName], 3000);
+  const output = await execFileAsync(REG_EXE, ['query', key, '/v', valueName, '/reg:64'], 3000);
   return parseRegistryValue(output, valueName);
 }
 
@@ -89,15 +94,10 @@ function mergeSources(primary, fallback) {
 }
 
 function countSources(sources) {
-  return Object.values(sources).filter(Boolean).length;
+  return ['cpu', 'board', 'disk', 'guid'].filter(key => sources[key]).length;
 }
 
-function hashMachineId(sources, prefix = '') {
-  const raw = ['cpu', 'board', 'disk', 'guid'].map(key => sources[key] || '').join('|');
-  return crypto.createHash('sha256').update(prefix ? `${prefix}|${raw}` : raw).digest('hex');
-}
-
-// 异步生成机器码（采集 + 缓存，仅 1 个子进程）
+// 异步生成机器码（合并 CIM 查询，并行读取稳定注册表来源）
 async function getMachineIdAsync() {
   if (cachedMachineId) {
     return { success: true, machineId: cachedMachineId, sources: cachedSources };
@@ -107,9 +107,19 @@ async function getMachineIdAsync() {
 
   pendingPromise = (async () => {
     try {
-      let sources = await collectSourcesAsync();
+      const [primary, registry] = await Promise.all([collectSourcesAsync(), collectRegistrySourcesAsync()]);
+      let sources = Object.fromEntries(['cpu', 'board', 'disk', 'guid'].map(key => [key, primary[key] || '']));
       if (countSources(sources) < 2) {
-        sources = mergeSources(sources, await collectRegistrySourcesAsync());
+        sources = mergeSources(sources, registry);
+      }
+      cachedEvidence = { primary, registry, disks: primary.disks || [] };
+      cachedCandidates = candidateMachineIds(cachedEvidence);
+      const remembered = getIdentityStore().read(cachedEvidence);
+      if (remembered) {
+        cachedMachineId = remembered;
+        cachedSources = sources;
+        pendingPromise = null;
+        return { success: true, machineId: remembered, sources };
       }
       if (countSources(sources) >= 2) {
         cachedMachineId = hashMachineId(sources);
@@ -141,6 +151,30 @@ async function getMachineIdAsync() {
   return pendingPromise;
 }
 
+// Called only after the license signature and expiry have been checked. A
+// transient startup CIM failure gets one bounded, coalesced recovery attempt.
+async function resolveMachineIdAsync(expectedId) {
+  let result = await getMachineIdAsync();
+  if (result.success && (result.machineId === expectedId || cachedCandidates.has(expectedId))) {
+    return { ...result, machineId: expectedId };
+  }
+  if (Date.now() - lastRecoveryAttempt >= 30000) {
+    lastRecoveryAttempt = Date.now();
+    cachedMachineId = null;
+    result = await getMachineIdAsync();
+  } else if (pendingPromise) {
+    result = await pendingPromise;
+  }
+  if (result.success && cachedCandidates.has(expectedId)) return { ...result, machineId: expectedId };
+  return result;
+}
+
+function rememberMachineId(machineId) {
+  if (!cachedEvidence || (cachedMachineId !== machineId && !cachedCandidates.has(machineId))) return false;
+  cachedMachineId = machineId;
+  return getIdentityStore().remember(machineId, cachedEvidence);
+}
+
 // 同步版本：仅返回缓存（无缓存时返回 null，不阻塞）
 function getMachineIdSync() {
   if (cachedMachineId) {
@@ -154,4 +188,4 @@ function preloadMachineId() {
   return getMachineIdAsync();
 }
 
-module.exports = { getMachineIdAsync, getMachineIdSync, preloadMachineId };
+module.exports = { getMachineIdAsync, getMachineIdSync, preloadMachineId, resolveMachineIdAsync, rememberMachineId };

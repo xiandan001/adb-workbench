@@ -131,7 +131,8 @@ const QUICK_TEMPLATES = () => ([
   }
 ]);
 
-function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange }) {
+function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange, initialScriptId = '' }) {
+  const initialScriptIdRef = useRef(initialScriptId);
   const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
@@ -228,6 +229,18 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           setEditorMode(restored.workspace.editorMode === 'advanced' ? 'advanced' : 'simple');
           setSelectedDeviceIds(Array.isArray(restored.workspace.selectedDeviceIds) ? restored.workspace.selectedDeviceIds : []);
         }
+        const incoming = nextScripts.find(script => script.id === initialScriptIdRef.current);
+        if (incoming) {
+          const openIncoming = () => {
+            setSelectedScriptId(incoming.id);
+            setDraft(cloneScript(incoming));
+            setSavedFingerprint(draftFingerprint(incoming));
+            setEditorMode('simple');
+            setWorkspaceView('editor');
+          };
+          if (restored.workspace && draftFingerprint(first) !== restored.workspace.savedFingerprint) setPendingDraftAction(() => openIncoming);
+          else openIncoming();
+        }
         setActiveTasks(stateRes?.activeTasks || []);
         setHistory(stateRes?.history || []);
         const onboardingState = settingsRes?.success
@@ -235,7 +248,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           : null;
         setOnboardingStatus(onboardingState?.status || null);
         setOnboardingLoadError(settingsRes?.success ? '' : (settingsRes?.error || tr("教程状态读取失败")));
-        setOnboardingOpen(!onboardingState && !restored.workspace);
+        setOnboardingOpen(!incoming && !onboardingState && !restored.workspace);
         setOnboardingLoaded(true);
       } catch (error) {
         if (!alive) return;

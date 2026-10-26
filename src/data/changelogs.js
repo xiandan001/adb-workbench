@@ -3,6 +3,18 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.4': {
+    title: 'v4.7.4',
+    date: '2026-10-26',
+    items: [
+      { type: 'feature', get text() { return tr('新增 AI 排障助手：根据问题推荐只读检查，预览证据后生成分析结论'); } },
+      { type: 'feature', get text() { return tr('新增 AI 多源联合分析：关联设备日志、串口和 SSH 终端证据'); } },
+      { type: 'feature', get text() { return tr('新增 AI 生成测试任务：将测试目标生成可审阅步骤，保存到任务中心后执行'); } },
+      { type: 'improve', get text() { return tr('新增 AI 功能沿用内置 AI 和会员权益，支持脱敏预览、独立取消与五种语言'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.3': {
     title: 'v4.7.3',
     date: '2026-10-24',

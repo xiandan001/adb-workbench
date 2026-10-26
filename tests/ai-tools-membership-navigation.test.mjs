@@ -19,9 +19,11 @@ function membershipCalls(source) {
 }
 test('AI membership navigation refreshes the shared status instead of displaying a stale App cache', () => {
   const callbacks = membershipCalls(readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'));
-  assert.equal(callbacks.length, 1);
-  assert.ok(callbacks[0].some(call => call.name === 'setActiveTab' && call.firstArgument === 'member'));
-  assert.ok(callbacks[0].some(call => call.name === 'refreshVipStatus'));
+  assert.equal(callbacks.length, 2);
+  for (const callback of callbacks) {
+    assert.ok(callback.some(call => call.name === 'setActiveTab' && call.firstArgument === 'member'));
+    assert.ok(callback.some(call => call.name === 'refreshVipStatus'));
+  }
 });
 test('the contract distinguishes the former navigation-only callback from a refreshing callback', () => {
   const old = membershipCalls("const ui = <AiToolsWorkspace onOpenMembership={() => setActiveTab('member')} />;");

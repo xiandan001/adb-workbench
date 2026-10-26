@@ -30,13 +30,17 @@ const LOG_STORE_BYTES_LIMIT = 100 * 1024 * 1024; // 100MB
 const LOG_STORE_REALTIME_MAX_ENTRIES = 200000;
 const LOG_STORE_FILE_MAX_ENTRIES = 200000; // file 日志条数上限
 const realtimeLogStore = createLogCaptureBuffer({ maxEntries: LOG_STORE_REALTIME_MAX_ENTRIES, maxBytes: LOG_STORE_BYTES_LIMIT });
+const analysisSourceGeneration = { realtime: 0, file: 0 };
+let fileLogEntries = [];
 const logStore = {
   get realtime() { return realtimeLogStore.toArray(); },
   set realtime(entries) {
+    analysisSourceGeneration.realtime++;
     realtimeLogStore.clear();
     for (const entry of entries) realtimeLogStore.push(entry);
   },
-  file: []
+  get file() { return fileLogEntries; },
+  set file(entries) { analysisSourceGeneration.file++; fileLogEntries = entries; }
 };
 const logStoreBytes = { get realtime() { return realtimeLogStore.bytes; }, file: 0 };
 
@@ -59,7 +63,7 @@ function clearLogBatchState() {
 }
 
 function resetLogStoreSource(source) {
-  if (source === 'realtime') realtimeLogStore.clear();
+  if (source === 'realtime') { analysisSourceGeneration.realtime++; realtimeLogStore.clear(); }
   else {
     logStore[source] = [];
     logStoreBytes[source] = 0;
@@ -285,8 +289,9 @@ function register(ipcMain) {
         logcatProc = null;
       }
 
+      const captureDeviceId = args?.deviceId || '';
       currentLogSource = 'realtime';
-      currentLogDeviceId = args?.deviceId || '';
+      currentLogDeviceId = captureDeviceId;
       clearLogBatchState();
       resetLogStoreSource('realtime');
       runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
@@ -317,7 +322,7 @@ function register(ipcMain) {
       rl.on('line', (line) => {
         if (logcatProc !== p) return;
         const entry = parseLogLine('realtime', line);
-        entry.deviceId = currentLogDeviceId;
+        entry.deviceId = captureDeviceId;
         const pkg = resolvePkg(entry.pid);
         if (pkg) entry.pkg = pkg;
         const lineIndex = appendRealtimeEntry(entry);
@@ -550,6 +555,15 @@ function setLogStoreFileEntries(entries) {
 }
 
 module.exports = {
+  // Local AI preview only: metadata stays bound to the retained source.
+  getAnalysisSnapshots: () => ['realtime', 'file'].map(source => {
+    const all = logStore[source] || [];
+    const entries = all.slice(-2000);
+    const deviceId = source === 'realtime' && entries[0]?.deviceId
+      && entries.every(entry => entry.deviceId === entries[0].deviceId) ? entries[0].deviceId : '';
+    return { source, deviceId, identity: String(analysisSourceGeneration[source]),
+      entries, truncated: all.length > entries.length || source === 'realtime' && realtimeLogStore.truncated };
+  }),
   register,
   createLogAnalyzerWindow,
   // 状态 getter（供 MCP 使用）

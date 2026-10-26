@@ -23,6 +23,7 @@ const logAnalyzer = require('./lib/log-analyzer.cjs');
 const mcp = require('./lib/mcp-server.cjs');
 const autoDiagnose = require('./lib/auto-diagnose.cjs');
 const aiAnalyze = require('./lib/ai-analyze.cjs');
+const aiWorkspace = require('./lib/ai-workspace.cjs');
 const smartSearch = require('./lib/smart-search.cjs');
 const vip = require('./lib/vip.cjs');
 // 设备巡检报告与证据包导出 IPC 模块
@@ -219,6 +220,7 @@ app.whenReady().then(async () => {
   appMessageDialog.register(diagnosticIpc);
   ssh.register(diagnosticIpc);
   aiTools.register(diagnosticIpc);
+  aiWorkspace.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
   regressionReport.register(diagnosticIpc);
   acceptanceSuite.register(diagnosticIpc);
@@ -246,6 +248,7 @@ function cleanupRuntimeResources() {
   startupSettings.cleanup();
   // 清理 AI 相关资源
   aiAnalyze.resetAiState();
+  aiWorkspace.cleanup();
   mcp.closeMcpServer();
   // 关闭 Log Analyzer 窗口（如有）
   const logWin = ctx.getLogAnalyzerWindow();

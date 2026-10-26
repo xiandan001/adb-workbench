@@ -7,7 +7,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const { getMachineIdAsync, getMachineIdSync, preloadMachineId } = require('./machine-id.cjs');
+const { getMachineIdAsync, getMachineIdSync, resolveMachineIdAsync, rememberMachineId } = require('./machine-id.cjs');
+const { atomicWritePrivateFile } = require('./machine-identity.cjs');
 
 // 应用内嵌公钥（对应开发者本地保存的私钥，用于验签）
 const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
@@ -118,6 +119,10 @@ function verifyToken(token) {
   } catch (e) {
     return { valid: false, error: 'bad_payload' };
   }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      typeof payload.m !== 'string' || !/^[a-f0-9]{64}$/.test(payload.m)) {
+    return { valid: false, error: 'bad_payload' };
+  }
 
   const sig = decodeCanonicalBase64Url(parts[1]);
   if (!sig || sig.length !== 64) {
@@ -147,37 +152,37 @@ function decodeCanonicalBase64Url(segment) {
   return decoded.toString('base64url') === value ? decoded : null;
 }
 
-// 异步解析并验证 token：读文件 → 验签 → 比对机器码 → 过期判断
+// 异步解析并验证 token：读文件 → 验签与过期检查 → 验证本机身份
 async function computeStatusAsync() {
   // 1. 取机器码（异步，不阻塞 main 进程）
-  const mid = await getMachineIdAsync();
-  if (!mid.success) {
-    return { ...freeBaseStatus(null, 'machine_id_failed'), error: mid.error };
-  }
+  let mid = await getMachineIdAsync();
 
   // 2. 读 token
   let token;
   try {
     token = fs.readFileSync(getTokenPath(), 'utf8').trim();
   } catch (e) {
-    return freeBaseStatus(mid, 'no_token');
+    return mid.success ? freeBaseStatus(mid, 'no_token') :
+      { ...freeBaseStatus(null, 'machine_id_failed'), error: mid.error };
   }
 
   // 3. 验签
   const { valid, payload, error } = verifyToken(token);
   if (!valid) return freeBaseStatus(mid, error);
 
-  // 4. 比对机器码
-  if (payload.m !== mid.machineId) {
-    return freeBaseStatus(mid, 'machine_mismatch');
-  }
-
-  // 5. 过期检查（订阅制预留）
+  // 4. 过期检查（订阅制预留）
   if (payload.t === 'subscription' && payload.e) {
     if (Math.floor(Date.now() / 1000) > payload.e) {
       return freeBaseStatus(mid, 'expired');
     }
   }
+
+  // 5. Only a valid, unexpired signed license may select a reconstructed local
+  // fingerprint. The encrypted identity is a binding aid, never an entitlement.
+  mid = await resolveMachineIdAsync(payload.m);
+  if (!mid.success) return { ...freeBaseStatus(null, 'machine_id_failed'), error: mid.error };
+  if (payload.m !== mid.machineId) return freeBaseStatus(mid, 'machine_mismatch');
+  rememberMachineId(payload.m);
 
   // 6. 全部通过
   return {
@@ -210,24 +215,24 @@ function register(ipcMain) {
     const { valid, payload, error } = verifyToken(token);
     if (!valid) return { success: false, error };
 
-    const mid = await getMachineIdAsync();
-    if (!mid.success) return { success: false, error: 'machine_id_failed' };
-    if (payload.m !== mid.machineId) {
-      return { success: false, error: 'machine_mismatch' };
-    }
     if (payload.t === 'subscription' && payload.e &&
         Math.floor(Date.now() / 1000) > payload.e) {
       return { success: false, error: 'expired' };
     }
+    const mid = await resolveMachineIdAsync(payload.m);
+    if (!mid.success) return { success: false, error: 'machine_id_failed' };
+    if (payload.m !== mid.machineId) return { success: false, error: 'machine_mismatch' };
 
     // 持久化
     try {
-      fs.writeFileSync(getTokenPath(), String(token).trim(), 'utf8');
-      // 激活成功后写入本机激活记录，便于后续备注、到期和重签追踪。
-      appendActivationRecord(payload, mid.machineId, token);
+      atomicWritePrivateFile(getTokenPath(), String(token).trim());
     } catch (e) {
       return { success: false, error: 'write_failed', detail: e.message };
     }
+    rememberMachineId(payload.m);
+    // Ancillary history cannot turn a durably saved license into a failed
+    // activation; it is not used for authorization or identity recovery.
+    try { appendActivationRecord(payload, mid.machineId, token); } catch { /* best effort */ }
     return { success: true, status: await computeStatusAsync() };
   });
 
@@ -293,15 +298,15 @@ function getStatus() {
     return freeBaseStatus(mid, 'expired');
   }
   return {
-    activated: true, scope: 'vip', type: payload.t,
+    activated: true, scope: payload.s === 'vip' ? 'vip' : 'free', type: payload.t,
     issuedAt: payload.i, expiresAt: payload.e,
     machineId: mid.machineId, reason: null
   };
 }
 
-// 启动预采集（在 app.whenReady 中异步调用）
+// 启动预采集并恢复有效的旧授权身份（在 app.whenReady 中异步调用）
 function preload() {
-  return preloadMachineId();
+  return computeStatusAsync();
 }
 
 module.exports = {

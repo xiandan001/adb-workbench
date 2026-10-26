@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
 import './index.css';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -37,6 +37,7 @@ import { filterDeviceCards, readPinnedDevices, togglePinnedDevice } from './shar
 import SerialPanel from './components/SerialPanel';
 const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
 const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspace'));
+const AiWorkspace = lazy(() => import('./components/AiWorkspace'));
 
 async function requestAiTools(command, args = {}) {
   const response = await window.electronAPI.aiToolsRequest({ command, args });
@@ -65,11 +66,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
-  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false });
-  const { activeTab, sshVisited, aiToolsVisited } = navigation;
+  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false, aiVisited: false });
+  const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const [aiTaskId, setAiTaskId] = useState('');
   const setActiveTab = useCallback(next => setNavigation(previous => {
     const tab = typeof next === 'function' ? next(previous.activeTab) : next;
-    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools' };
+    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
   }), []);
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1650,6 +1652,11 @@ function App() {
             <span className="font-medium">{tr("产物中心")}</span>
           </button>
           <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("工具与设置")}</div>
+          <button onClick={() => setActiveTab('ai-workspace')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-workspace' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
+            style={{ WebkitAppRegion: 'no-drag' }}>
+            <Sparkles size={20} /><span className="font-medium">{tr('AI 工作区')}</span>
+          </button>
           <button onClick={() => setActiveTab('ai-tools')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-tools' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}>
@@ -1720,7 +1727,7 @@ function App() {
           <div className="min-w-0">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
+              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("通过电脑串口线连接设备 · 端口列表每 2 秒自动更新")}</p>}
@@ -1960,6 +1967,13 @@ function App() {
           )}
 
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} />}
+          {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
+            <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
+              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId}
+                showToast={showToast} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }}
+                onOpenTasks={id => { setAiTaskId(id); setActiveTab('tasks'); }} />
+            </Suspense>
+          </div>}
           {sshVisited && <div hidden={activeTab !== 'ssh'}>
             <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 SSH 工作区…")}</div>}>
               <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} />
@@ -2130,6 +2144,7 @@ function App() {
 
           {activeTab === 'tasks' && (
             <TaskCenter
+              initialScriptId={aiTaskId}
               devices={devices}
               activeDeviceId={activeDeviceId}
               onActiveDeviceChange={setActiveDeviceId}
