@@ -3,6 +3,18 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.5': {
+    title: 'v4.7.5',
+    date: '2026-10-26',
+    items: [
+      { type: 'improve', get text() { return tr('全新黑底翠绿 V 品牌图标，统一应用与安装器视觉'); } },
+      { type: 'feature', get text() { return tr('新增紧凑黑色安装界面，支持行星环绕动画与自定义安装路径'); } },
+      { type: 'feature', get text() { return tr('安装器支持五种语言，首次默认英语；所选语言自动应用于首次启动'); } },
+      { type: 'improve', get text() { return tr('AI 工具管理新增配置范围说明：仅用于外部 AI 工具，不影响应用内置 AI'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.4': {
     title: 'v4.7.4',
     date: '2026-10-26',

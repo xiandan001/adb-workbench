@@ -51,8 +51,15 @@
       for (let row = 0; row < 3; row++) for (let col = 0; col < 4; col++) box(content + 18 + col * (cardWidth - 36) / 4, y + 340 + row * 58, (cardWidth - 64) / 4, 36, 20);
 
       const mask = document.createElement('canvas'); mask.width = 460; mask.height = 280; const ink = mask.getContext('2d');
-      ink.strokeStyle = '#fff'; ink.lineWidth = 5; ink.beginPath(); ink.roundRect(201, 24, 58, 96, 13); ink.stroke();
-      ink.beginPath(); ink.moveTo(218, 39); ink.lineTo(242, 39); ink.stroke(); ink.beginPath(); ink.arc(230, 104, 2.5, 0, Math.PI * 2); ink.fillStyle = '#fff'; ink.fill();
+      // The transparent V/node silhouette mirrors the approved black/emerald icon.
+      // Keeping it vector-only avoids asset loading delays in the native handoff.
+      ink.fillStyle = '#1bd5ae'; ink.beginPath();
+      ink.moveTo(194, 37); ink.lineTo(210, 37); ink.lineTo(231, 94); ink.lineTo(249, 48);
+      ink.lineTo(253, 50); ink.lineTo(258, 52); ink.lineTo(264, 53); ink.lineTo(269, 53);
+      ink.lineTo(237, 122); ink.arc(230, 119, 8, .39, 2.73); ink.lineTo(191, 41);
+      ink.arc(194, 40, 3, Math.PI, Math.PI * 1.5); ink.fill();
+      ink.beginPath(); ink.arc(265, 36, 11, 0, Math.PI * 2); ink.fill();
+      ink.fillStyle = '#fff';
       ink.font = '600 54px "Microsoft YaHei", sans-serif'; ink.textAlign = 'center'; ink.fillText(tr('卓控台'), 230, 203);
       const pixels = ink.getImageData(0, 0, mask.width, mask.height).data;
       for (let py = 0; py < mask.height; py += 4) for (let px = 0; px < mask.width; px += 4) if (pixels[(py * mask.width + px) * 4 + 3] > 100) sources.push({ x: center.x + px - 230, y: center.y + py - 140 });

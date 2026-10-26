@@ -27,8 +27,11 @@ export function createMessageTranslator(entries) {
     const translations = new Set([...catalogs.values()].map(catalog => catalog.get(source)).filter(value => typeof value === 'string'));
     for (const translated of translations) if (!reverse.has(translated)) reverse.set(translated, source);
     if (parameters(source).length) {
-      templates.push({ source, ...pattern(source) });
-      for (const translated of translations) if (translated !== source) templates.push({ source, ...pattern(translated) });
+      for (const message of new Set([source, ...translations])) {
+        const candidate = pattern(message);
+        // A bare placeholder matches every string, including an absent error.
+        if (candidate.needle.trim()) templates.push({ source, ...candidate });
+      }
     }
   }
   function resolve(text) {
@@ -46,12 +49,13 @@ export function createMessageTranslator(entries) {
   }
   return (text, params = {}, locale = 'zh-CN') => {
     if (typeof text !== 'string') return text;
+    if (!/[^\s\p{Cc}\p{Cf}]/u.test(text)) return text;
     const descriptor = sources.has(text) ? { source: text, params } : resolve(text);
     if (!descriptor) return text;
     const source = descriptor.source;
     const message = catalogs.get(locale)?.get(source) ?? source;
     const result = message.replace(/\{(\d+)\}/g, (token, index) => Object.prototype.hasOwnProperty.call(descriptor.params, index) ? String(descriptor.params[index] ?? '') : token);
-    if (result !== source && result.length <= 8192 && parameters(source).length) {
+    if (result !== source && result.length <= 8192 && parameters(source).length && pattern(message).needle.trim()) {
       recent.set(result, descriptor);
       if (recent.size > 128) recent.delete(recent.keys().next().value);
     }

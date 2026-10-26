@@ -1,6 +1,10 @@
 import { tr } from './i18n.js';
 const ACTIVE_STATUSES = new Set(['starting', 'recording', 'stopping', 'saving']);
 
+export function recordingErrorText(value) {
+  return typeof value === 'string' && /[^\s\p{Cc}\p{Cf}]/u.test(value) ? value : '';
+}
+
 export function deviceRecordingSessions(sessions, deviceId) {
   return (Array.isArray(sessions) ? sessions : [])
     .filter(session => session?.deviceId === deviceId)

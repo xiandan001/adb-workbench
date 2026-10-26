@@ -17,6 +17,9 @@ release
 .electron-cache
 build/*
 !build/installer.nsh
+!build/installer-ui/
+!build/installer-ui/**
+!build/installer-ui.nsh
 # docs 目录只忽略非图片文件，图片保留在仓库中
 docs/*
 !docs/*.png

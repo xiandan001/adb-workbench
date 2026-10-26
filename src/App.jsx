@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
 import './index.css';
+import brandIcon from '../assets/brand/icon-128.png';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
 import DeviceCard from './components/DeviceCard';
@@ -1579,7 +1580,7 @@ function App() {
       {/* Sidebar */}
       <div className={`${locale === 'ja-JP' ? 'w-72' : 'w-56 lg:w-60'} shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]`}>
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
-          <Smartphone size={28} />
+          <img src={brandIcon} width={32} height={32} alt="" aria-hidden="true" className="shrink-0" />
           <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">{tr('卓控台')}</h1>
           <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>

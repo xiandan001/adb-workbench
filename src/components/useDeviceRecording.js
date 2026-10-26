@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { currentDeviceRecording, watchDeviceRecordings } from '../shared/recordingWorkspace';
+import { currentDeviceRecording, recordingErrorText, watchDeviceRecordings } from '../shared/recordingWorkspace';
 import { tr, useLocale } from '../shared/i18n.js';
 
 export default function useDeviceRecording(deviceId, onStart, onStop) {
@@ -33,7 +33,7 @@ export default function useDeviceRecording(deviceId, onStart, onStop) {
       const result = await action();
       if (!result?.success) throw new Error(result?.error || tr('录屏操作未完成，请重试'));
     } catch (error) {
-      if (mounted.current) setRequestError(error.message || tr('录屏操作失败'));
+      if (mounted.current) setRequestError(recordingErrorText(error.message) || tr('录屏操作失败'));
     } finally {
       operationPending.current = false;
       if (mounted.current) {
@@ -47,7 +47,7 @@ export default function useDeviceRecording(deviceId, onStart, onStop) {
     ...snapshot,
     session: currentDeviceRecording(snapshot.sessions, deviceId),
     pending,
-    requestError: tr(requestError),
+    requestError: requestError ? tr(requestError) : '',
     dismissRequestError: () => setRequestError(''),
     refresh: () => controller.current?.refresh(),
     start: options => run(() => onStart(deviceId, options)),

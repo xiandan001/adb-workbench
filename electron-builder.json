@@ -34,7 +34,8 @@
   "nsis": {
     "oneClick": false,
     "perMachine": true,
-    "allowToChangeInstallationDirectory": true,
+    "allowToChangeInstallationDirectory": false,
+    "installerLanguages": ["en_US", "zh_CN", "zh_TW", "ja_JP", "ko_KR"],
     "installerIcon": "icon.ico",
     "uninstallerIcon": "icon.ico",
     "installerHeaderIcon": "icon.ico",
@@ -48,6 +49,7 @@
   "asar": true,
   "asarUnpack": [
     "electron/lib/localization.cjs",
+    "electron/lib/installer-language.cjs",
     "electron/locales/*.json",
     "electron/lib/performance-worker.cjs",
     "electron/lib/task-center-worker.cjs",

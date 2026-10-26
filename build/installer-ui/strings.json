@@ -1,0 +1,57 @@
+{
+  "zh-CN": {
+    "title": "卓控台安装", "brand": "卓控台", "tagline": "连接设备，洞察问题。", "tagline2": "让每一次调试更轻松。",
+    "feature1": "设备连接与投屏", "feature2": "串口与 SSH 工作区", "feature3": "内置 AI · 智能排障",
+    "welcomeLabel": "为高效工作，准备就绪", "welcomeTitle": "开启高效调试", "welcomeBody": "设备、终端与 AI，汇聚于一个工作台。",
+    "install": "立即安装", "custom": "自定义安装", "collapse": "收起安装选项", "pathLabel": "安装位置", "browse": "浏览", "shortcut": "创建桌面快捷方式",
+    "invalidPath": "请选择有效的本地文件夹，避免磁盘根目录或系统目录。", "pathSafety": "新位置会自动添加应用子文件夹，保护已有文件。", "unsafeTarget": "此位置已有内容、已重定向或无法读取，请选择其他位置。", "browseTitle": "选择安装位置", "browseError": "未能打开文件夹选择器，请手动输入安装路径。",
+    "installLabel": "正在为你准备工作台", "installTitle": "正在安装", "installBody": "正在安全部署应用，请稍候。", "working": "正在处理安装文件…", "progress": "安装进度", "details": "安装详情", "hideDetails": "返回安装进度",
+    "finishLabel": "一切就绪", "finishTitle": "安装完成", "finishBody": "连接第一台设备，开始高效工作。", "installed": "应用安装完成", "launch": "立即启动卓控台", "later": "稍后启动",
+    "cancel": "取消", "cancelTitle": "退出安装？", "cancelBody": "安装尚未完成。退出后可以重新运行安装包。", "continue": "继续安装", "exit": "退出安装",
+    "failedTitle": "安装未完成", "failedBody": "请查看安装详情，确认磁盘空间及文件权限后重试。", "close": "关闭", "copy": "复制详情", "copied": "已复制", "detailsEmpty": "暂无安装详情。"
+  },
+  "zh-TW": {
+    "title": "卓控臺安裝", "brand": "卓控臺", "tagline": "連接裝置，洞察問題。", "tagline2": "讓每一次除錯更輕鬆。",
+    "feature1": "裝置連接與投影", "feature2": "序列埠與 SSH 工作區", "feature3": "內建 AI · 智慧排障",
+    "welcomeLabel": "為高效工作，準備就緒", "welcomeTitle": "開啟高效除錯", "welcomeBody": "裝置、終端機與 AI，匯聚於一個工作臺。",
+    "install": "立即安裝", "custom": "自訂安裝", "collapse": "收合安裝選項", "pathLabel": "安裝位置", "browse": "瀏覽", "shortcut": "建立桌面捷徑",
+    "invalidPath": "請選擇有效的本機資料夾，避免磁碟根目錄或系統目錄。", "pathSafety": "新位置會自動加入應用程式子資料夾，保護現有檔案。", "unsafeTarget": "此位置已有內容、已重新導向或無法讀取，請選擇其他位置。", "browseTitle": "選擇安裝位置", "browseError": "無法開啟資料夾選擇器，請手動輸入安裝路徑。",
+    "installLabel": "正在為你準備工作臺", "installTitle": "正在安裝", "installBody": "正在安全部署應用程式，請稍候。", "working": "正在處理安裝檔案…", "progress": "安裝進度", "details": "安裝詳細資料", "hideDetails": "返回安裝進度",
+    "finishLabel": "一切就緒", "finishTitle": "安裝完成", "finishBody": "連接第一台裝置，開始高效工作。", "installed": "應用程式安裝完成", "launch": "立即啟動卓控臺", "later": "稍後啟動",
+    "cancel": "取消", "cancelTitle": "結束安裝？", "cancelBody": "安裝尚未完成。結束後可以重新執行安裝程式。", "continue": "繼續安裝", "exit": "結束安裝",
+    "failedTitle": "安裝未完成", "failedBody": "請查看安裝詳細資料，確認磁碟空間及檔案權限後重試。", "close": "關閉", "copy": "複製詳細資料", "copied": "已複製", "detailsEmpty": "尚無安裝詳細資料。"
+  },
+  "en-US": {
+    "title": "Veylo Setup", "brand": "Veylo", "tagline": "Connect devices. Find answers.", "tagline2": "Make every debug session easier.",
+    "feature1": "Device connection & mirroring", "feature2": "Serial & SSH workspace", "feature3": "Built-in AI troubleshooting",
+    "welcomeLabel": "READY FOR BETTER WORK", "welcomeTitle": "Your workspace awaits", "welcomeBody": "Devices, terminals and AI. One focused workspace.",
+    "install": "Install now", "custom": "Customize installation", "collapse": "Hide installation options", "pathLabel": "Install location", "browse": "Browse", "shortcut": "Create a desktop shortcut",
+    "invalidPath": "Choose a valid local folder, not a drive root or system folder.", "pathSafety": "New locations use a dedicated app subfolder. Existing files are protected.", "unsafeTarget": "This folder contains files, is redirected or cannot be read. Choose another location.", "browseTitle": "Choose install location", "browseError": "The folder picker could not open. Enter the path manually.",
+    "installLabel": "PREPARING YOUR WORKSPACE", "installTitle": "Installing", "installBody": "Your app is being installed. Please wait.", "working": "Processing installation files…", "progress": "Install progress", "details": "Installation details", "hideDetails": "Back to progress",
+    "finishLabel": "YOU'RE ALL SET", "finishTitle": "Ready to go", "finishBody": "Connect your first device and get to work.", "installed": "Application installed", "launch": "Launch Veylo", "later": "Launch later",
+    "cancel": "Cancel", "cancelTitle": "Exit setup?", "cancelBody": "Installation is not complete. You can run setup again later.", "continue": "Continue setup", "exit": "Exit setup",
+    "failedTitle": "Installation incomplete", "failedBody": "Check the installation details, disk space and file permissions before retrying.", "close": "Close", "copy": "Copy details", "copied": "Copied", "detailsEmpty": "No installation details yet."
+  },
+  "ja-JP": {
+    "title": "Veylo セットアップ", "brand": "Veylo", "tagline": "デバイスをつなぎ、問題を見極める。", "tagline2": "毎日のデバッグを、もっと快適に。",
+    "feature1": "デバイス接続とミラーリング", "feature2": "シリアル・SSH ワークスペース", "feature3": "内蔵 AI によるトラブル診断",
+    "welcomeLabel": "効率的な作業の準備を", "welcomeTitle": "快適なデバッグを始めよう", "welcomeBody": "デバイス、ターミナル、AI をひとつの作業環境に。",
+    "install": "インストール", "custom": "インストール設定", "collapse": "設定を閉じる", "pathLabel": "インストール先", "browse": "参照", "shortcut": "デスクトップにショートカットを作成",
+    "invalidPath": "ドライブ直下やシステム領域以外の有効なローカルフォルダーを選択してください。", "pathSafety": "新しい場所には専用のサブフォルダーを追加し、既存ファイルを保護します。", "unsafeTarget": "内容がある、転送されている、または読み取れない場所です。別の場所を選択してください。", "browseTitle": "インストール先の選択", "browseError": "フォルダー選択画面を開けませんでした。パスを直接入力してください。",
+    "installLabel": "ワークスペースを準備中", "installTitle": "インストール中", "installBody": "アプリをインストールしています。しばらくお待ちください。", "working": "インストールファイルを処理中…", "progress": "インストールの進行状況", "details": "インストールの詳細", "hideDetails": "進行状況に戻る",
+    "finishLabel": "準備が整いました", "finishTitle": "インストール完了", "finishBody": "最初のデバイスを接続して、作業を始めましょう。", "installed": "アプリをインストールしました", "launch": "Veylo を起動", "later": "後で起動",
+    "cancel": "キャンセル", "cancelTitle": "セットアップを終了しますか？", "cancelBody": "インストールは完了していません。後で再実行できます。", "continue": "インストールを続ける", "exit": "セットアップを終了",
+    "failedTitle": "インストール未完了", "failedBody": "詳細、ディスクの空き容量、ファイルのアクセス権を確認して再試行してください。", "close": "閉じる", "copy": "詳細をコピー", "copied": "コピーしました", "detailsEmpty": "インストールの詳細はまだありません。"
+  },
+  "ko-KR": {
+    "title": "Veylo 설치", "brand": "Veylo", "tagline": "기기를 연결하고, 문제를 파악하세요.", "tagline2": "모든 디버깅을 더 편리하게.",
+    "feature1": "기기 연결 및 화면 미러링", "feature2": "시리얼 및 SSH 작업 공간", "feature3": "내장 AI · 스마트 문제 해결",
+    "welcomeLabel": "효율적인 작업을 위한 준비", "welcomeTitle": "편리한 디버깅의 시작", "welcomeBody": "기기, 터미널, AI를 하나의 작업 공간에서.",
+    "install": "지금 설치", "custom": "사용자 지정 설치", "collapse": "설치 옵션 접기", "pathLabel": "설치 위치", "browse": "찾아보기", "shortcut": "바탕 화면 바로 가기 만들기",
+    "invalidPath": "드라이브 루트 또는 시스템 폴더가 아닌 유효한 로컬 폴더를 선택하세요.", "pathSafety": "새 위치에는 앱 전용 하위 폴더가 추가되어 기존 파일을 보호합니다.", "unsafeTarget": "파일이 있거나, 리디렉션되었거나, 읽을 수 없는 폴더입니다. 다른 위치를 선택하세요.", "browseTitle": "설치 위치 선택", "browseError": "폴더 선택 창을 열 수 없습니다. 경로를 직접 입력하세요.",
+    "installLabel": "작업 공간을 준비하고 있습니다", "installTitle": "설치 중", "installBody": "앱을 안전하게 설치하고 있습니다. 잠시 기다려 주세요.", "working": "설치 파일 처리 중…", "progress": "설치 진행 상황", "details": "설치 세부 정보", "hideDetails": "진행 상황으로 돌아가기",
+    "finishLabel": "모든 준비가 완료되었습니다", "finishTitle": "설치 완료", "finishBody": "첫 번째 기기를 연결하고 작업을 시작하세요.", "installed": "앱 설치 완료", "launch": "Veylo 실행", "later": "나중에 실행",
+    "cancel": "취소", "cancelTitle": "설치를 종료할까요?", "cancelBody": "설치가 완료되지 않았습니다. 나중에 다시 실행할 수 있습니다.", "continue": "설치 계속", "exit": "설치 종료",
+    "failedTitle": "설치가 완료되지 않았습니다", "failedBody": "설치 세부 정보, 디스크 공간 및 파일 권한을 확인한 후 다시 시도하세요.", "close": "닫기", "copy": "세부 정보 복사", "copied": "복사됨", "detailsEmpty": "아직 설치 세부 정보가 없습니다."
+  }
+}

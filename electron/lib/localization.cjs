@@ -52,7 +52,7 @@ function matchSystemLocale(values) {
 }
 
 function createLocalizationService({ readSettings, writeSettingsPatch, getMainWindow, getWindows,
-  hasExistingProfile = () => true, getSystemLocales = () => [] }) {
+  hasExistingProfile = () => true, getSystemLocales = () => [], getInstallerLanguage = async () => null }) {
   let queue = Promise.resolve();
   let languageSelectionPending = false;
   let selectionTracked = false;
@@ -77,13 +77,17 @@ function createLocalizationService({ readSettings, writeSettingsPatch, getMainWi
       selectionTracked = typeof settings?.languageSelectionPending === 'boolean';
       languageSelectionPending = settings?.languageSelectionPending === true;
       if (!existing && !selectionTracked && !LOCALES.includes(settings?.locale)) {
+        let installerLocale;
+        try { installerLocale = await getInstallerLanguage(); } catch { /* Keep the first-run picker if the receipt cannot be read. */ }
         let suggested = localeConfig.defaultLocale;
-        try { suggested = matchSystemLocale(getSystemLocales()); } catch { /* An unavailable OS locale uses the supported default. */ }
+        const selectedInInstaller = LOCALES.includes(installerLocale);
+        if (selectedInInstaller) suggested = installerLocale;
+        else try { suggested = matchSystemLocale(getSystemLocales()); } catch { /* An unavailable OS locale uses the supported default. */ }
         // Commit this before any BrowserWindow can create Local Storage. If it
         // fails, main must stop startup so the next launch remains a new profile.
-        try { await writeSettingsPatch({ locale: suggested, languageSelectionPending: true }); }
+        try { await writeSettingsPatch({ locale: suggested, languageSelectionPending: !selectedInInstaller }); }
         catch { throw firstRunFailure(); }
-        selectionTracked = true; languageSelectionPending = true; setLocale(suggested);
+        selectionTracked = true; languageSelectionPending = !selectedInInstaller; setLocale(suggested);
       } else setLocale(normalizeLocale(settings?.locale));
       return getLocale();
     });
@@ -125,6 +129,10 @@ function defaultService() {
     const settings = require('./settings.cjs'); const context = require('./app-context.cjs');
     service = createLocalizationService({ readSettings: settings.readSettings, writeSettingsPatch: settings.writeSettingsPatch,
       hasExistingProfile: settings.hasExistingLanguageProfile,
+      getInstallerLanguage: () => {
+        const { app } = require('electron');
+        return require('./installer-language.cjs').readInstallerLanguage({ isPackaged: app.isPackaged, executablePath: app.getPath('exe') });
+      },
       getSystemLocales: () => {
         const { app } = require('electron');
         return app.getPreferredSystemLanguages?.() || [app.getLocale?.()];

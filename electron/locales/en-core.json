@@ -1,4 +1,8 @@
 {
+  "全新黑底翠绿 V 品牌图标，统一应用与安装器视觉": "New emerald V icon on a black background, with consistent branding across the app and installer",
+  "新增紧凑黑色安装界面，支持行星环绕动画与自定义安装路径": "Added a compact black installer with orbital animation and a custom installation location",
+  "安装器支持五种语言，首次默认英语；所选语言自动应用于首次启动": "The installer supports five languages and defaults to English on first use; the app adopts your choice on first launch",
+  "AI 工具管理新增配置范围说明：仅用于外部 AI 工具，不影响应用内置 AI": "AI Tools now explains that its configuration applies only to external AI tools, not the app's built-in AI",
   "首次安装可选择应用语言，更新说明随所选语言显示": "Choose your app language on first launch, with release notes shown in the selected language",
   "新增繁体中文、日语和韩语，支持五种界面语言": "Added Traditional Chinese, Japanese and Korean, bringing the interface to five languages",
   "应用品牌名称随界面语言显示，优化多语言启动与窗口体验": "Localized app branding and improved multilingual startup and window display",

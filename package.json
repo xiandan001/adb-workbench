@@ -1,7 +1,7 @@
 {
   "name": "adb-workbench",
   "private": true,
-  "version": "4.7.4",
+  "version": "4.7.5",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -9,7 +9,7 @@
     "check:i18n": "node scripts/check-i18n.cjs",
     "test:i18n": "node --test --test-concurrency=4 tests/localization*.test.* tests/i18n-*.test.*",
     "prebuild": "npm run check:i18n",
-    "preelectron:build": "npm run check:i18n",
+    "preelectron:build": "npm run check:i18n && node scripts/build-installer-ui.cjs",
     "build": "vite build",
     "lint": "eslint .",
     "test:onboarding": "node --test tests/task-center-onboarding-state.test.cjs tests/task-center-onboarding-ui-model.test.mjs",

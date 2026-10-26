@@ -1090,5 +1090,6 @@
   "上下文 Token 上限需要 {0}–{1} 的整数": "Context token limit requires an integer from {0} to {1}",
   "自动压缩阈值（%）需要 {0}–{1} 的整数": "Auto-compaction threshold (%) requires an integer from {0} to {1}",
   "自动压缩 Token 阈值需要 {0}–{1} 的整数": "Auto-compaction token threshold requires an integer from {0} to {1}",
-  "数值需要 {0}–{1} 的整数": "The value requires an integer from {0} to {1}"
+  "数值需要 {0}–{1} 的整数": "The value requires an integer from {0} to {1}",
+  "此处的供应商与模型配置仅用于外部 AI 工具，不影响卓控台内置 AI。": "Provider and model settings here apply only to external AI tools, not to Veylo’s built-in AI."
 }

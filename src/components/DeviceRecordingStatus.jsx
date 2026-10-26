@@ -1,11 +1,13 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useState } from 'react';
 import { CircleAlert, FileText, FolderOpen, Loader2, Play, RefreshCw, X } from 'lucide-react';
-import { formatMediaDuration, recordingDuration, savedRecordingVisible } from '../shared/recordingWorkspace';
+import { formatMediaDuration, recordingDuration, recordingErrorText, savedRecordingVisible } from '../shared/recordingWorkspace';
 
 export default function DeviceRecordingStatus({ recording, isOnline, theme, showToast }) {
   useLocale();
-  const { session, sessions, pending, error, requestError } = recording;
+  const { session, sessions, pending } = recording;
+  const error = recordingErrorText(recording.error);
+  const requestError = recordingErrorText(recording.requestError);
   const [now, setNow] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState([]);
   const [mediaError, setMediaError] = useState('');
@@ -32,8 +34,9 @@ export default function DeviceRecordingStatus({ recording, isOnline, theme, show
       const result = await window.electronAPI.deviceMediaAction({ id: session.mediaId, action });
       if (!result?.success) throw new Error(result?.error || tr("无法打开录屏文件"));
     } catch (failure) {
-      setMediaError(failure.message || tr("无法打开录屏文件"));
-      showToast?.(failure.message || tr("无法打开录屏文件"));
+      const message = recordingErrorText(failure.message) || tr("无法打开录屏文件");
+      setMediaError(message);
+      showToast?.(message);
     } finally {
       setMediaBusy(false);
     }

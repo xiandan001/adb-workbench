@@ -1,0 +1,11 @@
+LIBRARY VeyloInstaller
+EXPORTS
+  Init=SkinInit
+  Page=SkinPage
+  GetPath=SkinGetPath
+  GetShortcut=SkinGetShortcut
+  GetLaunch=SkinGetLaunch
+  GetLanguage=SkinGetLanguage
+  TrustExistingPath=SkinTrustExistingPath
+  Failed=SkinFailed
+  Dispose=SkinDispose
