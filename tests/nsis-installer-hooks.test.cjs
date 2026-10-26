@@ -46,6 +46,13 @@ test('native callbacks retain real engine controls, update flags, shortcut opt-o
   assert.ok(!hooks.includes('\r\n')); assert.ok(!hooks.includes('\uFFFD'));
 });
 
+test('final configuration stage uses an actual install hook and leaves the stock engine intact', () => {
+  const source = read('build/installer.nsh');
+  assert.match(source, /!macro customInstall\s+!insertmacro VeyloSaveInstallerLanguage\s+\$\{If\} \$VeyloReady == "1"\s+VeyloInstaller::Stage \/NOUNLOAD "configuring"/);
+  assert.equal((source.match(/VeyloInstaller::Stage/g) || []).length, 1);
+  assert.doesNotMatch(source, /!macro (?:uninstallOldVersion|decompress|extractUsing7za)|SetDetailsPrint both/);
+});
+
 test('installer paths are passed as environment data, never interpolated as PowerShell code', () => {
   const source = read('build/installer.nsh');
   const calls = source.split('\n').filter(line => line.includes('nsExec::ExecToStack'));

@@ -131,13 +131,13 @@ test('ordinary ASCII and Chinese printing stays byte exact across every UTF-8 by
 test('a large single native callback is processed in bounded slices without changing its part count', () => {
   const buffer = createSerialBuffer();
   const frame = Buffer.from('ab050adf4e', 'hex');
-  const bytes = Buffer.alloc(frame.length * 40000);
+  const bytes = Buffer.alloc(frame.length * (MAX_ENTRIES + 40000));
   for (let offset = 0; offset < bytes.length; offset += frame.length) frame.copy(bytes, offset);
   buffer.append(record(bytes));
   const rows = buffer.entriesAfter();
   assert.equal(rows.length, MAX_ENTRIES);
   assert.equal(buffer.metadata().rxBytes, bytes.length);
-  assert.equal(buffer.metadata().evicted, 35000);
+  assert.equal(buffer.metadata().evicted, 40000);
   assert.ok(rows.every(row => row.kind === 'frame' && row.parts === 1 && row.hex === frame.toString('hex')));
   assert.equal(buffer.drainChanges().length, MAX_ENTRIES);
 });

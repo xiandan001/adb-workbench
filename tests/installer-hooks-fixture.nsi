@@ -4,9 +4,14 @@ RequestExecutionLevel user
 Name "Veylo hooks fixture"
 OutFile "${FIXTURE_EXE}"
 InstallDir "${FIXTURE_INSTALL_DIR}"
-ShowInstDetails show
 ShowUninstDetails show
-SetCompressor /SOLID lzma
+!ifdef FIXTURE_APP_ARCHIVE
+  ShowInstDetails nevershow
+  SetCompressor zlib
+!else
+  ShowInstDetails show
+  SetCompressor /SOLID lzma
+!endif
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -32,6 +37,14 @@ Var FixtureUpdated
   StrCmp "0" "1" `${_t}` `${_f}`
 !macroend
 !include "${FIXTURE_UI_HOOKS}"
+!ifdef FIXTURE_APP_ARCHIVE
+  !include "x64.nsh"
+  !define APP_64 "${FIXTURE_APP_ARCHIVE}"
+  !define COMPRESSION_METHOD "7z"
+  !define COMPRESS "auto"
+  !define PRODUCT_NAME "Veylo extraction fixture"
+  !include "${FIXTURE_EXTRACT_INCLUDE}"
+!endif
 
 !insertmacro customWelcomePage
 !insertmacro customPageAfterChangeDir
@@ -44,6 +57,13 @@ UninstPage instfiles
 !insertmacro MUI_LANGUAGE "Japanese"
 !insertmacro MUI_LANGUAGE "Korean"
 !insertmacro customHeader
+!ifdef FIXTURE_APP_ARCHIVE
+  LangString appCannotBeClosed 1033 "Fixture copy failed. Only this fixture may be retried."
+  LangString appCannotBeClosed 2052 "测试目录复制失败，仅允许重试本测试。"
+  LangString appCannotBeClosed 1028 "測試目錄複製失敗，僅允許重試本測試。"
+  LangString appCannotBeClosed 1041 "テスト用ディレクトリのコピーを再試行してください。"
+  LangString appCannotBeClosed 1042 "테스트 디렉터리 복사를 다시 시도하세요."
+!endif
 
 Function .onInit
   SetShellVarContext current
@@ -67,16 +87,41 @@ FunctionEnd
 !macroend
 
 Section "Fixture payload"
+!ifdef FIXTURE_APP_ARCHIVE
+  ; Match production installSection.nsh before even SetOutPath can add a row.
+  SetDetailsPrint none
+!endif
   ; Neither command line nor folder browser can escape the dedicated fixture.
   StrCmp $INSTDIR "${FIXTURE_INSTALL_DIR}" ownedDirectory
     SetErrorLevel 3
     Abort "Fixture directory mismatch"
   ownedDirectory:
   SetOutPath "$INSTDIR"
+!ifdef FIXTURE_APP_ARCHIVE
+  System::Call 'kernel32::GetTickCount64() l .r6'
+  FileOpen $5 "$EXEDIR\extraction-timing.txt" w
+  FileWrite $5 "start=$6$\nplugins=$PLUGINSDIR$\n"
+  FileClose $5
+  !insertmacro extractEmbeddedAppPackage
+  System::Call 'kernel32::GetTickCount64() l .r6'
+  FileOpen $5 "$EXEDIR\extraction-timing.txt" a
+  FileSeek $5 0 END
+  FileWrite $5 "end=$6$\n"
+  FileClose $5
+!else
   DetailPrint "Extracting real fixture payload through the NSIS File instruction"
   !insertmacro FixtureProgressCheckpoint "before-file"
   File /oname=fixture-payload.bin "${FIXTURE_PAYLOAD}"
   !insertmacro FixtureProgressCheckpoint "after-file"
+!endif
+!ifdef FIXTURE_STAGE_FEEDBACK
+  VeyloInstaller::Stage /NOUNLOAD "configuring"
+!endif
+!ifdef FIXTURE_APP_ARCHIVE
+  FileOpen $5 "$EXEDIR\extraction-complete.txt" w
+  FileWrite $5 "The real archive macro has returned; configuring was posted.$\n"
+  FileClose $5
+!endif
   SetRegView 64
   ReadRegDWORD $2 HKCU "${FIXTURE_RECEIPT_KEY}" "Generation"
   IntOp $2 $2 + 1
@@ -105,6 +150,9 @@ Function un.onInit
 FunctionEnd
 
 Section "Uninstall"
+!ifdef FIXTURE_EXTRACT_CLEANUP
+  !include "${FIXTURE_EXTRACT_CLEANUP}"
+!endif
   Delete "$INSTDIR\fixture.txt"
   Delete "$INSTDIR\fixture-payload.bin"
   Delete "$INSTDIR\qa-progress-checkpoint.txt"

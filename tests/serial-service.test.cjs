@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createSerialService } = require('../electron/lib/serial-service.cjs');
+const { MAX_ENTRIES, MAX_BYTES } = require('../electron/lib/serial-buffer.cjs');
 
 const CONFIG = { baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -683,19 +684,19 @@ test('native synchronous close error event does not trigger recursive close call
   assert.equal(service.snapshot().status, 'error');
 });
 
-test('production retention never exceeds 5000 rows or 4 MiB after a burst', async t => {
+test('production retention supports 10k rows and keeps the 64MiB byte guard after a burst', async t => {
   const { service, ports } = harness(t, { service: { mergeReceive: false } });
   await service.connect({ path: 'COM2', config: CONFIG });
-  for (let index = 0; index < 5001; index++) ports[0].emit('data', Buffer.from([index % 256]));
+  for (let index = 0; index < MAX_ENTRIES + 1; index++) ports[0].emit('data', Buffer.from([index % 256]));
   let data = service.snapshot();
-  assert.equal(data.entries.length, 5000);
+  assert.equal(data.entries.length, MAX_ENTRIES);
   assert.equal(data.evicted, 1);
-  const burst = Buffer.alloc(4 * 1024 * 1024 + 1, 0x41);
+  const burst = Buffer.alloc(MAX_BYTES + 1, 0x41);
   ports[0].emit('data', burst);
   data = service.snapshot();
-  assert.ok(data.entries.length <= 5000);
-  assert.ok(data.entries.reduce((sum, entry) => sum + entry.bytes, 0) <= 4 * 1024 * 1024);
-  assert.equal(data.rxBytes, burst.length + 5001);
+  assert.ok(data.entries.length <= MAX_ENTRIES);
+  assert.ok(data.entries.reduce((sum, entry) => sum + entry.bytes, 0) <= MAX_BYTES);
+  assert.equal(data.rxBytes, burst.length + MAX_ENTRIES + 1);
   assert.equal(data.entries.at(-1).hex, '41');
   assert.equal(data.entries.at(-1).bytes, 1);
 });

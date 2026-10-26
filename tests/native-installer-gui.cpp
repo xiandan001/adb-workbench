@@ -93,6 +93,19 @@ struct Capture {
     return pixels[static_cast<int>(y * height / 500) * width + static_cast<int>(x * width / 760)] & 0xffffff;
   }
 };
+uint64_t RegionHash(const Capture& capture, int left, int top, int width, int height) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (int y = top; y < top + height; ++y) for (int x = left; x < left + width; ++x) {
+    hash ^= capture.At(static_cast<float>(x), static_cast<float>(y)); hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+int RegionInk(const Capture& capture, int left, int top, int width, int height) {
+  int count = 0;
+  for (int y = top; y < top + height; ++y) for (int x = left; x < left + width; ++x)
+    if (capture.At(static_cast<float>(x), static_cast<float>(y)) != 0) ++count;
+  return count;
+}
 // Method 3 captures the entire client DC, including all native siblings.
 // Full-frame PrintWindow on an inactive desktop is not a reliable visual oracle.
 Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
@@ -148,10 +161,12 @@ std::string Json(const std::wstring& value) {
   return output + "\"";
 }
 void WriteEvidence(const std::wstring& name, const std::string& text) {
+  std::string normalized = text;
+  normalized.erase(std::remove(normalized.begin(), normalized.end(), '\r'), normalized.end());
   FILE* file = nullptr;
   if (_wfopen_s(&file, (fixture + L"\\" + name).c_str(), L"wb") || !file) throw std::runtime_error("open evidence file");
-  const size_t written = fwrite(text.data(), 1, text.size(), file); fclose(file);
-  if (written != text.size()) throw std::runtime_error("write evidence file");
+  const size_t written = fwrite(normalized.data(), 1, normalized.size(), file); fclose(file);
+  if (written != normalized.size()) throw std::runtime_error("write evidence file");
 }
 BOOL CALLBACK CollectNative(HWND window, LPARAM pointer) {
   if (window != skin && !IsChild(skin, window)) reinterpret_cast<std::vector<HWND>*>(pointer)->push_back(window);
@@ -183,7 +198,10 @@ bool ParentEvidence(const std::wstring& name, int* paintedProgress = nullptr) {
   RECT client{}, outer{}; GetClientRect(parent, &client); GetWindowRect(parent, &outer);
   std::string json = "{\n  \"parentTitle\": " + Json(Text(parent)) + ",\n  \"targetWindowDpi\": " + std::to_string(dpi) +
     ",\n  \"targetAwareness\": " + std::to_string(awareness) + ",\n  \"targetDpiContext\": " + std::to_string(reinterpret_cast<INT_PTR>(context)) +
-    ",\n  \"paintedProgressPercent\": " + std::to_string(drawnPercent) + ",\n  \"clientSize\": [" + std::to_string(client.right) + "," + std::to_string(client.bottom) + "],\n  \"windowSize\": [" +
+    ",\n  \"paintedProgressPercent\": " + std::to_string(drawnPercent) + ",\n  \"percentInkPixels\": " + std::to_string(RegionInk(clientImage, 654, 235, 74, 30)) +
+    ",\n  \"activityHash\": " + std::to_string(RegionHash(clientImage, 282, 281, 446, 5)) +
+    ",\n  \"elapsedStageHash\": " + std::to_string(RegionHash(clientImage, 282, 306, 446, 50)) +
+    ",\n  \"clientSize\": [" + std::to_string(client.right) + "," + std::to_string(client.bottom) + "],\n  \"windowSize\": [" +
     std::to_string(outer.right - outer.left) + "," + std::to_string(outer.bottom - outer.top) + "],\n  \"nativeChildren\": [\n";
   int count = 0; bool first = true;
   for (HWND window : NativeWindows()) {
@@ -216,6 +234,10 @@ bool ParentEvidence(const std::wstring& name, int* paintedProgress = nullptr) {
 std::wstring Version() {
   wchar_t value[64]{};
   return GetEnvironmentVariableW(L"VEYLO_QA_VERSION", value, 64) ? value : L"QA";
+}
+bool ArchiveFixture() {
+  wchar_t value[32]{};
+  return GetEnvironmentVariableW(L"VEYLO_QA_PAYLOAD_KIND", value, 32) && wcscmp(value, L"app-7z") == 0;
 }
 void Initialize(int language) {
   if (offscreen) ShowWindow(parent, SW_HIDE);
@@ -354,6 +376,124 @@ void FinishChecks(const std::wstring& initial) {
   Keyboard(VK_RETURN);
   Check(Call("GetLaunch") == L"1" && okCommands == before + 4, "Enter on Launch forwards exactly once with launch intent");
 }
+HWND DetailsEdit() {
+  for (HWND child = GetWindow(skin, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+    wchar_t name[32]{}; GetClassNameW(child, name, 32);
+    if (_wcsicmp(name, L"EDIT") == 0 && child != Control(Path)) return child;
+  }
+  return nullptr;
+}
+struct CaptionMetrics { float naturalWidth = 0, availableWidth = 0; int fitted = 0, lines = 0; };
+CaptionMetrics MeasureFooterCaption(HWND button) {
+  RECT client{}, buttonArea{}; GetClientRect(skin, &client); GetClientRect(button, &buttonArea);
+  const float scale = client.right / 760.0f;
+  const auto caption = Text(button);
+  CaptionMetrics result; result.availableWidth = buttonArea.right / scale - 12;
+  HDC dc = GetDC(button);
+  {
+    Gdiplus::Graphics graphics(dc); graphics.ScaleTransform(scale, scale);
+    graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    Gdiplus::FontFamily family(L"Segoe UI");
+    Gdiplus::Font font(&family, 12, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::StringFormat format; format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+    Gdiplus::RectF bounds{};
+    graphics.MeasureString(caption.c_str(), -1, &font, Gdiplus::RectF(6, 6, result.availableWidth, 24), &format, &bounds, &result.fitted, &result.lines);
+    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap); format.SetTrimming(Gdiplus::StringTrimmingNone);
+    graphics.MeasureString(caption.c_str(), -1, &font, Gdiplus::PointF(0, 0), &format, &bounds);
+    result.naturalWidth = bounds.Width;
+  }
+  ReleaseDC(button, dc); return result;
+}
+void FooterChecks(int locale, bool mirrorEngineCancel = false) {
+  RECT reference{}, client{}; GetClientRect(skin, &client);
+  GetWindowRect(Control(Details), &reference); MapWindowPoints(nullptr, skin, reinterpret_cast<POINT*>(&reference), 2);
+  std::string records = "{\"locale\":" + std::to_string(locale) + ",\"buttons\":[";
+  bool first = true;
+  for (int id : {Details, Copy, Cancel}) {
+    HWND button = Control(id); RECT area{}; GetWindowRect(button, &area);
+    MapWindowPoints(nullptr, skin, reinterpret_cast<POINT*>(&area), 2);
+    const bool expectedEnabled = id != Cancel || !mirrorEngineCancel || IsWindowEnabled(GetDlgItem(parent, IDCANCEL));
+    Check(IsWindowVisible(button) && !!IsWindowEnabled(button) == expectedEnabled, "footer action visibility and enabled state match the engine contract");
+    Check(area.top == reference.top && area.bottom - area.top == reference.bottom - reference.top, "all three footer actions have identical Y and height");
+    Check(area.left >= 0 && area.right <= client.right && area.bottom <= client.bottom, "footer action remains inside client bounds");
+    Check(!Text(button).empty(), "footer action has a localized caption");
+    const auto caption = MeasureFooterCaption(button);
+    std::printf("INFO footer locale=%d id=%d textWidth=%.2f available=%.2f fitted=%d lines=%d\n", locale, id, caption.naturalWidth, caption.availableWidth, caption.fitted, caption.lines);
+    const bool fits = caption.lines == 1 && caption.fitted == static_cast<int>(Text(button).size()) && caption.naturalWidth <= caption.availableWidth;
+    if (!fits) Screenshot(parent, L"footer-caption-overflow-" + std::to_wstring(locale), 3);
+    Check(fits, "localized footer caption fits on one complete line without clipping or ellipsis");
+    if (!first) records += ","; first = false;
+    records += "{\"id\":" + std::to_string(id) + ",\"caption\":" + Json(Text(button)) + ",\"enabled\":" + (IsWindowEnabled(button) ? "true" : "false") + ",\"y\":" + std::to_string(area.top) + ",\"height\":" + std::to_string(area.bottom - area.top) + ",\"captionWidth\":" + std::to_string(caption.naturalWidth) + ",\"availableCaptionWidth\":" + std::to_string(caption.availableWidth) + ",\"captionLines\":" + std::to_string(caption.lines) + "}";
+  }
+  WriteEvidence(L"footer-" + std::to_wstring(locale) + L".json", records + "]}\n");
+}
+DWORD WINAPI ConfigureOnWorker(void* result) {
+  try { Call("Stage", {L"configuring"}, false); *static_cast<bool*>(result) = true; }
+  catch (...) { *static_cast<bool*>(result) = false; }
+  return 0;
+}
+void BusyProgressChecks(const std::wstring& initial) {
+  Initialize(1033);
+  SendMessageW(details, LVM_DELETEALLITEMS, 0, 0);
+  SendMessageW(progress, PBM_SETRANGE32, 0, 1000);
+  SendMessageW(progress, PBM_SETPOS, 410, 0);
+  Page(L"install", initial); Pump(250);
+  const ULONGLONG holdStarted = GetTickCount64();
+  const auto known = Screenshot(parent, L"stall41-known-parent", 3);
+  Check(RegionInk(known, 654, 235, 74, 30) > 10, "fresh genuine 41-percent reading is shown before the stale threshold");
+  while (GetTickCount64() - holdStarted < 2700) {
+    Pump(100); Check(SendMessageW(progress, PBM_GETPOS, 0, 0) == 410, "native engine stays at exactly 41 percent");
+  }
+  const auto busy = Screenshot(parent, L"stall41-busy-parent", 3);
+  Check(RegionInk(busy, 654, 235, 74, 30) == 0, "stale 41-percent label is hidden instead of fabricated or increased");
+  while (GetTickCount64() - holdStarted < 5500) {
+    Pump(100); Check(SendMessageW(progress, PBM_GETPOS, 0, 0) == 410, "native engine stays fixed throughout the long wait");
+  }
+  const auto later = Screenshot(parent, L"stall41-later-parent", 3);
+  Check(RegionInk(later, 654, 235, 74, 30) == 0, "long busy wait still does not invent a percentage");
+  Check(RegionHash(busy, 282, 306, 446, 50) != RegionHash(later, 282, 306, 446, 50), "actual elapsed/stage region updates independently of the orbit");
+  BOOL animations = FALSE; SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+  if (animations) Check(RegionHash(busy, 282, 281, 446, 5) != RegionHash(later, 282, 281, 446, 5), "busy activity bar changes independently of fixed engine progress");
+  Check(ParentEvidence(L"stall41-final"), "long busy state never exposes native controls");
+  Click(Details); Pump(600);
+  const HWND edit = DetailsEdit();
+  const auto startingDetails = Text(edit);
+  Check(startingDetails.find(L"Preparing and deploying the app") != std::wstring::npos, "details contain the starting phase even when native logs are empty");
+  Check(startingDetails.find(L"no per-file log") != std::wstring::npos, "details explain absent raw engine logs honestly");
+  bool configured = false;
+  HANDLE worker = CreateThread(nullptr, 0, ConfigureOnWorker, &configured, 0, nullptr);
+  Check(worker && WaitForSingleObject(worker, 1500) == WAIT_OBJECT_0, "worker Stage call completes without invoking GUI work inline");
+  CloseHandle(worker); Pump(800);
+  const auto configuredDetails = Text(edit);
+  Check(configured && configuredDetails.find(L"Finishing installation settings") != std::wstring::npos && configuredDetails != startingDetails,
+    "visible details update to the next phase without closing and reopening");
+  SendMessageW(edit, EM_SETSEL, 0, 5);
+  const auto selected = Text(edit);
+  LVITEMW row{}; row.mask = LVIF_TEXT; row.pszText = const_cast<wchar_t*>(L"QA log appended while text is selected");
+  SendMessageW(details, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&row)); Pump(700);
+  Check(Text(edit) == selected, "automatic detail refresh preserves an active text selection");
+  SendMessageW(edit, EM_SETSEL, -1, -1); Pump(700);
+  Check(Text(edit).find(row.pszText) != std::wstring::npos, "details catch up after the text selection is cleared");
+  FooterChecks(1033);
+  WriteEvidence(L"stall41-summary.json", "{\"heldMilliseconds\":" + std::to_string(GetTickCount64() - holdStarted) + ",\"nativePosition\":410,\"nativeMaximum\":1000,\"percentFabricated\":false,\"elapsedUpdated\":true,\"liveDetails\":true,\"result\":\"passed\"}\n");
+  Screenshot(parent, L"live-details-parent", 3);
+  Check(Call("Page", {L"install", initial, L"Veylo", L"0", Handle(details)}) == L"ok", "unknown native progress is accepted as an unquantified stage");
+  Pump(300);
+  const auto unknown = Screenshot(parent, L"unknown-progress-parent", 3);
+  Check(RegionInk(unknown, 654, 235, 74, 30) == 0, "unknown progress never displays a fabricated percentage");
+  Click(Details); Pump(600);
+  Check(Text(DetailsEdit()).find(L"No measurable engine progress") != std::wstring::npos, "details explicitly explain unavailable engine progress");
+  SendMessageW(progress, PBM_SETPOS, 1000, 0);
+  Page(L"install", initial); Pump(250);
+  const auto stepComplete = Screenshot(parent, L"engine-step-complete-parent", 3);
+  Check(RegionInk(stepComplete, 654, 235, 74, 30) == 0, "an in-flight engine step at maximum cannot claim overall 100-percent completion");
+  Check(SendMessageW(progress, PBM_GETPOS, 0, 0) == 1000, "waiting at engine maximum never rewrites its native position");
+  SendMessageW(progress, PBM_SETPOS, 560, 0); Pump(250);
+  int resumedPercent = -1;
+  Check(ParentEvidence(L"engine-next-step-56", &resumedPercent), "a later engine step remains free of native overlays");
+  Check(std::abs(resumedPercent - 56) <= 2, "a real next-step 56-percent reading replaces waiting without fake monotonic progress");
+  Dispose();
+}
 void PathSafetyChecks() {
   Initialize(1033);
   const auto existing = fixture + L"\\Existing\\Veylo";
@@ -441,7 +581,7 @@ void NativeLifecycleChecks(const std::wstring& initial) {
   ShowWindow(progress, SW_HIDE); ShowWindow(details, SW_HIDE);
 }
 DWORD WINAPI Watchdog(void*) {
-  Sleep(45000);
+  Sleep(ArchiveFixture() ? 180000 : 45000);
   TerminateProcess(GetCurrentProcess(), 124);
   return 0;
 }
@@ -496,6 +636,9 @@ int Run() {
       Screenshot(Control(Language), L"language-wm-print", 1);
       Screenshot(Control(Language), L"language-window-dc", 3);
     }
+    Page(L"install", initial); Click(Details); Pump(100);
+    FooterChecks(locale);
+    Check(ParentEvidence(L"footer-" + std::to_wstring(locale)), "localized footer and details do not expose original NSIS controls");
     Dispose();
   }
   if (offscreen) {
@@ -524,6 +667,7 @@ int Run() {
   Initialize(1033); FinishChecks(initial); Dispose();
   PathSafetyChecks();
   NativeLifecycleChecks(initial);
+  BusyProgressChecks(initial);
   DestroyWindow(parent); parent = nullptr;
   FreeLibrary(library); library = nullptr;
   std::printf("RESULT %d checks passed; private desktop never switched into view\n", checks);

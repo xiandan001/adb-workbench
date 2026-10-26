@@ -1,4 +1,5 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
+import { SERIAL_VIEW_LIMIT } from '../shared/serialWorkspace';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Eraser, ClipboardPaste, Save, TerminalSquare } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
@@ -58,7 +59,7 @@ export default function SerialTerminal({ active = true, theme, isDark, snapshot,
     let pasting = false;
     let frame;
     const host = hostRef.current;
-    const term = new Terminal({ cursorBlink: true, cursorStyle: 'bar', scrollback: 2000, fontSize: 13, lineHeight: 1.2,
+    const term = new Terminal({ cursorBlink: true, cursorStyle: 'bar', scrollback: SERIAL_VIEW_LIMIT, fontSize: 13, lineHeight: 1.2,
       fontFamily: '"Cascadia Mono", Consolas, monospace', convertEol: false, disableStdin: true, altClickMovesCursor: false,
       linkHandler: { activate: event => event.preventDefault() }, windowOptions: {} });
     const fit = new FitAddon();
@@ -277,6 +278,7 @@ export default function SerialTerminal({ active = true, theme, isDark, snapshot,
     {notice && <p role="status" className="text-xs text-amber-500">{tr(notice)}</p>}
     {truncated && <p role="status" className="text-xs text-amber-500">{tr("终端较早输出已截断，仅恢复原始接收缓存中最近的内容；收发记录独立保留。")}</p>}
     <div className={`rounded-lg border p-2 ${settings.style === 'classic' ? 'border-slate-600 bg-black' : isDark ? 'border-slate-600 bg-[#111827]' : 'border-slate-200 bg-slate-50'}`}><div ref={hostRef} className="h-[360px] min-w-0 overflow-hidden" /></div>
+    <p className={`text-[11px] ${theme.textMuted}`}>{tr("终端最多回滚 {0} 个显示行，原始接收缓存上限 {1} MiB；较长文本可能折行。", { 0: SERIAL_VIEW_LIMIT.toLocaleString(getLocale()), 1: 16 })}</p>
     <p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr("Tab 补全、方向键历史由设备端 Shell 支持；Ctrl+C / Ctrl+D / Ctrl+Z 原样交给设备，Ctrl+Shift+M 移出终端焦点。清屏只清显示，不清收发记录。保存的收发记录可能包含敏感输入。")}</p>
     <button ref={settingsButtonRef} type="button" aria-expanded={settings.expanded} aria-controls={`${id}-settings`} onClick={() => onSettings({ expanded: !settings.expanded })} className={`inline-flex items-center gap-1 rounded py-1 text-xs ${theme.textMuted}`}><ChevronDown size={13} className={settings.expanded ? '' : '-rotate-90'} />{tr("终端设置")}</button>
     {settings.expanded && <div id={`${id}-settings`} className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-400/20 p-3">

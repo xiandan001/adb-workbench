@@ -2,8 +2,8 @@ const { tr } = require('./localization.cjs');
 const { StringDecoder } = require('node:string_decoder');
 const { splitSerialResponses } = require('./serial-response-framer.cjs');
 
-const MAX_ENTRIES = 5000;
-const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_ENTRIES = 10000;
+const MAX_BYTES = 64 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 16 * 1024;
 const RX_MERGE_GAP_MS = 50;
 const RX_MERGE_SPAN_MS = 1000;
@@ -15,7 +15,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
   const byteLimit = boundedLimit(maxBytes, MAX_BYTES);
   const chunkLimit = Math.min(MAX_CHUNK_BYTES, byteLimit);
   const decoders = new Map();
-  const dirtyIds = new Set();
+  const dirtyEntries = new Map();
   let rows = [];
   let head = 0;
   let retainedBytes = 0;
@@ -40,7 +40,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
     while (rows.length - head > entryLimit || retainedBytes > byteLimit) {
       const removed = rows[head];
       retainedBytes -= removed.bytes;
-      dirtyIds.delete(removed.id);
+      dirtyEntries.delete(removed.id);
       if (receiveId === removed.id) receiveId = 0;
       if (pending?.entry === removed) pending = null;
       rows[head++] = undefined;
@@ -59,7 +59,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
       rows.push(entry);
     }
     retainedBytes += entry.bytes;
-    dirtyIds.add(entry.id);
+    dirtyEntries.set(entry.id, entry);
     return entry;
   }
 
@@ -102,7 +102,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
           _lastPart: slice.part, _endOrder: position.order + bytes.length - 1 };
         rows[rows.length - 1] = entry;
         retainedBytes += bytes.length;
-        dirtyIds.add(entry.id);
+        dirtyEntries.set(entry.id, entry);
       } else {
         entry = put({ ...context, config: { ...context.config }, kind: 'raw', time: slice.time, endTime: slice.time,
           bytes: bytes.length, hex: bytes.toString('hex'), text, parts: 1,
@@ -152,8 +152,8 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
     for (const row of rows) { const oldId = row.id; row.id = nextId++; ids.set(oldId, row.id); }
     for (const session of decoders.values()) for (const stream of Object.values(session)) stream.lastId = ids.get(stream.lastId) || 0;
     receiveId = ids.get(receiveId) || 0;
-    dirtyIds.clear();
-    for (const row of rows) dirtyIds.add(row.id);
+    dirtyEntries.clear();
+    for (const row of rows) dirtyEntries.set(row.id, row);
     resetNeeded = true;
   }
 
@@ -168,7 +168,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
       replacement = { id: old.entry.id, index };
       rows.splice(index, 1);
       retainedBytes -= old.entry.bytes;
-      dirtyIds.delete(old.entry.id);
+      dirtyEntries.delete(old.entry.id);
       pending = null;
       sealRawReceive();
     }
@@ -232,7 +232,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
       const tail = stream.decoder.end();
       if (!tail) continue;
       const row = rows.find(entry => entry?.id === stream.lastId);
-      if (row) { row.text += tail; dirtyIds.add(row.id); changed = true; }
+      if (row) { row.text += tail; dirtyEntries.set(row.id, row); changed = true; }
     }
     decoders.delete(sessionId);
     return changed;
@@ -240,14 +240,16 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
 
   function clone(entry) {
     const { _lastPart, _order, _endOrder, ...publicEntry } = entry;
-    return { ...publicEntry, config: { ...entry.config } };
+    publicEntry.config = { ...entry.config };
+    return publicEntry;
   }
 
   function entriesAfter(id = 0) { return rows.slice(head).filter(entry => entry.id > id).map(clone); }
 
   function drainChanges(reset = false) {
-    const entries = rows.slice(head).filter(entry => reset || dirtyIds.has(entry.id)).map(clone);
-    dirtyIds.clear();
+    const changed = reset ? rows.slice(head) : [...dirtyEntries.values()].sort((left, right) => left.id - right.id);
+    const entries = changed.map(clone);
+    dirtyEntries.clear();
     return entries;
   }
 
@@ -260,7 +262,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
 
   function clear() {
     rows = []; head = 0; retainedBytes = 0; rxBytes = 0; txBytes = 0; evicted = 0;
-    pending = null; resetNeeded = false; decoders.clear(); dirtyIds.clear(); sealRawReceive();
+    pending = null; resetNeeded = false; decoders.clear(); dirtyEntries.clear(); sealRawReceive();
   }
 
   return { append, endSession, entriesAfter, drainChanges, consumeReset, hasPendingReceive,

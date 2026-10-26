@@ -1,5 +1,6 @@
 {
   "zh-CN": {
+    "phaseDeploying": "正在准备和部署应用", "phaseConfiguring": "正在完成安装设置", "phaseCompleted": "安装完成", "elapsed": "已用时", "waitingStage": "正在等待当前阶段完成，请保持安装器开启。", "stageHistory": "安装阶段记录", "engineSnapshot": "最近报告的引擎进度：", "engineUnknown": "暂未获取到可量化的引擎进度。", "engineDetails": "安装引擎信息（最近 200 行）", "engineNoLogs": "本阶段未提供逐文件日志；安装阶段记录仍会更新。",
     "title": "卓控台安装", "brand": "卓控台", "tagline": "连接设备，洞察问题。", "tagline2": "让每一次调试更轻松。",
     "feature1": "设备连接与投屏", "feature2": "串口与 SSH 工作区", "feature3": "内置 AI · 智能排障",
     "welcomeLabel": "为高效工作，准备就绪", "welcomeTitle": "开启高效调试", "welcomeBody": "设备、终端与 AI，汇聚于一个工作台。",
@@ -11,6 +12,7 @@
     "failedTitle": "安装未完成", "failedBody": "请查看安装详情，确认磁盘空间及文件权限后重试。", "close": "关闭", "copy": "复制详情", "copied": "已复制", "detailsEmpty": "暂无安装详情。"
   },
   "zh-TW": {
+    "phaseDeploying": "正在準備及部署應用程式", "phaseConfiguring": "正在完成安裝設定", "phaseCompleted": "安裝完成", "elapsed": "已耗時", "waitingStage": "正在等候目前階段完成，請保持安裝程式開啟。", "stageHistory": "安裝階段記錄", "engineSnapshot": "最近回報的引擎進度：", "engineUnknown": "尚未取得可量化的引擎進度。", "engineDetails": "安裝引擎資訊（最近 200 行）", "engineNoLogs": "此階段未提供逐檔日誌；安裝階段記錄仍會更新。",
     "title": "卓控臺安裝", "brand": "卓控臺", "tagline": "連接裝置，洞察問題。", "tagline2": "讓每一次除錯更輕鬆。",
     "feature1": "裝置連接與投影", "feature2": "序列埠與 SSH 工作區", "feature3": "內建 AI · 智慧排障",
     "welcomeLabel": "為高效工作，準備就緒", "welcomeTitle": "開啟高效除錯", "welcomeBody": "裝置、終端機與 AI，匯聚於一個工作臺。",
@@ -22,6 +24,7 @@
     "failedTitle": "安裝未完成", "failedBody": "請查看安裝詳細資料，確認磁碟空間及檔案權限後重試。", "close": "關閉", "copy": "複製詳細資料", "copied": "已複製", "detailsEmpty": "尚無安裝詳細資料。"
   },
   "en-US": {
+    "phaseDeploying": "Preparing and deploying the app", "phaseConfiguring": "Finishing installation settings", "phaseCompleted": "Installation completed", "elapsed": "Elapsed", "waitingStage": "Waiting for this step to finish. Please keep setup open.", "stageHistory": "Installation stage history", "engineSnapshot": "Last reported engine progress:", "engineUnknown": "No measurable engine progress is available yet.", "engineDetails": "Installation engine details (last 200 lines)", "engineNoLogs": "This stage provides no per-file log. Stage history will continue to update.",
     "title": "Veylo Setup", "brand": "Veylo", "tagline": "Connect devices. Find answers.", "tagline2": "Make every debug session easier.",
     "feature1": "Device connection & mirroring", "feature2": "Serial & SSH workspace", "feature3": "Built-in AI troubleshooting",
     "welcomeLabel": "READY FOR BETTER WORK", "welcomeTitle": "Your workspace awaits", "welcomeBody": "Devices, terminals and AI. One focused workspace.",
@@ -33,6 +36,7 @@
     "failedTitle": "Installation incomplete", "failedBody": "Check the installation details, disk space and file permissions before retrying.", "close": "Close", "copy": "Copy details", "copied": "Copied", "detailsEmpty": "No installation details yet."
   },
   "ja-JP": {
+    "phaseDeploying": "アプリの準備・配置中", "phaseConfiguring": "インストール設定を仕上げています", "phaseCompleted": "インストール完了", "elapsed": "経過時間", "waitingStage": "現在の処理が終わるまで、セットアップを開いたままお待ちください。", "stageHistory": "インストール段階の記録", "engineSnapshot": "エンジンが最後に報告した進捗：", "engineUnknown": "数値化できるエンジンの進捗はまだ取得できていません。", "engineDetails": "インストールエンジンの詳細（直近 200 行）", "engineNoLogs": "この段階ではファイル別のログは提供されません。段階の記録は引き続き更新されます。",
     "title": "Veylo セットアップ", "brand": "Veylo", "tagline": "デバイスをつなぎ、問題を見極める。", "tagline2": "毎日のデバッグを、もっと快適に。",
     "feature1": "デバイス接続とミラーリング", "feature2": "シリアル・SSH ワークスペース", "feature3": "内蔵 AI によるトラブル診断",
     "welcomeLabel": "効率的な作業の準備を", "welcomeTitle": "快適なデバッグを始めよう", "welcomeBody": "デバイス、ターミナル、AI をひとつの作業環境に。",
@@ -44,6 +48,7 @@
     "failedTitle": "インストール未完了", "failedBody": "詳細、ディスクの空き容量、ファイルのアクセス権を確認して再試行してください。", "close": "閉じる", "copy": "詳細をコピー", "copied": "コピーしました", "detailsEmpty": "インストールの詳細はまだありません。"
   },
   "ko-KR": {
+    "phaseDeploying": "앱 준비 및 배포 중", "phaseConfiguring": "설치 설정 마무리 중", "phaseCompleted": "설치 완료", "elapsed": "경과 시간", "waitingStage": "현재 단계가 완료될 때까지 설치 프로그램을 열어 두세요.", "stageHistory": "설치 단계 기록", "engineSnapshot": "최근 보고된 엔진 진행률:", "engineUnknown": "아직 수치로 표시할 엔진 진행률을 가져오지 못했습니다.", "engineDetails": "설치 엔진 세부 정보 (최근 200줄)", "engineNoLogs": "이 단계에서는 파일별 로그를 제공하지 않습니다. 설치 단계 기록은 계속 업데이트됩니다.",
     "title": "Veylo 설치", "brand": "Veylo", "tagline": "기기를 연결하고, 문제를 파악하세요.", "tagline2": "모든 디버깅을 더 편리하게.",
     "feature1": "기기 연결 및 화면 미러링", "feature2": "시리얼 및 SSH 작업 공간", "feature3": "내장 AI · 스마트 문제 해결",
     "welcomeLabel": "효율적인 작업을 위한 준비", "welcomeTitle": "편리한 디버깅의 시작", "welcomeBody": "기기, 터미널, AI를 하나의 작업 공간에서.",

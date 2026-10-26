@@ -36,14 +36,26 @@ int EngineProgress() {
 bool EngineCheckpointActive(const std::wstring& installPath) {
   return GetFileAttributesW((installPath + L"\\qa-progress-checkpoint.txt").c_str()) != INVALID_FILE_ATTRIBUTES;
 }
+std::wstring RemoteDetailsText() {
+  const HWND edit = DetailsEdit();
+  DWORD_PTR length = 0, copied = 0;
+  if (!edit || !SendMessageTimeoutW(edit, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 1000, &length)) return {};
+  std::vector<wchar_t> buffer(std::min<size_t>(length, 32768) + 1);
+  if (!SendMessageTimeoutW(edit, WM_GETTEXT, buffer.size(), reinterpret_cast<LPARAM>(buffer.data()), SMTO_ABORTIFHUNG, 1000, &copied)) return {};
+  return buffer.data();
+}
 void ObserveInstallation(const std::wstring& installPath, bool cleanEntry = true) {
+  const bool archive = ArchiveFixture();
   bool progressSeen = false, finished = false;
   bool overlayObserved = !cleanEntry, overlayCaptured = false, progressPaintingMatched = true;
   int lastProgress = -2, progressChanges = 0, frames = 0, capturedPosition = -2, stableMeasurements = 0;
   std::string trace = "[\n";
   const ULONGLONG started = GetTickCount64();
   ULONGLONG stableSince = started;
-  while (GetTickCount64() - started < 20000 && IsWindow(parent)) {
+  ULONGLONG lastArchiveFrame = 0;
+  bool archiveDetailsSeen = false, archiveConfiguredSeen = false;
+  const auto archiveCompleteMarker = installPath.substr(0, installPath.find_last_of(L'\\')) + L"\\extraction-complete.txt";
+  while (GetTickCount64() - started < (archive ? 120000 : 20000) && IsWindow(parent)) {
     Pump(35);
     if (VisibleNativeCount()) {
       overlayObserved = true;
@@ -52,6 +64,28 @@ void ObserveInstallation(const std::wstring& installPath, bool cleanEntry = true
     if (!IsWindowVisible(Control(Language)) && !IsWindowVisible(Control(Primary))) {
       progressSeen = true;
       const int position = EngineProgress();
+      if (archive && !archiveDetailsSeen) {
+        FixtureClick(Details);
+        const auto log = RemoteDetailsText();
+        Check(log.size() > 40 && log.find(L"No installation details yet.") == std::wstring::npos, "real 7z path exposes phase history despite suppressed native details");
+        WriteEvidence(L"real-extract-initial-details.txt", Utf8(log));
+        FooterChecks(1033, true);
+        ParentEvidence(L"real-extract-details");
+        FixtureClick(Details); archiveDetailsSeen = true;
+      }
+      if (archive && !archiveConfiguredSeen && GetFileAttributesW(archiveCompleteMarker.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        FixtureClick(Details); Pump(600);
+        const auto log = RemoteDetailsText();
+        Check(log.find(L"Preparing and deploying the app") != std::wstring::npos && log.find(L"Finishing installation settings") != std::wstring::npos,
+          "real archive details retain deploying and append configuring after extraction");
+        WriteEvidence(L"real-extract-configuring-details.txt", Utf8(log));
+        if (!ParentEvidence(L"real-extract-configuring")) overlayObserved = true;
+        FixtureClick(Details); archiveConfiguredSeen = true;
+      }
+      if (archive && GetTickCount64() - lastArchiveFrame >= 1000 && frames < 120) {
+        if (!ParentEvidence(L"real-extract-progress-" + std::to_wstring(frames++))) overlayObserved = true;
+        lastArchiveFrame = GetTickCount64();
+      }
       const bool checkpointActive = EngineCheckpointActive(installPath);
       if (!checkpointActive) stableSince = GetTickCount64();
       if (position >= 0 && position != lastProgress) {
@@ -59,7 +93,7 @@ void ObserveInstallation(const std::wstring& installPath, bool cleanEntry = true
         trace += "  {\"elapsedMs\":" + std::to_string(GetTickCount64() - started) + ",\"nativePercent\":" + std::to_string(position) + "}";
         ++progressChanges; lastProgress = position; stableSince = GetTickCount64();
       }
-      if (checkpointActive && position >= 0 && position != capturedPosition && GetTickCount64() - stableSince >= 250 && frames < 6) {
+      if (!archive && checkpointActive && position >= 0 && position != capturedPosition && GetTickCount64() - stableSince >= 250 && frames < 6) {
         int painted = -1;
         if (!ParentEvidence(L"fixture-installing-" + std::to_wstring(frames++), &painted)) overlayObserved = true;
         const int after = EngineProgress();
@@ -77,11 +111,14 @@ void ObserveInstallation(const std::wstring& installPath, bool cleanEntry = true
   }
   WriteEvidence(L"engine-progress.json", trace + "\n]\n");
   Check(progressSeen, "actual NSIS install page was observed");
-  Check(progressChanges >= 2, "actual NSIS progress changed during payload extraction and engine execution");
+  Check(progressChanges >= (archive ? 1 : 2), "actual NSIS progress control was observed during payload extraction");
   Check(finished, "real NSIS install automatically reaches finish and Later exits");
   Check(!overlayObserved, "whole installer parent never exposes native page/progress/list/buttons, including actual File extraction");
-  Check(stableMeasurements >= 2, "at least two actual engine progress positions were stable for a full refresh interval");
-  Check(progressPaintingMatched, "custom progress pixels in the whole parent follow actual NSIS PBM positions");
+  if (archive) Check(archiveDetailsSeen && archiveConfiguredSeen, "real archive stage had readable evolving phase details and footer actions");
+  else {
+    Check(stableMeasurements >= 2, "at least two actual engine progress positions were stable for a full refresh interval");
+    Check(progressPaintingMatched, "custom progress pixels in the whole parent follow actual NSIS PBM positions");
+  }
 }
 int RunFixture(const std::wstring& executable, const std::wstring& installPath, int locale, const std::wstring& action) {
   Check(executable.find(L"\\.superpowers\\") != std::wstring::npos && executable.find(L"fixture") != std::wstring::npos, "fixture executable is confined to test output");

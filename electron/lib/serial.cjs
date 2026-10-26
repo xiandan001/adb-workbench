@@ -113,7 +113,7 @@ function register(ipcMain, options = {}) {
     createService: options.createService || ((workspace, onChange) => createSerialService({
       listPorts: () => require('serialport').SerialPort.list(),
       createPort: config => new (require('serialport').SerialPort)(config),
-      mergeReceive: workspace === 'rs232', onChange
+      mergeReceive: workspace === 'rs232', terminalReplayBytes: workspace === 'terminal' ? 16 * 1024 * 1024 : 0, onChange
     })), onChange: publish
   });
   controller = createSerialController({ workspaces, getOwner: () => ctx.getMainWindow(),

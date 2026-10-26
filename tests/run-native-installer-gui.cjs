@@ -71,12 +71,16 @@ if (reusedHarness) {
 }
 const argumentsForHarness = fixtureMode ? [fixture, '--fixture', fixtureExecutable, installPath, process.argv[5] || '1033', process.argv[6] || 'install'] : offscreenMode ? [fixture, '--offscreen'] : [fixture];
 const environment = { ...process.env, VEYLO_QA_VERSION: `${fixtureManifest?.version || require('../package.json').version} QA`, VEYLO_UPDATE_LANGUAGE: '' };
+environment.VEYLO_QA_PAYLOAD_KIND = fixtureManifest?.payloadKind || 'nsis-file';
 if (fixtureMode) {
   environment.APPDATA = path.join(fixtureManifest.fixture, 'fake-appdata');
+  environment.TEMP = path.join(fixtureManifest.fixture, 'owned-temp');
+  environment.TMP = environment.TEMP;
   fs.mkdirSync(environment.APPDATA, { recursive: true });
+  fs.mkdirSync(environment.TEMP, { recursive: true });
   if (fixtureManifest.updateLanguageEnvironment) environment.VEYLO_UPDATE_LANGUAGE = fixtureManifest.updateLanguageEnvironment;
 }
-const execution = cp.spawnSync(path.join(fixture, 'harness.exe'), argumentsForHarness, { cwd: fixture, windowsHide: true, encoding: 'utf8', timeout: 60000, env: environment });
+const execution = cp.spawnSync(path.join(fixture, 'harness.exe'), argumentsForHarness, { cwd: fixture, windowsHide: true, encoding: 'utf8', timeout: fixtureManifest?.payloadKind === 'app-7z' ? 195000 : 60000, env: environment });
 const artifactVerification = { checked: false, error: null };
 if (fixtureMode) {
   try {
@@ -91,6 +95,16 @@ if (fixtureMode) {
         fixtureTools.assertValue(fixtureManifest, 'Language', locale);
         artifactVerification.receiptLanguage = locale;
         artifactVerification.payloadSha256 = fixtureManifest.payloadSha256;
+        if (fixtureManifest.extraction) {
+          const timing = fs.readFileSync(path.join(fixtureManifest.fixture, 'extraction-timing.txt'), 'utf8');
+          const started = Number(timing.match(/^start=(\d+)/m)?.[1]);
+          const ended = Number(timing.match(/^end=(\d+)/m)?.[1]);
+          assert.ok(Number.isFinite(started) && ended >= started, 'Real extraction duration must be recorded');
+          artifactVerification.realExtractionMilliseconds = ended - started;
+          artifactVerification.extractedFileCount = fixtureManifest.extraction.fileCount;
+          artifactVerification.extractedBytes = fixtureManifest.extraction.unpackedBytes;
+          artifactVerification.nsis7zSha256 = fixtureManifest.extraction.nsis7zSha256;
+        }
       }
       artifactVerification.checked = true;
     }
@@ -112,6 +126,7 @@ const summary = {
   languageScriptSha256: fixtureManifest?.languageScriptSha256 || null,
   installerManifestDpiAware: fixtureManifest?.dpiAware ?? null,
   historicalBaseline: fixtureManifest?.historicalBaseline || null,
+  payloadKind: fixtureManifest?.payloadKind || null,
   fixture,
   fixtureExecutable,
   fixtureExecutableSha256: fixtureMode ? crypto.createHash('sha256').update(fs.readFileSync(fixtureExecutable)).digest('hex') : null,
@@ -125,7 +140,7 @@ const summary = {
   safetySentinelsPreserved: safetySentinels.every(({ file, content }) => fs.existsSync(file) && fs.readFileSync(file, 'utf8') === content),
   screenshots: fs.readdirSync(fixture).filter(name => name.endsWith('.png') && name !== 'icon.png'),
   wholeParentNativeSnapshots: fs.readdirSync(fixture).filter(name => name.endsWith('-native-windows.json')),
-  isolation: `${offscreenMode ? 'Hidden Init, then offscreen (-20000,-20000) without activation; capture only' : 'Private desktop'}; fixture DLL copy; process-local 45-second watchdog; launcher 60-second child timeout.`,
+  isolation: `${offscreenMode ? 'Hidden Init, then offscreen (-20000,-20000) without activation; capture only' : 'Private desktop'}; fixture DLL copy; process-local watchdog and owned-process job; archive mode uses bounded 180/195-second deadlines, other modes 45/60 seconds.`,
   notCovered: ['Production installation and uninstall', 'Elevation', ...fixtureMode ? [] : ['NSIS engine integration'], 'Multi-monitor and non-current DPI', 'Global reduced-motion setting changes', 'Clipboard mutation'],
 };
 fs.writeFileSync(path.join(fixture, 'summary.json'), JSON.stringify(summary, null, 2) + '\n', 'utf8');

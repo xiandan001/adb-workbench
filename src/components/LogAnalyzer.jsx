@@ -739,12 +739,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           const off = window.electronAPI.onSmartSearchChunk((payload) => {
             // 会话 ID 过滤：忽略旧搜索会话的分块结果，防止旧结果混入新搜索
             if (payload.sessionId !== searchSessionRef.current) return;
-            // M6: 增量结果添加上限 5000 条，超过时丢弃最旧的
-            setSmartSearchIncremental((prev) => {
-              const merged = [...prev, ...payload.entries];
-              if (merged.length > 5000) return merged.slice(merged.length - 5000);
-              return merged;
-            });
+            setSmartSearchIncremental(prev => appendLogWindow(prev, payload.entries));
           });
           listeners.push(off);
         }

@@ -2,6 +2,7 @@ LIBRARY VeyloInstaller
 EXPORTS
   Init=SkinInit
   Page=SkinPage
+  Stage=SkinStage
   GetPath=SkinGetPath
   GetShortcut=SkinGetShortcut
   GetLaunch=SkinGetLaunch

@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.7': {
+    title: 'v4.7.7',
+    date: '2026-10-26',
+    items: [
+      { type: 'improve', get text() { return tr('设备日志支持保留 50,000 条，串口记录与终端回滚支持 10,000 条/行'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.6': {
     title: 'v4.7.6',
     date: '2026-10-26',

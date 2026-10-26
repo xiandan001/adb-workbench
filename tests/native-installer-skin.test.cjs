@@ -25,7 +25,7 @@ test('native installer uses complete five-language catalogs and localized brand'
 });
 
 test('native display plugin preserves the explicit NSIS ABI', () => {
-  const exports = ['Init', 'Page', 'GetPath', 'GetShortcut', 'GetLaunch', 'GetLanguage', 'TrustExistingPath', 'Failed', 'Dispose'];
+  const exports = ['Init', 'Page', 'Stage', 'GetPath', 'GetShortcut', 'GetLaunch', 'GetLanguage', 'TrustExistingPath', 'Failed', 'Dispose'];
   const source = read('installer-skin.cpp');
   for (const name of exports) {
     assert.ok(read('installer-skin.def').includes(`${name}=Skin${name}`), name);
@@ -126,4 +126,30 @@ test('native installer source files use UTF-8 without replacement characters and
     assert.equal(text.includes('\r'), false, name);
     assert.equal(text.includes('\uFFFD'), false, name);
   }
+});
+
+test('installer stages cross the worker boundary by a fixed message and never fake progress', () => {
+  const source = read('installer-skin.cpp');
+  const stage = source.slice(source.indexOf('SKIN_EXPORT(Stage)'), source.indexOf('SKIN_EXPORT(GetPath)'));
+  assert.match(stage, /value == L"deploying"/);
+  assert.match(stage, /value == L"configuring"/);
+  assert.match(stage, /PostMessageW\(window, skin::kInstallStageMessage/);
+  assert.doesNotMatch(stage, /skin::s\.|skin::Push\(|SetWindowText|Layout\(|ReadDetails\(/);
+  assert.match(source, /installation\.Start\(GetTickCount64\(\)\)/);
+  assert.match(source, /InstallPhase::Completed/);
+  assert.match(source, /PeekMessageW\(&message, skin::s\.window, skin::kInstallStageMessage/);
+  assert.match(source, /now - s\.lastSampleAt >= 200/);
+  assert.match(source, /installation\.Determinate\(now\)/);
+  assert.match(source, /if \(determinate\) DrawText/);
+  assert.match(source, /now - s\.lastDetailsAt >= 500/);
+  assert.match(source, /Text\(s\.detailEdit, 32768\) == output\) return/);
+  assert.match(source, /selectionStart != selectionEnd \|\| GetCapture\(\) == s\.detailEdit\) return/);
+  assert.match(source, /Place\(s\.cancel, 628, 410, 100, 32/);
+  assert.match(source, /Place\(s\.details, 282, 410, 190, 32/);
+  assert.match(source, /Place\(s\.copy, 485, 410, 130, 32/);
+  assert.match(source, /if \(singleLine\) format\.SetFormatFlags\(Gdiplus::StringFormatFlagsNoWrap\)/);
+  assert.match(source, /singleLine \? Gdiplus::StringTrimmingNone : Gdiplus::StringTrimmingEllipsisCharacter/);
+  const drawButton = source.slice(source.indexOf('void DrawButton('), source.indexOf('bool Validate()'));
+  assert.match(drawButton, /primary \? 14\.0f : 12\.0f/);
+  assert.match(drawButton, /Gdiplus::StringAlignmentCenter, true\)/);
 });

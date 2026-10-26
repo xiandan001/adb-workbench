@@ -1,5 +1,6 @@
 import { tr } from './i18n.js';
-const MAX_ROWS = 5000;
+export const SERIAL_VIEW_LIMIT = 10000;
+const MAX_ROWS = SERIAL_VIEW_LIMIT;
 export const SERIAL_WORKSPACES = Object.freeze(['rs232', 'terminal']);
 
 export function emptySerialSnapshot(workspace = 'rs232') {
@@ -7,13 +8,43 @@ export function emptySerialSnapshot(workspace = 'rs232') {
     rxBytes: 0, txBytes: 0, evicted: 0, firstId: 0, lastId: 0, unsaved: false, entries: [], needsSnapshot: false };
 }
 
+function firstIndexAtOrAfter(entries, id) {
+  let low = 0; let high = entries.length;
+  while (low < high) { const middle = (low + high) >>> 1; if (entries[middle].id < id) low = middle + 1; else high = middle; }
+  return low;
+}
+
+function mergeRows(previous, changed, firstId, lastId) {
+  if (!(firstId > 0) || lastId < firstId) return [];
+  const start = firstIndexAtOrAfter(previous, firstId);
+  const end = firstIndexAtOrAfter(previous, lastId + 1);
+  const retained = start === 0 && end === previous.length ? previous : previous.slice(start, end);
+  const updates = [...new Map((changed || []).map(row => [row.id, row])).values()]
+    .filter(row => row.id >= firstId && row.id <= lastId).sort((left, right) => left.id - right.id);
+  if (!updates.length) return retained;
+  if (!retained.length) return updates.slice(-MAX_ROWS);
+  if (updates[0].id > retained.at(-1).id) {
+    const appended = retained.concat(updates);
+    return appended.length > MAX_ROWS ? appended.slice(-MAX_ROWS) : appended;
+  }
+  const merged = []; let left = 0; let right = 0;
+  while (left < retained.length && right < updates.length) {
+    if (retained[left].id < updates[right].id) merged.push(retained[left++]);
+    else {
+      if (retained[left].id === updates[right].id) left++;
+      merged.push(updates[right++]);
+    }
+  }
+  while (left < retained.length) merged.push(retained[left++]);
+  while (right < updates.length) merged.push(updates[right++]);
+  return merged.length > MAX_ROWS ? merged.slice(-MAX_ROWS) : merged;
+}
+
 function mergeSnapshot(current, incoming, replace) {
   if (!incoming || !Number.isFinite(incoming.revision) || incoming.revision < current.revision) return current;
-  const rows = new Map((replace ? [] : current.entries).map(row => [row.id, row]));
-  for (const row of incoming.entries || []) rows.set(row.id, row);
   const firstId = incoming.firstId ?? current.firstId;
   const lastId = incoming.lastId ?? current.lastId;
-  const entries = [...rows.values()].filter(row => firstId > 0 && row.id >= firstId && row.id <= lastId).sort((a, b) => a.id - b.id).slice(-MAX_ROWS);
+  const entries = mergeRows(replace ? [] : current.entries, incoming.entries, firstId, lastId);
   const complete = firstId === 0 && lastId === 0 ? entries.length === 0
     : entries.length === lastId - firstId + 1 && entries[0]?.id === firstId && entries.at(-1)?.id === lastId;
   return { ...current, ...incoming, entries, needsSnapshot: !complete };

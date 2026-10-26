@@ -2,6 +2,7 @@
 #include "installer-path.h"
 #include "installer-path-filesystem.h"
 #include "installer-orbit.h"
+#include "installer-progress.h"
 #include <commctrl.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -24,6 +25,7 @@ namespace skin {
 constexpr int kWidth = 760, kHeight = 500, kLeft = 250;
 constexpr UINT_PTR kTimer = 475, kSubclass = 475, kNativeSubclass = 476;
 constexpr UINT kConcealNativeMessage = WM_APP + 476;
+constexpr UINT kInstallStageMessage = WM_APP + 477;
 constexpr COLORREF kBackground = RGB(0, 0, 0), kLeftBackground = RGB(0, 0, 0);
 constexpr COLORREF kText = RGB(244, 244, 244), kMuted = RGB(164, 164, 164);
 constexpr COLORREF kAccent = RGB(29, 213, 162), kBorder = RGB(37, 37, 37);
@@ -49,7 +51,10 @@ struct State {
   std::unique_ptr<Gdiplus::Image> image;
   std::vector<std::unique_ptr<NativeWindow>> nativeWindows;
   std::wstring version, initialPath, trustedInitialPath, installPath, folderName, error;
-  int locale = 0, progressValue = -1;
+  int locale = 0;
+  InstallationProgress installation;
+  ULONGLONG lastSampleAt = 0, lastDetailsAt = 0, displayedElapsed = 0;
+  bool displayedDeterminate = false;
   float scale = 1;
   bool custom = false, launch = false, animate = true, failed = false;
   bool cancelOverlay = false, showingDetails = false, bypassCancel = false, forwardingNext = false;
@@ -62,6 +67,7 @@ static HINSTANCE gInstance = nullptr;
 constexpr int kLanguageIds[] = {2052, 1028, 1033, 1041, 1042};
 int Px(float value);
 bool ProtectNativeWindow(HWND window);
+void ReadDetails();
 void QueueNativeConceal() {
   if (s.window && !s.concealPending)
     s.concealPending = PostMessageW(s.window, kConcealNativeMessage, 0, 0) != FALSE;
@@ -212,6 +218,24 @@ const wchar_t* T(const wchar_t* key) {
     if (wcscmp(key, kSkinStringKeys[i]) == 0) return kSkinStrings[s.locale][i];
   return L"";
 }
+const wchar_t* PhaseText(InstallPhase phase) {
+  return T(phase == InstallPhase::Configuring ? L"phaseConfiguring" :
+    phase == InstallPhase::Completed ? L"phaseCompleted" : L"phaseDeploying");
+}
+std::wstring DurationText(uint64_t seconds) {
+  const auto remainder = seconds % 60;
+  return std::to_wstring(seconds / 60) + L":" + (remainder < 10 ? L"0" : L"") + std::to_wstring(remainder);
+}
+std::wstring CurrentStatus() {
+  return std::wstring(PhaseText(s.installation.phase)) + L" · " + T(L"elapsed") + L" " + DurationText(s.installation.Elapsed(GetTickCount64()));
+}
+void ApplyInstallStage(WPARAM stage) {
+  if (s.mode != Mode::Install || s.failed) return;
+  if (stage != static_cast<WPARAM>(InstallPhase::Deploying) && stage != static_cast<WPARAM>(InstallPhase::Configuring)) return;
+  s.installation.SetPhase(static_cast<InstallPhase>(stage), GetTickCount64());
+  if (s.showingDetails && !s.cancelOverlay) ReadDetails();
+  InvalidateRect(s.window, nullptr, FALSE);
+}
 int Px(float value) { return static_cast<int>(std::lround(value * s.scale)); }
 Gdiplus::Color Color(COLORREF c, BYTE alpha = 255) { return {alpha, GetRValue(c), GetGValue(c), GetBValue(c)}; }
 
@@ -272,10 +296,10 @@ void Layout() {
   Place(s.path, 284, 240, 342, 32, welcome && s.custom);
   Place(s.browse, 634, 239, 94, 34, welcome && s.custom);
   Place(s.shortcut, 282, 284, 446, 30, welcome && s.custom);
-  Place(s.cancel, 628, 420, 100, 32, !finish || s.failed);
-  Place(s.details, 282, 410, 230, 32, s.mode == Mode::Install || s.failed);
+  Place(s.cancel, 628, 410, 100, 32, !finish || s.failed);
+  Place(s.details, 282, 410, 190, 32, s.mode == Mode::Install || s.failed);
   Place(s.detailEdit, 282, 152, 446, 240, s.showingDetails);
-  Place(s.copy, 524, 410, 90, 32, s.showingDetails);
+  Place(s.copy, 485, 410, 130, 32, s.showingDetails);
   if (s.showingDetails) ShowWindow(s.primary, SW_HIDE);
   const HWND controls[] = {s.primary, s.secondary, s.path, s.browse, s.shortcut, s.cancel, s.details, s.copy, s.language, s.detailEdit};
   for (HWND control : controls) {
@@ -290,13 +314,14 @@ void Layout() {
 
 void DrawText(Gdiplus::Graphics& graphics, const std::wstring& text, float x, float y,
               float width, float height, float size, COLORREF color, bool bold = false,
-              Gdiplus::StringAlignment align = Gdiplus::StringAlignmentNear) {
+              Gdiplus::StringAlignment align = Gdiplus::StringAlignmentNear, bool singleLine = false) {
   Gdiplus::FontFamily family(L"Segoe UI");
   Gdiplus::Font font(&family, size, bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
   Gdiplus::SolidBrush brush(Color(color));
   Gdiplus::StringFormat format;
   format.SetAlignment(align);
-  format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+  if (singleLine) format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+  format.SetTrimming(singleLine ? Gdiplus::StringTrimmingNone : Gdiplus::StringTrimmingEllipsisCharacter);
   graphics.DrawString(text.c_str(), -1, &font, Gdiplus::RectF(x, y, width, height), &format, &brush);
 }
 void Line(Gdiplus::Graphics& graphics, float x, float y, float width, COLORREF color = kBorder) {
@@ -371,13 +396,22 @@ void PaintTo(HWND window, HDC dc) {
         Line(graphics, 282, 325, 446);
       } else if (!s.failed) {
         DrawText(graphics, T(L"progress"), 282, 239, 320, 25, 13, kMuted);
-        if (s.progressValue >= 0) DrawText(graphics, std::to_wstring(s.progressValue) + L"%", 654, 235, 74, 30, 18, kText, true, Gdiplus::StringAlignmentFar);
+        const auto now = GetTickCount64();
+        const bool determinate = s.installation.Determinate(now);
+        if (determinate) DrawText(graphics, std::to_wstring(s.installation.Percent()) + L"%", 654, 235, 74, 30, 18, kText, true, Gdiplus::StringAlignmentFar);
         Gdiplus::SolidBrush track(Color(kBorder)), fill(Color(kAccent));
         graphics.FillRectangle(&track, 282, 281, 446, 5);
-        if (s.progressValue >= 0) graphics.FillRectangle(&fill, 282.0f, 281.0f, 446.0f * s.progressValue / 100, 5.0f);
-        DrawText(graphics, T(L"working"), 282, 306, 446, 30, 12, kMuted);
+        if (determinate) graphics.FillRectangle(&fill, 282.0f, 281.0f, static_cast<float>(446 * s.installation.Fraction()), 5.0f);
+        else {
+          const float x = s.animate ? static_cast<float>((now % 1800) / 1800.0 * 526 - 80) : 183;
+          const float left = std::max(0.0f, x), right = std::min(446.0f, x + 80);
+          if (right > left) graphics.FillRectangle(&fill, 282 + left, 281.0f, right - left, 5.0f);
+        }
+        DrawText(graphics, CurrentStatus(), 282, 306, 446, 24, 12, kMuted);
+        if (!determinate) DrawText(graphics, T(L"waitingStage"), 282, 334, 446, 48, 11, kMuted);
       }
     }
+    if (s.showingDetails) DrawText(graphics, CurrentStatus(), 282, 126, 446, 22, 11, kMuted);
     Line(graphics, 0, 468, 760);
     DrawText(graphics, std::wstring(T(L"brand")) + L"  " + s.version, 20, 479, 470, 20, 10, kMuted);
     DrawText(graphics, L"Windows · x64", 585, 479, 155, 20, 10, kMuted, false, Gdiplus::StringAlignmentFar);
@@ -424,7 +458,7 @@ void DrawButton(const DRAWITEMSTRUCT& item) {
   if (!primary) { Gdiplus::Pen border(Color(kBorder), 1); graphics.DrawPath(&border, &outline); }
   const auto text = Text(item.hwndItem);
   DrawText(graphics, text, 6, (height - 20) / 2, width - 12, 24, primary ? 14.0f : 12.0f,
-    disabled ? RGB(105, 105, 105) : primary ? RGB(0, 42, 30) : kText, primary, Gdiplus::StringAlignmentCenter);
+    disabled ? RGB(105, 105, 105) : primary ? RGB(0, 42, 30) : kText, primary, Gdiplus::StringAlignmentCenter, true);
   if (item.itemState & ODS_FOCUS) {
     Gdiplus::Pen focus(Color(primary ? kLeftBackground : kAccent), 1);
     focus.SetDashStyle(Gdiplus::DashStyleDot);
@@ -476,22 +510,46 @@ void BrowseFolder() {
 }
 
 void ReadDetails() {
-  std::wstring output;
-  if (IsWindow(s.nativeDetails)) {
+  std::wstring nativeOutput;
+  if (IsWindow(s.nativeDetails) && GetWindowThreadProcessId(s.nativeDetails, nullptr) == GetCurrentThreadId()) {
     DWORD_PTR result = 0;
     if (SendMessageTimeoutW(s.nativeDetails, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 250, &result)) {
       const int count = std::min(static_cast<int>(result), 200);
       const int total = static_cast<int>(result);
-      for (int index = std::max(0, total - count); index < total && output.size() < 32768; ++index) {
+      for (int index = std::max(0, total - count); index < total && nativeOutput.size() < 32768; ++index) {
         wchar_t buffer[1024]{};
         LVITEMW item{}; item.iSubItem = 0; item.pszText = buffer; item.cchTextMax = 1024;
         if (!SendMessageTimeoutW(s.nativeDetails, LVM_GETITEMTEXTW, index, reinterpret_cast<LPARAM>(&item), SMTO_ABORTIFHUNG, 250, &result)) break;
-        output.append(buffer); output.append(L"\r\n");
-        if (output.size() > 32768) output.resize(32768);
+        nativeOutput.append(buffer); nativeOutput.append(L"\r\n");
+        if (nativeOutput.size() > 32768) nativeOutput.resize(32768);
       }
     }
   }
-  SetWindowTextW(s.detailEdit, output.empty() ? T(L"detailsEmpty") : output.c_str());
+  std::wstring output = std::wstring(T(L"stageHistory")) + L"\r\n";
+  for (std::size_t index = 0; index < s.installation.historyCount; ++index) {
+    const auto& entry = s.installation.history[index];
+    output += L"[" + DurationText(entry.elapsedSeconds) + L"] " + PhaseText(entry.phase) + L"\r\n";
+  }
+  if (s.failed) output += std::wstring(T(L"failedTitle")) + L"\r\n";
+  output += L"\r\n";
+  output += s.installation.sampleValid ? std::wstring(T(L"engineSnapshot")) + L" " + std::to_wstring(s.installation.Percent()) + L"%\r\n" : std::wstring(T(L"engineUnknown")) + L"\r\n";
+  output += L"\r\n";
+  output += nativeOutput.empty() ? T(L"engineNoLogs") : std::wstring(T(L"engineDetails")) + L"\r\n" + nativeOutput;
+  if (output.size() > 32768) output.resize(32768);
+  if (Text(s.detailEdit, 32768) == output) return;
+  DWORD selectionStart = 0, selectionEnd = 0;
+  SendMessageW(s.detailEdit, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+  // Keep a user's selection stable while they inspect/copy a snapshot. The next
+  // refresh catches up after selection is cleared; unchanged content is untouched.
+  if (selectionStart != selectionEnd || GetCapture() == s.detailEdit) return;
+  const auto firstLine = SendMessageW(s.detailEdit, EM_GETFIRSTVISIBLELINE, 0, 0);
+  SendMessageW(s.detailEdit, WM_SETREDRAW, FALSE, 0);
+  SetWindowTextW(s.detailEdit, output.c_str());
+  SendMessageW(s.detailEdit, EM_SETSEL, selectionStart, selectionEnd);
+  const auto currentLine = SendMessageW(s.detailEdit, EM_GETFIRSTVISIBLELINE, 0, 0);
+  SendMessageW(s.detailEdit, EM_LINESCROLL, 0, firstLine - currentLine);
+  SendMessageW(s.detailEdit, WM_SETREDRAW, TRUE, 0);
+  InvalidateRect(s.detailEdit, nullptr, TRUE);
 }
 void CopyDetails() {
   const auto text = Text(s.detailEdit, 32768);
@@ -548,13 +606,29 @@ void Command(int id) {
 }
 
 void Tick() {
-  if (s.mode == Mode::Install && IsWindow(s.progress)) {
-    PBRANGE range{}; DWORD_PTR position = 0, ignored = 0;
-    const bool readable = SendMessageTimeoutW(s.progress, PBM_GETRANGE, 0, reinterpret_cast<LPARAM>(&range), SMTO_ABORTIFHUNG, 50, &ignored) &&
-      SendMessageTimeoutW(s.progress, PBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 50, &position);
-    const int next = readable && range.iHigh > range.iLow ? std::clamp(static_cast<int>((static_cast<double>(position) - range.iLow) * 100 / (range.iHigh - range.iLow)), 0, 100) : -1;
-    if (next != s.progressValue) { s.progressValue = next; Repaint(); }
-    EnableWindow(s.cancel, !s.cancelOverlay && CanCancel());
+  const auto now = GetTickCount64();
+  if (s.mode == Mode::Install) {
+    if (!s.lastSampleAt || now - s.lastSampleAt >= 200) {
+      s.lastSampleAt = now;
+      PBRANGE range{}; DWORD_PTR position = 0, ignored = 0;
+      const bool readable = IsWindow(s.progress) && GetWindowThreadProcessId(s.progress, nullptr) == GetCurrentThreadId() &&
+        SendMessageTimeoutW(s.progress, PBM_GETRANGE, 0, reinterpret_cast<LPARAM>(&range), SMTO_ABORTIFHUNG, 50, &ignored) &&
+        SendMessageTimeoutW(s.progress, PBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 50, &position);
+      if (s.installation.Observe(readable, range.iLow, range.iHigh, static_cast<int>(position), now)) Repaint();
+      EnableWindow(s.cancel, !s.cancelOverlay && CanCancel());
+    }
+    const auto elapsed = s.installation.Elapsed(now);
+    const bool determinate = s.installation.Determinate(now);
+    if (elapsed != s.displayedElapsed || determinate != s.displayedDeterminate) {
+      s.displayedElapsed = elapsed; s.displayedDeterminate = determinate; Repaint();
+    }
+    if (s.showingDetails && !s.cancelOverlay && now - s.lastDetailsAt >= 500) {
+      s.lastDetailsAt = now; ReadDetails();
+    }
+    if (!determinate && s.animate && !s.showingDetails && !s.cancelOverlay && IsWindowVisible(s.parent) && !IsIconic(s.parent)) {
+      RECT bar{Px(282), Px(281), Px(728), Px(286)};
+      InvalidateRect(s.window, &bar, FALSE);
+    }
   }
   if (s.animate && !s.cancelOverlay && IsWindowVisible(s.parent) && !IsIconic(s.parent)) {
     RECT orbit{Px(37), Px(186), Px(213), Px(362)};
@@ -597,6 +671,7 @@ LRESULT CALLBACK ParentProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 }
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
+    case kInstallStageMessage: ApplyInstallStage(wParam); return 0;
     case kConcealNativeMessage:
       s.concealPending = false;
       for (const auto& native : s.nativeWindows)
@@ -716,6 +791,17 @@ SKIN_EXPORT(Page) {
   const auto mode = skin::Pop(stack, stringSize), path = skin::Pop(stack, stringSize), folder = skin::Pop(stack, stringSize);
   const auto progress = skin::Handle(skin::Pop(stack, stringSize)), details = skin::Handle(skin::Pop(stack, stringSize));
   if (!skin::s.window || parent != skin::s.parent || (mode != L"welcome" && mode != L"install" && mode != L"finish")) { skin::Push(stack, stringSize, L"error"); return; }
+  if (mode == L"install" && skin::s.mode != skin::Mode::Install) {
+    skin::s.installation.Start(GetTickCount64()); skin::s.lastSampleAt = 0; skin::s.lastDetailsAt = 0;
+  }
+  if (mode == L"finish") {
+    // A worker's posted stage can otherwise be overtaken by NSIS's synchronous
+    // install-done notification. Consume only this skin's fixed stage messages.
+    MSG message{};
+    while (PeekMessageW(&message, skin::s.window, skin::kInstallStageMessage, skin::kInstallStageMessage, PM_REMOVE))
+      skin::ApplyInstallStage(message.wParam);
+    skin::s.installation.SetPhase(skin::InstallPhase::Completed, GetTickCount64());
+  }
   skin::s.mode = mode == L"welcome" ? skin::Mode::Welcome : mode == L"finish" ? skin::Mode::Finish : skin::Mode::Install;
   skin::s.installPath = path; skin::s.folderName = folder;
   if (skin::s.initialPath.empty()) skin::s.initialPath = path;
@@ -727,6 +813,15 @@ SKIN_EXPORT(Page) {
   skin::Layout();
   SetFocus(skin::s.mode == skin::Mode::Install ? skin::s.details : skin::s.primary);
   skin::Push(stack, stringSize, L"ok");
+}
+SKIN_EXPORT(Stage) {
+  const auto value = skin::Pop(stack, stringSize);
+  const auto phase = value == L"deploying" ? skin::InstallPhase::Deploying : value == L"configuring" ? skin::InstallPhase::Configuring : skin::InstallPhase::None;
+  if (phase == skin::InstallPhase::None || !IsWindow(parent)) return;
+  HWND window = FindWindowExW(parent, nullptr, L"VeyloInstallerSkin475", nullptr);
+  DWORD processId = 0;
+  if (window && GetWindowThreadProcessId(window, &processId) && processId == GetCurrentProcessId())
+    PostMessageW(window, skin::kInstallStageMessage, static_cast<WPARAM>(phase), 0);
 }
 SKIN_EXPORT(GetPath) { skin::Push(stack, stringSize, skin::s.window && skin::Validate() ? skin::s.installPath : L""); }
 SKIN_EXPORT(GetShortcut) { skin::Push(stack, stringSize, SendMessageW(skin::s.shortcut, BM_GETCHECK, 0, 0) == BST_CHECKED ? L"1" : L"0"); }

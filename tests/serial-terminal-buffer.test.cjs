@@ -123,7 +123,7 @@ test('append copies caller storage and read metadata cannot mutate internal stat
   assert.equal(buffer.read({ sessionId: 'session-A', offset: 2 }).nextOffset, 9);
 });
 
-test('default reads are capped at 64 KiB while the ring retains 256 KiB', () => {
+test('default reads are capped at 64 KiB while a multi-chunk history remains intact', () => {
   const buffer = createSerialTerminalBuffer();
   buffer.reset('session-A');
   const bytes = Buffer.from(Array.from({ length: 256 * 1024 }, (_, index) => index % 251));
@@ -142,8 +142,16 @@ test('default reads are capped at 64 KiB while the ring retains 256 KiB', () => 
   assert.deepEqual(Buffer.concat(chunks), bytes);
 });
 
+test('the shared factory default stays 256 KiB for existing SSH consumers', () => {
+  const buffer = createSerialTerminalBuffer(); buffer.reset('ssh-compatible-default');
+  buffer.append(Buffer.alloc(300000, 0x41));
+  const result = buffer.read({ sessionId: 'ssh-compatible-default', offset: 0 });
+  assert.equal(result.truncated, true); assert.equal(result.startOffset, 300000 - 256 * 1024);
+  assert.equal(result.hex.length, 64 * 1024 * 2);
+});
+
 test('configuration, session and binary input validation preserve existing data on errors', () => {
-  for (const maxBytes of [0, -1, 1.5, '8', NaN, Infinity, 256 * 1024 + 1]) {
+  for (const maxBytes of [0, -1, 1.5, '8', NaN, Infinity, 64 * 1024 * 1024 + 1]) {
     assert.throws(() => createSerialTerminalBuffer({ maxBytes }), hasCode('SERIAL_TERMINAL_CONFIG_INVALID'));
   }
   for (const chunkBytes of [0, -1, 1.5, '8', NaN, Infinity, 64 * 1024 + 1]) {

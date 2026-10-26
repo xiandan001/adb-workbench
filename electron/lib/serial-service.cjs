@@ -11,10 +11,10 @@ const TERMINAL_QUEUE_ITEMS = 256;
 const PORT_FIELDS = ['path', 'manufacturer', 'serialNumber', 'pnpId', 'locationId', 'vendorId', 'productId', 'friendlyName'];
 
 function createSerialService({ listPorts: enumerate, createPort, onChange = () => {}, now = Date.now,
-  writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes, mergeReceive = true }) {
+  writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes, mergeReceive = true, terminalReplayBytes }) {
   if (typeof enumerate !== 'function' || typeof createPort !== 'function') throw new Error(tr("串口驱动未初始化"));
   const buffer = createSerialBuffer({ now, maxEntries, maxBytes, mergeReceive });
-  const terminalBuffer = createSerialTerminalBuffer();
+  const terminalBuffer = terminalReplayBytes === 0 ? null : createSerialTerminalBuffer({ maxBytes: terminalReplayBytes });
   const terminalQueue = [];
   let terminalInFlight = null;
   let terminalPendingBytes = 0;
@@ -60,6 +60,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
 
   function terminalRead(args) {
     assertRunning();
+    if (!terminalBuffer) throw terminalError('SERIAL_TERMINAL_NO_SESSION', tr("尚无串口终端会话，请先连接串口"));
     return terminalBuffer.read(args);
   }
 
@@ -205,7 +206,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       if (active !== session || session.cancelled || session.released || disposed) return;
       if (!Buffer.isBuffer(bytes) && !ArrayBuffer.isView(bytes)) return;
       const raw = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      terminalBuffer.append(raw);
+      terminalBuffer?.append(raw);
       if (buffer.append({ sessionId: session.id, path: session.path, config: session.config, direction: 'RX', bytes: raw })) {
         changed({ data: true });
         scheduleReceiveIdle(session);
@@ -274,7 +275,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       closePromise: null, closeSignal: null, write: null, streamEnded: false
     };
     active = session;
-    terminalBuffer.reset(session.id);
+    terminalBuffer?.reset(session.id);
     Object.assign(state, { status: 'connecting', path, config: normalized, sessionId: session.id, error: '', sending: false });
     changed();
     try {

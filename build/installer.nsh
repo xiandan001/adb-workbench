@@ -13,6 +13,9 @@
 
 !macro customInstall
   !insertmacro VeyloSaveInstallerLanguage
+  ${If} $VeyloReady == "1"
+    VeyloInstaller::Stage /NOUNLOAD "configuring"
+  ${EndIf}
   Push $R0
   StrCpy $R0 "$INSTDIR\scrcpy-win64"
 

@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Pause, Play, Save, Trash2, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { formatAscii, formatHex } from '../shared/serialFormat';
+import { SERIAL_VIEW_LIMIT } from '../shared/serialWorkspace';
 import { SUPPORTED_LOCALES } from '../shared/localeStore';
 
 const ROW_HEIGHT = 56;
@@ -47,7 +48,7 @@ export default function SerialDataView({ theme, isDark, snapshot, receiveMode, o
   const [detailId, setDetailId] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const entries = snapshot.entries;
-  const detail = entries.find(entry => entry.id === detailId);
+  const detail = detailId === null ? null : entries.find(entry => entry.id === detailId);
   const maximumScroll = Math.max(0, entries.length * ROW_HEIGHT - VIEW_HEIGHT);
   const visibleTop = following ? maximumScroll : Math.min(scrollTop, maximumScroll);
   const start = Math.max(0, Math.floor(visibleTop / ROW_HEIGHT) - 3);
@@ -79,6 +80,7 @@ export default function SerialDataView({ theme, isDark, snapshot, receiveMode, o
     </div>
     <div className={`flex flex-wrap justify-between gap-1 text-[11px] ${theme.textMuted}`}><span>{tr("接收 ")}{snapshot.rxBytes.toLocaleString(getLocale())}{tr(" B · 发送 ")}{snapshot.txBytes.toLocaleString(getLocale())}{tr(" B · 缓存 ")}{entries.length}{tr(" 条")}{snapshot.unsaved ? tr(" · 有未保存记录") : ''}</span><span>{following ? tr("跟随最新") : tr("已暂停滚动，仍持续接收")}{tr(" · 点击记录查看完整内容")}</span></div>
     {snapshot.evicted > 0 && <p role="status" className="text-xs text-amber-500">{tr("仅保留最近记录，较早的 {0} 条记录已移出缓存；保存仅包含当前缓存。", { 0: snapshot.evicted })}</p>}
+    <p className={`text-[11px] ${theme.textMuted}`}>{tr("收发记录上限：{0} 条 / {1} MiB 原始字节；超限后保留最近记录。", { 0: SERIAL_VIEW_LIMIT.toLocaleString(getLocale()), 1: 64 })}</p>
     <p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr("AB 响应按长度与 CRC 校验分行，FE / XBHCMD 按长度、固定标识与包尾校验分行；未识别数据保留原样。")}{receiveMode === 'ascii' ? tr("ASCII 将不可见或高位字节显示为转义，原始数据保持不变。") : tr("文本不可读时可切换 HEX 查看原始字节。")}</p>
     {detail && <SerialEntryDetail entry={detail} mode={receiveMode} theme={theme} onClose={() => setDetailId(null)} onCopy={copy} />}
   </div>;

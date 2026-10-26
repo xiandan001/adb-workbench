@@ -1,4 +1,6 @@
 {
+  "收发记录上限：{0} 条 / {1} MiB 原始字节；超限后保留最近记录。": "Transfer history keeps up to {0} records or {1} MiB of raw bytes; the oldest records are removed when either limit is reached.",
+  "终端最多回滚 {0} 个显示行，原始接收缓存上限 {1} MiB；较长文本可能折行。": "Terminal scrollback holds up to {0} display rows, with a {1} MiB raw receive buffer. Long text may wrap across rows.",
   "无法选择私钥": "Unable to choose a private key",
   "请填写主机、用户名及 1–65535 的端口": "Enter a host, username, and port from 1 to 65535",
   "请输入登录密码": "Enter the login password",

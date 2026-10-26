@@ -1,5 +1,6 @@
 const { tr } = require('./localization.cjs');
-const MAX_BYTES = 256 * 1024;
+const DEFAULT_MAX_BYTES = 256 * 1024;
+const MAX_BYTES = 64 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
 
 function terminalError(code, message) {
@@ -12,10 +13,10 @@ function checkLimit(value, maximum) {
   }
 }
 
-function createSerialTerminalBuffer({ maxBytes = MAX_BYTES, chunkBytes = CHUNK_BYTES } = {}) {
+function createSerialTerminalBuffer({ maxBytes = DEFAULT_MAX_BYTES, chunkBytes = CHUNK_BYTES } = {}) {
   checkLimit(maxBytes, MAX_BYTES);
   checkLimit(chunkBytes, CHUNK_BYTES);
-  const ring = Buffer.alloc(maxBytes);
+  let ring = null;
   let sessionId = null;
   let endOffset = 0;
 
@@ -32,7 +33,8 @@ function createSerialTerminalBuffer({ maxBytes = MAX_BYTES, chunkBytes = CHUNK_B
       || [...nextSessionId].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
       throw terminalError('SERIAL_TERMINAL_SESSION_INVALID', tr("串口终端会话标识无效"));
     }
-    ring.fill(0);
+    // Resetting offsets makes previous session bytes unreachable. Allocation is
+    // deferred until the first nonempty output, not merely opening a port.
     sessionId = nextSessionId;
     endOffset = 0;
     return metadata();
@@ -44,6 +46,7 @@ function createSerialTerminalBuffer({ maxBytes = MAX_BYTES, chunkBytes = CHUNK_B
     const nextOffset = endOffset + bytes.length;
     if (!Number.isSafeInteger(nextOffset)) throw terminalError('SERIAL_TERMINAL_OFFSET_INVALID', tr("串口终端数据位置超出范围，请重新连接"));
     if (!bytes.length) return endOffset;
+    if (!ring) ring = Buffer.alloc(maxBytes);
     // A large callback copies only the retained suffix; ordinary appends touch
     // only new bytes and wrap at most once, never clone the whole history.
     const sourceStart = Math.max(0, bytes.length - maxBytes);
@@ -70,8 +73,8 @@ function createSerialTerminalBuffer({ maxBytes = MAX_BYTES, chunkBytes = CHUNK_B
     const length = Math.min(chunkBytes, endOffset - position);
     const start = position % maxBytes;
     const firstLength = Math.min(length, maxBytes - start);
-    const hex = ring.subarray(start, start + firstLength).toString('hex')
-      + (firstLength < length ? ring.subarray(0, length - firstLength).toString('hex') : '');
+    const hex = length ? ring.subarray(start, start + firstLength).toString('hex')
+      + (firstLength < length ? ring.subarray(0, length - firstLength).toString('hex') : '') : '';
     return { ...state, nextOffset: position + length, hex, truncated: offset < state.startOffset };
   }
 

@@ -86,7 +86,10 @@ function decodeRead(result, sessionId, offset) {
     || hex.length / 2 !== nextOffset - Math.max(offset, startOffset) || hex.length > 128 * 1024) {
     throw new Error(tr("终端输出游标或数据无效，已暂停读取"));
   }
-  return Uint8Array.from(hex.match(/.{2}/g) || [], byte => Number.parseInt(byte, 16));
+  const bytes = new Uint8Array(hex.length / 2);
+  const digit = code => code <= 57 ? code - 48 : (code | 32) - 87;
+  for (let index = 0; index < bytes.length; index++) bytes[index] = digit(hex.charCodeAt(index * 2)) * 16 + digit(hex.charCodeAt(index * 2 + 1));
+  return bytes;
 }
 
 export function createSerialTerminalReader({ sessionId, read, write, onTruncated = () => {}, onError = () => {}, onReplayChange = () => {}, intervalMs = 100, schedule = setTimeout, cancel = clearTimeout }) {
@@ -103,6 +106,7 @@ export function createSerialTerminalReader({ sessionId, read, write, onTruncated
     if (!active || disposed || running) return;
     running = true;
     const requestedGeneration = generation;
+    let backlog = false;
     try {
       const result = await read({ sessionId, offset });
       if (!active || disposed || requestedGeneration !== generation) return;
@@ -112,12 +116,15 @@ export function createSerialTerminalReader({ sessionId, read, write, onTruncated
       if (data.length) await write(data, replaying);
       if (disposed) return;
       offset = result.nextOffset;
+      backlog = data.length > 0 && offset < result.endOffset;
       if (requestedGeneration === generation && replaying && offset >= replayEnd) { replaying = false; onReplayChange(false); }
     } catch (error) {
       if (!disposed && requestedGeneration === generation) { active = false; onError(error.message || tr("终端输出读取失败")); }
     } finally {
       running = false;
-      if (active && !disposed) timer = schedule(() => { void poll(); }, intervalMs);
+      // Each chunk still waits for xterm's write acknowledgement and yields a
+      // task. Only an empty/caught-up stream waits for the idle polling interval.
+      if (active && !disposed) timer = schedule(() => { void poll(); }, backlog ? 0 : intervalMs);
     }
   }
   return {

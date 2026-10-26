@@ -1,4 +1,5 @@
 {
+  "设备日志支持保留 50,000 条，串口记录与终端回滚支持 10,000 条/行": "Retain 50,000 device log records, plus 10,000 serial records and terminal scrollback lines",
   "全新黑底翠绿 V 品牌图标，统一应用与安装器视觉": "New emerald V icon on a black background, with consistent branding across the app and installer",
   "新增紧凑黑色安装界面，支持行星环绕动画与自定义安装路径": "Added a compact black installer with orbital animation and a custom installation location",
   "安装器支持五种语言，首次默认英语；所选语言自动应用于首次启动": "The installer supports five languages and defaults to English on first use; the app adopts your choice on first launch",
