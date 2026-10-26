@@ -1,4 +1,4 @@
-const { tr } = require('./localization.cjs');
+const { tr, getLocale, onLocaleChanged } = require('./localization.cjs');
 // 自动更新集成 - 使用 electron-updater 实现差分增量更新
 // 开发模式下不启用自动更新（electron-updater 需要签名后的应用才能工作）
 //
@@ -47,6 +47,22 @@ let checkFlight = null;
 let downloadFlight = null;
 let updatePoller = null;
 let pollingDisposed = false;
+let updateInstallLocale = getLocale();
+const removeLocaleListener = onLocaleChanged(locale => { updateInstallLocale = locale; });
+
+function prepareUpdateInstallLanguage() {
+  if (process.platform !== 'win32' || isDev) return;
+  if (['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'].includes(updateInstallLocale)) {
+    process.env.VEYLO_UPDATE_LANGUAGE = updateInstallLocale;
+  } else delete process.env.VEYLO_UPDATE_LANGUAGE;
+}
+
+// electron-updater's automatic quit handler also spawns NSIS from process.env.
+// Prepend so the handoff is ready even when its own quit handler is already set.
+app.prependListener('quit', () => {
+  if (updaterStatus.downloaded) prepareUpdateInstallLanguage();
+  removeLocaleListener();
+});
 
 // 自动更新事件转发到渲染进程（同时发送到主窗口 + Log Analyzer 窗口）
 function sendUpdaterEvent(eventName, payload) {
@@ -196,6 +212,7 @@ function isQuitAndInstallInProgress() {
 
 function quitAndInstallPreparedUpdate() {
   if (!updaterStatus.downloaded) return false;
+  prepareUpdateInstallLanguage();
   quitAndInstallInProgress = true;
   updateInstallPrepared = true;
   autoUpdater.quitAndInstall();

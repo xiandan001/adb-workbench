@@ -22,13 +22,21 @@ namespace skin {
 #include "installer-strings.generated.h"
 
 constexpr int kWidth = 760, kHeight = 500, kLeft = 250;
-constexpr UINT_PTR kTimer = 475, kSubclass = 475;
+constexpr UINT_PTR kTimer = 475, kSubclass = 475, kNativeSubclass = 476;
+constexpr UINT kConcealNativeMessage = WM_APP + 476;
 constexpr COLORREF kBackground = RGB(0, 0, 0), kLeftBackground = RGB(0, 0, 0);
 constexpr COLORREF kText = RGB(244, 244, 244), kMuted = RGB(164, 164, 164);
 constexpr COLORREF kAccent = RGB(29, 213, 162), kBorder = RGB(37, 37, 37);
 constexpr COLORREF kEditBackground = RGB(12, 12, 12);
 enum ControlId { Primary = 300, Secondary, Browse, Cancel, Path, Shortcut, Details, Copy, Keep, Exit, Language };
 enum class Mode { Welcome, Install, Finish };
+struct NativeWindow {
+  HWND window = nullptr;
+  bool requestedVisible = false, internalHide = false;
+  bool requestedTabStop = false, requestedControlParent = false;
+  HRGN originalRegion = nullptr;
+  ~NativeWindow() { if (originalRegion) DeleteObject(originalRegion); }
+};
 struct State {
   HWND parent = nullptr, window = nullptr, path = nullptr, shortcut = nullptr;
   HWND primary = nullptr, secondary = nullptr, browse = nullptr, cancel = nullptr;
@@ -39,17 +47,165 @@ struct State {
   HBRUSH backgroundBrush = nullptr, editBrush = nullptr;
   ULONG_PTR gdiplusToken = 0;
   std::unique_ptr<Gdiplus::Image> image;
+  std::vector<std::unique_ptr<NativeWindow>> nativeWindows;
   std::wstring version, initialPath, trustedInitialPath, installPath, folderName, error;
   int locale = 0, progressValue = -1;
   float scale = 1;
   bool custom = false, launch = false, animate = true, failed = false;
   bool cancelOverlay = false, showingDetails = false, bypassCancel = false, forwardingNext = false;
+  bool concealPending = false;
   ULONGLONG start = 0;
   Mode mode = Mode::Welcome;
 };
 static State s;
 static HINSTANCE gInstance = nullptr;
 constexpr int kLanguageIds[] = {2052, 1028, 1033, 1041, 1042};
+int Px(float value);
+bool ProtectNativeWindow(HWND window);
+void QueueNativeConceal() {
+  if (s.window && !s.concealPending)
+    s.concealPending = PostMessageW(s.window, kConcealNativeMessage, 0, 0) != FALSE;
+}
+bool IsNativeControl(HWND window) {
+  if (!window) return false;
+  for (const auto& native : s.nativeWindows)
+    if (native->window && (native->window == window || IsChild(native->window, window))) return true;
+  return false;
+}
+HWND SkinFocusTarget() {
+  if (s.cancelOverlay) return s.keep;
+  return s.mode == Mode::Install || s.failed ? s.details : s.primary;
+}
+void HideNativeWindow(NativeWindow* native) {
+  if (!native->window || native->internalHide) return;
+  native->internalHide = true;
+  SetWindowPos(native->window, nullptr, 0, 0, 0, 0,
+    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+  native->internalHide = false;
+}
+
+// NSIS shows an instfiles page *after* its SHOW callback. Hiding it once in that
+// callback is insufficient: later native show/style/z-order operations must be
+// intercepted before they take effect. Keep HWNDs alive for progress and engine
+// messages; never change their enabled state or suppress independent dialogs.
+LRESULT CALLBACK NativeWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                 UINT_PTR, DWORD_PTR reference) {
+  auto* native = reinterpret_cast<NativeWindow*>(reference);
+  if (message == WM_NCDESTROY) {
+    native->window = nullptr;
+    RemoveWindowSubclass(window, NativeWindowProc, kNativeSubclass);
+    return DefSubclassProc(window, message, wParam, lParam);
+  }
+  if (message == WM_WINDOWPOSCHANGING && lParam) {
+    auto* position = reinterpret_cast<WINDOWPOS*>(lParam);
+    if (!native->internalHide) {
+      if (position->flags & SWP_SHOWWINDOW) { native->requestedVisible = true; QueueNativeConceal(); }
+      if (position->flags & SWP_HIDEWINDOW) native->requestedVisible = false;
+    }
+    position->flags &= ~SWP_SHOWWINDOW;
+    position->flags |= SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOZORDER;
+    const auto result = DefSubclassProc(window, message, wParam, lParam);
+    position->flags &= ~SWP_SHOWWINDOW;
+    position->flags |= SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOZORDER;
+    return result;
+  } else if (message == WM_STYLECHANGING && static_cast<int>(wParam) == GWL_STYLE && lParam) {
+    auto* style = reinterpret_cast<STYLESTRUCT*>(lParam);
+    if (!native->internalHide) {
+      if ((style->styleNew ^ style->styleOld) & WS_VISIBLE) native->requestedVisible = (style->styleNew & WS_VISIBLE) != 0;
+      if ((style->styleNew ^ style->styleOld) & WS_TABSTOP) native->requestedTabStop = (style->styleNew & WS_TABSTOP) != 0;
+    }
+    style->styleNew &= ~(WS_VISIBLE | WS_TABSTOP);
+    const auto result = DefSubclassProc(window, message, wParam, lParam);
+    style->styleNew &= ~(WS_VISIBLE | WS_TABSTOP);
+    return result;
+  } else if (message == WM_STYLECHANGING && static_cast<int>(wParam) == GWL_EXSTYLE && lParam) {
+    auto* style = reinterpret_cast<STYLESTRUCT*>(lParam);
+    if (!native->internalHide && ((style->styleNew ^ style->styleOld) & WS_EX_CONTROLPARENT))
+      native->requestedControlParent = (style->styleNew & WS_EX_CONTROLPARENT) != 0;
+    style->styleNew &= ~WS_EX_CONTROLPARENT;
+    const auto result = DefSubclassProc(window, message, wParam, lParam);
+    style->styleNew &= ~WS_EX_CONTROLPARENT;
+    return result;
+  } else if (message == WM_SHOWWINDOW && wParam && !native->internalHide) {
+    // Dialog ShowWindow paths can bypass a vetoable WINDOWPOSCHANGING message.
+    // Suppress synchronously after the dialog's own processing, before painting.
+    native->requestedVisible = true;
+    QueueNativeConceal();
+    const auto result = DefSubclassProc(window, message, wParam, lParam);
+    HideNativeWindow(native);
+    return result;
+  } else if (message == WM_WINDOWPOSCHANGED && !native->internalHide) {
+    // SWP_NOSENDCHANGING explicitly skips the pre-change notification.
+    const auto result = DefSubclassProc(window, message, wParam, lParam);
+    if (native->window && (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE)) {
+      native->requestedVisible = true;
+      HideNativeWindow(native);
+      QueueNativeConceal();
+    }
+    return result;
+  }
+  return DefSubclassProc(window, message, wParam, lParam);
+}
+
+bool ProtectNativeWindow(HWND window) {
+  if (!window || window == s.window || GetParent(window) != s.parent || !(GetWindowLongPtrW(window, GWL_STYLE) & WS_CHILD)) return true;
+  if (GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) return false;
+  for (const auto& native : s.nativeWindows) if (native->window == window) return true;
+  auto native = std::make_unique<NativeWindow>();
+  native->window = window;
+  native->requestedVisible = (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) != 0;
+  native->requestedTabStop = (GetWindowLongPtrW(window, GWL_STYLE) & WS_TABSTOP) != 0;
+  native->requestedControlParent = (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_CONTROLPARENT) != 0;
+  native->originalRegion = CreateRectRgn(0, 0, 0, 0);
+  if (!native->originalRegion) return false;
+  if (GetWindowRgn(window, native->originalRegion) == ERROR) {
+    DeleteObject(native->originalRegion); native->originalRegion = nullptr;
+  }
+  if (!SetWindowSubclass(window, NativeWindowProc, kNativeSubclass, reinterpret_cast<DWORD_PTR>(native.get()))) return false;
+  auto* installed = native.get();
+  s.nativeWindows.push_back(std::move(native));
+  // A real NSIS dialog can commit WS_VISIBLE only after WM_SHOWWINDOW returns.
+  // Its empty region makes it unpaintable even before the queued visibility
+  // normalization runs; no frame can leak the engine's original progress bar.
+  HRGN emptyRegion = CreateRectRgn(0, 0, 0, 0);
+  if (!emptyRegion || !SetWindowRgn(window, emptyRegion, TRUE)) {
+    if (emptyRegion) DeleteObject(emptyRegion);
+    RemoveWindowSubclass(window, NativeWindowProc, kNativeSubclass);
+    s.nativeWindows.pop_back(); return false;
+  }
+  // Windows owns emptyRegion after successful SetWindowRgn.
+  installed->internalHide = true;
+  SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) & ~WS_TABSTOP);
+  SetWindowLongPtrW(window, GWL_EXSTYLE, GetWindowLongPtrW(window, GWL_EXSTYLE) & ~WS_EX_CONTROLPARENT);
+  installed->internalHide = false;
+  HideNativeWindow(installed);
+  return true;
+}
+
+bool ProtectNativeChildren() {
+  for (HWND child = GetWindow(s.parent, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+    if (!ProtectNativeWindow(child)) return false;
+  SetWindowPos(s.window, HWND_TOP, 0, 0, Px(kWidth), Px(kHeight), SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  return true;
+}
+
+void RestoreNativeChildren() {
+  for (const auto& native : s.nativeWindows) {
+    // WM_NCDESTROY clears the handle, so an unrelated reused HWND is never touched.
+    if (!native->window || !IsWindow(native->window)) continue;
+    RemoveWindowSubclass(native->window, NativeWindowProc, kNativeSubclass);
+    const LONG_PTR style = GetWindowLongPtrW(native->window, GWL_STYLE);
+    const LONG_PTR extended = GetWindowLongPtrW(native->window, GWL_EXSTYLE);
+    SetWindowLongPtrW(native->window, GWL_STYLE, native->requestedTabStop ? style | WS_TABSTOP : style & ~WS_TABSTOP);
+    SetWindowLongPtrW(native->window, GWL_EXSTYLE, native->requestedControlParent ? extended | WS_EX_CONTROLPARENT : extended & ~WS_EX_CONTROLPARENT);
+    // Transfer the saved region back to Windows, or restore the default region.
+    if (SetWindowRgn(native->window, native->originalRegion, TRUE)) native->originalRegion = nullptr;
+    SetWindowPos(native->window, nullptr, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+      (native->requestedVisible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+  }
+  s.nativeWindows.clear();
+}
 
 const wchar_t* T(const wchar_t* key) {
   for (size_t i = 0; i < kSkinStringCount; ++i)
@@ -406,6 +562,13 @@ void Tick() {
   }
 }
 LRESULT CALLBACK ParentProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+  if (message == WM_PARENTNOTIFY && LOWORD(wParam) == WM_CREATE)
+    ProtectNativeWindow(reinterpret_cast<HWND>(lParam));
+  if (message == WM_NEXTDLGCTL && lParam && IsNativeControl(reinterpret_cast<HWND>(wParam))) {
+    const HWND target = SkinFocusTarget();
+    if (IsWindowVisible(target) && IsWindowEnabled(target)) SetFocus(target);
+    return 0;
+  }
   if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(wParam) == IDCANCEL)) {
     if (!s.bypassCancel) {
       if (s.cancelOverlay) Command(Keep); else RequestCancel();
@@ -434,6 +597,15 @@ LRESULT CALLBACK ParentProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 }
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
+    case kConcealNativeMessage:
+      s.concealPending = false;
+      for (const auto& native : s.nativeWindows)
+        if (native->window && (GetWindowLongPtrW(native->window, GWL_STYLE) & WS_VISIBLE)) HideNativeWindow(native.get());
+      if (IsNativeControl(GetFocus())) {
+        const HWND target = SkinFocusTarget();
+        if (IsWindowVisible(target) && IsWindowEnabled(target)) SetFocus(target);
+      }
+      return 0;
     case WM_PAINT: Paint(window); return 0;
     case WM_PRINTCLIENT: PaintTo(window, reinterpret_cast<HDC>(wParam)); return 0;
     case WM_ERASEBKGND: return 1;
@@ -460,14 +632,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
   }
   return DefWindowProcW(window, message, wParam, lParam);
 }
-void HideNativeChildren() {
-  for (HWND child = GetWindow(s.parent, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
-    if (child != s.window) ShowWindow(child, SW_HIDE);
-  SetWindowPos(s.window, HWND_TOP, 0, 0, Px(kWidth), Px(kHeight), SWP_SHOWWINDOW | SWP_NOACTIVATE);
-}
 void Cleanup() {
   if (s.parent) RemoveWindowSubclass(s.parent, ParentProc, kSubclass);
   if (s.window) { KillTimer(s.window, kTimer); DestroyWindow(s.window); }
+  RestoreNativeChildren();
   s.image.reset();
   if (s.gdiplusToken) Gdiplus::GdiplusShutdown(s.gdiplusToken);
   if (s.font) DeleteObject(s.font);
@@ -532,7 +700,8 @@ bool Initialize(HWND parent, const std::wstring& image, const std::wstring& lang
     FreeLibrary(dwm);
   }
   s.start = GetTickCount64(); SetTimer(s.window, kTimer, s.animate ? 33 : 200, nullptr);
-  HideNativeChildren(); Layout();
+  if (!ProtectNativeChildren()) { Cleanup(); return false; }
+  Layout();
   return true;
 }
 }
@@ -554,7 +723,8 @@ SKIN_EXPORT(Page) {
   skin::s.progress = progress && IsChild(parent, progress) ? progress : nullptr;
   skin::s.nativeDetails = details && IsChild(parent, details) ? details : nullptr;
   skin::s.cancelOverlay = false; skin::s.showingDetails = false;
-  skin::HideNativeChildren(); skin::Layout();
+  if (!skin::ProtectNativeChildren()) { skin::Push(stack, stringSize, L"error"); return; }
+  skin::Layout();
   SetFocus(skin::s.mode == skin::Mode::Install ? skin::s.details : skin::s.primary);
   skin::Push(stack, stringSize, L"ok");
 }

@@ -1,5 +1,7 @@
 ; Display-only native skin; electron-builder retains its install/update/uninstall engine.
 !ifndef BUILD_UNINSTALLER
+  ; Render at the system DPI instead of letting Windows enlarge a 96-DPI bitmap.
+  ManifestDPIAware true
   !include LogicLib.nsh
   !include nsDialogs.nsh
   !addplugindir /x86-unicode "${BUILD_RESOURCES_DIR}\generated\installer-ui"
@@ -60,6 +62,61 @@
       ${EndSwitch}
     FunctionEnd
 
+    ; $0 is data from a fixed source. Only exact supported locale codes apply.
+    ; $2 reports whether a value was accepted; all other values keep the fallback.
+    Function VeyloApplyLanguageValue
+      StrCpy $2 "1"
+      ${If} $0 S== "zh-CN"
+        StrCpy $LANGUAGE 2052
+      ${ElseIf} $0 S== "zh-TW"
+        StrCpy $LANGUAGE 1028
+      ${ElseIf} $0 S== "en-US"
+        StrCpy $LANGUAGE 1033
+      ${ElseIf} $0 S== "ja-JP"
+        StrCpy $LANGUAGE 1041
+      ${ElseIf} $0 S== "ko-KR"
+        StrCpy $LANGUAGE 1042
+      ${Else}
+        StrCpy $2 "0"
+      ${EndIf}
+    FunctionEnd
+
+    Function VeyloReadUpgradeLanguage
+      ; New updaters pass the active app language, including automatic quit installs.
+      ReadEnvStr $0 "VEYLO_UPDATE_LANGUAGE"
+      Call VeyloApplyLanguageValue
+      ${If} $2 == "1"
+        Return
+      ${EndIf}
+      ; Older updaters cannot pass a locale. Read only the current user's fixed
+      ; profile, never enumerate other users or modify settings/activation data.
+      !ifdef VEYLO_PROFILE_SETTINGS_FILE
+        StrCpy $3 "${VEYLO_PROFILE_SETTINGS_FILE}"
+      !else
+        ReadEnvStr $3 "APPDATA"
+        ${If} $3 == ""
+          Return
+        ${EndIf}
+        StrCpy $3 "$3\adb-workbench\settings.json"
+      !endif
+      InitPluginsDir
+      File /oname=$PLUGINSDIR\veylo-installer-language.ps1 "${PROJECT_DIR}\build\installer-language.ps1"
+      System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_SETTINGS_FILE", w r3)'
+      ; This x86 NSIS process otherwise starts the slower WOW64 PowerShell host.
+      StrCpy $4 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+      ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+        StrCpy $4 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+      ${EndIf}
+      nsExec::ExecToStack /TIMEOUT=5000 `"$4" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\veylo-installer-language.ps1"`
+      Pop $0
+      Pop $1
+      System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_SETTINGS_FILE", p 0)'
+      ${If} $0 == "0"
+        StrCpy $0 $1
+        Call VeyloApplyLanguageValue
+      ${EndIf}
+    FunctionEnd
+
     Function VeyloInitLanguage
       StrCpy $VeyloReady "0"
       StrCpy $VeyloShortcut "1"
@@ -68,20 +125,16 @@
       ReadRegStr $0 ${VEYLO_RECEIPT_ROOT} "${VEYLO_RECEIPT_KEY}" "Language"
       ReadRegStr $1 ${VEYLO_RECEIPT_ROOT} "${VEYLO_RECEIPT_KEY}" "InstallLocation"
       ${If} $1 == $INSTDIR
-        ${Switch} $0
-          ${Case} "zh-CN"
-            StrCpy $LANGUAGE 2052
-            ${Break}
-          ${Case} "zh-TW"
-            StrCpy $LANGUAGE 1028
-            ${Break}
-          ${Case} "ja-JP"
-            StrCpy $LANGUAGE 1041
-            ${Break}
-          ${Case} "ko-KR"
-            StrCpy $LANGUAGE 1042
-            ${Break}
-        ${EndSwitch}
+        Call VeyloApplyLanguageValue
+      ${EndIf}
+      ${If} ${isUpdated}
+        Call VeyloReadUpgradeLanguage
+      ${Else}
+        ReadRegStr $0 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+        ${If} $0 == $INSTDIR
+        ${AndIf} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+          Call VeyloReadUpgradeLanguage
+        ${EndIf}
       ${EndIf}
       Call VeyloSetDisplayLanguage
     FunctionEnd

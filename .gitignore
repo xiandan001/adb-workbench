@@ -17,6 +17,7 @@ release
 .electron-cache
 build/*
 !build/installer.nsh
+!build/installer-language.ps1
 !build/installer-ui/
 !build/installer-ui/**
 !build/installer-ui.nsh

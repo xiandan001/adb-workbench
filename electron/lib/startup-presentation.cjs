@@ -41,7 +41,8 @@ function createStartupPresentation({ BrowserWindow, ipcMain, screen, mainWindow 
   function restoreMain() {
     if (mainWindow.isDestroyed()) return;
     mainWindow.setOpacity(1); mainWindow.setIgnoreMouseEvents(false);
-    if (!mainWindow.webContents.isDestroyed()) mainWindow.webContents.setBackgroundThrottling(true);
+    // Main-window visibility owns throttling. Ending startup must not freeze a
+    // still-visible workspace when another application later covers it.
   }
   function dispose() {
     if (ended) return;

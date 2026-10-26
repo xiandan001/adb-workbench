@@ -59,6 +59,34 @@ test('native skin animation, cancellation and owned resources have bounded lifec
   assert.match(source, /CBN_SELCHANGE/);
 });
 
+test('native engine windows stay hidden across post-show callbacks without polling', () => {
+  const source = read('installer-skin.cpp');
+  assert.match(source, /WM_WINDOWPOSCHANGING/);
+  assert.match(source, /position->flags &= ~SWP_SHOWWINDOW/);
+  assert.match(source, /position->flags \|= SWP_HIDEWINDOW \| SWP_NOACTIVATE \| SWP_NOZORDER/);
+  assert.match(source, /WM_STYLECHANGING/);
+  assert.match(source, /style->styleNew &= ~\(WS_VISIBLE \| WS_TABSTOP\)/);
+  assert.match(source, /WM_PARENTNOTIFY && LOWORD\(wParam\) == WM_CREATE/);
+  assert.match(source, /window == s\.window \|\| GetParent\(window\) != s\.parent/);
+  assert.match(source, /SetWindowSubclass\(window, NativeWindowProc/);
+  assert.match(source, /WM_NCDESTROY/);
+  assert.match(source, /native->window = nullptr/);
+  assert.match(source, /RestoreNativeChildren\(\)/);
+  assert.match(source, /RemoveWindowSubclass\(native->window, NativeWindowProc/);
+  assert.match(source, /CreateRectRgn\(0, 0, 0, 0\)/);
+  assert.match(source, /GetWindowRgn\(window, native->originalRegion\)/);
+  assert.match(source, /SetWindowRgn\(window, emptyRegion, TRUE\)/);
+  assert.match(source, /SetWindowRgn\(native->window, native->originalRegion, TRUE\)\) native->originalRegion = nullptr/);
+  assert.match(source, /WM_APP \+ 476/);
+  assert.match(source, /PostMessageW\(s\.window, kConcealNativeMessage/);
+  assert.match(source, /WM_SHOWWINDOW && wParam && !native->internalHide/);
+  assert.match(source, /WM_NEXTDLGCTL && lParam && IsNativeControl/);
+  assert.match(source, /requestedControlParent/);
+  assert.doesNotMatch(source, /VeyloGuardAtPage|VeyloGuardFlags|VeyloGuardCreated|VeyloGuardShowStyle|SetPropW\(/);
+  const tick = source.slice(source.indexOf('void Tick()'), source.indexOf('LRESULT CALLBACK ParentProc'));
+  assert.doesNotMatch(tick, /ProtectNative|HideNative|SW_HIDE|SWP_HIDEWINDOW|WS_VISIBLE/);
+});
+
 test('native skin matches the approved pure-black elliptical orbit design', () => {
   const source = read('installer-skin.cpp');
   const orbit = read('installer-orbit.h');

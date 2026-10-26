@@ -13,7 +13,7 @@ SetCompressor /SOLID lzma
 !include "FileFunc.nsh"
 !include "${PROJECT_DIR}\node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh"
 !addplugindir /x86-unicode "${FIXTURE_STDUTILS_DIR}"
-!define VERSION "4.7.5"
+!define VERSION "${FIXTURE_VERSION}"
 !define APP_FILENAME "Veylo-hooks-fixture"
 !define APP_EXECUTABLE_FILENAME "fixture.txt"
 !define SHORTCUT_NAME "Veylo-hooks-fixture"
@@ -31,7 +31,7 @@ Var FixtureUpdated
 !macro _isNoDesktopShortcut _a _b _t _f
   StrCmp "0" "1" `${_t}` `${_f}`
 !macroend
-!include "${PROJECT_DIR}\build\installer-ui.nsh"
+!include "${FIXTURE_UI_HOOKS}"
 
 !insertmacro customWelcomePage
 !insertmacro customPageAfterChangeDir
@@ -58,6 +58,14 @@ Function .onInit
   Call VeyloInitLanguage
 FunctionEnd
 
+!macro FixtureProgressCheckpoint label
+  FileOpen $5 "$INSTDIR\qa-progress-checkpoint.txt" w
+  FileWrite $5 "${label}"
+  FileClose $5
+  Sleep 750
+  Delete "$INSTDIR\qa-progress-checkpoint.txt"
+!macroend
+
 Section "Fixture payload"
   ; Neither command line nor folder browser can escape the dedicated fixture.
   StrCmp $INSTDIR "${FIXTURE_INSTALL_DIR}" ownedDirectory
@@ -65,6 +73,10 @@ Section "Fixture payload"
     Abort "Fixture directory mismatch"
   ownedDirectory:
   SetOutPath "$INSTDIR"
+  DetailPrint "Extracting real fixture payload through the NSIS File instruction"
+  !insertmacro FixtureProgressCheckpoint "before-file"
+  File /oname=fixture-payload.bin "${FIXTURE_PAYLOAD}"
+  !insertmacro FixtureProgressCheckpoint "after-file"
   SetRegView 64
   ReadRegDWORD $2 HKCU "${FIXTURE_RECEIPT_KEY}" "Generation"
   IntOp $2 $2 + 1
@@ -77,6 +89,8 @@ Section "Fixture payload"
     DetailPrint "Fixture operation $4 of 30"
     Sleep 35
   ${LoopUntil} $4 == 30
+  ; Stable engine checkpoints let the GUI timer catch up before pixel comparison.
+  !insertmacro FixtureProgressCheckpoint "after-loop"
   WriteUninstaller "$INSTDIR\fixture-uninstall.exe"
   !insertmacro VeyloSaveInstallerLanguage
   WriteRegDWORD HKCU "${FIXTURE_RECEIPT_KEY}" "Generation" $2
@@ -92,6 +106,8 @@ FunctionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\fixture.txt"
+  Delete "$INSTDIR\fixture-payload.bin"
+  Delete "$INSTDIR\qa-progress-checkpoint.txt"
   Delete "$INSTDIR\fixture-uninstall.exe"
   RMDir "$INSTDIR"
   SetRegView 64

@@ -44,6 +44,7 @@ function harness() {
     localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
     feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
     startupPresentation: null, startupPresented: false, ipcMain: {}, screen: {}, console: { log() {} },
+    attachWindowRenderContinuity(window) { window.continuityAttached = true; },
     createStartupPresentation({ mainWindow }) {
       assert.equal(ctx.current, mainWindow); calls.push('controller');
       const item = { reveals: 0, disposals: 0, reveal() { this.reveals++; calls.push('reveal'); }, dispose() { this.disposals++; calls.push('dispose'); } };
@@ -68,7 +69,8 @@ test('subsequent created main windows do not replay native startup', () => {
   const h = harness(); h.create(); h.windows[0].emit('closed');
   assert.equal(h.presentations[0].disposals, 1); assert.equal(h.context.startupPresentation, null);
   h.create(); assert.equal(h.presentations.length, 1);
-  assert.equal(h.windows[1].options.show, true); assert.equal(h.windows[1].options.webPreferences.backgroundThrottling, true);
+  assert.equal(h.windows[1].options.show, true); assert.equal(h.windows[1].options.webPreferences.backgroundThrottling, false);
+  assert.ok(h.windows.every(window => window.continuityAttached));
 });
 
 test('main windows hide the native menu before loading without removing its Alt access or accelerator menu', () => {

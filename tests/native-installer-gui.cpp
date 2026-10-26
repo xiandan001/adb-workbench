@@ -6,6 +6,7 @@
 #include <gdiplus.h>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -92,7 +93,8 @@ struct Capture {
     return pixels[static_cast<int>(y * height / 500) * width + static_cast<int>(x * width / 760)] & 0xffffff;
   }
 };
-// Some native controls omit text through PrintWindow; method 3 captures the real window DC.
+// Method 3 captures the entire client DC, including all native siblings.
+// Full-frame PrintWindow on an inactive desktop is not a reliable visual oracle.
 Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
   RECT area{}; GetClientRect(window, &area);
   Capture capture; capture.width = area.right; capture.height = area.bottom;
@@ -102,8 +104,9 @@ Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
   info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
   void* bits = nullptr;
   HBITMAP bitmap = CreateDIBSection(reference, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+  memset(bits, 0, static_cast<size_t>(capture.width) * capture.height * sizeof(DWORD));
   auto old = SelectObject(memory, bitmap);
-  RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+  RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME);
   BOOL captured = FALSE;
   if (method == 1) {
     SendMessageW(window, WM_PRINT, reinterpret_cast<WPARAM>(memory), PRF_CLIENT | PRF_CHILDREN | PRF_ERASEBKGND);
@@ -129,9 +132,94 @@ Capture Screenshot(HWND window, const std::wstring& filename, int method = 0) {
   else std::printf("INFO capture diagnostic method=%d coloredPixels=%zu\n", method, colored);
   return capture;
 }
+std::string Utf8(const std::wstring& value) {
+  const int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+  std::string result(size, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
+  return result;
+}
+std::string Json(const std::wstring& value) {
+  std::string output = "\"";
+  for (unsigned char character : Utf8(value)) {
+    if (character == '\\' || character == '"') output += '\\';
+    if (character >= 32) output += static_cast<char>(character);
+    else output += ' ';
+  }
+  return output + "\"";
+}
+void WriteEvidence(const std::wstring& name, const std::string& text) {
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, (fixture + L"\\" + name).c_str(), L"wb") || !file) throw std::runtime_error("open evidence file");
+  const size_t written = fwrite(text.data(), 1, text.size(), file); fclose(file);
+  if (written != text.size()) throw std::runtime_error("write evidence file");
+}
+BOOL CALLBACK CollectNative(HWND window, LPARAM pointer) {
+  if (window != skin && !IsChild(skin, window)) reinterpret_cast<std::vector<HWND>*>(pointer)->push_back(window);
+  return TRUE;
+}
+std::vector<HWND> NativeWindows() {
+  std::vector<HWND> windows;
+  EnumChildWindows(parent, CollectNative, reinterpret_cast<LPARAM>(&windows));
+  return windows;
+}
+int VisibleNativeCount() {
+  int count = 0;
+  for (HWND window : NativeWindows()) if (IsWindowVisible(window)) ++count;
+  return count;
+}
+bool ParentEvidence(const std::wstring& name, int* paintedProgress = nullptr) {
+  const auto clientImage = Screenshot(parent, name + L"-parent-client-window-dc", 3);
+  int accentSamples = 0;
+  for (int x = 282; x < 728; ++x) if (clientImage.At(static_cast<float>(x) + 0.5f, 283) == 0x1dd5a2) ++accentSamples;
+  const int drawnPercent = accentSamples * 100 / 446;
+  if (paintedProgress) *paintedProgress = drawnPercent;
+  const HMODULE user = GetModuleHandleW(L"user32.dll");
+  auto getDpi = reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(user, "GetDpiForWindow"));
+  auto getContext = reinterpret_cast<HANDLE(WINAPI*)(HWND)>(GetProcAddress(user, "GetWindowDpiAwarenessContext"));
+  auto getAwareness = reinterpret_cast<int(WINAPI*)(HANDLE)>(GetProcAddress(user, "GetAwarenessFromDpiAwarenessContext"));
+  const UINT dpi = getDpi ? getDpi(parent) : 0;
+  const HANDLE context = getContext ? getContext(parent) : nullptr;
+  const int awareness = getAwareness && context ? getAwareness(context) : -1;
+  RECT client{}, outer{}; GetClientRect(parent, &client); GetWindowRect(parent, &outer);
+  std::string json = "{\n  \"parentTitle\": " + Json(Text(parent)) + ",\n  \"targetWindowDpi\": " + std::to_string(dpi) +
+    ",\n  \"targetAwareness\": " + std::to_string(awareness) + ",\n  \"targetDpiContext\": " + std::to_string(reinterpret_cast<INT_PTR>(context)) +
+    ",\n  \"paintedProgressPercent\": " + std::to_string(drawnPercent) + ",\n  \"clientSize\": [" + std::to_string(client.right) + "," + std::to_string(client.bottom) + "],\n  \"windowSize\": [" +
+    std::to_string(outer.right - outer.left) + "," + std::to_string(outer.bottom - outer.top) + "],\n  \"nativeChildren\": [\n";
+  int count = 0; bool first = true;
+  for (HWND window : NativeWindows()) {
+    wchar_t name[128]{}; GetClassNameW(window, name, 128);
+    const HWND owner = GetParent(window);
+    wchar_t ownerClass[128]{}; GetClassNameW(owner, ownerClass, 128);
+    DWORD process = 0; const DWORD thread = GetWindowThreadProcessId(window, &process);
+    RECT area{}; GetWindowRect(window, &area);
+    const bool visible = IsWindowVisible(window) != FALSE;
+    count += visible ? 1 : 0;
+    if (!first) json += ",\n"; first = false;
+    json += "    {\"hwnd\":" + std::to_string(reinterpret_cast<UINT_PTR>(window)) + ",\"id\":" + std::to_string(GetDlgCtrlID(window)) +
+      ",\"parentHwnd\":" + std::to_string(reinterpret_cast<UINT_PTR>(owner)) + ",\"parentClass\":" + Json(ownerClass) +
+      ",\"directChild\":" + (owner == parent ? "true" : "false") + ",\"threadId\":" + std::to_string(thread) + ",\"processId\":" + std::to_string(process) +
+      ",\"windowProcedure\":" + std::to_string(static_cast<UINT_PTR>(GetWindowLongPtrW(window, GWLP_WNDPROC))) +
+      ",\"class\":" + Json(name) + ",\"visible\":" + (visible ? "true" : "false") + ",\"styleVisible\":" +
+      ((GetWindowLongW(window, GWL_STYLE) & WS_VISIBLE) ? "true" : "false") + ",\"enabled\":" + (IsWindowEnabled(window) ? "true" : "false") +
+      ",\"rect\":[" + std::to_string(area.left) + "," + std::to_string(area.top) + "," + std::to_string(area.right) + "," + std::to_string(area.bottom) + "]}";
+    if (json.back() == '}') json.pop_back();
+    for (const wchar_t* property : {L"VeyloGuardCreated", L"VeyloGuardAtPage", L"VeyloGuardPos", L"VeyloGuardChanged", L"VeyloGuardShow", L"VeyloGuardShowStyle", L"VeyloGuardStyle", L"VeyloGuardFlags"})
+      json += "," + Json(property) + ":" + std::to_string(reinterpret_cast<UINT_PTR>(GetPropW(window, property)));
+    json += "}";
+  }
+  json += "\n  ],\n  \"visibleNativeCount\": " + std::to_string(count) + "\n}\n";
+  WriteEvidence(name + L"-native-windows.json", json);
+  std::printf("INFO whole-parent snapshot visible-native-count=%d\n", count);
+  std::printf("INFO target window DPI=%u awareness=%d (0=unaware,1=system,2=per-monitor)\n", dpi, awareness);
+  return count == 0;
+}
+std::wstring Version() {
+  wchar_t value[64]{};
+  return GetEnvironmentVariableW(L"VEYLO_QA_VERSION", value, 64) ? value : L"QA";
+}
 void Initialize(int language) {
   if (offscreen) ShowWindow(parent, SW_HIDE);
-  Check(Call("Init", {Handle(parent), fixture + L"\\icon.png", std::to_wstring(language), L"4.7.5 QA"}) == L"ok", "Init consumes arguments and returns ok");
+  Check(Call("Init", {Handle(parent), fixture + L"\\icon.png", std::to_wstring(language), Version()}) == L"ok", "Init consumes arguments and returns ok");
   skin = FindWindowExW(parent, nullptr, L"VeyloInstallerSkin475", nullptr);
   Check(skin && GetWindowThreadProcessId(skin, nullptr) == guiThread, "skin is owned by caller GUI thread");
   Check(Call("GetLanguage") == std::to_wstring(language), "locale ABI roundtrip");
@@ -219,8 +307,10 @@ void InstallChecks(const std::wstring& initial) {
   SendMessageW(progress, PBM_SETRANGE32, 0, 1000);
   SendMessageW(progress, PBM_SETPOS, 250, 0); Pump(250);
   const auto quarter = Screenshot(skin, L"progress-25");
+  Check(ParentEvidence(L"progress-25"), "whole parent exposes no native controls at 25 percent");
   SendMessageW(progress, PBM_SETPOS, 750, 0); Pump(250);
   const auto threeQuarters = Screenshot(skin, L"progress-75");
+  Check(ParentEvidence(L"progress-75"), "whole parent exposes no native controls at 75 percent");
   Check(quarter.At(500, 283) != threeQuarters.At(500, 283), "painted progress responds to genuine engine range and position");
   Check(SendMessageW(progress, PBM_GETPOS, 0, 0) == 750, "skin never changes native progress position");
   EnableWindow(GetDlgItem(parent, IDCANCEL), FALSE); Pump(250);
@@ -285,6 +375,71 @@ void PathSafetyChecks() {
   Screenshot(skin, L"safe-custom-path");
   Dispose();
 }
+void CheckNativeClipped(HWND window, const char* message) {
+  HRGN region = CreateRectRgn(0, 0, 0, 0);
+  const int type = GetWindowRgn(window, region);
+  DeleteObject(region);
+  Check(type == NULLREGION, message);
+}
+void NativeLifecycleChecks(const std::wstring& initial) {
+  HRGN expectedRegion = CreateRectRgn(0, 0, 80, 20);
+  HRGN originalRegion = CreateRectRgn(0, 0, 80, 20);
+  Check(SetWindowRgn(progress, originalRegion, FALSE) != 0, "fixture native progress starts with a restorable custom region");
+  Initialize(1033); Page(L"install", initial);
+  SendMessageW(parent, WM_NEXTDLGCTL, reinterpret_cast<WPARAM>(progress), TRUE);
+  Check(IsChild(skin, GetFocus()) && IsWindowVisible(GetFocus()) && IsWindowEnabled(GetFocus()), "engine native focus request redirects to a visible enabled skin control");
+  ShowWindow(progress, SW_SHOWNA);
+  CheckNativeClipped(progress, "late native progress cannot draw even before queued visibility correction");
+  Pump();
+  Check(ParentEvidence(L"late-show-progress"), "late ShowWindow cannot expose native progress");
+  SetWindowPos(details, HWND_TOP, 30, 80, 650, 80, SWP_SHOWWINDOW | SWP_NOACTIVATE); Pump();
+  Check(ParentEvidence(L"late-position-native"), "late SetWindowPos cannot expose or cover skin with native controls");
+  SetWindowPos(details, HWND_TOP, 30, 80, 650, 80, SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+  CheckNativeClipped(details, "native show with SWP_NOSENDCHANGING cannot paint before message dispatch");
+  Pump();
+  Check(!IsWindowVisible(details), "native show with SWP_NOSENDCHANGING is hidden after queued correction");
+  SetWindowLongW(progress, GWL_STYLE, GetWindowLongW(progress, GWL_STYLE) | WS_VISIBLE); Pump();
+  Check(ParentEvidence(L"late-style-native"), "late visible style cannot expose native progress");
+  HWND page = CreateWindowW(L"STATIC", L"Native page created after plugin initialization", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+    20, 100, 700, 200, parent, reinterpret_cast<HMENU>(1998), nullptr, nullptr);
+  HWND childProgress = CreateWindowW(PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 20, 650, 30, page, reinterpret_cast<HMENU>(1999), nullptr, nullptr);
+  SetWindowPos(page, HWND_TOP, 20, 100, 700, 200, SWP_SHOWWINDOW | SWP_NOACTIVATE); Pump();
+  Check(ParentEvidence(L"late-created-native-page"), "new native page and its progress stay hidden");
+  HWND direct = CreateWindowW(PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 600, 60, parent, reinterpret_cast<HMENU>(1997), nullptr, nullptr);
+  Pump();
+  Check(ParentEvidence(L"late-created-direct-progress"), "new direct native progress cannot cover skin");
+  const HWND previousDirect = direct;
+  DestroyWindow(direct);
+  direct = CreateWindowW(PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 600, 60, parent, reinterpret_cast<HMENU>(1997), nullptr, nullptr);
+  Pump();
+  std::printf("INFO replacement native HWND old=%u new=%u sameHandle=%d\n", static_cast<unsigned>(reinterpret_cast<UINT_PTR>(previousDirect)), static_cast<unsigned>(reinterpret_cast<UINT_PTR>(direct)), previousDirect == direct);
+  Check(ParentEvidence(L"recreated-native-progress"), "destroyed native control can be replaced with the same ID without exposing it");
+  struct NativeDialogTemplate { DLGTEMPLATE dialog; WORD menu = 0, windowClass = 0, title = 0; } nativeTemplate{};
+  nativeTemplate.dialog.style = WS_CHILD | DS_CONTROL;
+  nativeTemplate.dialog.dwExtendedStyle = WS_EX_NOPARENTNOTIFY | WS_EX_CONTROLPARENT;
+  nativeTemplate.dialog.cx = 300; nativeTemplate.dialog.cy = 120;
+  HWND nativeDialog = CreateDialogIndirectParamW(GetModuleHandleW(nullptr), &nativeTemplate.dialog, parent, HostProc, 0);
+  Check(nativeDialog != nullptr, "real native dialog page without parent notification was created");
+  CreateWindowW(PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 20, 300, 30, nativeDialog, reinterpret_cast<HMENU>(1004), nullptr, nullptr);
+  Page(L"install", initial);
+  ShowWindow(nativeDialog, SW_SHOWNA);
+  CheckNativeClipped(nativeDialog, "native dialog SW_SHOWNA cannot paint before queued correction");
+  Pump();
+  Check(!IsWindowVisible(nativeDialog), "native dialog SW_SHOWNA is hidden after queued correction");
+  Check(ParentEvidence(L"late-native-dialog"), "whole parent contains no late native dialog or its progress bar");
+  Check(IsWindow(childProgress) && IsWindowEnabled(childProgress), "native progress still exists and remains enabled for the engine");
+  Dispose();
+  Check(IsWindowVisible(page) && IsWindowVisible(direct) && IsWindowVisible(progress), "Dispose restores the last requested visible state before another ShowWindow call");
+  Check(IsWindowVisible(nativeDialog), "Dispose restores the native dialog's last show request");
+  Check((GetWindowLongW(page, GWL_STYLE) & WS_TABSTOP) != 0 && (GetWindowLongW(nativeDialog, GWL_EXSTYLE) & WS_EX_CONTROLPARENT) != 0, "Dispose restores original native navigation styles");
+  HRGN restoredRegion = CreateRectRgn(0, 0, 0, 0);
+  Check(GetWindowRgn(progress, restoredRegion) != ERROR && EqualRgn(expectedRegion, restoredRegion), "Dispose restores the original native clipping region");
+  DeleteObject(expectedRegion); DeleteObject(restoredRegion); SetWindowRgn(progress, nullptr, FALSE);
+  ShowWindow(page, SW_SHOWNA); ShowWindow(direct, SW_SHOWNA); Pump();
+  Check(IsWindowVisible(page) && IsWindowVisible(direct), "Dispose restores native windows' normal show behavior");
+  DestroyWindow(page); DestroyWindow(direct); DestroyWindow(nativeDialog);
+  ShowWindow(progress, SW_HIDE); ShowWindow(details, SW_HIDE);
+}
 DWORD WINAPI Watchdog(void*) {
   Sleep(45000);
   TerminateProcess(GetCurrentProcess(), 124);
@@ -292,7 +447,7 @@ DWORD WINAPI Watchdog(void*) {
 }
 DWORD WINAPI RejectForeignGuiThread(void* result) {
   try {
-    *static_cast<bool*>(result) = Call("Init", {Handle(parent), fixture + L"\\icon.png", L"1033", L"4.7.5 QA"}) == L"error";
+    *static_cast<bool*>(result) = Call("Init", {Handle(parent), fixture + L"\\icon.png", L"1033", Version()}) == L"error";
   } catch (...) { *static_cast<bool*>(result) = false; }
   return 0;
 }
@@ -320,7 +475,7 @@ int Run() {
   SendMessageW(details, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&item));
   library = LoadLibraryExW((fixture + L"\\VeyloInstaller.dll").c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
   Check(library != nullptr, "x86 fixture DLL loaded");
-  Check(Call("Init", {L"0", fixture + L"\\icon.png", L"1033", L"4.7.5 QA"}) == L"error", "wrong host handle rejected without corrupting stack");
+  Check(Call("Init", {L"0", fixture + L"\\icon.png", L"1033", Version()}) == L"error", "wrong host handle rejected without corrupting stack");
   bool foreignThreadRejected = false;
   HANDLE foreignThread = CreateThread(nullptr, 0, RejectForeignGuiThread, &foreignThreadRejected, 0, nullptr);
   Check(foreignThread && WaitForSingleObject(foreignThread, 3000) == WAIT_OBJECT_0, "foreign-thread ABI probe completed within deadline");
@@ -331,6 +486,7 @@ int Run() {
     Initialize(locale); Page(L"welcome", initial);
     Screenshot(skin, L"welcome-" + std::to_wstring(locale));
     Screenshot(skin, L"welcome-" + std::to_wstring(locale) + L"-window-dc", 3);
+    Check(ParentEvidence(L"welcome-" + std::to_wstring(locale)), "whole welcome parent contains no visible native siblings");
     if (locale == 1033) {
       Screenshot(Control(Cancel), L"cancel-direct");
       Screenshot(Control(Language), L"language-direct");
@@ -367,6 +523,7 @@ int Run() {
   Initialize(1033); InstallChecks(initial); Dispose();
   Initialize(1033); FinishChecks(initial); Dispose();
   PathSafetyChecks();
+  NativeLifecycleChecks(initial);
   DestroyWindow(parent); parent = nullptr;
   FreeLibrary(library); library = nullptr;
   std::printf("RESULT %d checks passed; private desktop never switched into view\n", checks);

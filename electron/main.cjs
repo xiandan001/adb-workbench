@@ -45,6 +45,7 @@ const appMessageDialog = require('./lib/app-message-dialog.cjs');
 const startupSettings = require('./lib/startup-settings.cjs');
 const feedback = require('./lib/feedback.cjs');
 const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
+const { attachWindowRenderContinuity } = require('./lib/window-render-continuity.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -119,9 +120,10 @@ function createWindow() {
       additionalArguments: localization.windowArguments(),
       nodeIntegration: false,
       contextIsolation: true,
-      backgroundThrottling: !presentStartup,
+      backgroundThrottling: false,
     }
   });
+  attachWindowRenderContinuity(mainWindow);
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('page-title-updated', event => event.preventDefault());
   const removeTitleListener = localization.onLocaleChanged(locale => {

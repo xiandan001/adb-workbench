@@ -28,6 +28,7 @@ test('installer default English and language receipt are explicit and path scope
 });
 
 test('native callbacks retain real engine controls, update flags, shortcut opt-out and unelevated launch', () => {
+  assert.match(hooks, /ManifestDPIAware true/);
   assert.match(hooks, /MUI_CUSTOMFUNCTION_GUIINIT VeyloGuiInit/);
   assert.match(hooks, /Function VeyloGuiInit\s+;[^\n]*\n\s+SetAutoClose true/);
   assert.match(hooks, /VeyloInstaller::GetPath \/NOUNLOAD/);

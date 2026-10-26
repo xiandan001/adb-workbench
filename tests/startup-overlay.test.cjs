@@ -56,7 +56,7 @@ test('enabled animation uses native transparent click-through display bounds and
   h.emit('startup-overlay:finished', overlay);
   assert.equal(overlay.destroyed, false); h.tick(280);
   assert.equal(overlay.destroyed, true); assert.equal(h.mainWindow.shows, 1);
-  assert.deepEqual(h.mainWindow.webContents.throttles, [true]);
+  assert.deepEqual(h.mainWindow.webContents.throttles, [], 'Startup must not override the main-window render policy');
 });
 
 test('disabled and reduced-motion modes wait only for the actual main frame and create no overlay', t => {
