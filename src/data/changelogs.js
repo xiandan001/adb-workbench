@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.10': {
+    title: 'v4.7.10',
+    date: '2026-10-28',
+    items: [
+      { type: 'feature', get text() { return tr('设备卡片新增设备日志快捷入口'); } },
+      { type: 'improve', get text() { return tr('精简常用工具，移除固定音量按钮，音量操作可通过自定义快捷操作配置'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.7.9': {
     title: 'v4.7.9',
     date: '2026-10-28',

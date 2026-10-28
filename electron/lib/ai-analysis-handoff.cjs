@@ -105,7 +105,8 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, now = D
         return create(await readReference(reference), 'server-snapshot', createHash('sha256').update(JSON.stringify(reference)).digest('hex'), true);
       }
       const view = args.view;
-      if (!view || Object.keys(view).some(key => !['origin', 'title', 'question', 'text', 'deviceId'].includes(key))
+      if (!view || Object.keys(view).some(key => !['origin', 'title', 'question', 'text', 'deviceId', 'truncated'].includes(key))
+        || Object.hasOwn(view, 'truncated') && typeof view.truncated !== 'boolean'
         || !['log-filter', 'log-marker', 'log-diagnostic', 'serial-selection', 'ssh-selection', 'device-error'].includes(view.origin)) throw fail(tr('AI 上下文格式无效或超过大小限制。'));
       return create(view, 'renderer-view', undefined, true);
     },

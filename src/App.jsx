@@ -842,21 +842,6 @@ function App() {
     }
   };
 
-  const handleAdbCommand = async (deviceId, command) => {
-    try {
-      if (window.electronAPI) {
-        const res = await window.electronAPI.adbShell(deviceId, command);
-        if (!res.success) {
-          showDeviceFailure(deviceId, tr("命令执行失败: {0}", { 0: res.error }));
-        }
-      } else {
-        console.log(`发送命令到 ${deviceId}: adb shell ${command}`);
-      }
-    } catch (err) {
-      showDeviceFailure(deviceId, tr("命令执行错误: {0}", { 0: err.message }));
-    }
-  };
-
   const handleExecuteCommand = async (deviceId, command) => {
     try {
       if (window.electronAPI) {
@@ -1929,7 +1914,6 @@ function App() {
                       deviceName={deviceNames[device.id]}
                       onNameChange={handleDeviceNameChange}
                       onStart={() => handleStartScrcpy(device.id)}
-                      onCommand={(cmd) => handleAdbCommand(device.id, cmd)}
                       onScreenshot={() => handleScreenshot(device.id)}
                       onScreenRecordStart={handleScreenRecordStart}
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}

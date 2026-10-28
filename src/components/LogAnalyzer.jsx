@@ -11,7 +11,7 @@ import LogEvidence from './LogEvidence';
 import LogMarkers from './LogMarkers';
 import AiContextButton from './AiContextButton';
 import AiOutboundPreviewHost from './AiOutboundPreviewHost';
-import { joinAiContextRows } from '../shared/aiHandoff';
+import LogFilterHandoff from './LogFilterHandoff';
 import { captureLogMarker, logEntryIdentity, MAX_LOG_MARKERS } from '../shared/logMarkers';
 import { appendLogWindow, createLogBatchBuffer, LOG_VIEW_LIMIT } from '../shared/logStream';
 // 日志诊断规则库面板
@@ -222,7 +222,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     const applyContext = (context) => {
       if (!context?.deviceId) return;
       if (runningRef.current || aiAnalyzingRef.current) {
-        setNote(tr("日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后再从应用详情打开日志"));
+        setNote(tr("日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后重新打开设备日志"));
         return;
       }
       clearTimeout(filterDebounceRef.current);
@@ -1533,8 +1533,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onMessage={setNote}
           />
           <LogMarkers markers={markers} onChange={setMarkers} draft={markerDraft} onDismissDraft={() => setMarkerDraft(null)} isDark={isDark} onLocate={locateMarker} />
-          <AiContextButton disabled={!filtered.length} context={() => ({ view: { origin: 'log-filter', title: tr('当前日志筛选结果'), question: tr('请分析这段已筛选的日志上下文。'),
-            deviceId: captureDeviceId || '', text: joinAiContextRows(filtered) } })} />
+          <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={truncated} isDark={isDark} />
           <div className="flex-1" />
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{tr("{0} 条", { 0: filtered.length.toLocaleString(getLocale()) })}</div>

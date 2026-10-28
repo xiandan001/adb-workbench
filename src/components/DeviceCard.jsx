@@ -1,6 +1,6 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useState, useEffect, useRef } from 'react';
-import { Smartphone, Unplug, Play, Camera, Video, Volume2, VolumeX, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, Star } from 'lucide-react';
+import { Smartphone, Unplug, Play, Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, Star } from 'lucide-react';
 import themes from '../data/themes';
 import ControlButton from './ControlButton';
 import SelectMenu from './SelectMenu';
@@ -20,7 +20,7 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   useLocale();
   const isOnline = device.status === 'device';
   const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
@@ -395,17 +395,9 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
               isRecording={recordButton.recording}
             />
             <ControlButton
-              icon={<Volume2 size={16} />}
-              label={tr("音量+")}
-              onClick={() => onCommand('input keyevent 24')}
-              disabled={!isOnline}
-              theme={t}
-              isOnline={isOnline}
-            />
-            <ControlButton
-              icon={<VolumeX size={16} />}
-              label={tr("音量-")}
-              onClick={() => onCommand('input keyevent 25')}
+              icon={<ScrollText size={16} />}
+              label={tr("设备日志")}
+              onClick={() => onViewApplicationLogs({ deviceId: device.id })}
               disabled={!isOnline}
               theme={t}
               isOnline={isOnline}

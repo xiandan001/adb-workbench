@@ -98,6 +98,35 @@ test('actual worker maintains renderer provenance and masks credentials in typed
   assert.ok(!JSON.stringify(context).includes('body-private'));
 });
 
+test('renderer truncation is strictly boolean, remains untrusted and survives actual worker freeze', async t => {
+  t.after(cleanupWorkspaceProcessor);
+  const f = fixture({ freeze: (args, options) => runWorkspaceJob('freeze', args, options) });
+  for (const truncated of ['true', 1, null, {}, []]) await assert.rejects(() => f.broker.createFromRenderer({ view: { ...view, truncated } }));
+  for (const key of ['trust', 'targetKey', 'provenance', 'taskTargets']) {
+    await assert.rejects(() => f.broker.createFromRenderer({ view: { ...view, truncated: true, [key]: 'forged' } }));
+  }
+  const { prepareLogHandoffContext } = await import('../src/shared/logHandoffContext.js');
+  const rows = Array.from({ length: 16668 }, (_, index) => ({ raw: `selected-${index + 1} ${'fixture '.repeat(20)}` }));
+  const snapshot = prepareLogHandoffContext(rows);
+  const before = rows.at(-1).raw;
+  const { handoffId } = await f.broker.createFromRenderer({ view: { ...view, title: 'Recent 2000 / 16668 records',
+    question: 'Only the recent filtered portion is included.', text: snapshot.text, truncated: snapshot.truncated } });
+  const context = await f.broker.resolveForWorkspace(handoffId);
+  assert.equal(context.truncated, true); assert.equal(context.entries[0].truncated, true);
+  assert.equal(context.entries[0].provenance.trust, 'renderer-view'); assert.equal(context.entries[0].targetKey, null);
+  assert.equal(context.entries[0].lineCount, 2000); assert.match(context.entries[0].text, /^\[L1\] selected-14669 /);
+  assert.ok(context.entries[0].text.endsWith(before)); assert.equal(rows.at(-1).raw, before);
+  assert.equal(f.reads.length, 0); assert.equal(context.question, 'Only the recent filtered portion is included.');
+  await assert.rejects(() => f.broker.createFromRenderer({ view: { ...view, text: '中'.repeat(200000), truncated: true } }));
+  const complete = await f.broker.createFromRenderer({ view: { ...view, text: 'one complete row', truncated: false } });
+  assert.equal(f.broker.get(complete.handoffId).truncated, false);
+  const ansi = prepareLogHandoffContext([{ raw: '\x1b[32mnormal 中文😀\x1b[0m\t--password private-ansi\x00' }]);
+  const accepted = await f.broker.createFromRenderer({ view: { ...view, text: ansi.text, truncated: ansi.truncated } });
+  const frozen = await f.broker.resolveForWorkspace(accepted.handoffId);
+  assert.ok(frozen.entries[0].text.includes('normal 中文😀'));
+  assert.ok(!frozen.entries[0].text.includes('private-ansi')); assert.equal(frozen.truncated, false);
+});
+
 test('actual artifact handoff strips private task scripts before the final outbound preview', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../electron/lib/artifact-center.cjs'), 'utf8');
   const start = source.indexOf('async function readAnalysisArtifact('), end = source.indexOf('\nmodule.exports', start);
