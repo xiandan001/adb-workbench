@@ -50,6 +50,7 @@ const startupSettings = require('./lib/startup-settings.cjs');
 const feedback = require('./lib/feedback.cjs');
 const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
 const { attachWindowRenderContinuity } = require('./lib/window-render-continuity.cjs');
+const { getMainWindowBounds } = require('./lib/main-window-bounds.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
@@ -111,10 +112,7 @@ function createWindow() {
   const presentStartup = !startupPresented;
   const mainWindow = new BrowserWindow({
     title: tr('卓控台'),
-    width: 1600,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    ...getMainWindowBounds(screen.getPrimaryDisplay().workArea),
     autoHideMenuBar: true,
     show: !presentStartup,
     backgroundColor: '#081417',

@@ -10,6 +10,7 @@ const CHANGELOGS = {
       { type: 'feature', get text() { return tr('设备卡片新增设备日志快捷入口'); } },
       { type: 'improve', get text() { return tr('精简常用工具，移除固定音量按钮，音量操作可通过自定义快捷操作配置'); } },
       { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
     ],
   },
   '4.7.9': {

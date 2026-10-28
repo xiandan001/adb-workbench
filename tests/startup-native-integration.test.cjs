@@ -43,7 +43,10 @@ function harness() {
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
     localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
     feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
-    startupPresentation: null, startupPresented: false, ipcMain: {}, screen: {}, console: { log() {} },
+    startupPresentation: null, startupPresented: false, ipcMain: {},
+    screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1.25 }) },
+    getMainWindowBounds: require('../electron/lib/main-window-bounds.cjs').getMainWindowBounds,
+    console: { log() {} },
     attachWindowRenderContinuity(window) { window.continuityAttached = true; },
     createStartupPresentation({ mainWindow }) {
       assert.equal(ctx.current, mainWindow); calls.push('controller');
@@ -62,9 +65,25 @@ function harness() {
 test('first native window loads concurrently while hidden with unthrottled first frame and context before IPC', () => {
   const h = harness(); h.create();
   assert.equal(h.windows[0].options.show, false);
+  assert.equal(h.windows[0].options.height, 960); assert.equal(h.windows[0].options.width, 1600);
+  assert.equal(h.windows[0].options.x, 160); assert.equal(h.windows[0].options.y, 40);
   assert.equal(h.windows[0].options.webPreferences.backgroundThrottling, false);
   assert.deepEqual(h.calls.slice(0, 2), ['context', 'controller']); assert.match(h.calls[2], /^load:/);
   assert.equal(h.presentations.length, 1);
+});
+
+test('main window uses the display work area rather than physical bounds or DPI scaling', () => {
+  const h = harness();
+  h.context.screen.getPrimaryDisplay = () => ({
+    bounds: { x: 0, y: 0, width: 2560, height: 1440 },
+    workArea: { x: -1280, y: 40, width: 1280, height: 680 }, scaleFactor: 2,
+  });
+  h.create();
+  const options = h.windows[0].options;
+  assert.equal(options.width, 1264); assert.equal(options.height, 664);
+  assert.equal(options.x, -1272); assert.equal(options.y, 48);
+  assert.equal(options.minWidth, 900); assert.equal(options.minHeight, 600);
+  assert.equal(options.show, false); assert.ok(h.windows[0].continuityAttached);
 });
 
 test('subsequent created main windows do not replay native startup', () => {
