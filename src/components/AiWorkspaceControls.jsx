@@ -30,6 +30,7 @@ export function AiWorkspaceContext({ context, onClear, disabled, theme }) {
     <p className="whitespace-pre-wrap break-words text-xs leading-5">{context.question}</p>
     <p className={`max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{context.summary}</p>
     {context.finding && <div className="border-t border-emerald-500/15 pt-2"><p className="text-xs font-medium">{context.finding.title}</p><p className={`max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{context.finding.detail}</p></div>}
+    {context.caseReview && <div className="space-y-1 border-t border-emerald-500/15 pt-2 text-xs leading-5"><p>{tr('案例人工记录：{0} · 适用 {1} {2}', { 0: { verified: tr('已人工验证'), rejected: tr('已确认误判'), unverified: tr('待验证') }[context.caseReview.status], 1: context.caseReview.packageName, 2: context.caseReview.version })}</p><p className="whitespace-pre-wrap break-words">{context.caseReview.rootCause}</p><p className="whitespace-pre-wrap break-words">{context.caseReview.solution}</p><p className="whitespace-pre-wrap break-words">{context.caseReview.verification}</p></div>}
     <p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr('仅带入已选择内容；不会自动采集、发送或执行。')}</p>
   </section>;
 }

@@ -3,6 +3,7 @@ import { CheckCircle2, FileCheck2, Save, TriangleAlert } from 'lucide-react';
 import { formatDateTime, tr, useLocale } from '../shared/i18n';
 import AiWorkspaceEvidence, { AiWorkspaceUsage } from './AiWorkspaceEvidence';
 import { workspaceCitation, workspacePreviewFresh } from './AiWorkspaceState';
+import AiWorkspaceHandoff from './AiWorkspaceHandoff';
 
 function ResultList({ title, items, theme }) {
   if (!items?.length) return null;
@@ -43,6 +44,7 @@ export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onC
 }
 
 function stepDetails(step) {
+  if (step.targetId) return tr('已选控件：{0}', { 0: step.targetId });
   switch (step.type) {
     case 'tap': return tr('坐标：{0}, {1}', { 0: step.x, 1: step.y });
     case 'longPress': return tr('坐标：{0}, {1} · 时长 {2} ms', { 0: step.x, 1: step.y, 2: step.durationMs });
@@ -71,6 +73,7 @@ export function AiWorkspaceTask({ draft, busy, onSave, usage, theme }) {
   return <section aria-label={tr('测试任务草案')} className={`space-y-4 rounded-xl border p-4 ${theme.card}`}>
     <div className="flex items-center gap-2"><FileCheck2 size={19} className="text-emerald-500" /><h3 className="text-sm font-semibold">{tr('测试任务草案')}</h3></div>
     <div><h4 className="text-base font-semibold">{draft.name}</h4><p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-6 ${theme.textMuted}`}>{draft.description}</p></div>
+    {draft.targets?.length > 0 && <><AiWorkspaceHandoff targets={draft.targets} theme={theme} /><div className="space-y-1">{draft.targets.map(target => <p key={target.id} className={`break-all text-[11px] leading-5 ${theme.textMuted}`}>{target.id}: {Object.entries(target.selector || {}).map(([key, value]) => `${key}=${value}`).join(', ')}</p>)}</div></>}
     <p className={`text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600 dark:text-amber-400'}`}>{fresh ? tr('草案有效至 {0}', { 0: formatDateTime(draft.expiresAt) }) : tr('草案已过期，不能保存；请保留目标并手动重新生成。')}</p>
     {(observationOnly || draft.missingInformation?.length > 0) && <div className="space-y-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5">
       {observationOnly && <p>{tr('此草案仅包含观察步骤，尚不能证明交互目标通过。可保存后在任务中心补充。')}</p>}

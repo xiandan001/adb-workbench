@@ -18,6 +18,7 @@ import TaskCenterOnboarding from './TaskCenterOnboarding';
 import TaskCenterQuickStart from './TaskCenterQuickStart';
 import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
+import TaskAiTargets from './TaskAiTargets';
 import TaskCenterDraftDialog from './TaskCenterDraftDialog';
 import TaskRunComparisonDialog from './TaskRunComparisonDialog';
 import {
@@ -131,8 +132,9 @@ const QUICK_TEMPLATES = () => ([
   }
 ]);
 
-function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange, initialScriptId = '' }) {
+function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange, initialScriptId = '', incomingTaskId = '', incomingTaskRequestId = 0 }) {
   const initialScriptIdRef = useRef(initialScriptId);
+  const incomingTaskRef = useRef('');
   const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
@@ -288,6 +290,20 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const selectedScript = scripts.find(script => script.id === selectedScriptId);
   const draftDirty = draftFingerprint(draft) !== savedFingerprint;
   const selectedTask = [...activeTasks, ...history].find(task => task.id === selectedTaskId);
+  useEffect(() => {
+    const requestKey = `${incomingTaskId}:${incomingTaskRequestId}`;
+    if (!incomingTaskId || loading || incomingTaskRef.current === requestKey) return;
+    incomingTaskRef.current = requestKey;
+    const known = [...activeTasks, ...history].some(task => task.id === incomingTaskId);
+    Promise.resolve(known ? null : window.electronAPI?.taskState?.()).then(response => {
+      if (!recorderMountedRef.current || incomingTaskRef.current !== requestKey) return;
+      if (!known) {
+        if (!response?.ok || ![...(response.activeTasks || []), ...(response.history || [])].some(task => task.id === incomingTaskId)) throw new Error(tr('运行记录不存在或已移除。'));
+        setActiveTasks(response.activeTasks || []); setHistory(response.history || []);
+      }
+      setSelectedTaskId(incomingTaskId);
+    }).catch(error => { if (recorderMountedRef.current && incomingTaskRef.current === requestKey) showToast?.(error.message); });
+  }, [incomingTaskId, incomingTaskRequestId, loading, activeTasks, history, showToast]);
   const offlineTargets = selectedDeviceIds.filter(id => !onlineDevices.some(device => device.id === id));
   const recordingTask = useMemo(
     () => { void locale; return findOnboardingTask(recordingTaskId, activeTasks, history); },
@@ -701,6 +717,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         setRecorder(prev => prev.deviceId === deviceId ? ({
           ...prev,
           nodes: res.nodes || [],
+          snapshotId: res.snapshotId || '',
           selectedNodeIndex: '',
           screenshotDataUrl: res.screenshotDataUrl || prev.screenshotDataUrl,
           screenshotWidth: res.screenshotWidth || prev.screenshotWidth,
@@ -1068,6 +1085,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         </div>
       </div>
 
+      {draft.aiTargetDeviceId && <div role="status" className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3 text-sm">{tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: draft.aiTargetDeviceId })}</div>}
       {(offlineTargets.length > 0 || (activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId))) && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-600">
           <span>{tr("目标设备离线或未授权：{0}。不会自动切换设备。", { 0: Array.from(new Set([...offlineTargets, ...((activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId)) ? [activeDeviceId] : [])])).join('、') })}</span>
@@ -1361,7 +1379,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           initialError={onboardingLoadError}
         />
       )}
-      {selectedTask && <TaskCenterResultDrawer task={selectedTask} theme={t} onClose={() => setSelectedTaskId('')} onCancel={cancelTask} onOpenPath={openTaskPath} />}
+      {selectedTask && <TaskCenterResultDrawer key={selectedTask.id} task={selectedTask} theme={t} onClose={() => setSelectedTaskId('')} onCancel={cancelTask} onOpenPath={openTaskPath}
+        onRerun={task => { if (task) { setActiveTasks(items => [task, ...items.filter(item => item.id !== task.id)]); setSelectedTaskId(task.id); } }} />}
       {comparisonOpen && <TaskRunComparisonDialog history={history} theme={t} onClose={() => setComparisonOpen(false)} onOpenPath={openTaskPath} />}
       {pendingDraftAction && (
         <TaskCenterDraftDialog
@@ -2138,6 +2157,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
         </div>
 
         {!focusedMode && <div className="space-y-3 min-w-0">
+          <TaskAiTargets key={recorder.deviceId} recorder={recorder} busy={recorderBusy} isDark={isDark} />
           <div className={`rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
             <div className={`text-xs mb-2 ${muted}`}>{tr("选中控件")}</div>
             <div className={`text-base font-semibold break-words ${text}`}>{selectedNode?.label || tr("未选择控件")}</div>

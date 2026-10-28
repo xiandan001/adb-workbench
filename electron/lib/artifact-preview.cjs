@@ -6,7 +6,7 @@ const { collectArtifactFiles } = require('./artifact-export.cjs');
 const TEXT_LIMIT = 512 * 1024;
 const IMAGE_LIMIT = 12 * 1024 * 1024;
 const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-const TEXT_TYPES = new Set(['.md', '.json', '.txt', '.log', '.csv']);
+const TEXT_TYPES = new Set(['.md', '.json', '.jsonl', '.txt', '.log', '.csv']);
 const previewable = name => Boolean(IMAGE_TYPES[path.extname(name).toLowerCase()]) || TEXT_TYPES.has(path.extname(name).toLowerCase());
 
 async function artifactDetails(item) {

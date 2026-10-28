@@ -2,12 +2,14 @@ export const AI_WORKSPACE_MODES = ['diagnose', 'analysis', 'task'];
 export const AI_WORKSPACE_TURN_LIMIT = 6;
 export const workspaceSelection = () => ({ keywords: '', from: '', to: '', contextLines: 3, maxLines: 2000 });
 export const workspaceRequirements = () => ({ application: '', preconditions: '', target: '', expectedResult: '' });
+export const workspaceCaseReview = () => ({ status: 'unverified', rootCause: '', solution: '', verification: '', packageName: '', version: '', tags: [] });
 
 export function createWorkspaceCase(mode, deviceId, caseId) {
   return { mode, caseId, revision: 0, question: '', deviceId: deviceId || '', checks: [], sourceIds: [], text: '',
     plan: null, planUsage: null, preview: null, result: null, draft: null, usage: null, cached: false, error: '', busy: '',
     selection: workspaceSelection(), selectionChanged: false, requirements: workspaceRequirements(), turns: [], reportView: null,
-    contextRef: null, context: null, findingIndex: null, baseline: '' };
+    contextRef: null, context: null, findingIndex: null, baseline: '', diagnostic: { packageName: '', symptom: '' },
+    handoffId: '', handoff: null, targetSelection: { tokens: [] }, targets: [] };
 }
 
 export function completeWorkspaceTurn(current, response) {
@@ -22,19 +24,29 @@ export function prepareWorkspaceContext(current, reportView, kind, findingIndex 
   const { report, reportRef } = reportView;
   const finding = Number.isInteger(findingIndex) ? report.result?.findings?.[findingIndex] : null;
   return editWorkspaceCase(current, { question: '', sourceIds: [], checks: [], text: '', selection: workspaceSelection(), selectionChanged: false,
-    contextRef: { ...reportRef }, context: { question: report.preview?.question || '', summary: report.result?.summary || '', ...(finding ? { finding } : {}) },
+    contextRef: { ...reportRef }, context: { question: report.preview?.question || '', summary: report.result?.summary || '', ...(finding ? { finding } : {}),
+      ...(report.review ? { caseReview: report.review, caseName: report.name } : {}) },
     findingIndex: finding ? findingIndex : null, requirements: workspaceRequirements(),
+    handoffId: '', handoff: null, targetSelection: { tokens: [] }, targets: [],
     reportView: kind === 'task' ? null : reportView });
 }
 
+export function prepareWorkspaceHandoff(current, metadata) {
+  const targets = metadata.taskTargets || [];
+  return editWorkspaceCase(current, { question: metadata.question || '', contextRef: null, context: null, sourceIds: [], text: '',
+    preview: null, reportView: null, handoffId: metadata.id || metadata.handoffId, handoff: metadata,
+    targetSelection: { tokens: targets.map(target => target.token) }, targets, findingIndex: null });
+}
+
 export function workspaceReportKey(reportRef) {
-  return reportRef?.historyId ? `history:${reportRef.historyId}` : reportRef?.turnId ? `turn:${reportRef.caseId}:${reportRef.turnId}` : '';
+  return reportRef?.casebookId ? `casebook:${reportRef.casebookId}` : reportRef?.historyId ? `history:${reportRef.historyId}` : reportRef?.turnId ? `turn:${reportRef.caseId}:${reportRef.turnId}` : '';
 }
 
 export function workspaceReportRef(key) {
   if (typeof key !== 'string') return null;
   const parts = key.split(':');
   if (parts[0] === 'history' && parts.length === 2 && parts[1]) return { historyId: parts[1] };
+  if (parts[0] === 'casebook' && parts.length === 2 && parts[1]) return { casebookId: parts[1] };
   if (parts[0] === 'turn' && parts.length === 3 && parts[1] && parts[2]) return { caseId: parts[1], turnId: parts[2] };
   return null;
 }
@@ -55,7 +67,8 @@ export function workspaceLinePage(total, requested, size = 80) {
 
 export function editWorkspaceCase(current, changes) {
   if (current.busy) return current;
-  return { ...current, ...changes, revision: current.revision + 1, preview: null, result: null, draft: null, usage: null,
+  const changedDevice = Object.hasOwn(changes, 'deviceId') && changes.deviceId !== current.deviceId;
+  return { ...current, ...changes, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, usage: null,
     cached: false, error: '', ...(Object.hasOwn(changes, 'selection') ? { selectionChanged: changes.selectionChanged ?? true } : {}),
     ...(Object.hasOwn(changes, 'question') || Object.hasOwn(changes, 'deviceId') ? { plan: null, planUsage: null } : {}) };
 }

@@ -6,6 +6,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import SelectMenu from './SelectMenu';
+import AiContextButton from './AiContextButton';
 import { localEchoTerminalInput, mapTerminalKey, normalizeTerminalNewlines, prepareTerminalPaste } from '../shared/serialTerminalInput';
 import { createSerialTerminalReader, createSerialTerminalWriter } from '../shared/serialTerminalTransport';
 
@@ -269,6 +270,11 @@ export default function SerialTerminal({ active = true, theme, isDark, snapshot,
   const inputReady = active && connected && !replaying && !sendError && !readError;
 
   return <section aria-label={tr("串口终端")} className="space-y-3">
+    <AiContextButton disabled={!sessionId} context={() => {
+      const text = termRef.current?.getSelection() || '';
+      return text ? { view: { origin: 'serial-selection', title: tr('串口终端选区'), question: tr('请分析这段已选择的串口上下文。'), text, deviceId: '' } }
+        : { reference: { kind: 'serial', workspace: 'terminal', sessionId } };
+    }} />
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p role="status" className={`inline-flex items-center gap-1.5 text-xs ${inputReady && focused ? 'text-emerald-500' : theme.textMuted}`}><TerminalSquare size={15} />{!connected ? tr("未连接 · 终端只读") : replaying ? tr("正在恢复最近输出，暂不可输入…") : sendError || readError ? tr("输入已暂停") : focused ? tr("输入已激活 · Ctrl+C 发送中断") : tr("已连接 · 点击终端后输入")}</p>
       <div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => actionsRef.current?.copy()} className={button} title="Ctrl+Shift+C"><Copy size={13} />{tr("复制选区")}</button><button type="button" onClick={() => actionsRef.current?.pasteClipboard()} disabled={!inputReady} className={button} title={tr("Ctrl+Shift+V；多行粘贴需确认")}><ClipboardPaste size={13} />{tr("粘贴")}</button><button type="button" onClick={() => actionsRef.current?.clearScreen()} className={button} title={tr("仅清理终端显示，不清除收发记录")}><Eraser size={13} />{tr("清屏")}</button><button type="button" onClick={onSave} disabled={busy || !snapshot.entries.length} className={button} title={tr("保存当前收发记录，可能包含敏感输入")}><Save size={13} />{saving ? tr("保存中…") : tr("保存收发记录")}</button></div>

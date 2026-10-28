@@ -9,6 +9,7 @@ const path = require('path');
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
+const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
@@ -93,6 +94,7 @@ function register(ipcMain) {
   ipcMain.handle('inspection:cancel', async () => {
     if (!currentTask) return { ok: true, cancelled: false };
     currentTask.cancelled = true;
+    currentTask.aiSummaryController?.abort();
     currentTask.status = 'cancelling';
     lastTaskState = publicInspectionTask(currentTask);
     if (currentTask.currentProc) {
@@ -120,6 +122,12 @@ function register(ipcMain) {
 }
 
 async function runInspection(task, options) {
+  const lifetime = bindSummaryLifetime(task);
+  try { return await runInspectionBody(task, options); }
+  finally { lifetime.dispose(); }
+}
+
+async function runInspectionBody(task, options) {
   const outputDir = await createOutputDir(options.deviceId, options.outputBaseDir);
   const dirs = {
     root: outputDir,
@@ -174,7 +182,7 @@ async function runInspection(task, options) {
     }
   }
 
-  const cancelled = task.cancelled;
+  let cancelled = task.cancelled;
   if (cancelled) {
     errors.push({ id: 'cancelled', label: tr("用户取消"), error: tr("巡检已取消，后续步骤未执行") });
   }
@@ -184,7 +192,9 @@ async function runInspection(task, options) {
   const errorsPath = path.join(outputDir, 'errors.json');
   const summaryPath = path.join(outputDir, 'summary.json');
   const analysis = buildAnalysis(results, errors);
-  const aiSummary = options.includeAiSummary ? await buildInspectionAiSummary(state, results, errors, analysis) : { ok: false, skipped: true, summary: '' };
+  const aiSummary = options.includeAiSummary ? await buildInspectionAiSummary(state, results, errors, analysis, task.aiSummarySignal) : { ok: false, skipped: true, summary: '' };
+  if (task.cancelled && !cancelled) errors.push({ id: 'cancelled', label: tr('用户取消'), error: tr('AI 发送已取消。') });
+  cancelled = task.cancelled;
   const finalState = {
     ...state,
     endedAt: endedAt.toISOString(),
@@ -233,15 +243,15 @@ async function runInspection(task, options) {
 async function finishEarly(task, outputDir, state, errors, error) {
   errors.push({ id: 'preflight', label: tr("巡检预检查"), error });
   const analysis = buildAnalysis([], errors);
-  const aiSummary = state.includeAiSummary ? await buildInspectionAiSummary(state, [], errors, analysis) : { ok: false, skipped: true, summary: '' };
-  const finalState = { ...state, endedAt: new Date().toISOString(), cancelled: false, successCount: 0, failedCount: errors.length, analysis, aiSummary, steps: [] };
+  const aiSummary = state.includeAiSummary ? await buildInspectionAiSummary(state, [], errors, analysis, task.aiSummarySignal) : { ok: false, skipped: true, summary: '' };
+  const finalState = { ...state, endedAt: new Date().toISOString(), cancelled: task.cancelled === true, successCount: 0, failedCount: errors.length, analysis, aiSummary, steps: [] };
   const reportPath = path.join(outputDir, 'inspection-report.md');
   const errorsPath = path.join(outputDir, 'errors.json');
   await writeJson(path.join(outputDir, 'metadata.json'), finalState);
   await writeJson(errorsPath, errors);
   await writeJson(path.join(outputDir, 'summary.json'), buildSummary(finalState, [], errors));
   await fs.promises.writeFile(reportPath, buildReport(finalState, [], errors, { root: outputDir, raw: path.join(outputDir, 'raw'), media: path.join(outputDir, 'media') }), 'utf8');
-  const payload = { ok: false, error, outputDir, reportPath, zipPath: null, successCount: 0, failedCount: errors.length, analysis, aiSummary };
+  const payload = { ok: false, error, cancelled: task.cancelled === true, outputDir, reportPath, zipPath: null, successCount: 0, failedCount: errors.length, analysis, aiSummary };
   sendDone(task, payload);
   return payload;
 }
@@ -514,7 +524,7 @@ function buildAnalysis(results, errors) {
   return { severity, summary, findings };
 }
 
-async function buildInspectionAiSummary(state, results, errors, analysis) {
+async function buildInspectionAiSummary(state, results, errors, analysis, signal) {
   const artifacts = results
     .filter(item => item.file)
     .slice(0, 20)
@@ -545,6 +555,7 @@ async function buildInspectionAiSummary(state, results, errors, analysis) {
     tr("请输出一段面向 Android 调试人员的巡检 AI 总结，包含：总体结论、优先关注项、下一步建议。不要编造未提供的证据。")
   ].join('\n');
   return aiAnalyze.generateAiSummary({
+    signal,
     systemPrompt: tr("你是 Android 设备巡检报告助手，只根据给定巡检摘要输出简洁、可执行的中文结论。"),
     userContent: prompt,
     timeoutMs: 60000,

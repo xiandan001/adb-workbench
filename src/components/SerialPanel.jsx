@@ -5,6 +5,7 @@ import SerialConnectionSettings from './SerialConnectionSettings';
 import SerialDataView from './SerialDataView';
 import SerialSendPanel from './SerialSendPanel';
 import SelectMenu from './SelectMenu';
+import AiContextButton from './AiContextButton';
 import { appendSerialHistory, defaultSerialPreferences, normalizePreferences, readSerialHistory, readSerialPreferences, saveSerialPreferences } from '../shared/serialSettings';
 import { applySerialWorkspaceDelta, applySerialWorkspaceSnapshot, createSerialDiscovery, emptySerialWorkspaces, readSerialWorkspace, SERIAL_WORKSPACES, updateSerialWorkspace } from '../shared/serialWorkspace';
 import { isDarkTheme } from '../shared/theme';
@@ -241,6 +242,7 @@ export default function SerialPanel({ theme, showToast }) {
       <p className={`w-full text-right text-[11px] ${theme.textMuted}`} aria-label={tr("另一串口连接状态")}>{WORKSPACE_LABELS()[otherMode]}：{otherSnapshot.revision < 0 ? tr("读取中") : STATUS_LABELS()[otherSnapshot.status]}{otherSnapshot.path ? ` · ${otherSnapshot.path}` : ''}{otherSnapshot.unsaved ? tr(" · 有未保存记录") : ''}</p>
     </div>
     <div className="space-y-4 border-t border-slate-400/20 p-4">
+      <AiContextButton disabled={!snapshot.sessionId || !snapshot.entries?.length} context={{ reference: { kind: 'serial', workspace: mode, sessionId: snapshot.sessionId || '' } }} />
       <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr("两路独立，可同时连接不同 COM。切换只改变界面，不会断开另一侧连接或停止后台接收。")}{mode === 'terminal' ? tr("连接后点击终端，用键盘操作设备 Shell。") : tr("连接后选择格式，查看或发送数据。")}</p>
       <SerialConnectionSettings key={mode} theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : selectedPath} onSelectPath={value => updateWorkspace({ [mode === 'terminal' ? 'terminalSelectedPath' : 'selectedPath']: value })} config={connected ? snapshot.config : config} onConfig={value => changePreferences({ [mode === 'terminal' ? 'terminalConfig' : 'config']: value })} status={snapshot.status} activePath={snapshot.path} pending={snapshot.revision < 0 || (Boolean(currentPending) && currentPending !== 'send')} connectingRequest={currentPending === 'connect'} cancelling={currentPending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act(mode, 'connect', () => window.electronAPI.serialConnect({ workspace: mode, path: selectedPath, config }))} onDisconnect={() => act(mode, 'disconnect', () => window.electronAPI.serialDisconnect({ workspace: mode }))} advanced={mode === 'terminal' ? workspace.terminalAdvanced : workspace.advanced} onAdvanced={advanced => updateWorkspace({ [mode === 'terminal' ? 'terminalAdvanced' : 'advanced']: advanced })} />
       {selectedOccupied && <p role="status" className="text-xs text-amber-500">{tr("{0} 正由{1}使用，请为当前界面选择另一个串口。", { 0: selectedPath, 1: WORKSPACE_LABELS()[otherMode] })}</p>}

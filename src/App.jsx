@@ -11,7 +11,10 @@ import PerformanceDashboard from './components/PerformanceDashboard';
 import TaskCenter from './components/TaskCenter';
 import TroubleshootingWizard from './components/TroubleshootingWizard';
 import ArtifactCenter from './components/ArtifactCenter';
-import QualityCenter from './components/QualityCenter';
+import QualityCenter from './components/QualityWorkspace';
+import AiOutboundPreviewHost from './components/AiOutboundPreviewHost';
+import WorkbenchActivity from './components/WorkbenchActivity';
+import ReproductionDialog from './components/ReproductionDialog';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import DangerConfirmModal from './components/DangerConfirmModal';
@@ -70,6 +73,11 @@ function App() {
   const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false, aiVisited: false });
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
   const [aiTaskId, setAiTaskId] = useState('');
+  const [activityTaskId, setActivityTaskId] = useState('');
+  const [activityTaskRequest, setActivityTaskRequest] = useState(0);
+  const [incomingHandoffId, setIncomingHandoffId] = useState('');
+  const [incomingGuardId, setIncomingGuardId] = useState('');
+  const [reproductionTarget, setReproductionTarget] = useState(null);
   const setActiveTab = useCallback(next => setNavigation(previous => {
     const tab = typeof next === 'function' ? next(previous.activeTab) : next;
     return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
@@ -106,6 +114,18 @@ function App() {
     setDeviceOperationErrors(previous => ({ ...previous, [deviceId]: message }));
     showToast(message);
   };
+  useEffect(() => {
+    let alive = true;
+    const off = window.electronAPI?.onAiHandoffAvailable?.(async event => {
+      try {
+        const response = await window.electronAPI.aiHandoffGet({ handoffId: event?.handoffId });
+        if (!alive) return;
+        if (!response?.ok) throw new Error(response?.error || tr('分析上下文已失效，请重新选择。'));
+        setIncomingHandoffId(event.handoffId); setActiveTab('ai-workspace');
+      } catch (failure) { if (alive) showToast(failure.message); }
+    });
+    return () => { alive = false; off?.(); };
+  }, [setActiveTab, showToast]);
   // Confirm 确认框状态
   const [confirmModal, setConfirmModal] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
@@ -1398,6 +1418,9 @@ function App() {
   return (
     <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
+      <AiOutboundPreviewHost isDark={isDark} />
+      {reproductionTarget && <ReproductionDialog key={`${reproductionTarget.deviceId}:${reproductionTarget.sessionId || ''}`} theme={t} devices={devices}
+        deviceId={reproductionTarget.deviceId} sessionId={reproductionTarget.sessionId} onClose={() => setReproductionTarget(null)} />}
       {languageSelectionPending && <InitialLanguageDialog theme={t} isDark={isDark} />}
       {feedbackOpen && <FeedbackDialog theme={t} currentPage={activeTab} onClose={() => setFeedbackOpen(false)} />}
       {/* Toast 提示 */}
@@ -1629,7 +1652,7 @@ function App() {
           </button>
           <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("测试与证据")}</div>
           <button
-            onClick={() => setActiveTab('quality')}
+            onClick={() => { setIncomingGuardId(''); setActiveTab('quality'); }}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'quality' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
           >
@@ -1694,7 +1717,12 @@ function App() {
 
         <BackgroundTaskStack
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
-          onOpen={(tab, deviceId) => {
+          showToast={showToast}
+          onOpen={(tab, deviceId, id) => {
+            if (tab === 'reproduction') { setReproductionTarget({ deviceId: deviceId || '', sessionId: id || '' }); return; }
+            if (tab === 'logs') { void window.electronAPI?.logAnalyzerOpen?.({ deviceId }).catch(error => showToast(error.message)); return; }
+            if (tab === 'tasks') { setActivityTaskId(id || ''); setActivityTaskRequest(value => value + 1); }
+            if (tab === 'quality') setIncomingGuardId(id ? `${id}:${Date.now()}` : '');
             if (deviceId) setActiveDeviceId(deviceId);
             setActiveTab(tab);
           }}
@@ -1883,6 +1911,7 @@ function App() {
                     </div>}
                     {visibleDevices.map(device => (
                     <DeviceCard
+                      onOpenReproduction={id => setReproductionTarget({ deviceId: id, sessionId: '' })}
                       key={device.id}
                       device={device}
                       isActive={device.id === activeDeviceId}
@@ -1970,9 +1999,9 @@ function App() {
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
-              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId}
+              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} incomingHandoffId={incomingHandoffId}
                 showToast={showToast} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }}
-                onOpenTasks={id => { setAiTaskId(id); setActiveTab('tasks'); }} />
+                onOpenTasks={id => { setActivityTaskId(''); setAiTaskId(id); setActiveTab('tasks'); }} />
             </Suspense>
           </div>}
           {sshVisited && <div hidden={activeTab !== 'ssh'}>
@@ -2000,6 +2029,7 @@ function App() {
 
           {activeTab === 'artifacts' && (
             <ArtifactCenter
+              onOpenReproduction={id => setReproductionTarget({ deviceId: '', sessionId: String(id).replace(/^reproduction:/, '') })}
               theme={theme}
               showToast={showToast}
               showConfirm={showConfirm}
@@ -2008,6 +2038,7 @@ function App() {
 
           {activeTab === 'quality' && (
             <QualityCenter
+              incomingGuardId={incomingGuardId}
               devices={devices}
               activeDeviceId={activeDeviceId}
               onActiveDeviceChange={setActiveDeviceId}
@@ -2146,6 +2177,8 @@ function App() {
           {activeTab === 'tasks' && (
             <TaskCenter
               initialScriptId={aiTaskId}
+              incomingTaskId={activityTaskId}
+              incomingTaskRequestId={activityTaskRequest}
               devices={devices}
               activeDeviceId={activeDeviceId}
               onActiveDeviceChange={setActiveDeviceId}
@@ -2990,38 +3023,8 @@ function App() {
   );
 }
 
-function BackgroundTaskStack({ tasks, onOpen }) {
-  if (!tasks.length) return null;
-  return (
-    <div className="px-4 py-3 border-t border-[#3E4145] space-y-2">
-      {tasks.map(task => {
-        const Icon = task.icon;
-        const active = task.status === 'running' || task.status === 'cancelling';
-        const StatusIcon = active ? Loader2 : task.status === 'failed' ? AlertCircle : CheckCircle2;
-        return (
-          <button
-            key={task.key}
-            type="button"
-            onClick={() => onOpen?.(task.tab, task.deviceId)}
-            className="w-full rounded-lg border border-[#3E4145] bg-[#2D2F33]/80 px-3 py-2.5 text-left hover:bg-[#3E4145] transition-colors"
-            title={`${task.title}\n${task.deviceId || ''}\n${task.message}`}
-          >
-            <div className="flex items-center gap-2">
-              <Icon size={16} className={task.status === 'failed' ? 'text-red-400' : 'text-emerald-400'} />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-[#E8EAED] truncate">{task.title}</div>
-                <div className="text-[10px] text-[#9AA0A6] truncate">{task.message}</div>
-              </div>
-              <StatusIcon size={15} className={`${active ? 'animate-spin text-emerald-400' : task.status === 'failed' ? 'text-red-400' : 'text-emerald-400'} shrink-0`} />
-            </div>
-            <div className="mt-2 h-1.5 rounded-full overflow-hidden bg-[#202124]">
-              <div className={`h-full rounded-full transition-all ${task.status === 'failed' ? 'bg-red-400' : task.status === 'cancelled' ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${task.percent}%` }} />
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
+function BackgroundTaskStack({ tasks, onOpen, showToast }) {
+  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} />;
 }
 
 function buildSidebarBackgroundTasks(backgroundTasks) {

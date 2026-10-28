@@ -32,7 +32,8 @@ const TYPE_FILTERS = () => ([
   { id: 'regression', label: tr("回归差异") },
   { id: 'deviceGuard', label: tr("设备守护") },
   { id: 'performance', label: tr("性能报告") },
-  { id: 'task', label: tr("任务中心") }
+  { id: 'task', label: tr("任务中心") },
+  { id: 'reproduction', label: tr('复现采证') }
 ]);
 
 const TYPE_META = {
@@ -41,10 +42,11 @@ const TYPE_META = {
   regression: { icon: FileDiff, color: 'text-blue-400', bg: 'bg-blue-500/15' },
   deviceGuard: { icon: ShieldCheck, color: 'text-teal-400', bg: 'bg-teal-500/15' },
   performance: { icon: Activity, color: 'text-purple-400', bg: 'bg-purple-500/15' },
-  task: { icon: FileJson, color: 'text-amber-400', bg: 'bg-amber-500/15' }
+  task: { icon: FileJson, color: 'text-amber-400', bg: 'bg-amber-500/15' },
+  reproduction: { icon: ClipboardCheck, color: 'text-emerald-400', bg: 'bg-emerald-500/15' }
 };
 
-function ArtifactCenter({ theme, showToast, showConfirm }) {
+function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const [items, setItems] = useState([]);
@@ -340,6 +342,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
                   onDelete={(target) => deleteArtifacts([target.id], tr("删除产物"))}
                   onOpenPath={openPath}
                   onPreview={setPreviewItem}
+                  onOpenReproduction={onOpenReproduction}
                 />
               ))}
               {visibleCount < filteredItems.length && <button type="button" onClick={() => setVisibleCount(count => count + 30)} className={`w-full py-3 rounded-lg border text-sm ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>{tr("加载更多 · 已显示 {0} / {1} 项", { 0: Math.min(visibleCount, filteredItems.length), 1: filteredItems.length })}</button>}
@@ -352,7 +355,7 @@ function ArtifactCenter({ theme, showToast, showConfirm }) {
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview }) {
+function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview, onOpenReproduction }) {
   useLocale();
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
@@ -389,6 +392,7 @@ function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting,
           {item.deviceId ? tr("设备：{0}", { 0: item.deviceId }) : tr("未记录设备")} · {item.artifactCount || 0}{tr(" 项")}{' · '}{formatBytes(item.sizeBytes)}
         </div>
         <div className="flex flex-wrap gap-2">
+          {item.type === 'reproduction' && onOpenReproduction && <button type="button" disabled={disabled} onClick={() => onOpenReproduction(item.sessionId || item.id)} className={`${buttonClass(isDark)} disabled:opacity-50`}><ClipboardCheck size={14} />{tr('查看复现采证')}</button>}
           <button type="button" onClick={() => onPreview(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}><Eye size={14} />{tr("预览")}</button>
           <button type="button" onClick={() => onExport(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}>
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}

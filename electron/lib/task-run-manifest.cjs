@@ -14,7 +14,15 @@ function canonicalJson(value) {
 function createRunComparisonIdentity(script, options = {}) {
   const content = {
     mode: script.mode || 'replay',
-    steps: script.steps || [],
+    steps: (script.steps || []).map(step => {
+      // Default values for newly added guards must not invalidate an otherwise
+      // unchanged manually authored script's pre-4.7.9 comparison identity.
+      const value = { ...step };
+      if (value.requireUnique === false) delete value.requireUnique;
+      if (value.packageName === '') delete value.packageName;
+      if (value.selector?.packageName === '') { value.selector = { ...value.selector }; delete value.selector.packageName; }
+      return value;
+    }),
     continueOnError: options.continueOnError ?? script.continueOnError ?? true,
     concurrency: Math.max(1, Math.min(Number(options.concurrency) || 1, 4))
   };
@@ -22,7 +30,10 @@ function createRunComparisonIdentity(script, options = {}) {
     comparisonVersion: 1,
     scriptId: script.id || '',
     scriptHash: crypto.createHash('sha256').update(canonicalJson(content)).digest('hex'),
-    scriptSteps: content.steps.map(step => ({ id: step.id, type: step.type, label: step.label }))
+    scriptSteps: content.steps.map(step => ({ id: step.id, type: step.type, label: step.label })),
+    ...(options.rerunSnapshot ? { inputHash: Array.isArray(options.rerunSnapshot.inputs) && options.rerunSnapshot.inputs.every(input => input.state === 'available')
+      ? crypto.createHash('sha256').update(canonicalJson(options.rerunSnapshot.inputs)).digest('hex') : null,
+      inputFileCount: options.rerunSnapshot.inputs?.length || 0 } : {})
   };
 }
 
@@ -39,7 +50,7 @@ function deviceComparisonIdentity(identity) {
   return result;
 }
 
-function writeRunManifest(record) {
+function writeRunManifest(record, { rerunSnapshot } = {}) {
   const outputDir = record.artifactDir || (record.artifactBaseDir
     ? path.join(record.artifactBaseDir, `run-${String(record.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`)
     : '');
@@ -54,6 +65,11 @@ function writeRunManifest(record) {
     scriptId: record.scriptId || '',
     scriptHash: record.scriptHash || '',
     scriptSteps: record.scriptSteps || [],
+    ...(record.inputHash !== undefined ? { inputHash: record.inputHash, inputFileCount: record.inputFileCount } : {}),
+    ...(record.analysisOrigin ? { analysisOrigin: record.analysisOrigin } : {}),
+    ...(record.aiTargetDeviceId ? { aiTargetDeviceId: record.aiTargetDeviceId } : {}),
+    ...(record.parentTaskId ? { parentTaskId: record.parentTaskId } : {}),
+    ...(rerunSnapshot ? { rerunSnapshot } : {}),
     mode: record.mode || 'replay',
     status: record.status,
     createdAt: record.createdAt,

@@ -3,6 +3,7 @@ const { tr } = require('./localization.cjs');
 const { redactText } = require('./feedback-policy.cjs');
 const limits = require('./ai-workspace-limits.cjs');
 const { normalizeSelection, selectLines } = require('./ai-workspace-selection.cjs');
+const { APP_CHECKS, diagnosticChecks, diagnosticCommand, normalizeDiagnostic } = require('./ai-workspace-diagnostics.cjs');
 
 const MAX_SOURCE_BYTES = limits.sourceBytes;
 const MAX_EVIDENCE_BYTES = limits.evidenceBytes;
@@ -10,11 +11,7 @@ const fail = (code, message) => Object.assign(new Error(message), { code });
 const digest = value => createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
 
 function checks() {
-  return [
-    { id: 'device_info', label: tr('设备基础信息'), description: tr('只读采集型号、Android 版本和启动时长。') },
-    { id: 'logcat_snapshot', label: tr('近期设备日志'), description: tr('只读最近 2000 行日志，不清空或持续抓取。') },
-    { id: 'performance_snapshot', label: tr('性能基础读数'), description: tr('只读内存、CPU 统计和存储空间。') },
-  ];
+  return diagnosticChecks();
 }
 
 function stripControls(text) {
@@ -100,7 +97,7 @@ function freezeEntry(source, index, now, selection = normalizeSelection()) {
     ...(uncertain || selected.omittedUnknownTimeLines ? { timeWarning: tr('时间仅代表各来源自身时钟；无年份或未知时间的内容不能确定跨源先后关系。时间筛选会排除无法匹配的时间行。') } : {}) };
 }
 
-function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), getSsh = () => [], readSsh, runAdb, now = Date.now }) {
+function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), getSsh = () => [], readSsh, runAdb, now = Date.now, processor }) {
   function descriptors() {
     const result = [];
     for (const log of getLogs()) {
@@ -144,12 +141,14 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     } finally { signal?.removeEventListener('abort', stop); }
   }
 
-  async function collect({ deviceId, selectedChecks = [], sourceIds = [], text = '', selection: requestedSelection, signal }) {
+  async function collect({ deviceId, selectedChecks = [], sourceIds = [], text = '', selection: requestedSelection, diagnostic: requestedDiagnostic, signal }) {
     const selection = normalizeSelection(requestedSelection);
-    if (!Array.isArray(selectedChecks) || selectedChecks.length > 3 || selectedChecks.some(id => !checks().some(check => check.id === id))
+    const diagnostic = normalizeDiagnostic(requestedDiagnostic);
+    if (!Array.isArray(selectedChecks) || selectedChecks.length > 7 || selectedChecks.some(id => !checks().some(check => check.id === id))
       || new Set(selectedChecks).size !== selectedChecks.length || !Array.isArray(sourceIds) || sourceIds.length > 8 || new Set(sourceIds).size !== sourceIds.length
       || typeof text !== 'string' || Buffer.byteLength(text) > MAX_SOURCE_BYTES) throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
     if (selectedChecks.length && (typeof deviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(deviceId))) throw fail('AI_DEVICE_REQUIRED', tr('请选择有效的目标设备。'));
+    for (const id of selectedChecks) if (APP_CHECKS.includes(id)) diagnosticCommand(id, diagnostic);
     // Snapshot buffered sources before awaiting any device read. Re-listing also
     // rejects a source whose session/file changed after the selection was shown.
     const available = descriptors();
@@ -163,8 +162,11 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
       const state = await adbRead(deviceId, ['get-state'], signal);
       if (state.trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
       for (const id of selectedChecks) {
-        let output;
-        if (id === 'device_info') {
+        let output, unavailable = false;
+        if (APP_CHECKS.includes(id)) {
+          try { output = await adbRead(deviceId, diagnosticCommand(id, diagnostic), signal, 256 * 1024); }
+          catch (error) { if (signal?.aborted || error.code === 'CANCELLED') throw error; unavailable = true; output = ''; }
+        } else if (id === 'device_info') {
           const values = [];
           for (const property of ['ro.product.manufacturer', 'ro.product.model', 'ro.build.version.release', 'ro.build.version.sdk']) {
             values.push(`${property}: ${(await adbRead(deviceId, ['shell', 'getprop', property], signal)).trim()}`);
@@ -179,15 +181,18 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
           }
           output = values.join('\n');
         }
-        raw.push({ kind: 'adb', checkId: id, label: checks().find(check => check.id === id).label, target: deviceId, text: output, capturedAt: now() });
+        raw.push({ kind: 'adb', checkId: id, label: checks().find(check => check.id === id).label, target: deviceId, text: output, capturedAt: now(),
+          ...(APP_CHECKS.includes(id) ? { diagnostic, unavailable } : {}) });
       }
       if ((await adbRead(deviceId, ['get-state'], signal)).trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
     }
     if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
-    if (!raw.length || raw.every(item => !item.text.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
-    const entries = raw.map((item, index) => freezeEntry(item, index, now(), selection));
+    if (!raw.length || raw.every(item => !item.text.trim() && !item.unavailable)) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
+    const process = processor || require('./ai-workspace-compute.cjs').computeWorkspaceJob;
+    const frozen = await process('freeze', { sources: raw, selection, now: now() }, { signal });
+    const entries = frozen.entries;
     if (entries.every(entry => !entry.text.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
-    const bytes = Buffer.byteLength(JSON.stringify(entries));
+    const bytes = frozen.bytes;
     if (bytes > MAX_EVIDENCE_BYTES) throw fail('AI_EVIDENCE_LIMIT', tr('证据总量超过 1 MiB，请减少来源或缩小选段后重新生成预览。'));
     return { entries, bytes, selection, truncated: entries.some(item => item.truncated) };
   }

@@ -340,7 +340,12 @@ function createScreenRecordingService({
     return { success: results.every(result => result.success), failed: results.filter(result => !result.success).map(result => result.session) };
   }
 
-  return { start, stop, retry, list, hasActiveRecordings, listUnresolved, stopAllRecordings };
+  async function stopOwned({ id } = {}) {
+    const session = sessions.get(id);
+    if (!session) return { success: false, error: tr('没有找到指定的录屏会话。') };
+    return finish(session);
+  }
+  return { start, stop, stopOwned, retry, list, hasActiveRecordings, listUnresolved, stopAllRecordings };
 }
 
 let singleton;
@@ -373,6 +378,9 @@ function register(ipcMain) {
 
 module.exports = {
   createScreenRecordingService, register,
+  start: args => getService().start(args),
+  stopOwned: args => getService().stopOwned(args),
+  list: args => getService().list(args),
   hasActiveRecordings: () => getService().hasActiveRecordings(),
   listUnresolved: () => getService().listUnresolved(),
   stopAllRecordings: () => getService().stopAllRecordings()

@@ -5,6 +5,7 @@ const { tr } = require('./localization.cjs');
 const { sanitize } = require('./ai-workspace-evidence.cjs');
 const { parseAnalysis } = require('./ai-workspace-schema.cjs');
 const { normalizeSelection } = require('./ai-workspace-selection.cjs');
+const { CHECK_IDS, normalizeDiagnostic } = require('./ai-workspace-diagnostics.cjs');
 const limits = require('./ai-workspace-limits.cjs');
 const UUID = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const fail = () => Object.assign(new Error(tr('报告无效、已损坏或超过本地保存限制。')), { code: 'AI_REPORT', safe: true });
@@ -21,7 +22,14 @@ function validateReport(report) {
     || (report.preview.targetFingerprint != null && !/^[a-f\d]{24,64}$/.test(report.preview.targetFingerprint))
     || Buffer.byteLength(JSON.stringify(report)) > limits.reportBytes) throw fail();
   if (report.preview.context && (!string(report.preview.context.question, 4000) || !string(report.preview.context.summary, 4000))) throw fail();
+  const review = report.review === undefined ? undefined : require('./ai-workspace-store-async.cjs').normalizeReview(report.review);
+  if (report.preview.context?.caseReview) require('./ai-workspace-store-async.cjs').normalizeReview(report.preview.context.caseReview);
+  if (report.preview.context?.caseName !== undefined && !string(report.preview.context.caseName, 80)) throw fail();
+  const provenance = value => value && typeof value === 'object' && !Array.isArray(value) && ['renderer-view', 'server-snapshot'].includes(value.trust) && string(value.origin, 80);
+  if (report.preview.handoff && (!string(report.preview.handoff.title, 2000) || !string(report.preview.handoff.deviceId, 2000)
+    || !string(report.preview.handoff.origin, 80) || !provenance(report.preview.handoff.provenance))) throw fail();
   if (report.preview.selection !== undefined) normalizeSelection(report.preview.selection);
+  if (report.preview.diagnostic !== undefined) normalizeDiagnostic(report.preview.diagnostic);
   if (report.usage != null && (!integer(report.usage.inputTokens, 1000000000) || !integer(report.usage.outputTokens, 1000000000)
     || report.usage.totalTokens !== report.usage.inputTokens + report.usage.outputTokens)) throw fail();
   const ids = new Set();
@@ -35,7 +43,11 @@ function validateReport(report) {
       || (entry.timeWarning !== undefined && !string(entry.timeWarning, 2000))
       || (entry.selectionWarning !== undefined && !string(entry.selectionWarning, 2000))
       || (entry.targetKey != null && !/^[a-f\d]{24,64}$/.test(entry.targetKey))
-      || (entry.evidenceKind !== undefined && !['adb:device_info', 'adb:logcat_snapshot', 'adb:performance_snapshot', 'log', 'serial', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
+      || (entry.unavailable !== undefined && typeof entry.unavailable !== 'boolean')
+      || (entry.evidenceKind !== undefined && ![...CHECK_IDS.map(id => `adb:${id}`), 'log', 'serial', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
+    if (entry.diagnostic !== undefined) normalizeDiagnostic(entry.diagnostic);
+    if (entry.provenance !== undefined && !provenance(entry.provenance)) throw fail();
+    if (entry.provenance?.trust === 'renderer-view' && entry.targetKey != null) throw fail();
     ids.add(entry.id);
     const lineCount = entry.text ? entry.text.split('\n').length : 0;
     if (entry.lineCount !== undefined && entry.lineCount !== lineCount) throw fail();
@@ -64,7 +76,7 @@ function validateReport(report) {
     const before = report.preview.entries.find(entry => entry.id === pair.beforeId), after = report.preview.entries.find(entry => entry.id === pair.afterId);
     if (!before.evidenceKind || before.evidenceKind !== after.evidenceKind || !before.targetKey || before.targetKey !== after.targetKey) throw fail();
   }
-  return { ...clone(report), result: parseAnalysis(JSON.stringify(report.result), report.preview.entries, comparison) };
+  return { ...clone(report), ...(review ? { review } : {}), result: parseAnalysis(JSON.stringify(report.result), report.preview.entries, comparison) };
 }
 
 function atomicWrite(filename, content, io = fs) {
@@ -173,6 +185,7 @@ function reportText(report) {
     for (const value of report.result[field]) sections.push(fenced(typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
   }
   if (report.result.verdict) sections.push(fenced(report.result.verdict));
+  if (report.review) sections.push(fenced(JSON.stringify(report.review, null, 2)));
   if (report.preview.context) sections.push(fenced(JSON.stringify(report.preview.context, null, 2)));
   if (report.preview.comparison) sections.push(fenced(JSON.stringify(report.preview.comparison, null, 2)));
   if (report.preview.selection) sections.push(fenced(JSON.stringify(report.preview.selection, null, 2)));

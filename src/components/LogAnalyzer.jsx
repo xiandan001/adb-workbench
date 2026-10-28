@@ -9,6 +9,9 @@ import LogFilterPresets from './LogFilterPresets';
 import LogSessionManager from './LogSessionManager';
 import LogEvidence from './LogEvidence';
 import LogMarkers from './LogMarkers';
+import AiContextButton from './AiContextButton';
+import AiOutboundPreviewHost from './AiOutboundPreviewHost';
+import { joinAiContextRows } from '../shared/aiHandoff';
 import { captureLogMarker, logEntryIdentity, MAX_LOG_MARKERS } from '../shared/logMarkers';
 import { appendLogWindow, createLogBatchBuffer, LOG_VIEW_LIMIT } from '../shared/logStream';
 // 日志诊断规则库面板
@@ -155,6 +158,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [smartSearchMatchedIds, setSmartSearchMatchedIds] = useState(new Set()); // 匹配的 entry ID 集合
   const [smartSearchIncremental, setSmartSearchIncremental] = useState([]); // 增量累积的匹配条目（流式显示）
   const smartSearchListenersRef = useRef([]);
+  useEffect(() => window.electronAPI?.onAiOutboundChanged?.(payload => {
+    const operations = payload?.operations || [];
+    const analysis = operations.filter(item => ['analysis', 'diagnostic'].includes(item.kind)).at(-1);
+    const search = operations.filter(item => item.kind === 'search').at(-1);
+    if (analysis && ['cancelled', 'failed'].includes(analysis.status)) { setAiAnalyzing(false); setMapReduceProgress(null); }
+    if (search && ['cancelled', 'failed'].includes(search.status)) { setSmartSearching(false); setSmartSearchProgress(null); }
+  }), []);
   // 当前搜索会话 ID：用于过滤旧搜索会话的事件，防止"停止→重新搜索"时
   // 旧搜索的 complete/chunk/progress 事件污染新搜索状态
   const searchSessionRef = useRef(0);
@@ -1224,7 +1234,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         });
       }
       try {
-        await window.electronAPI.smartSearch({ query: smartSearchQuery.trim(), source });
+        const result = await window.electronAPI.smartSearch({ query: smartSearchQuery.trim(), source, entryIds: filtered.map(entry => entry.id) });
+        if (!result?.ok) throw new Error(result?.error || tr('智能搜索未完成。'));
       } catch (e) {
         setSmartSearching(false);
         setSmartSearchProgress(null);
@@ -1522,6 +1533,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onMessage={setNote}
           />
           <LogMarkers markers={markers} onChange={setMarkers} draft={markerDraft} onDismissDraft={() => setMarkerDraft(null)} isDark={isDark} onLocate={locateMarker} />
+          <AiContextButton disabled={!filtered.length} context={() => ({ view: { origin: 'log-filter', title: tr('当前日志筛选结果'), question: tr('请分析这段已筛选的日志上下文。'),
+            deviceId: captureDeviceId || '', text: joinAiContextRows(filtered) } })} />
           <div className="flex-1" />
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{tr("{0} 条", { 0: filtered.length.toLocaleString(getLocale()) })}</div>
@@ -2039,6 +2052,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   </div>
                 )}
                 <div className="flex items-center gap-2 mt-3">
+                  {hasIssues && <AiContextButton context={() => ({ view: { origin: 'log-diagnostic', title: tr('日志规则异常上下文'), question: tr('请核对这些规则命中的异常并给出验证方向。'),
+                    deviceId: captureDeviceId || '', text: autoDiagnoseAlert.issues.map(issue => `${issue.label}\n${issue.context}`).join('\n\n') } })} />}
                   {hasIssues && (
                     <button
                       onClick={() => {
@@ -2544,6 +2559,7 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
           </div>
         </div>
       )}
+      <AiOutboundPreviewHost isDark={isDark} />
     </div>
   );
 }

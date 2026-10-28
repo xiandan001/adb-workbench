@@ -5,6 +5,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('../electron/lib/task-run-manifest.cjs');
 
+test('new inactive selector guards preserve existing manual-script comparison hashes', () => {
+  const old = { id: 'fixture', steps: [{ id: 'step', type: 'tap', x: 12, y: 34, selector: { text: 'fixture' } }] };
+  const next = { ...old, steps: [{ ...old.steps[0], requireUnique: false, packageName: '', selector: { ...old.steps[0].selector, packageName: '' } }] };
+  assert.equal(createRunComparisonIdentity(old).scriptHash, createRunComparisonIdentity(next).scriptHash);
+  assert.notEqual(createRunComparisonIdentity(old).scriptHash, createRunComparisonIdentity({ ...next, steps: [{ ...next.steps[0], requireUnique: true }] }).scriptHash);
+});
+
 for (const status of ['success', 'failed', 'cancelled']) {
   test(`${status} replay writes an indexable manifest with failure evidence`, (t) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'adb-workbench-manifest-'));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createMessageTranslator } from '../src/shared/messageCatalog.js';
 import taskParameters from '../electron/lib/ai-workspace-task.cjs';
-import { AI_WORKSPACE_TURN_LIMIT, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, toggleWorkspaceSelection, workspaceCitation, workspaceDeviceOnline, workspaceLinePage, workspacePreviewFresh, workspaceReportKey, workspaceReportRef, workspaceRequestCurrent } from '../src/components/AiWorkspaceState.js';
+import { AI_WORKSPACE_TURN_LIMIT, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, toggleWorkspaceSelection, workspaceCitation, workspaceDeviceOnline, workspaceLinePage, workspacePreviewFresh, workspaceReportKey, workspaceReportRef, workspaceRequestCurrent } from '../src/components/AiWorkspaceState.js';
 
 test('AI workspace modes keep independent identities and snapshots', () => {
   const diagnosis = createWorkspaceCase('diagnose', 'device-a', 'case-a');
@@ -57,8 +57,21 @@ test('follow-up and regression handoffs only prepare state and do not reuse send
 });
 
 test('report selection only accepts declared reference forms', () => {
-  for (const ref of [{ historyId: 'saved' }, { caseId: 'case', turnId: 'turn' }]) assert.deepEqual(workspaceReportRef(workspaceReportKey(ref)), ref);
+  for (const ref of [{ historyId: 'saved' }, { casebookId: 'verified-case' }, { caseId: 'case', turnId: 'turn' }]) assert.deepEqual(workspaceReportRef(workspaceReportKey(ref)), ref);
   for (const key of ['', 'preview:token', 'history:', 'turn:one', 'turn:one:two:extra']) assert.equal(workspaceReportRef(key), null);
+});
+
+test('handoff metadata only prepares input and selected targets without any send authorization', () => {
+  const metadata = { id: 'handoff', question: 'synthetic target', title: 'fixture', taskTargets: [{ token: 'selected-token', label: 'Settings' }] };
+  const next = prepareWorkspaceHandoff(createWorkspaceCase('task', '', 'case'), metadata);
+  assert.equal(next.handoffId, 'handoff'); assert.equal(next.question, 'synthetic target');
+  assert.deepEqual(next.targetSelection.tokens, ['selected-token']); assert.equal(next.preview, null); assert.equal(next.draft, null); assert.equal(next.busy, '');
+});
+
+test('changing diagnostic device invalidates application and selected-target binding', () => {
+  const state = { ...createWorkspaceCase('diagnose', 'A', 'case'), diagnostic: { packageName: 'com.example.fixture', symptom: 'crash' }, targets: [{ token: 'old' }], targetSelection: { tokens: ['old'] } };
+  const changed = editWorkspaceCase(state, { deviceId: 'B' });
+  assert.equal(changed.diagnostic.packageName, ''); assert.deepEqual(changed.targetSelection.tokens, []); assert.deepEqual(changed.targets, []);
 });
 
 test('line citations validate retained lines and page navigation remains bounded', () => {

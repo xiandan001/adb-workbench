@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
+const { transformRunManifest } = require('./artifact-export-transform.cjs');
 
 function isWithin(parent, candidate) {
   const relative = path.relative(path.resolve(parent), path.resolve(candidate));
@@ -66,15 +67,20 @@ async function exportArtifact(item, destination) {
     const staging = path.join(tempRoot, 'content');
     const bundle = path.join(tempRoot, 'evidence.zip');
     await fs.promises.mkdir(path.join(staging, 'evidence'), { recursive: true });
+    const copiedFiles = [];
     for (const file of selected.files) {
       const copyPath = path.join(staging, 'evidence', file.name);
       await fs.promises.mkdir(path.dirname(copyPath), { recursive: true });
       await fs.promises.copyFile(file.source, copyPath);
+      const processed = path.basename(copyPath).toLowerCase() === 'run-result.json' ? await transformRunManifest(copyPath) : null;
+      const bytes = processed?.bytes ?? (await fs.promises.stat(copyPath)).size;
+      copiedFiles.push({ path: `evidence/${file.name.split(path.sep).join('/')}`, bytes,
+        ...(processed?.excludedFields.length ? { excludedFields: processed.excludedFields } : {}) });
     }
     const manifest = {
       version: 1, title: item.title, type: item.type, deviceId: item.deviceId || '',
       exportedAt: new Date().toISOString(),
-      files: selected.files.map(file => ({ path: `evidence/${file.name.split(path.sep).join('/')}`, bytes: file.bytes }))
+      files: copiedFiles
     };
     await fs.promises.writeFile(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
     await zipDirectory(staging, bundle);

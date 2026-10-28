@@ -8,7 +8,7 @@ const { analysisMessages } = require('./analysis-language.cjs');
 // 该模块导出工具函数（pushAiMessages / buildAiSystemPrompt）和 getter（供其他模块读取状态）
 
 const { dialog } = require('electron');
-const https = require('https');
+const https = require('./ai-outbound-transport.cjs');
 const { StringDecoder } = require('string_decoder');
 
 const aiKeys = require('./ai-keys.cjs');
@@ -232,6 +232,7 @@ function truncateUserContentToFit(userContent, systemBytes, historyBytes, reason
  * @returns {Promise<{systemPrompt: string, userContent: string, totalChunks: number}>}
  */
 async function mapReduceAnalyze(lines, filterContext, customPrompt, sender) {
+  return https.withBatch(tr('确认发送固定日志分块'), async () => {
   const totalLines = lines.length;
   // 计算分块大小：行数 / 最大块数 与固定块长取较大值，避免块过多
   const desiredChunks = Math.min(Math.ceil(totalLines / AI_CHUNK_LINES), AI_MAPREDUCE_MAX_CHUNKS);
@@ -278,6 +279,7 @@ async function mapReduceAnalyze(lines, filterContext, customPrompt, sender) {
         timeoutMs: 90000,
         temperature: 0.2
       }).then(result => {
+        if (result.cancelled || result.code?.startsWith('AI_SEND_')) throw Object.assign(new Error(result.error), { code: result.code, name: result.cancelled ? 'AbortError' : 'Error' });
         // 单块完成后发送进度（并行完成顺序不确定，进度按完成数递增）
         completedCount++;
         sendProgress('map', completedCount, totalChunks, { lineRange: `${start + 1}-${end}` });
@@ -303,9 +305,11 @@ async function mapReduceAnalyze(lines, filterContext, customPrompt, sender) {
   const userContent = tr("{0}\n\n--- 分块分析结果 ---\n\n{1}", { 0: reduceIntro, 1: chunkResults.join('\n\n---\n\n') });
 
   return { systemPrompt, userContent, totalChunks };
+  });
 }
 
-function register(ipcMain) {
+function register(rawIpcMain) {
+  const ipcMain = https.protectIpc(rawIpcMain);
   ipcMain.handle('ai:analyzeLog', async (event, args) => {
     try {
       const { lines, filterContext, customPrompt, logChanged, thinkingMode } = args;
@@ -436,7 +440,7 @@ function register(ipcMain) {
 
       // 累积完整回复
       let fullResponse = '';
-      const AI_MAX_RETRIES = 3;
+      const AI_MAX_RETRIES = 0; // Retrying or changing an authorized payload requires a new explicit preview.
       let retryCount = 0;
 
       function doRequest(currentKey) {
@@ -818,7 +822,8 @@ function clearAiConversation() {
   aiLastResult = '';
 }
 
-function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, temperature = 0.2 }) {
+function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, temperature = 0.2, signal }) {
+  if (signal?.aborted) return Promise.resolve({ ok: false, code: 'AI_SEND_CANCELLED', cancelled: true, error: tr('AI 发送已取消。') });
   return new Promise((resolve) => {
     if (!AGNES_API_KEYS || AGNES_API_KEYS.length === 0) {
       resolve({ ok: false, error: tr("AI Key 未配置") });
@@ -832,7 +837,7 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
       stream: false,
       temperature
     });
-    const maxRetries = 2;
+    const maxRetries = 0;
     let retryCount = 0;
     let settled = false;
 
@@ -845,16 +850,14 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
 
     const doRequest = (apiKey) => {
       let req = null;
-      const timer = setTimeout(() => {
-        try { req?.destroy?.(); } catch {}
-        finish({ ok: false, error: tr("AI 总结超时（{0}ms）", { 0: timeoutMs }) });
-      }, timeoutMs);
+      let timer;
 
-      req = https.request({
+      try { req = https.request({
         hostname: urlObj.hostname,
         port: 443,
         path: urlObj.pathname,
         method: 'POST',
+        signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
@@ -877,13 +880,17 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
           try {
             const json = JSON.parse(body);
             const summary = json.choices?.[0]?.message?.content || '';
-            finish(summary ? { ok: true, summary } : { ok: false, error: tr("AI 总结为空") });
+            finish(summary ? { ok: true, summary, usage: json.usage || null } : { ok: false, error: tr("AI 总结为空") });
           } catch (error) {
             finish({ ok: false, error: tr("解析 AI 响应失败: {0}", { 0: error.message }) });
           }
         });
       });
 
+      } catch (error) {
+        finish({ ok: false, code: error.code, cancelled: error.name === 'AbortError', error: error.message });
+        return;
+      }
       req.on('error', (error) => {
         clearTimeout(timer);
         if (settled) return;
@@ -892,7 +899,15 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
           doRequest(getNextApiKey());
           return;
         }
-        finish({ ok: false, error: error.message });
+        finish({ ok: false, code: error.code, cancelled: error.name === 'AbortError' || error.code === 'AI_SEND_CANCELLED', error: error.message });
+      });
+
+      // Preview reading time is not network time. Start the existing deadline only after consent.
+      req.once('ai:authorized', () => {
+        timer = setTimeout(() => {
+          finish({ ok: false, code: 'AI_SEND_TIMEOUT', error: tr("AI 总结超时（{0}ms）", { 0: timeoutMs }) });
+          req.destroy(Object.assign(new Error(tr("AI 总结超时（{0}ms）", { 0: timeoutMs })), { code: 'AI_SEND_TIMEOUT' }));
+        }, timeoutMs);
       });
 
       req.write(requestBody);

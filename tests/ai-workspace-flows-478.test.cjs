@@ -64,8 +64,8 @@ test('delete cancellation and owner disposal during confirmation never remove a 
   let finish;
   const h = fixture(t, { confirmDelete: () => new Promise(resolve => { finish = resolve; }) });
   const p = await h.collect(), a = await h.analyze(p.preview), stored = await h.service.call('historySave', { caseId: h.caseId, turnId: a.turn.id, name: 'keep' });
-  const cancelled = h.service.call('historyDelete', { id: stored.item.id }); finish(false); assert.equal((await cancelled).cancelled, true);
-  const pending = h.service.call('historyDelete', { id: stored.item.id }); h.service.dispose(); finish(true);
+  const cancelled = h.service.call('historyDelete', { id: stored.item.id }); await new Promise(resolve => setImmediate(resolve)); finish(false); assert.equal((await cancelled).cancelled, true);
+  const pending = h.service.call('historyDelete', { id: stored.item.id }); await new Promise(resolve => setImmediate(resolve)); h.service.dispose(); finish(true);
   assert.equal((await pending).cancelled, true); assert.equal(h.deps.history.load(stored.item.id).name, 'keep');
 });
 

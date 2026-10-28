@@ -7,6 +7,9 @@ import { AiWorkspaceUsage } from './AiWorkspaceEvidence';
 import { AiWorkspaceReport, AiWorkspaceTask } from './AiWorkspaceResults';
 import { AiWorkspaceContext, AiWorkspaceRequirements, AiWorkspaceSelection } from './AiWorkspaceControls';
 import AiWorkspaceHistory, { AiWorkspaceComparison, AiWorkspaceReportActions } from './AiWorkspaceHistory';
+import AiWorkspaceDiagnostics from './AiWorkspaceDiagnostics';
+import AiWorkspaceCasebook from './AiWorkspaceCasebook';
+import AiWorkspaceHandoff from './AiWorkspaceHandoff';
 import SelectMenu from './SelectMenu';
 
 function WorkspaceRules({ theme }) {
@@ -31,9 +34,9 @@ function SelectionCards({ items, selected, onToggle, disabled, theme, empty }) {
   </label>)}</div>;
 }
 
-export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', onOpenTasks, onOpenMembership, showToast }) {
+export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', incomingHandoffId = '', onOpenTasks, onOpenMembership, showToast }) {
   useLocale();
-  const state = useAiWorkspace({ active, activeDeviceId, onOpenTasks, showToast });
+  const state = useAiWorkspace({ active, activeDeviceId, incomingHandoffId, onOpenTasks, showToast });
   const { mode, current, sources, loading, sourceError } = state;
   const dark = isDarkTheme(theme); const busy = Boolean(current.busy || state.reportBusy);
   const entitled = sources.entitled === true;
@@ -54,7 +57,8 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     plan: tr('正在生成只读检查计划…'), collect: tr('正在本机采集并脱敏…'), analyze: tr('正在使用内置 AI 分析…'),
     generate: tr('正在生成测试任务草案…'), save: tr('正在确认并保存任务…'), cancelling: tr('正在取消…'), compare: tr('正在本机准备对比预览…'),
   }[current.busy];
-  const canCollect = current.question.trim() && !busy && !loading && (mode === 'diagnose' ? online && current.checks.length > 0 : !staleSources && (current.contextRef || current.sourceIds.length > 0 || current.text.trim()));
+  const needsPackage = current.checks.some(check => check.startsWith('app_'));
+  const canCollect = current.question.trim() && !busy && !loading && (mode === 'diagnose' ? online && current.checks.length > 0 && (!needsPackage || current.diagnostic.packageName.trim()) : !staleSources && (current.handoffId || current.contextRef || current.sourceIds.length > 0 || current.text.trim()));
   const view = current.reportView;
 
   return <section aria-label={tr('AI 工作区')} className={`min-w-0 space-y-4 ${theme.text}`}>
@@ -64,6 +68,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     </div>
     <WorkspaceRules theme={theme} />
     {sourceError && <p role="alert" className="rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-500">{tr(sourceError)}</p>}
+    {state.pendingHandoff && <div className={`flex items-center gap-3 rounded-xl border p-3 ${theme.card}`}><p className="flex-1 text-xs">{tr('带入新上下文会替换当前输入；已完成报告会保留。')}</p><button type="button" disabled={Boolean(state.reportBusy) || Object.values(state.cases).some(value => value.busy)} onClick={state.acceptPendingHandoff} className={button}>{tr('带入等待中的上下文')}</button></div>}
     {!entitled && !loading && <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${theme.card}`}><ShieldCheck size={21} className="shrink-0 text-emerald-500" /><p className={`min-w-0 flex-1 text-xs leading-5 ${theme.textMuted}`}>{tr('AI 调用沿用本软件会员权限。请在会员中心确认激活；无需新建 AI 账号。')}</p><button type="button" onClick={onOpenMembership} disabled={!onOpenMembership} className={button}>{tr('打开会员中心')}</button></div>}
     <div role="tablist" aria-label={tr('AI 工作区功能')} className="grid gap-2 md:grid-cols-3">{modes.map(item => <button key={item.id} type="button" role="tab" id={`ai-workspace-tab-${item.id}`} aria-selected={mode === item.id} aria-controls={`ai-workspace-panel-${item.id}`} onClick={() => state.setMode(item.id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${mode === item.id ? (dark ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700') : theme.card}`}>
       <item.icon size={20} className="shrink-0" /><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{item.title}</span><span className={`mt-1 block text-[11px] ${theme.textMuted}`}>{item.detail}</span></span>{state.cases[item.id].busy && <Loader2 size={15} className="shrink-0 animate-spin" />}
@@ -74,6 +79,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
           <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">{currentMode.title}</h3><button type="button" onClick={state.reset} disabled={busy} className={button} title={tr('开始新问题，保留本会话已完成分析')}><RotateCcw size={13} />{tr('新建')}</button></div>
           <label className="block space-y-2"><span className="text-xs font-medium">{mode === 'task' ? tr('测试目标') : tr('描述你要分析的问题')}</span><textarea value={current.question} onChange={event => state.edit({ question: event.target.value })} disabled={busy} maxLength={4000} rows={4} className={`${input} resize-y leading-6`} placeholder={mode === 'task' ? tr('例如：等待首页出现“设置”，点击坐标 (100, 200)，截图并采集性能。请给出可核对的参数。') : tr('说明现象、复现条件和期望结果。不要填写密码、密钥或账号信息。')} /></label>
           <AiWorkspaceContext context={current.context} disabled={busy} onClear={() => state.edit({ contextRef: null, context: null, findingIndex: null })} theme={theme} />
+          <AiWorkspaceHandoff handoff={current.handoff} targets={current.targets} disabled={busy} onClear={() => state.edit({ handoffId: '', handoff: null, targets: [], targetSelection: { tokens: [] } })} theme={theme} />
           {mode === 'diagnose' && <>
             <div className="space-y-2"><p className="text-xs font-medium">{tr('本次排障设备')}</p><SelectMenu ariaLabel={tr('本次排障设备')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
               { value: '', label: tr('请选择在线设备') },
@@ -81,6 +87,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
               ...onlineDevices.map(device => ({ value: device.id, label: device.model ? `${device.model} · ${device.id}` : device.id })),
             ]} /></div>
             {current.deviceId && !online && <p className="text-xs leading-5 text-amber-600">{tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。')}</p>}
+            <AiWorkspaceDiagnostics current={current} presets={sources.diagnosticPresets || []} onChange={state.edit} disabled={busy} online={online} theme={theme} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">{tr('只读检查项目')}</span><button type="button" onClick={state.plan} disabled={busy || !entitled || !online || !current.question.trim()} className={button}><Sparkles size={14} />{tr('AI 建议检查计划')}</button></div>
             <SelectionCards items={sources.checks || []} selected={current.checks} onToggle={id => state.edit({ checks: toggleWorkspaceSelection(current.checks, id) })} disabled={busy} theme={theme} empty={loading ? tr('正在读取可用检查…') : tr('未读取到检查项目，请刷新来源。')} />
             {current.plan && <div className="space-y-2 rounded-lg bg-emerald-500/5 p-3"><p className={`whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{current.plan.reason}</p><AiWorkspaceUsage usage={current.planUsage} theme={theme} /></div>}
@@ -98,11 +105,12 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
           {current.error && <p role="alert" className="break-words rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-5 text-red-500">{tr(current.error)}</p>}
         </section>
         <AiWorkspaceHistory state={state} theme={theme} />
+        <AiWorkspaceCasebook state={state} theme={theme} />
         {mode !== 'task' && <AiWorkspaceComparison state={state} theme={theme} />}
       </div>
       <div className="min-w-0 space-y-4">
         {view ? <>
-          <AiWorkspaceReportActions key={view.reportRef.historyId || view.reportRef.turnId} view={view} state={state} theme={theme} />
+          <AiWorkspaceReportActions key={view.reportRef.casebookId || view.reportRef.historyId || view.reportRef.turnId} view={view} state={state} theme={theme} />
           <AiWorkspaceReport key={view.report.preview.id} preview={view.report.preview} result={view.report.result} usage={view.report.usage} cached={view.cached} theme={theme} readOnly onRegression={!busy && !state.cases.task.busy ? index => state.useContext('task', index) : undefined} />
         </> : current.preview && <AiWorkspaceReport key={current.preview.id} preview={current.preview} result={current.result} usage={current.usage} cached={current.cached} busy={current.busy} entitled={entitled} onAnalyze={state.analyze} theme={theme} />}
         {current.draft && <AiWorkspaceTask draft={current.draft} busy={current.busy} onSave={state.save} usage={current.usage} theme={theme} />}

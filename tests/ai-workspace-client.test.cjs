@@ -8,10 +8,10 @@ const input = { systemPrompt: 'Return one synthetic result.', userContent: 'Synt
 const config = { url: 'https://fixture.invalid/v1/chat/completions?route=fixture', model: 'fixture-model', key: 'fixture-not-a-real-key' };
 const responseBody = (text = '{"ok":true}', usage) => JSON.stringify({ choices: [{ message: { content: text }, finish_reason: 'stop' }], ...(usage ? { usage } : {}) });
 
-function harness({ status = 200, body = responseBody(), headers = {}, action, configOverride, synchronous = false } = {}) {
+function harness({ status = 200, body = responseBody(), headers = {}, action, configOverride, synchronous = false, serializeBody } = {}) {
   const calls = [];
   const sockets = [];
-  const client = createBuiltinClient({ getConfig: () => ({ ...config, ...configOverride }), request: (options, callback) => {
+  const client = createBuiltinClient({ serializeBody, getConfig: () => ({ ...config, ...configOverride }), request: (options, callback) => {
     const req = new EventEmitter();
     const res = new EventEmitter();
     res.statusCode = status;
@@ -67,6 +67,19 @@ test('missing or malformed token usage is unknown rather than zero', async () =>
   }
   const h = harness({ body: responseBody('ok', { prompt_tokens: 2, completion_tokens: 1 }) });
   assert.deepEqual((await h.client(input)).usage, { inputTokens: 2, outputTokens: 1, totalTokens: 3 });
+});
+
+test('async transport serialization receives no credentials and cancelled preparation sends no request', async () => {
+  let seen;
+  const h = harness({ serializeBody: async payload => { seen = payload; return JSON.stringify(payload); } });
+  assert.equal((await h.client(input)).ok, true);
+  assert.equal(JSON.stringify(seen).includes(config.key), false);
+  assert.equal(h.calls[0].options.headers['Content-Length'], Buffer.byteLength(h.calls[0].body));
+  let finish;
+  const stopped = harness({ serializeBody: payload => new Promise(resolve => { finish = () => resolve(JSON.stringify(payload)); }) });
+  const controller = new AbortController(), pending = stopped.client({ ...input, signal: controller.signal });
+  controller.abort(); finish();
+  assert.equal((await pending).code, 'cancelled'); assert.equal(stopped.calls.length, 0);
 });
 
 test('invalid input and configuration never perform a request or expose configuration', async () => {

@@ -46,7 +46,7 @@ function parseResponse(body) {
   } catch { return failure('response'); }
 }
 
-function prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig) {
+function prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, deferred = false) {
   if (typeof systemPrompt !== 'string' || !systemPrompt.trim() || typeof userContent !== 'string' || !userContent.trim()
     || Buffer.byteLength(systemPrompt, 'utf8') + Buffer.byteLength(userContent, 'utf8') > LIMITS.inputBytes
     || !Number.isInteger(maxTokens) || maxTokens < 16 || maxTokens > LIMITS.maxTokens) return { error: failure('invalid_input') };
@@ -56,23 +56,33 @@ function prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig) {
     if (url.protocol !== 'https:' || url.username || url.password || url.hash
       || typeof config.key !== 'string' || !config.key.trim() || /[\r\n]/.test(config.key)
       || typeof config.model !== 'string' || !config.model.trim()) return { error: failure('unavailable') };
-    const body = JSON.stringify({ model: config.model, messages: analysisMessages(systemPrompt, [], userContent), stream: false, temperature: 0.2, max_tokens: maxTokens });
-    return { body, options: {
+    const payload = { model: config.model, messages: analysisMessages(systemPrompt, [], userContent), stream: false, temperature: 0.2, max_tokens: maxTokens };
+    const body = deferred ? '' : JSON.stringify(payload);
+    return { body, ...(deferred ? { payload } : {}), options: {
       protocol: 'https:', hostname: url.hostname, port: url.port || 443, path: `${url.pathname}${url.search}`, method: 'POST', rejectUnauthorized: true,
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), Authorization: `Bearer ${config.key}` }
     } };
   } catch { return { error: failure('unavailable') }; }
 }
 
-function createBuiltinClient({ request = https.request, getConfig = builtinConfig } = {}) {
+function createBuiltinClient({ request = https.request, getConfig = builtinConfig, serializeBody, deferTimeoutUntilAuthorized = false } = {}) {
   return async ({ systemPrompt, userContent, signal, maxTokens = 2200 } = {}) => {
     if (signal?.aborted) return failure('cancelled');
-    const prepared = prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig);
+    const prepared = prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, Boolean(serializeBody));
     if (prepared.error) return prepared.error;
+    if (serializeBody) {
+      try {
+        prepared.body = await serializeBody(prepared.payload, { signal });
+        if (signal?.aborted) return failure('cancelled');
+        if (typeof prepared.body !== 'string' || Buffer.byteLength(prepared.body) > LIMITS.inputBytes * 2 + 65536) return failure('invalid_input');
+        prepared.options.headers['Content-Length'] = Buffer.byteLength(prepared.body);
+      } catch { return failure(signal?.aborted ? 'cancelled' : 'invalid_input'); }
+    }
     return new Promise(resolve => {
       let settled = false;
       let req;
       let response;
+      let timer;
       const stop = () => {
         try { response?.destroy(); } catch { /* Cleanup must not expose transport errors. */ }
         try { req?.destroy(); } catch { /* Cleanup must not expose transport errors. */ }
@@ -82,15 +92,18 @@ function createBuiltinClient({ request = https.request, getConfig = builtinConfi
         settled = true;
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
+        req?.removeListener('ai:authorized', startTimer);
         if (abort) stop();
         resolve(result);
       };
       const onAbort = () => finish(failure('cancelled'), true);
-      const timer = setTimeout(() => finish(failure('timeout'), true), LIMITS.timeoutMs);
+      const onError = error => finish(failure(signal?.aborted || error?.name === 'AbortError' || error?.code === 'AI_SEND_CANCELLED' ? 'cancelled' : 'network'), true);
+      const startTimer = () => { if (!settled && !timer) timer = setTimeout(() => finish(failure('timeout'), true), LIMITS.timeoutMs); };
+      if (!deferTimeoutUntilAuthorized) startTimer();
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) { onAbort(); return; }
       try {
-        req = request(prepared.options, res => {
+        req = request({ ...prepared.options, signal }, res => {
           response = res;
           res.on('error', () => finish(failure('network'), true));
           res.on('aborted', () => finish(failure('network'), true));
@@ -114,10 +127,11 @@ function createBuiltinClient({ request = https.request, getConfig = builtinConfi
           });
           res.on('end', () => { if (!settled) finish(parseResponse(Buffer.concat(chunks).toString('utf8'))); });
         });
-        req.on('error', () => finish(failure('network'), true));
+        req.on('error', onError);
+        if (deferTimeoutUntilAuthorized) req.once('ai:authorized', startTimer);
         if (settled) { stop(); return; }
         req.end(prepared.body);
-      } catch { finish(failure('network'), true); }
+      } catch (error) { onError(error); }
     });
   };
 }

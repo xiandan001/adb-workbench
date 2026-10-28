@@ -51,6 +51,8 @@ function harness() {
       presentations.push(item); return item;
     },
     startupSettings: cleanupModule('settings'), aiAnalyze: { resetAiState: () => {} }, aiWorkspace: cleanupModule('ai-workspace'), mcp: { closeMcpServer: () => {} },
+    aiHandoff: cleanupModule('ai-handoff'), aiOutbound: cleanupModule('ai-outbound'), workbenchActivity: cleanupModule('activity'),
+    reproduction: { cleanup: async () => calls.push('reproduction') },
     performanceMonitor: cleanupModule('performance'), taskCenter: cleanupModule('tasks'), deviceGuard: cleanupModule('guard'), adb: { stopAllShellProcs: () => {} },
   };
   vm.createContext(context);
@@ -105,7 +107,7 @@ test('confirmed quit cancels animation before awaiting potentially slow device c
   });
   const pending = vm.runInContext(beforeQuitSource, h.context)();
   assert.equal(h.presentations[0].disposals, 1); assert.equal(h.context.startupPresentation, null);
-  assert.equal(h.presentations[0].reveals, 0); await Promise.resolve(); finish(); await pending;
+  assert.equal(h.presentations[0].reveals, 0); await new Promise(resolve => setImmediate(resolve)); finish(); await pending;
   assert.equal(h.presentations[0].disposals, 1);
 });
 
@@ -118,6 +120,18 @@ test('regular preload exposes only fixed one-way startup signals, never overlay 
   api.startupPresentationPreferences(flags); api.startupPresentationReady('ignored'); api.startupPresentationFailed('ignored');
   assert.deepEqual(sent, [['startup:prefs', flags], ['startup:ready'], ['startup:failed']]);
   assert.ok(!Object.keys(api).some(key => /overlay/i.test(key)));
+});
+
+test('quit flushes reproduction evidence before closing serial and SSH sources', async () => {
+  const h = harness(); h.create(); const order = []; let finish;
+  Object.assign(h.context, { appMessageDialog: { cleanup() {} }, aiTools: { cleanup: async () => {} },
+    reproduction: { cleanup: () => new Promise(resolve => { finish = () => { order.push('evidence-saved'); resolve(); }; }) },
+    serial: { cleanup: async () => order.push('serial') }, ssh: { cleanup: async () => order.push('ssh') },
+    cleanupRuntimeResources: h.cleanup, cleanupAndroidToolProcesses: async () => {},
+  });
+  const pending = vm.runInContext(beforeQuitSource, h.context)();
+  assert.deepEqual(order, []); finish(); await pending;
+  assert.deepEqual(order, ['evidence-saved', 'serial', 'ssh']);
 });
 
 test('a stalled optional diagnostic flush cannot block starting device cleanup or hold exit forever', async () => {

@@ -24,6 +24,10 @@ const mcp = require('./lib/mcp-server.cjs');
 const autoDiagnose = require('./lib/auto-diagnose.cjs');
 const aiAnalyze = require('./lib/ai-analyze.cjs');
 const aiWorkspace = require('./lib/ai-workspace.cjs');
+const aiHandoff = require('./lib/ai-analysis-handoff.cjs');
+const aiOutbound = require('./lib/ai-outbound-transport.cjs');
+const workbenchActivity = require('./lib/workbench-activity.cjs');
+const reproduction = require('./lib/reproduction.cjs');
 const smartSearch = require('./lib/smart-search.cjs');
 const vip = require('./lib/vip.cjs');
 // 设备巡检报告与证据包导出 IPC 模块
@@ -223,6 +227,10 @@ app.whenReady().then(async () => {
   ssh.register(diagnosticIpc);
   aiTools.register(diagnosticIpc);
   aiWorkspace.register(diagnosticIpc);
+  aiHandoff.register(diagnosticIpc);
+  aiOutbound.register(diagnosticIpc);
+  workbenchActivity.register(diagnosticIpc);
+  reproduction.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
   regressionReport.register(diagnosticIpc);
   acceptanceSuite.register(diagnosticIpc);
@@ -251,6 +259,9 @@ function cleanupRuntimeResources() {
   // 清理 AI 相关资源
   aiAnalyze.resetAiState();
   aiWorkspace.cleanup();
+  aiHandoff.cleanup();
+  aiOutbound.cleanup();
+  workbenchActivity.cleanup();
   mcp.closeMcpServer();
   // 关闭 Log Analyzer 窗口（如有）
   const logWin = ctx.getLogAnalyzerWindow();
@@ -277,6 +288,7 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   catch { feedbackCleanup = Promise.resolve(); }
   // Invalidate pending AI dialogs/CLI launches immediately after quit confirmation.
   const aiCleanup = aiTools.cleanup().catch(() => console.warn('[AI Tools] quit cleanup failed'));
+  await reproduction.cleanup().catch(() => console.warn('[Reproduction] quit cleanup failed'));
   // Quit is already confirmed; keep other cleanup running even if a driver refuses to close.
   await serial.cleanup().catch(error => console.warn('[Serial] quit cleanup failed:', error.message));
   await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
@@ -302,10 +314,11 @@ app.on('before-quit', async (event) => {
   quitCleanupRunning = true;
   try {
     const owner = ctx.getMainWindow();
-    if ((!owner || owner.isDestroyed()) && (serial.needsQuitConfirmation() || ssh.needsQuitConfirmation() || screenRecording.listUnresolved().length)) {
+    if ((!owner || owner.isDestroyed()) && (serial.needsQuitConfirmation() || ssh.needsQuitConfirmation() || screenRecording.listUnresolved().length || reproduction.hasActive())) {
       createWindow(); quitCleanupRunning = false; return;
     }
     const ask = options => appMessageDialog.ask(options);
+    if (!await reproduction.confirmQuit(ask)) { quitCleanupRunning = false; return; }
     if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { quitCleanupRunning = false; return; }
     if (!await ssh.confirmQuit(ask)) { quitCleanupRunning = false; return; }
     const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });

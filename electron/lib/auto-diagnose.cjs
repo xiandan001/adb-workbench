@@ -7,7 +7,7 @@ const { tr } = require('./localization.cjs');
 //   auto-diagnose → app-context（广播）
 //   auto-diagnose → log-analyzer（延迟 require，运行时读取 logStore）
 
-const https = require('https');
+const https = require('./ai-outbound-transport.cjs');
 const { StringDecoder } = require('string_decoder');
 const fs = require('fs');
 const path = require('path');
@@ -396,7 +396,8 @@ function resetAutoDiagnoseLastFire() {
   Object.keys(autoDiagnoseLastFireByType).forEach(k => delete autoDiagnoseLastFireByType[k]);
 }
 
-function register(ipcMain) {
+function register(rawIpcMain) {
+  const ipcMain = https.protectIpc(rawIpcMain);
   // 诊断规则库 IPC：基础版可使用内置规则与重置，会员版解锁自定义规则和导入导出。
   ipcMain.handle('auto-diagnose:rules:list', async () => {
     return { ok: true, rules: publicRules() };
@@ -541,7 +542,7 @@ function register(ipcMain) {
       }
 
       let fullResponse = '';
-      const AI_MAX_RETRIES = 3;
+      const AI_MAX_RETRIES = 0;
       let retryCount = 0;
 
       function doRequest(currentKey) {

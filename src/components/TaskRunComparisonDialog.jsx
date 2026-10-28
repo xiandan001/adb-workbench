@@ -63,7 +63,10 @@ export default function TaskRunComparisonDialog({ history, theme, onClose, onOpe
                 <span className={muted}>{tr("未完成 / 未执行 {0}", { 0: comparison.unobserved })}</span>
                 <span>{tr("总耗时 {0} → {1}", { 0: durationLabel(comparison.beforeMs), 1: durationLabel(comparison.afterMs) })}</span>
               </div>
-              <p className={`text-xs leading-5 ${muted}`}>{tr("只比较两次均实际完成的步骤；取消、未执行或仍在运行的步骤不算成功，也不判定为新增失败。耗时受设备状态影响，外部 APK / 文件内容未纳入脚本版本校验。")}</p>
+              <p className={`text-xs leading-5 ${muted}`}>{tr('只比较两次均实际完成的步骤；取消、未执行或仍在运行的步骤不算成功。耗时受设备状态影响。')}</p>
+              <p className={`text-xs leading-5 ${before.inputHash && after.inputHash && before.inputHash === after.inputHash ? muted : 'text-amber-500'}`}>
+                {before.inputHash && after.inputHash ? before.inputHash === after.inputHash ? tr('已记录的输入文件内容一致。') : tr('输入文件内容不同，请结合版本变化判断结果；不能视为完全相同的运行条件。') : tr('至少一次运行缺少输入文件内容校验，不能仅凭相同路径判断输入一致。')}
+              </p>
               <label className="flex w-fit cursor-pointer items-center gap-2 text-sm"><input type="checkbox" checked={changesOnly} onChange={event => setChangesOnly(event.target.checked)} className="accent-emerald-500" />{tr("隐藏两次都成功的步骤")}</label>
               {visibleSteps.length === 0 && <p className={`py-8 text-center text-sm ${muted}`}>{tr("没有失败或待确认的步骤；取消勾选可查看全部步骤和耗时。")}</p>}
               <div className="space-y-2">

@@ -7,6 +7,7 @@ import SelectMenu from './SelectMenu';
 import DeviceNavigationControls from './DeviceNavigationControls';
 import DeviceRecordingStatus from './DeviceRecordingStatus';
 import DeviceRecentMedia from './DeviceRecentMedia';
+import AiContextButton from './AiContextButton';
 import useDeviceRecording from './useDeviceRecording';
 import './DeviceCard.css';
 // 设备巡检面板：采集逻辑在主进程 inspection 模块中
@@ -19,7 +20,7 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, operationError, onDismissOperationError, isPinned, onTogglePin }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   useLocale();
   const isOnline = device.status === 'device';
   const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
@@ -359,6 +360,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
         {operationError && (
           <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             <span className="min-w-0 flex-1 break-words">{tr(operationError)}</span>
+            <AiContextButton context={{ view: { origin: 'device-error', title: tr('设备操作错误'), question: tr('请根据这条界面错误说明可能原因和验证方向。'), text: String(operationError), deviceId: device.id } }} />
             <button type="button" onClick={onDismissOperationError} className="shrink-0 underline">{tr("收起")}</button>
           </div>
         )}
@@ -372,6 +374,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onCommand, onSc
         <section className="device-control-section" aria-label={tr("常用工具")}>
           <h4 className={`device-control-heading ${t.textMuted}`}>{tr("常用工具")}</h4>
           <div className="device-tool-grid">
+            {onOpenReproduction && <ControlButton icon={<ClipboardCheck size={16} />} label={tr('复现采证')} onClick={() => onOpenReproduction(device.id)} disabled={!isOnline} theme={t} isOnline={isOnline} />}
             <ControlButton
               icon={<Camera size={16} />}
               label={isLoading(`screenshot_${device.id}`) ? tr("截图中...") : tr("截图")}

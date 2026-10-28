@@ -271,6 +271,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiWorkspaceReportText: args => ipcRenderer.invoke('ai-workspace:reportText', args),
   aiWorkspaceHistoryExport: args => ipcRenderer.invoke('ai-workspace:historyExport', args),
   aiWorkspaceComparisonPreview: args => ipcRenderer.invoke('ai-workspace:comparisonPreview', args),
+  aiWorkspaceCasebookList: args => ipcRenderer.invoke('ai-workspace:casebookList', args),
+  aiWorkspaceCasebookSave: args => ipcRenderer.invoke('ai-workspace:casebookSave', args),
+  aiWorkspaceCasebookLoad: args => ipcRenderer.invoke('ai-workspace:casebookLoad', args),
+  aiWorkspaceCasebookUpdate: args => ipcRenderer.invoke('ai-workspace:casebookUpdate', args),
+  aiWorkspaceCasebookDelete: args => ipcRenderer.invoke('ai-workspace:casebookDelete', args),
+  aiWorkspaceCasebookSimilar: args => ipcRenderer.invoke('ai-workspace:casebookSimilar', args),
+  aiHandoffCreate: args => ipcRenderer.invoke('ai-handoff:create', args),
+  aiHandoffGet: args => ipcRenderer.invoke('ai-handoff:get', args),
+  onAiHandoffAvailable: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('ai-handoff:available', listener);
+    return () => ipcRenderer.off('ai-handoff:available', listener);
+  },
+  aiOutboundList: () => ipcRenderer.invoke('ai-outbound:list'),
+  aiOutboundGet: args => ipcRenderer.invoke('ai-outbound:get', args),
+  aiOutboundDecide: args => ipcRenderer.invoke('ai-outbound:decide', args),
+  onAiOutboundChanged: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('ai-outbound:changed', listener);
+    return () => ipcRenderer.off('ai-outbound:changed', listener);
+  },
   aiStopAnalyze: () => ipcRenderer.invoke('ai:stopAnalyze'),
   aiClearConversation: () => ipcRenderer.invoke('ai:clearConversation'),
   aiGetContextUsage: () => ipcRenderer.invoke('ai:getContextUsage'),
@@ -434,6 +455,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   taskStressImport: (args) => ipcRenderer.invoke('task-center:stress:import', args),
   taskStressExport: (args) => ipcRenderer.invoke('task-center:stress:export', args),
   taskStressUiSnapshot: (args) => ipcRenderer.invoke('task-center:stress:uiSnapshot', args),
+  taskAiTargetSelect: args => ipcRenderer.invoke('task-center:ai-target:select', args),
+  taskAiTargetsHandoff: args => ipcRenderer.invoke('task-center:ai-target:handoff', args),
+  taskRerunPreview: args => ipcRenderer.invoke('task-center:rerun:preview', args),
+  taskRerunFailed: args => ipcRenderer.invoke('task-center:rerun:failed', args),
   taskStressRecordAction: (args) => ipcRenderer.invoke('task-center:stress:recordAction', args),
   taskRun: (args) => ipcRenderer.invoke('task-center:run', args),
   taskCancel: (args) => ipcRenderer.invoke('task-center:cancel', args),
@@ -461,6 +486,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deviceGuardStart: (args) => ipcRenderer.invoke('device-guard:start', args),
   deviceGuardStop: (args) => ipcRenderer.invoke('device-guard:stop', args),
   deviceGuardState: () => ipcRenderer.invoke('device-guard:state'),
+  workbenchActivityList: () => ipcRenderer.invoke('workbench-activity:list'),
+  workbenchActivityCancel: args => ipcRenderer.invoke('workbench-activity:cancel', args),
+  workbenchActivityDismiss: args => ipcRenderer.invoke('workbench-activity:dismiss', args),
+  onWorkbenchActivity: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('workbench:activity', listener);
+    return () => ipcRenderer.off('workbench:activity', listener);
+  },
+  reproductionList: () => ipcRenderer.invoke('reproduction:list'),
+  reproductionSources: () => ipcRenderer.invoke('reproduction:sources'),
+  reproductionStart: args => ipcRenderer.invoke('reproduction:start', args),
+  reproductionMark: args => ipcRenderer.invoke('reproduction:mark', args),
+  reproductionStop: args => ipcRenderer.invoke('reproduction:stop', args),
+  reproductionRetrySave: args => ipcRenderer.invoke('reproduction:retrySave', args),
+  reproductionOpen: args => ipcRenderer.invoke('reproduction:open', args),
+  reproductionRead: args => ipcRenderer.invoke('reproduction:read', args),
+  reproductionAnalyze: args => ipcRenderer.invoke('reproduction:analyze', args),
+  reproductionExport: args => ipcRenderer.invoke('reproduction:export', args),
+  onReproductionUpdate: callback => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('reproduction:update', listener);
+    return () => ipcRenderer.off('reproduction:update', listener);
+  },
   onDeviceGuardUpdate: (callback) => {
     const listener = safeListener(callback);
     ipcRenderer.on('device-guard:update', listener);

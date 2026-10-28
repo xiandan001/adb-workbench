@@ -83,6 +83,7 @@ async function listArtifacts({ measure = false } = {}) {
     path.join(userData, QUALITY_CENTER_DIR, 'device-guard'),
     path.join(userData, 'device-guard')
   ])));
+  buckets.push(...await scanReproduction());
 
   const items = buckets
     .filter(Boolean)
@@ -125,6 +126,23 @@ async function scanTroubleshooting(baseDir) {
       artifactCount: Array.isArray(summary.artifacts) ? summary.artifacts.length : countFilesShallow(dir)
     };
   }));
+}
+
+async function scanReproduction() {
+  const store = require('./reproduction-store.cjs').createReproductionStore(path.join(app.getPath('userData'), 'reproduction-sessions'));
+  const result = await store.list();
+  const items = [];
+  for (const session of result.sessions) {
+    if (['starting', 'recording', 'stopping'].includes(session.status)) continue;
+    const directory = await store.checkedDirectory(session.id);
+    const manifest = await store.filePath(session.id, 'manifest.json', true);
+    items.push({ id: `reproduction:${session.id}`, sessionId: session.id, type: 'reproduction', typeLabel: tr('复现采证'),
+      title: session.title, subtitle: tr('{0} 份证据 · {1} 个标记', { 0: session.files.length, 1: session.markers.length }),
+      status: session.status, deviceId: session.deviceId, createdAt: new Date(session.startedAt).toISOString(),
+      updatedAt: new Date(session.endedAt || session.startedAt).toISOString(), rootPath: directory, deletePath: directory,
+      reportPath: manifest, summaryPath: manifest, artifactCount: session.files.length + 1 });
+  }
+  return items;
 }
 
 async function scanInspection(baseDirs) {
@@ -402,4 +420,18 @@ function parseDeviceFromPerformanceName(name) {
     .replace(/-\d{4}-\d{2}-\d{2}T.*$/i, '');
 }
 
-module.exports = { register };
+async function readAnalysisArtifact(artifactId, name) {
+  if (typeof artifactId !== 'string' || artifactId.length > 2048 || typeof name !== 'string' || name.length > 512
+    || !/\.(?:md|json|txt|log|csv)$/i.test(name)) throw new Error(tr('请选择已知产物中的文本文件带入 AI。'));
+  const item = (await listArtifacts()).find(entry => entry.id === artifactId);
+  if (!item) throw new Error(tr('产物已不存在，请刷新列表后重试'));
+  const preview = await previewArtifact(item, name);
+  if (preview.kind !== 'text') throw new Error(tr('请选择已知产物中的文本文件带入 AI。'));
+  const taskResult = /(?:^|[\\/])run-result\.json$/i.test(name);
+  const text = taskResult ? await require('./ai-outbound-processor.cjs').sanitizeTaskArtifact({ text: preview.content, truncated: preview.truncated }) : preview.content;
+  return { origin: 'artifact', title: String(item.title || name).slice(0, 240), deviceId: item.deviceId || '',
+    question: tr('请基于这份已选择的产物分析问题与验证方向。'),
+    text: taskResult ? `${tr('本机私有重跑脚本未包含在 AI 上下文中。')}\n${text}` : text, truncated: preview.truncated };
+}
+
+module.exports = { register, readAnalysisArtifact };

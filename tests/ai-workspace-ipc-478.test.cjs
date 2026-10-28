@@ -8,14 +8,15 @@ const { EventEmitter } = require('node:events');
 const { createRequire } = require('node:module');
 const { registerHandlers, cleanup } = require('../electron/lib/ai-workspace.cjs');
 
-test('all new history/export/comparison handlers require the exact owned main frame and expose matching typed preload APIs', async t => {
+test('all history/export/comparison/casebook handlers require the exact owned main frame and expose matching typed preload APIs', async t => {
   t.after(cleanup);
   const handlers = new Map(), sender = new EventEmitter(); sender.mainFrame = {};
   let invoked = 0;
   registerHandlers({ handle: (name, handler) => handlers.set(name, handler) }, { getOwner: () => ({ isDestroyed: () => false, webContents: sender }),
     factory: () => ({ call: async () => { invoked++; return { ok: true }; }, dispose() {} }) });
   const preload = fs.readFileSync(path.join(__dirname, '../electron/preload.cjs'), 'utf8');
-  for (const method of ['historyList', 'historyLoad', 'historySave', 'historyDelete', 'reportText', 'historyExport', 'comparisonPreview']) {
+  for (const method of ['historyList', 'historyLoad', 'historySave', 'historyDelete', 'reportText', 'historyExport', 'comparisonPreview',
+    'casebookList', 'casebookLoad', 'casebookSave', 'casebookUpdate', 'casebookDelete', 'casebookSimilar']) {
     const handle = handlers.get(`ai-workspace:${method}`); assert.equal(typeof handle, 'function');
     assert.equal((await handle({ sender, senderFrame: {} }, {})).code, 'AI_OWNER');
     assert.equal((await handle({ sender: new EventEmitter(), senderFrame: sender.mainFrame }, {})).code, 'AI_OWNER');

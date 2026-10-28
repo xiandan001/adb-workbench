@@ -4,6 +4,7 @@ import { formatNumber, tr, useLocale } from '../shared/i18n';
 import { workspacePreviewFresh } from './AiWorkspaceState';
 import AiWorkspaceEvidenceLines, { AiWorkspaceEvents } from './AiWorkspaceEvidenceLines';
 import { AiWorkspaceContext } from './AiWorkspaceControls';
+import AiWorkspaceHandoff from './AiWorkspaceHandoff';
 
 export function AiWorkspaceUsage({ usage, cached, theme }) {
   useLocale();
@@ -37,6 +38,8 @@ export default function AiWorkspaceEvidence({ preview, busy, entitled, onAnalyze
     <div className="space-y-3 p-4">
       <div className={`rounded-lg border p-3 ${theme.input}`}><p className={`mb-1 text-xs ${theme.textMuted}`}>{tr('本次问题')}</p><p className="whitespace-pre-wrap break-words text-sm">{preview.question}</p></div>
       <AiWorkspaceContext context={preview.context} theme={theme} />
+      {preview.handoff && <AiWorkspaceHandoff handoff={preview.handoff} theme={theme} />}
+      {preview.diagnostic?.packageName && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('目标应用：{0}', { 0: preview.diagnostic.packageName })}</p>}
       {preview.comparison && <div className="space-y-2 rounded-lg border border-emerald-500/25 p-3 text-xs leading-5">
         <p>{tr('之前：{0} · 证据 {1}', { 0: preview.comparison.beforeName, 1: preview.comparison.beforeIds.join(', ') })}</p>
         <p>{tr('之后：{0} · 证据 {1}', { 0: preview.comparison.afterName, 1: preview.comparison.afterIds.join(', ') })}</p>
@@ -49,8 +52,8 @@ export default function AiWorkspaceEvidence({ preview, busy, entitled, onAnalyze
       </div>
       <AiWorkspaceEvents entries={preview.entries} onCitation={onCitation} theme={theme} />
       {!readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-400/15 pt-3">
-        <p className={`flex max-w-md items-start gap-1.5 text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600'}`}><LockKeyhole size={14} className="mt-0.5 shrink-0" />{fresh ? tr('请核对敏感信息；点击分析即同意发送上述内容。') : tr('预览已过期，请重新采集后再分析。')}</p>
-        <button type="button" onClick={onAnalyze} disabled={Boolean(busy) || !entitled || !fresh} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Send size={15} />{tr('发送并分析')}</button>
+        <p className={`flex max-w-md items-start gap-1.5 text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600'}`}><LockKeyhole size={14} className="mt-0.5 shrink-0" />{fresh ? tr('继续后将显示最终发送预览；确认前不会联网。') : tr('预览已过期，请重新采集后再分析。')}</p>
+        <button type="button" onClick={onAnalyze} disabled={Boolean(busy) || !entitled || !fresh} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Send size={15} />{tr('查看并确认发送')}</button>
       </div>}
     </div>
   </section>;

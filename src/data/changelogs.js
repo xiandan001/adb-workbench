@@ -3,6 +3,20 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.9': {
+    title: 'v4.7.9',
+    date: '2026-10-28',
+    items: [
+      { type: 'feature', get text() { return tr('新增复现采证会话，统一保存录屏、日志、性能及选定终端证据'); } },
+      { type: 'feature', get text() { return tr('支持在日志、终端、错误和运行结果旁直接准备 AI 分析'); } },
+      { type: 'feature', get text() { return tr('新增应用专项排障与本地已验证案例库'); } },
+      { type: 'feature', get text() { return tr('AI 测试可引用已选控件，支持失败设备安全复跑与结果回流'); } },
+      { type: 'improve', get text() { return tr('统一内置 AI 发送预览、脱敏、取消及用量提示'); } },
+      { type: 'improve', get text() { return tr('质量验证草稿按设备保留，后台活动集中查看'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+    ],
+  },
   '4.7.8': {
     title: 'v4.7.8',
     date: '2026-10-26',

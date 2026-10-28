@@ -1,6 +1,11 @@
 const { tr, getLocale, withLocale } = require('./localization.cjs');
 // Task center: replay scripts, multi-device task queue, and execution history.
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
+const { createTaskTargetRegistry, materializeAiSteps } = require('./task-ai-targets.cjs');
+const { captureRunSnapshot, createTaskRerunService } = require('./task-rerun.cjs');
+const { normalizeTaskOrigin, runEvidence } = require('./task-run-provenance.cjs');
+const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
+const { createTaskAiBridge, normalizeSummary } = require('./task-ai-summary-bridge.cjs');
 
 const { app } = require('electron');
 const { Worker } = require('worker_threads');
@@ -34,12 +39,77 @@ const STRESS_REPORT_FILE = 'stress-report.md';
 const STRESS_RESULT_FILE = 'stress-result.json';
 
 const activeTasks = new Map();
+const taskAiBridge = createTaskAiBridge({ generate: options => aiAnalyze.generateAiSummary(options),
+  isActive: id => activeTasks.has(id) && activeTasks.get(id).cancelled !== true });
 const bridgeInspectionTasks = new Map();
 let scriptsCache = null;
 let historyCache = null;
 let taskWorker = null;
 let taskWorkerFailed = false;
 let workerBroadcastTimer = null;
+const taskTargets = createTaskTargetRegistry();
+const observedOwners = new WeakSet();
+const inputControllers = new Map();
+const taskLifetimes = new Map();
+
+function ownsTaskWindow(event) {
+  const window = ctx.getMainWindow?.();
+  return window && !window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame;
+}
+function watchTaskOwner(sender) {
+  if (observedOwners.has(sender)) return;
+  observedOwners.add(sender);
+  const clear = () => { taskTargets.clearOwner(sender.id); reruns.clearOwner(sender.id); };
+  sender.once?.('destroyed', clear);
+  sender.on?.('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (!inPlace && mainFrame) clear(); });
+}
+async function onlineTaskDevices() {
+  const result = await runRuntimeAdb(['devices', '-l'], { timeoutMs: 10000, maxBuffer: 128 * 1024 });
+  return result.ok ? parseAdbDeviceRows(result.stdout) : [];
+}
+async function indexedTaskRun(taskId) {
+  if (typeof taskId !== 'string' || !/^[\w.-]{1,180}$/.test(taskId)) throw new Error(tr('运行记录无效。'));
+  const current = activeTasks.get(taskId);
+  if (current) return publicTask(current);
+  const record = readHistory().find(item => item.id === taskId);
+  if (!record) throw new Error(tr('运行记录不存在或已移除。'));
+  if (!record.runResultPath || !record.artifactDir || path.basename(record.runResultPath) !== 'run-result.json'
+    || path.resolve(path.dirname(record.runResultPath)) !== path.resolve(record.artifactDir)) return { ...record, rerunSnapshot: undefined };
+  try {
+    const stat = await fs.promises.lstat(record.runResultPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024) return { ...record, rerunSnapshot: undefined };
+    const raw = await fs.promises.readFile(record.runResultPath, 'utf8');
+    const manifest = JSON.parse(raw);
+    if (manifest.id !== record.id || manifest.scriptHash !== record.scriptHash) return { ...record, rerunSnapshot: undefined };
+    return { ...record, rerunSnapshot: manifest.rerunSnapshot };
+  } catch { return { ...record, rerunSnapshot: undefined }; }
+}
+async function verifyRerunDevices(record, deviceIds) {
+  const commands = { roSerialno: ['getprop', 'ro.serialno'], roBootSerialno: ['getprop', 'ro.boot.serialno'],
+    androidId: ['settings', 'get', 'secure', 'android_id'], wifiMac: ['cat', '/sys/class/net/wlan0/address'] };
+  for (const deviceId of deviceIds) {
+    const expected = record.deviceRuns.find(run => run.deviceId === deviceId)?.comparisonIdentity || {};
+    const keys = Object.keys(commands).filter(key => typeof expected[key] === 'string');
+    if (!keys.length) return false;
+    const actual = {};
+    for (const key of keys) {
+      const result = await runRuntimeAdb(['-s', deviceId, 'shell', ...commands[key]], { timeoutMs: 5000, maxBuffer: 4096 });
+      if (result.ok) actual[key] = String(result.stdout || '').trim();
+    }
+    const hashed = deviceComparisonIdentity(actual);
+    if (!keys.some(key => hashed[key] === expected[key]) || keys.some(key => hashed[key] && hashed[key] !== expected[key])) return false;
+  }
+  return true;
+}
+const reruns = createTaskRerunService({ getRun: indexedTaskRun, getOnlineDevices: onlineTaskDevices, verifyDevices: verifyRerunDevices,
+  confirm: async (preview, deviceIds) => {
+    const answer = await require('./app-message-dialog.cjs').ask({ type: 'warning', title: tr('确认复跑失败设备'), message: preview.scriptName,
+      detail: tr('将对所选 {0} 台失败设备从第一步完整运行原脚本，不会从失败步骤盲目续跑。原运行记录保持不变。', { 0: deviceIds.length }) + '\n' + deviceIds.join('\n'),
+      buttons: [tr('取消'), tr('确认复跑')], defaultId: 0, cancelId: 0, noLink: true });
+    return answer.response === 1;
+  },
+  startRun: (script, deviceIds, options, trusted, sender) => runInlineScript(script, deviceIds, sender, options, trusted),
+});
 
 const DEFAULT_SCRIPT = {
   id: 'default-smoke-test',
@@ -56,6 +126,23 @@ const DEFAULT_SCRIPT = {
 };
 
 function register(ipcMain) {
+  for (const [channel, action] of Object.entries({
+    'ai-target:select': async (args, sender) => ({ target: taskTargets.select(args, sender.id) }),
+    'ai-target:handoff': async (args, sender) => {
+      const selected = taskTargets.resolve(args?.tokens, sender.id);
+      const publicTargets = selected.targets.map(({ id: _id, selector: _selector, ...target }) => target);
+      return require('./ai-analysis-handoff.cjs').createInternal({ origin: 'task-targets', deviceId: selected.deviceId,
+        title: tr('已选择的真实界面控件'), question: tr('请根据这些已选择控件生成可核对的测试草案。'),
+        text: selected.targets.map(target => `${target.id}: ${target.label}`).join('\n'), taskTargets: publicTargets });
+    },
+    'rerun:preview': async (args, sender) => ({ preview: await reruns.preview(args, sender.id) }),
+    'rerun:failed': (args, sender) => reruns.run(args, sender),
+  })) ipcMain.handle(`task-center:${channel}`, async (event, args) => {
+    if (!ownsTaskWindow(event)) return { ok: false, code: 'TASK_OWNER', error: tr('请在应用主窗口操作任务。') };
+    watchTaskOwner(event.sender);
+    try { return { ok: true, ...await action(args || {}, event.sender) }; }
+    catch (error) { return { ok: false, code: error.code || 'TASK_OPERATION', error: error.message }; }
+  });
   ipcMain.handle('task-center:scripts:list', async () => {
     return { ok: true, scripts: readScripts() };
   });
@@ -68,6 +155,8 @@ function register(ipcMain) {
       const existing = scripts.find(item => item.id === script.id);
       const nextScript = {
         ...script,
+        ...(existing?.analysisOrigin ? { analysisOrigin: normalizeTaskOrigin(existing.analysisOrigin) } : {}),
+        ...(existing?.aiTargetDeviceId ? { aiTargetDeviceId: existing.aiTargetDeviceId } : {}),
         createdAt: existing?.createdAt || now,
         updatedAt: now
       };
@@ -127,6 +216,7 @@ function register(ipcMain) {
       if (!deviceId) return { ok: false, error: 'device_required' };
       const snapshot = await captureUiSnapshot(createRecorderTask(event.sender), deviceId, args?.timeoutMs || DEFAULT_TIMEOUT_MS);
       if (snapshot.error) return { ok: false, error: snapshot.error, nodes: snapshot.nodes || [] };
+      if (ownsTaskWindow(event)) { watchTaskOwner(event.sender); return { ok: true, ...taskTargets.remember(snapshot, deviceId, event.sender.id) }; }
       return { ok: true, ...snapshot };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -153,6 +243,7 @@ function register(ipcMain) {
     const task = activeTasks.get(taskId);
     if (!task) return { ok: false, error: 'task_not_found' };
     task.cancelled = true;
+    inputControllers.get(taskId)?.abort();
     task.status = 'cancelled';
     cancelBridgeInspectionTasks(taskId);
     postTaskWorker({ action: 'cancel', taskId });
@@ -180,15 +271,35 @@ function register(ipcMain) {
   });
 }
 
-async function runInlineScript(script, deviceIds, sender, args = {}) {
+async function runInlineScript(script, deviceIds, sender, args = {}, trusted = {}) {
   try {
     const devices = normalizeDeviceIds(deviceIds);
     if (devices.length === 0) return { ok: false, error: tr("请至少选择一台在线设备") };
     const nextScript = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(script);
     if (!nextScript) return { ok: false, error: 'script_not_found' };
+    const savedScript = readScripts().find(item => item.id === nextScript.id);
+    const aiTargetDeviceId = trusted.aiTargetDeviceId || savedScript?.aiTargetDeviceId || '';
+    if (aiTargetDeviceId && (devices.length !== 1 || devices[0] !== aiTargetDeviceId)) return { ok: false, code: 'TASK_TARGET_DEVICE', error: tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: aiTargetDeviceId }) };
     const task = createTask(nextScript, devices, sender, args || {});
+    task.analysisOrigin = normalizeTaskOrigin(trusted.analysisOrigin || savedScript?.analysisOrigin);
+    task.aiTargetDeviceId = aiTargetDeviceId;
+    task.parentTaskId = typeof trusted.parentTaskId === 'string' ? trusted.parentTaskId : '';
+    const controller = new AbortController(); inputControllers.set(task.id, controller); taskLifetimes.set(task.id, controller);
+    try {
+      require('./workbench-activity.cjs').begin({ id: task.id, kind: 'task', title: task.scriptName, deviceId: devices.length === 1 ? devices[0] : '',
+        target: { page: 'tasks', id: task.id }, cancel: () => { task.cancelled = true; controller.abort(); cancelBridgeInspectionTasks(task.id); postTaskWorker({ action: 'cancel', taskId: task.id }); return { ok: true }; } });
+    } catch (error) { inputControllers.delete(task.id); taskLifetimes.delete(task.id); throw error; }
     activeTasks.set(task.id, task);
     broadcastState();
+    require('./workbench-activity.cjs').update(task.id, { stage: tr('正在核验运行输入'), progress: null });
+    try { task.rerunSnapshot = trusted.rerunSnapshot || await captureRunSnapshot(task.script, task, { signal: controller.signal }); }
+    catch (error) { task.error = error.message; task.cancelled = error.code === 'CANCELLED'; }
+    finally { inputControllers.delete(task.id); }
+    if (task.cancelled || task.error) {
+      task.status = task.cancelled ? 'cancelled' : 'failed'; task.endedAt = new Date().toISOString();
+      await finishWorkerTask(publicTask(task)); return { ok: true, task: publicTask(task) };
+    }
+    task.comparison = createRunComparisonIdentity(task.script, task);
     const started = startWorkerTask(task);
     if (!started.ok) {
       task.status = 'failed';
@@ -258,8 +369,12 @@ function postTaskWorker(message) {
 }
 
 function handleTaskWorkerMessage(message) {
+  if (message?.type === 'bridge:cancel' && message.action === 'aiSummary') { taskAiBridge.cancelRequest(message.id, message.taskId); return; }
   if (message?.type === 'progress' && message.task) {
     applyWorkerTaskUpdate(message.task);
+    require('./workbench-activity.cjs').update(message.task.id, { stage: tr('正在执行任务'),
+      detail: tr('完成 {0}，失败 {1}', { 0: message.task.completedSteps || 0, 1: message.task.failedSteps || 0 }),
+      progress: message.task.mode === 'replay' && message.task.totalSteps > 0 ? Math.min(100, (message.task.completedSteps || 0) / message.task.totalSteps * 100) : null });
     scheduleWorkerBroadcast();
     return;
   }
@@ -274,8 +389,9 @@ function handleTaskWorkerMessage(message) {
     return;
   }
   if (message?.type === 'bridge:request') {
-    withLocale(message.locale, () => handleTaskWorkerBridge(message)).catch(error => {
-      respondTaskWorkerBridge(message.id, false, null, error.message || 'bridge_failed');
+    const ownerWorker = taskWorker;
+    withLocale(message.locale, () => handleTaskWorkerBridge(message, ownerWorker)).catch(error => {
+      respondTaskWorkerBridge(message.id, false, null, error.message || 'bridge_failed', ownerWorker);
     });
     return;
   }
@@ -308,8 +424,10 @@ async function finishWorkerTask(snapshot) {
   ensureRunManifest(record);
   activeTasks.delete(taskId);
   cancelBridgeInspectionTasks(taskId);
+  taskLifetimes.delete(taskId);
   const history = [record, ...readHistory().filter(item => item.id !== taskId)].slice(0, MAX_HISTORY);
   writeHistory(history);
+  require('./workbench-activity.cjs').finish(taskId, { status: record.status === 'success' ? 'completed' : record.status === 'cancelled' ? 'cancelled' : 'failed', detail: record.error || record.scriptName });
   flushWorkerBroadcast();
   ctx.broadcastToAllWindows('task-center:update', {
     task: record,
@@ -349,8 +467,10 @@ function handleTaskWorkerFailure(error) {
       record.endedAt = now;
     }
     failedRecords.push(record);
+    require('./workbench-activity.cjs').finish(record.id, { status: 'failed', detail: record.error });
     ensureRunManifest(record);
     cancelBridgeInspectionTasks(taskId);
+    taskLifetimes.delete(taskId);
   }
   activeTasks.clear();
   if (failedRecords.length > 0) {
@@ -365,7 +485,7 @@ function handleTaskWorkerFailure(error) {
   broadcastState();
 }
 
-async function handleTaskWorkerBridge(message) {
+async function handleTaskWorkerBridge(message, ownerWorker = taskWorker) {
   const action = String(message.action || '').trim();
   const payload = message.payload || {};
   let result;
@@ -374,15 +494,15 @@ async function handleTaskWorkerBridge(message) {
   } else if (action === 'inspection') {
     result = await bridgeInspection(payload);
   } else if (action === 'aiSummary') {
-    result = await bridgeAiSummary(payload);
+    result = await bridgeAiSummary(payload, message.id);
   } else {
     result = { ok: false, error: `unsupported_bridge_action:${action}` };
   }
-  respondTaskWorkerBridge(message.id, true, result, '');
+  respondTaskWorkerBridge(message.id, true, result, '', ownerWorker);
 }
 
-function respondTaskWorkerBridge(id, ok, result, error) {
-  if (!id || !taskWorker) return;
+function respondTaskWorkerBridge(id, ok, result, error, ownerWorker = taskWorker) {
+  if (!id || !taskWorker || ownerWorker !== taskWorker) return;
   try {
     taskWorker.postMessage({ type: 'bridge:response', id, ok, result, error });
   } catch {}
@@ -427,9 +547,9 @@ async function bridgeInspection(payload) {
   }
 }
 
-async function bridgeAiSummary(payload) {
+async function bridgeAiSummary(payload, requestId) {
   try {
-    const summary = await aiAnalyze.generateAiSummary(payload?.options || {});
+    const summary = await taskAiBridge.run(requestId, payload?.taskId, payload?.options || {});
     return { ok: true, summary };
   } catch (error) {
     return { ok: false, error: error.message || 'ai_summary_failed' };
@@ -441,6 +561,7 @@ function createBridgeInspectionTask(parentTaskId, deviceId) {
     id: `${parentTaskId}-${sanitizeName(deviceId)}`,
     parentTaskId,
     deviceId,
+    signal: taskLifetimes.get(parentTaskId)?.signal,
     sender: null,
     cancelled: false,
     currentProc: null
@@ -461,6 +582,8 @@ function removeBridgeInspectionTask(taskId, bridgeTask) {
 }
 
 function cancelBridgeInspectionTasks(taskId) {
+  taskLifetimes.get(taskId)?.abort();
+  taskAiBridge.cancelTask(taskId);
   const tasks = bridgeInspectionTasks.get(taskId);
   if (!tasks) return;
   for (const task of tasks) {
@@ -852,7 +975,7 @@ async function capturePerformance(task, deviceId, step) {
 }
 
 async function tapUiTarget(task, deviceId, step) {
-  const fallbackPoint = getExplicitPoint(step);
+  const fallbackPoint = step.requireUnique ? null : getExplicitPoint(step);
   const point = await findUiPoint(task, deviceId, step, step.timeoutMs || DEFAULT_TIMEOUT_MS) || fallbackPoint;
   if (!point) return { ok: false, error: 'ui_target_not_found' };
   const res = await runAdb(task, ['-s', deviceId, 'shell', `input tap ${point.x} ${point.y}`], step.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -860,7 +983,7 @@ async function tapUiTarget(task, deviceId, step) {
 }
 
 async function longPressUiTarget(task, deviceId, step) {
-  const fallbackPoint = getExplicitPoint(step);
+  const fallbackPoint = step.requireUnique ? null : getExplicitPoint(step);
   const point = await findUiPoint(task, deviceId, step, step.timeoutMs || DEFAULT_TIMEOUT_MS) || fallbackPoint;
   if (!point) return { ok: false, error: 'ui_target_not_found' };
   const duration = clampNumber(step.durationMs, 300, 10000, 800);
@@ -1124,17 +1247,19 @@ function buildRecordedStep(action, args) {
 
 function toPublicUiNode(node, index) {
   const attrs = node.attrs || {};
+  const password = attrs.password === 'true';
   const center = getNodeCenter(node);
-  const label = attrs.text || attrs['content-desc'] || attrs['resource-id'] || attrs.class || tr("控件 {0}", { 0: index + 1 });
+  const label = (!password && (attrs.text || attrs['content-desc'])) || attrs['resource-id'] || attrs.class || tr("控件 {0}", { 0: index + 1 });
   return {
     index,
     label,
-    text: attrs.text || '',
+    text: password ? '' : attrs.text || '',
     resourceId: attrs['resource-id'] || '',
-    contentDesc: attrs['content-desc'] || '',
+    contentDesc: password ? '' : attrs['content-desc'] || '',
     className: attrs.class || '',
     xpath: node.xpath || '',
     packageName: attrs.package || '',
+    password: attrs.password === 'true',
     bounds: attrs.bounds || '',
     rect: {
       left: node.bounds.left,
@@ -1198,7 +1323,8 @@ async function findUiNode(task, deviceId, step, timeoutMs) {
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!res.ok) return null;
   const nodes = parseUiNodes(res.stdout || res.output || '');
-  return nodes.find(node => matchUiNode(node, selector)) || null;
+  const matches = nodes.filter(node => matchUiNode(node, selector));
+  return step.requireUnique && matches.length !== 1 ? null : matches[0] || null;
 }
 
 function parseUiNodes(xml) {
@@ -1245,6 +1371,7 @@ function matchUiNode(node, selector) {
   if (selector.resourceId && attrs['resource-id'] !== selector.resourceId) return false;
   if (selector.contentDesc && attrs['content-desc'] !== selector.contentDesc) return false;
   if (selector.className && attrs.class !== selector.className) return false;
+  if (selector.packageName && attrs.package !== selector.packageName) return false;
   if (selector.xpath && !selector.text && !selector.textContains && !selector.resourceId && !selector.contentDesc && node.xpath !== selector.xpath) return false;
   return true;
 }
@@ -1257,6 +1384,7 @@ function normalizeSelector(step) {
     resourceId: String(selector.resourceId || step.resourceId || '').trim(),
     contentDesc: String(selector.contentDesc || step.contentDesc || '').trim(),
     className: String(selector.className || step.className || '').trim(),
+    packageName: String(selector.packageName || step.packageName || '').trim(),
     xpath: String(selector.xpath || selector.path || step.xpath || step.path || '').trim()
   };
 }
@@ -1753,6 +1881,9 @@ function publicTask(task) {
     mode: task.script?.mode || 'replay',
     scriptName: task.scriptName,
     ...(task.comparison || {}),
+    ...(task.analysisOrigin ? { analysisOrigin: task.analysisOrigin } : {}),
+    ...(task.aiTargetDeviceId ? { aiTargetDeviceId: task.aiTargetDeviceId } : {}),
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
     status: task.status,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
@@ -1836,8 +1967,10 @@ function normalizeStep(raw, index) {
     resourceId: String(raw.resourceId || ''),
     contentDesc: String(raw.contentDesc || ''),
     className: String(raw.className || ''),
+    packageName: String(raw.packageName || '').trim(),
     xpath: String(raw.xpath || raw.path || ''),
     selector: normalizeStepSelector(raw.selector || {}),
+    requireUnique: raw.requireUnique === true,
     x: nullableNumber(raw.x),
     y: nullableNumber(raw.y),
     endX: nullableNumber(raw.endX),
@@ -1905,6 +2038,7 @@ function normalizeStepSelector(raw) {
     resourceId: String(source.resourceId || '').trim(),
     contentDesc: String(source.contentDesc || '').trim(),
     className: String(source.className || '').trim(),
+    packageName: String(source.packageName || '').trim(),
     xpath: String(source.xpath || source.path || '').trim()
   };
 }
@@ -2126,7 +2260,7 @@ function buildStressReport(result, aiSummary) {
   if (aiSummary?.ok && aiSummary.summary) {
     lines.push(aiSummary.summary.trim(), '');
   } else if (aiSummary?.skipped) {
-    lines.push(tr("未启用 AI 分析。"), '');
+    lines.push(aiSummary.skipReason || tr("未启用 AI 分析。"), '');
   } else {
     lines.push(tr("AI 分析失败：{0}", { 0: aiSummary?.error || tr("未知错误") }), '');
   }
@@ -2150,12 +2284,12 @@ async function buildStressAiSummary(result) {
       failedRounds: device.failedRounds
     }))
   }, null, 2);
-  return aiAnalyze.generateAiSummary({
+  return normalizeSummary(await aiAnalyze.generateAiSummary({
     systemPrompt: prompt,
     userContent: content,
     timeoutMs: 60000,
     temperature: 0.2
-  });
+  }));
 }
 
 function importStressScript(filePath, scriptArgs = '') {
@@ -2519,6 +2653,12 @@ function sleepWithCancel(task, durationMs) {
 }
 
 function cleanup() {
+  taskAiBridge.cleanup();
+  taskTargets.clear(); reruns.clear();
+  for (const controller of inputControllers.values()) controller.abort();
+  inputControllers.clear();
+  for (const controller of taskLifetimes.values()) controller.abort();
+  taskLifetimes.clear();
   if (workerBroadcastTimer) {
     clearTimeout(workerBroadcastTimer);
     workerBroadcastTimer = null;
@@ -2526,6 +2666,7 @@ function cleanup() {
   for (const task of activeTasks.values()) {
     task.cancelled = true;
     task.status = 'cancelled';
+    require('./workbench-activity.cjs').finish(task.id, { status: 'cancelled', detail: tr('用户取消') });
     cancelBridgeInspectionTasks(task.id);
     killCurrentProcess(task);
   }
@@ -2538,14 +2679,22 @@ function cleanup() {
   }
 }
 
-function saveAiDraft(draft) {
+function saveAiDraft(draft, { origin, targets = [] } = {}) {
   const { parseTask } = require('./ai-workspace-schema.cjs');
-  const valid = parseTask(JSON.stringify(draft));
+  const valid = parseTask(JSON.stringify(draft), { targets });
+  valid.steps = materializeAiSteps(valid.steps, targets);
+  const aiTargetDeviceId = targets.length ? targets[0].deviceId : '';
+  if (targets.length && (typeof aiTargetDeviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(aiTargetDeviceId)
+    || targets.some(target => target.deviceId !== aiTargetDeviceId))) throw Object.assign(new Error(tr('控件引用已失效或不属于当前设备，请重新读取并选择控件。')), { code: 'TASK_TARGET_INVALID' });
+  const analysisOrigin = normalizeTaskOrigin(origin);
   const timestamp = new Date().toISOString();
   const script = { ...normalizeScript({ ...valid, id: `ai-${crypto.randomUUID()}`, continueOnError: false,
-    report: { includeAiSummary: false, includePerformance: false } }), createdAt: timestamp, updatedAt: timestamp };
+    report: { includeAiSummary: false, includePerformance: false } }),
+    ...(analysisOrigin ? { analysisOrigin } : {}), ...(aiTargetDeviceId ? { aiTargetDeviceId } : {}), createdAt: timestamp, updatedAt: timestamp };
   writeScripts([script, ...readScripts()]);
   return script;
 }
 
-module.exports = { register, cleanup, runInlineScript, saveAiDraft };
+module.exports = { register, cleanup, runInlineScript, saveAiDraft,
+  resolveAiTaskTargets: (tokens, owner) => taskTargets.resolve(tokens, owner),
+  getRunEvidence: async taskId => runEvidence(await indexedTaskRun(taskId)) };

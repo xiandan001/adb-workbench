@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
+const { AI_BRIDGE_TOTAL_MS, normalizeSummary } = require('./task-ai-summary-bridge.cjs');
 
 let adbPath = workerData?.adbPath || 'adb';
 const defaultArtifactBaseDir = workerData?.defaultArtifactBaseDir || '';
@@ -152,10 +153,11 @@ function requestMain(action, payload = {}, timeoutMs = 120000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       bridgeRequests.delete(id);
+      if (action === 'aiSummary') parentPort.postMessage({ type: 'bridge:cancel', id, action, taskId: payload.taskId });
       resolve({ ok: false, error: 'bridge_timeout' });
     }, timeoutMs);
     timer.unref?.();
-    bridgeRequests.set(id, { resolve, timer });
+    bridgeRequests.set(id, { resolve, timer, action, taskId: payload.taskId });
     try {
       parentPort.postMessage({ type: 'bridge:request', id, action, payload, locale: getLocale() });
     } catch (error) {
@@ -411,6 +413,18 @@ async function runStressDevice(task, run) {
 }
 
 async function executeStep(task, deviceId, step) {
+  if (task.parentTaskId) {
+    const inputs = (task.rerunSnapshot?.inputs || []).filter(input => input.stepId === String(step.id));
+    for (const expected of inputs) {
+      const controller = new AbortController(); task.inputAbortController = controller;
+      let current;
+      try { current = await require('./task-rerun.cjs').hashInput(expected, { signal: controller.signal }); }
+      catch (error) { return { ok: false, error: error.message }; }
+      finally { if (task.inputAbortController === controller) task.inputAbortController = null; }
+      if (task.cancelled) return { ok: false, error: tr('用户取消') };
+      if (current.state !== 'available' || current.sha256 !== expected.sha256) return { ok: false, error: tr('复跑输入文件已改变，未执行该步骤。') };
+    }
+  }
   const type = step.type;
   if (type === 'shell') {
     const command = String(step.command || '').trim();
@@ -550,7 +564,7 @@ async function capturePerformance(task, deviceId, step) {
 }
 
 async function tapUiTarget(task, deviceId, step) {
-  const fallbackPoint = getExplicitPoint(step);
+  const fallbackPoint = step.requireUnique ? null : getExplicitPoint(step);
   const point = await findUiPoint(task, deviceId, step, step.timeoutMs || DEFAULT_TIMEOUT_MS) || fallbackPoint;
   if (!point) return { ok: false, error: 'ui_target_not_found' };
   const res = await runAdb(task, ['-s', deviceId, 'shell', `input tap ${point.x} ${point.y}`], step.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -558,7 +572,7 @@ async function tapUiTarget(task, deviceId, step) {
 }
 
 async function longPressUiTarget(task, deviceId, step) {
-  const fallbackPoint = getExplicitPoint(step);
+  const fallbackPoint = step.requireUnique ? null : getExplicitPoint(step);
   const point = await findUiPoint(task, deviceId, step, step.timeoutMs || DEFAULT_TIMEOUT_MS) || fallbackPoint;
   if (!point) return { ok: false, error: 'ui_target_not_found' };
   const duration = clampNumber(step.durationMs, 300, 10000, 800);
@@ -805,17 +819,19 @@ function buildRecordedStep(action, args) {
 
 function toPublicUiNode(node, index) {
   const attrs = node.attrs || {};
+  const password = attrs.password === 'true';
   const center = getNodeCenter(node);
-  const label = attrs.text || attrs['content-desc'] || attrs['resource-id'] || attrs.class || tr("控件 {0}", { 0: index + 1 });
+  const label = (!password && (attrs.text || attrs['content-desc'])) || attrs['resource-id'] || attrs.class || tr("控件 {0}", { 0: index + 1 });
   return {
     index,
     label,
-    text: attrs.text || '',
+    text: password ? '' : attrs.text || '',
     resourceId: attrs['resource-id'] || '',
-    contentDesc: attrs['content-desc'] || '',
+    contentDesc: password ? '' : attrs['content-desc'] || '',
     className: attrs.class || '',
     xpath: node.xpath || '',
     packageName: attrs.package || '',
+    password: attrs.password === 'true',
     bounds: attrs.bounds || '',
     x: center.x,
     y: center.y
@@ -873,7 +889,8 @@ async function findUiNode(task, deviceId, step, timeoutMs) {
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!res.ok) return null;
   const nodes = parseUiNodes(res.stdout || res.output || '');
-  return nodes.find(node => matchUiNode(node, selector)) || null;
+  const matches = nodes.filter(node => matchUiNode(node, selector));
+  return step.requireUnique && matches.length !== 1 ? null : matches[0] || null;
 }
 
 function parseUiNodes(xml) {
@@ -920,6 +937,7 @@ function matchUiNode(node, selector) {
   if (selector.resourceId && attrs['resource-id'] !== selector.resourceId) return false;
   if (selector.contentDesc && attrs['content-desc'] !== selector.contentDesc) return false;
   if (selector.className && attrs.class !== selector.className) return false;
+  if (selector.packageName && attrs.package !== selector.packageName) return false;
   if (selector.xpath && !selector.text && !selector.textContains && !selector.resourceId && !selector.contentDesc && node.xpath !== selector.xpath) return false;
   return true;
 }
@@ -932,6 +950,7 @@ function normalizeSelector(step) {
     resourceId: String(selector.resourceId || step.resourceId || '').trim(),
     contentDesc: String(selector.contentDesc || step.contentDesc || '').trim(),
     className: String(selector.className || step.className || '').trim(),
+    packageName: String(selector.packageName || step.packageName || '').trim(),
     xpath: String(selector.xpath || selector.path || step.xpath || step.path || '').trim()
   };
 }
@@ -1579,7 +1598,7 @@ async function finishTask(task) {
   activeTasks.delete(task.id);
   const record = publicTask(task);
   try {
-    writeRunManifest(record);
+    writeRunManifest(record, { rerunSnapshot: task.rerunSnapshot });
   } catch (error) {
     record.error = [record.error, tr("运行清单保存失败：{0}", { 0: error.message })].filter(Boolean).join('\n');
   }
@@ -1593,6 +1612,9 @@ function publicTask(task) {
     mode: task.script?.mode || 'replay',
     scriptName: task.scriptName,
     ...(task.comparison || {}),
+    ...(task.analysisOrigin ? { analysisOrigin: task.analysisOrigin } : {}),
+    ...(task.aiTargetDeviceId ? { aiTargetDeviceId: task.aiTargetDeviceId } : {}),
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
     status: task.status,
     createdAt: task.createdAt,
     startedAt: task.startedAt,
@@ -1679,8 +1701,10 @@ function normalizeStep(raw, index) {
     resourceId: String(raw.resourceId || ''),
     contentDesc: String(raw.contentDesc || ''),
     className: String(raw.className || ''),
+    packageName: String(raw.packageName || '').trim(),
     xpath: String(raw.xpath || raw.path || ''),
     selector: normalizeStepSelector(raw.selector || {}),
+    requireUnique: raw.requireUnique === true,
     x: nullableNumber(raw.x),
     y: nullableNumber(raw.y),
     endX: nullableNumber(raw.endX),
@@ -1748,6 +1772,7 @@ function normalizeStepSelector(raw) {
     resourceId: String(source.resourceId || '').trim(),
     contentDesc: String(source.contentDesc || '').trim(),
     className: String(source.className || '').trim(),
+    packageName: String(source.packageName || '').trim(),
     xpath: String(source.xpath || source.path || '').trim()
   };
 }
@@ -1921,7 +1946,7 @@ async function writeStressArtifacts(task, summary) {
     }))
   };
   await fs.promises.writeFile(resultPath, JSON.stringify(result, null, 2), 'utf8');
-  const aiSummary = task.script.report?.includeAiSummary ? await buildStressAiSummary(result) : { ok: false, skipped: true, summary: '' };
+  const aiSummary = task.script.report?.includeAiSummary && !task.cancelled ? await buildStressAiSummary(result, task.id) : { ok: false, skipped: true, summary: '' };
   await fs.promises.writeFile(reportPath, buildStressReport(result, aiSummary), 'utf8');
   task.stressResultPath = resultPath;
   task.stressReportPath = reportPath;
@@ -1969,14 +1994,14 @@ function buildStressReport(result, aiSummary) {
   if (aiSummary?.ok && aiSummary.summary) {
     lines.push(aiSummary.summary.trim(), '');
   } else if (aiSummary?.skipped) {
-    lines.push(tr("未启用 AI 分析。"), '');
+    lines.push(aiSummary.skipReason || tr("未启用 AI 分析。"), '');
   } else {
     lines.push(tr("AI 分析失败：{0}", { 0: aiSummary?.error || tr("未知错误") }), '');
   }
   return lines.join('\n');
 }
 
-async function buildStressAiSummary(result) {
+async function buildStressAiSummary(result, taskId) {
   const prompt = [
     tr("你是 Android 自动化压测报告分析助手。"),
     tr("只能基于用户提供的结构化压测结果总结，不要臆测未出现的信息。"),
@@ -1994,17 +2019,18 @@ async function buildStressAiSummary(result) {
     }))
   }, null, 2);
   const bridge = await requestMain('aiSummary', {
+    taskId,
     options: {
       systemPrompt: prompt,
       userContent: content,
       timeoutMs: 60000,
       temperature: 0.2
     }
-  }, 70000);
+  }, AI_BRIDGE_TOTAL_MS + 5000);
   if (!bridge.ok || !bridge.result?.ok) {
     return { ok: false, error: bridge.error || bridge.result?.error || 'ai_summary_failed' };
   }
-  return bridge.result.summary || { ok: false, error: 'ai_summary_empty' };
+  return normalizeSummary(bridge.result.summary) || { ok: false, error: 'ai_summary_empty' };
 }
 
 function importStressScript(filePath) {
@@ -2223,6 +2249,12 @@ function getAdbCommand() {
 }
 
 function killCurrentProcess(task) {
+  for (const [id, pending] of bridgeRequests) if (pending.action === 'aiSummary' && pending.taskId === task.id) {
+    clearTimeout(pending.timer); bridgeRequests.delete(id);
+    parentPort.postMessage({ type: 'bridge:cancel', id, action: pending.action, taskId: task.id });
+    pending.resolve({ ok: true, result: { ok: true, summary: { ok: false, cancelled: true, code: 'AI_SEND_CANCELLED' } } });
+  }
+  task.inputAbortController?.abort();
   if (task.procs) {
     for (const proc of Array.from(task.procs)) {
       try { proc?.kill?.(); } catch {}

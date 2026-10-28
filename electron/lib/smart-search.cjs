@@ -6,7 +6,7 @@ const { tr } = require('./localization.cjs');
 //   - log-analyzer.getLogStore / getCurrentLogSource（读取日志）
 //   - ai-keys（API Key 轮询 + 模型配置）
 
-const https = require('https');
+const https = require('./ai-outbound-transport.cjs');
 const { StringDecoder } = require('string_decoder');
 
 const logAnalyzer = require('./log-analyzer.cjs');
@@ -27,16 +27,25 @@ let smartSearchAbortController = null;
 // 会话 ID：用于区分不同搜索会话，防止旧搜索的事件污染新搜索状态
 let smartSearchSessionId = 0;
 
-function register(ipcMain) {
+function register(rawIpcMain) {
+  const ipcMain = https.protectIpc(rawIpcMain);
   ipcMain.handle('smart-search:search', async (event, args) => {
-    const { query, source } = args || {};
-    if (!query || !query.trim()) {
+    const { query, source, entryIds } = args || {};
+    if (typeof query !== 'string' || !query.trim() || query.length > 4000) {
       return { ok: false, error: tr("查询不能为空") };
     }
 
     const logStore = logAnalyzer.getLogStore();
     const currentLogSource = logAnalyzer.getCurrentLogSource();
-    const entries = logStore[source || currentLogSource] || [];
+    if (!['realtime', 'file'].includes(source || currentLogSource)) return { ok: false, error: tr('日志来源无效。') };
+    if (entryIds !== undefined && (!Array.isArray(entryIds) || entryIds.length > 15200 || entryIds.some(id => typeof id !== 'string' || id.length > 240))) {
+      return { ok: false, error: tr('智能搜索最多预览 16 个分块、8 MiB，请先缩小日志筛选范围。') };
+    }
+    const selectedIds = entryIds ? new Set(entryIds) : null;
+    const entries = (logStore[source || currentLogSource] || []).filter(entry => !selectedIds || selectedIds.has(entry.id));
+    if (entries.length > 15200 || entries.reduce((bytes, entry) => bytes + Buffer.byteLength(entry.raw || entry.message || ''), 0) > 8 * 1024 * 1024) {
+      return { ok: false, error: tr('智能搜索最多预览 16 个分块、8 MiB，请先缩小日志筛选范围。') };
+    }
     if (entries.length === 0) {
       return { ok: false, error: tr("没有可搜索的日志") };
     }
@@ -249,7 +258,7 @@ function register(ipcMain) {
       return new Promise((resolve) => {
         const urlObj = new URL(AGNES_API_URL);
         let retryCount = 0;
-        const AI_MAX_RETRIES = 3;
+        const AI_MAX_RETRIES = 0;
         const REQUEST_TIMEOUT_MS = 15000; // 单次请求超时 15 秒
         const RETRY_DELAY_MS = 1000; // 重试间隔 1 秒
 
@@ -365,7 +374,9 @@ function register(ipcMain) {
     // 改为：每个分块独立完成就立即推送，不等批次内其他分块
     // 使用信号量控制最大并发数，分块完成后立即推送结果
     let chunkIndex = 0;
-    const concurrency = Math.min(SMART_SEARCH_MAX_CONCURRENT, chunks.length);
+    // Queue the entire fixed batch for one complete preview. The guarded
+    // transport enforces the same three-request network concurrency below.
+    const concurrency = chunks.length;
 
     async function runWorker() {
       while (chunkIndex < chunks.length && !myController.signal.aborted) {
@@ -429,11 +440,11 @@ function register(ipcMain) {
     }
 
     // 启动多个 worker 并行处理
-    const workers = [];
-    for (let i = 0; i < concurrency; i++) {
-      workers.push(runWorker());
-    }
-    await Promise.all(workers);
+    await https.withBatch(tr('确认发送固定智能搜索分块'), async () => {
+      const workers = [];
+      for (let i = 0; i < concurrency; i++) workers.push(runWorker());
+      await Promise.all(workers);
+    }, SMART_SEARCH_MAX_CONCURRENT);
 
     // 使用闭包内的 myController 检查中止状态，而非可能已被替换的全局变量
     const aborted = myController.signal.aborted;

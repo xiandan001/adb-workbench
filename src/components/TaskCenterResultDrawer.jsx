@@ -1,13 +1,17 @@
 import { tr, useLocale } from '../shared/i18n';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText, FolderOpen, Square, X } from 'lucide-react';
+import { FileText, FolderOpen, Square, X, Sparkles, RotateCcw } from 'lucide-react';
+import TaskRerunPanel from './TaskRerunPanel';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 
-export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel, onOpenPath }) {
+export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel, onOpenPath, onRerun }) {
   useLocale();
   const dialogRef = useRef(null);
+  const [rerunOpen, setRerunOpen] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffError, setHandoffError] = useState('');
   const isDark = isDarkTheme(theme);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -24,6 +28,15 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
   const steps = (task.deviceRuns || []).flatMap(run => (run.steps || []).map(step => ({ ...step, deviceId: run.deviceId })));
   const failures = steps.filter(step => step.status === 'failed' || step.error);
   const visibleSteps = failures.length ? failures : steps;
+  async function analyzeRun() {
+    if (handoffBusy) return;
+    setHandoffBusy(true); setHandoffError('');
+    try {
+      const result = await window.electronAPI?.aiHandoffCreate?.({ reference: { kind: 'task-run', taskId: task.id } });
+      if (!result?.ok) throw new Error(result?.error || tr('运行结果交接失败。'));
+    } catch (failure) { setHandoffError(failure.message); }
+    finally { setHandoffBusy(false); }
+  }
   return createPortal(
     <dialog
       ref={dialogRef}
@@ -40,6 +53,9 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           <button type="button" autoFocus onClick={onClose} className="rounded-lg p-2 hover:bg-slate-500/10" aria-label={tr("关闭任务详情")}><X size={20} /></button>
         </header>
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {task.analysisOrigin && <details className="rounded-lg border border-current/10 p-3 text-sm"><summary className="cursor-pointer font-medium">{tr('原分析上下文（不是已验证结论）：')}</summary><p className="mt-2 whitespace-pre-wrap break-words">{task.analysisOrigin.question}</p><p className="mt-2 whitespace-pre-wrap break-words opacity-70">{task.analysisOrigin.finding?.detail || task.analysisOrigin.summary}</p></details>}
+          {rerunOpen && <TaskRerunPanel key={task.id} taskId={task.id} onStarted={onRerun} />}
+          {handoffError && <p role="alert" className="text-sm text-red-500">{handoffError}</p>}
           {task.error && <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500 whitespace-pre-wrap break-words">{tr(task.error)}</div>}
           {task.stressSummary?.reason && task.stressSummary.reason !== task.error && <p className="text-sm text-amber-500">{task.stressSummary.reason}</p>}
           <section>
@@ -71,6 +87,8 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {task.artifactDir && <p className={`text-xs font-mono break-all ${muted}`}>{task.artifactDir}</p>}
         </div>
         <footer className="flex flex-wrap gap-2 border-t border-current/10 p-4">
+          <button type="button" disabled={handoffBusy} onClick={analyzeRun} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Sparkles size={15} />{tr('分析本次运行')}</button>
+          {!running && ((task.deviceRuns || []).some(run => run.status === 'failed') || failures.length > 0) && <button type="button" onClick={() => setRerunOpen(value => !value)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}><RotateCcw size={15} />{tr('仅复跑失败设备')}</button>}
           {task.stressReportPath && <button type="button" onClick={() => onOpenPath(task.stressReportPath)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}><FileText size={15} />{tr("打开报告")}</button>}
           {(task.runResultPath || task.stressResultPath) && <button type="button" onClick={() => onOpenPath(task.runResultPath || task.stressResultPath)} className={`rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>{tr("运行数据")}</button>}
           {task.artifactDir && <button type="button" onClick={() => onOpenPath(task.artifactDir)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}><FolderOpen size={15} />{tr("证据目录")}</button>}

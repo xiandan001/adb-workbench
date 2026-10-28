@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { ArrowDown, ArrowUp, ClipboardPaste, Copy, Eraser, History, Pause, Play } from 'lucide-react';
 import SelectMenu from '../SelectMenu';
+import AiContextButton from '../AiContextButton';
 import { prepareTerminalPaste } from '../../shared/serialTerminalInput';
 import { createSshTerminalReader, createSshTerminalWriter } from '../../shared/sshTerminalTransport';
 import { sshResult } from '../../shared/sshWorkspace';
@@ -223,6 +224,11 @@ export default function SshTerminal({ session, terminal, active, historyRevision
   }, [id, popup]);
 
   return <section aria-label={tr("SSH 终端 {0}", { 0: tr(terminal.title) || terminal.id })} className="flex h-full min-h-0 min-w-0 flex-col gap-1.5">
+    <div className="shrink-0"><AiContextButton context={() => {
+      const text = termRef.current?.getSelection() || '';
+      return text ? { view: { origin: 'ssh-selection', title: tr('SSH 终端选区'), question: tr('请分析这段已选择的 SSH 上下文。'), text, deviceId: '' } }
+        : { reference: { kind: 'ssh', sessionId: session.id, terminalId: terminal.id } };
+    }} /></div>
 <div className="flex shrink-0 flex-wrap items-center gap-1"><span className={`mr-auto text-[10px] ${theme.textMuted}`}>{!connected ? tr("只读 · 会话或终端未连接") : replaying ? tr("正在恢复输出…") : tr("选区 Ctrl+C 复制 · Ctrl+V 粘贴 · 右键更多")}</span><button type="button" onClick={() => { paused.current = !pausedScroll; setPausedScroll(!pausedScroll); if (pausedScroll) termRef.current?.scrollToBottom(); }} className={button} title={tr("暂停只影响滚动，不停止接收")}>{pausedScroll ? <Play size={12} /> : <Pause size={12} />}{pausedScroll ? tr("跟随") : tr("暂停滚动")}</button><button type="button" aria-label={tr("复制 SSH 终端选区")} title={tr("选区 Ctrl+C / Ctrl+Shift+C / Ctrl+Insert；无选区 Ctrl+C 仍中断远端程序")} onMouseDown={event => event.preventDefault()} onClick={() => apiRef.current?.copy()} className={button}><Copy size={12} /></button><button type="button" aria-label={tr("粘贴到 SSH 终端")} title={tr("Ctrl+V / Ctrl+Shift+V / Shift+Insert；多行先确认")} onMouseDown={event => event.preventDefault()} disabled={!connected || replaying || shell.status === 'enabling' || Boolean(error)} onClick={() => apiRef.current?.pasteClipboard()} className={button}><ClipboardPaste size={12} /></button><button type="button" aria-label={tr("清空 SSH 终端屏幕")} title={tr("仅清屏，不关闭远端程序")} onClick={() => apiRef.current?.clear()} className={button}><Eraser size={12} /></button></div>
     <div className="flex shrink-0 items-center gap-1"><input ref={searchRef} aria-label={tr("搜索 SSH 终端")} value={query} onChange={event => { setQuery(event.target.value); searchIndex.current = -1; }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); apiRef.current?.find(query, event.shiftKey); } }} placeholder={tr("搜索当前终端缓存")} className={`min-w-0 flex-1 rounded border px-2 py-1 text-xs ${theme.input}`} /><button type="button" aria-label={tr("上一处 SSH 终端匹配")} onClick={() => apiRef.current?.find(query, true)} className={button}><ArrowUp size={12} /></button><button type="button" aria-label={tr("下一处 SSH 终端匹配")} onClick={() => apiRef.current?.find(query, false)} className={button}><ArrowDown size={12} /></button><label className="sr-only" htmlFor={`${id}-theme`}>{tr("SSH 终端样式")}</label><SelectMenu id={`${id}-theme`} compact isDark={isDark} value={style} onChange={setStyle} options={[{ value: 'current', label: tr("当前主题") }, { value: 'classic', label: tr("经典黑底") }]} className="w-28" /></div>
     <div className="flex shrink-0 flex-wrap items-center gap-1"><button ref={historyAnchor} type="button" aria-expanded={historyOpen} title={tr("Alt+R；Ctrl+R 仍是远端历史")} onClick={() => setHistoryOpen(value => !value)} className={button}><History size={12} />{tr("命令历史")}</button>

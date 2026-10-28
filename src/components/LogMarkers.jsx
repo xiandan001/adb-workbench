@@ -2,6 +2,7 @@ import { tr, useLocale, getLocale } from '../shared/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { BookmarkPlus, MapPin, Trash2, X } from 'lucide-react';
 import { logEntryIdentity } from '../shared/logMarkers';
+import AiContextButton from './AiContextButton';
 
 export default function LogMarkers({ markers, onChange, draft, onDismissDraft, isDark, onLocate }) {
   useLocale();
@@ -45,6 +46,8 @@ export default function LogMarkers({ markers, onChange, draft, onDismissDraft, i
             {selected && <div className="mt-4">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">{selected.note}</h3><button type="button" className={`${button} flex items-center gap-1`} onClick={() => { const result = onLocate(selected); if (result === true) close(); else setLocateMessage(result); }}><MapPin size={12} />{tr("定位原日志")}</button></div>
               {locateMessage && <p role="status" className="mb-2 text-xs text-amber-500">{locateMessage}</p>}
+              <div className="mb-2"><AiContextButton context={() => ({ view: { origin: 'log-marker', title: tr('日志问题标记'),
+                question: selected.note, deviceId: selected.entry.deviceId || '', text: [selected.note, ...(selected.context?.length ? selected.context : [selected.entry]).map(entry => entry.raw)].join('\n') } })} onCreated={close} /></div>
               <p className="mb-2 text-xs opacity-70">{tr("标记时冻结的上下文。定位仅查找当前视图，不改变过滤条件。")}</p>
               <div className="max-h-[35vh] overflow-auto rounded-lg border border-emerald-500/30 font-mono text-xs">
                 {(selected.context.length ? selected.context : [selected.entry]).map((entry, index) => <pre key={index} className={`whitespace-pre-wrap break-all border-b border-slate-500/15 px-3 py-2 ${logEntryIdentity(entry) === logEntryIdentity(selected.entry) ? 'bg-emerald-500/15' : ''}`}>{entry.raw}</pre>)}

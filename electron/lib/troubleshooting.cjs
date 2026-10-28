@@ -10,6 +10,7 @@ const performanceMonitor = require('./performance-monitor.cjs');
 const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
+const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
@@ -99,6 +100,7 @@ function register(ipcMain) {
   ipcMain.handle('troubleshooting:cancel', async () => {
     if (!currentTask) return { ok: true, cancelled: false };
     currentTask.cancelled = true;
+    currentTask.aiSummaryController?.abort();
     currentTask.status = 'cancelling';
     if (currentTask.currentProc) {
       try { currentTask.currentProc.kill(); } catch {}
@@ -120,6 +122,12 @@ function register(ipcMain) {
 }
 
 async function runTroubleshooting(task) {
+  const lifetime = bindSummaryLifetime(task);
+  try { return await runTroubleshootingBody(task); }
+  finally { lifetime.dispose(); }
+}
+
+async function runTroubleshootingBody(task) {
   const vipStatus = await vip.getStatusAsync();
   const outputDir = await createOutputDir(task);
   const rawDir = path.join(outputDir, 'raw');
@@ -264,6 +272,7 @@ async function runTroubleshooting(task) {
   }
 
   await prepareAiSummary(task, context);
+  if (task.cancelled) return finishCancelled(task, context);
   return finishTask(task, context);
 }
 
@@ -289,7 +298,7 @@ async function prepareAiSummary(task, context) {
 
   markStep(task, 'aiSummary', 'running', tr("正在生成 AI 总结"));
   try {
-    context.aiSummary = await buildTroubleshootingAiSummary(context);
+    context.aiSummary = await buildTroubleshootingAiSummary(context, task.aiSummarySignal);
     if (context.aiSummary?.ok) {
       markStep(task, 'aiSummary', 'success', tr("AI 总结已写入报告"));
     } else {
@@ -480,7 +489,7 @@ function formatAiSummaryLines(aiSummary) {
   return lines.some(Boolean) ? lines : [tr("- AI 总结为空")];
 }
 
-function buildTroubleshootingAiSummary(context) {
+function buildTroubleshootingAiSummary(context, signal) {
   const checks = (context.checks || []).map(item => ({
     label: item.label,
     ok: item.ok,
@@ -511,6 +520,7 @@ function buildTroubleshootingAiSummary(context) {
     artifacts: (context.artifacts || []).map(item => ({ label: item.label, path: item.path }))
   };
   return aiAnalyze.generateAiSummary({
+    signal,
     timeoutMs: 60000,
     temperature: 0.2,
     systemPrompt: tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
@@ -656,6 +666,7 @@ function createSilentInspectionTask(parentTask) {
     sender: null,
     silent: true,
     tracked: false,
+    get signal() { return parentTask.aiSummarySignal || parentTask.signal; },
     get cancelled() { return parentTask.cancelled; },
     set cancelled(value) { parentTask.cancelled = value; },
     get currentProc() { return parentTask.currentProc; },

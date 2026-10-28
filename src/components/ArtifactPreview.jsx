@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { formatBytes } from '../shared/artifactWorkspace';
+import AiContextButton from './AiContextButton';
 
 export default function ArtifactPreview({ item, isDark, onClose }) {
   useLocale();
@@ -56,6 +57,7 @@ export default function ArtifactPreview({ item, isDark, onClose }) {
         {loading && <div className="py-12 flex gap-2 justify-center text-sm"><Loader2 className="animate-spin" size={18} />{tr("正在读取预览…")}</div>}
         {!loading && !error && !files.length && <p className="text-sm opacity-70 py-8 text-center">{tr("没有可预览的报告、数据或图片，请使用“打开目录”查看。")}</p>}
         {preview?.truncated && <p className="text-xs text-amber-500">{tr("文件较大，仅预览前 512 KB；原文件未修改。")}</p>}
+        {preview?.kind === 'text' && <AiContextButton disabled={loading || Boolean(error)} context={{ reference: { kind: 'artifact', artifactId: item.id, name } }} onCreated={onClose} />}
         {preview?.kind === 'image' ? <img alt={preview.name} src={preview.content} className="max-w-full max-h-[62vh] mx-auto object-contain" /> : preview && <pre className="text-xs leading-6 whitespace-pre-wrap break-words overflow-auto max-h-[62vh] p-3 rounded bg-slate-500/10">{preview.content}</pre>}
       </div>
     </dialog>

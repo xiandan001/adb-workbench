@@ -9,6 +9,7 @@ const path = require('path');
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
+const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 
 // 默认 3 秒采样，减少性能面板数值延后感；1 秒高频仍由会员权限控制。
@@ -197,6 +198,7 @@ async function withVip(action) {
 }
 
 async function runReportTask(task, options) {
+  const lifetime = bindSummaryLifetime(task);
   try {
     const result = await writeReport(
       options.deviceId,
@@ -204,7 +206,8 @@ async function runReportTask(task, options) {
       options.outputPath,
       options.outputBaseDir,
       options.includeAiSummary,
-      (progress) => updateReportProgress(task, progress)
+      (progress) => updateReportProgress(task, progress),
+      lifetime.signal
     );
     const payload = { ok: true, path: result.path, aiSummary: result.aiSummary, count: options.history.length };
     task.status = 'success';
@@ -220,6 +223,7 @@ async function runReportTask(task, options) {
     lastReportTask = publicReportTask(task);
     sendReportDone(task, payload);
   } finally {
+    lifetime.dispose();
     if (currentReportTask === task) currentReportTask = null;
   }
 }
@@ -856,6 +860,7 @@ function publicMonitor(monitor) {
 }
 
 function cleanup() {
+  currentReportTask?.aiSummaryController?.abort();
   monitors.clear();
   workerRequests.forEach(pending => {
     clearTimeout(pending.timer);
@@ -905,7 +910,7 @@ async function writeExport(deviceId, history, outputPath, outputBaseDir) {
   return filePath;
 }
 
-async function writeReport(deviceId, history, outputPath, outputBaseDir, includeAiSummary, onProgress) {
+async function writeReport(deviceId, history, outputPath, outputBaseDir, includeAiSummary, onProgress, signal) {
   onProgress?.({ percent: 15, message: tr("统计性能采样数据") });
   const filePath = await resolvePerformanceFile(deviceId, outputPath, outputBaseDir, 'performance-report', 'md');
   const summary = summarizeHistory(history);
@@ -913,7 +918,7 @@ async function writeReport(deviceId, history, outputPath, outputBaseDir, include
     .flatMap(item => (item.warnings || []).map(warning => ({ at: item.timestamp, ...warning })))
     .slice(-50);
   onProgress?.({ percent: includeAiSummary ? 45 : 75, message: includeAiSummary ? tr("生成 AI 分析") : tr("写入性能报告") });
-  const aiSummary = includeAiSummary ? await buildPerformanceAiSummary(deviceId, history, summary, warningRows) : { ok: false, skipped: true, summary: '' };
+  const aiSummary = includeAiSummary ? await buildPerformanceAiSummary(deviceId, history, summary, warningRows, signal) : { ok: false, skipped: true, summary: '' };
   onProgress?.({ percent: 85, message: tr("写入性能报告") });
   await fs.promises.writeFile(filePath, buildPerformanceReport(deviceId, history, aiSummary), 'utf8');
   return { path: filePath, aiSummary };
@@ -991,7 +996,7 @@ function formatAiAnalysisLines(aiSummary) {
   return lines.some(Boolean) ? lines : [tr("- AI 分析为空")];
 }
 
-async function buildPerformanceAiSummary(deviceId, history, summary, warnings) {
+async function buildPerformanceAiSummary(deviceId, history, summary, warnings, signal) {
   const latest = history[history.length - 1] || {};
   const processes = (latest.processes || [])
     .slice(0, 8)
@@ -1023,6 +1028,7 @@ async function buildPerformanceAiSummary(deviceId, history, summary, warnings) {
     tr("请输出一段面向 Android 性能排查的中文 AI 总结，包含：总体判断、风险点、建议验证动作。不要编造未提供的数据。")
   ].join('\n');
   return aiAnalyze.generateAiSummary({
+    signal,
     systemPrompt: tr("你是 Android 性能分析报告助手，只根据给定性能指标输出简洁、可执行的中文结论。"),
     userContent: prompt,
     timeoutMs: 60000,

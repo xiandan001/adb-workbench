@@ -241,6 +241,7 @@ test('repeated diagnosed stack lines do not log or snapshot again inside the deb
       if (name === './app-context.cjs') return { broadcastToAllWindows: (channel, payload) => events.push({ channel, payload }) };
       if (name === './ai-analyze.cjs') return { aiKeys: {} };
       if (name === './vip.cjs') return {};
+      if (name === './ai-outbound-transport.cjs') return { protectIpc: ipc => ipc };
       if (name === './log-analyzer.cjs') return { getLogStore: () => { snapshots += 1; return { realtime: [{ raw: 'FATAL EXCEPTION' }] }; } };
       return require(name);
     }

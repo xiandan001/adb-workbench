@@ -21,36 +21,54 @@ import {
   Trash2
 } from 'lucide-react';
 
-function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange }) {
+function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange, initialDraft = {}, onDraftChange, incomingGuardId }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const onlineDevices = useMemo(() => { void locale; return devices.filter(device => device.status === 'device'); }, [devices, locale]);
   const [deviceId, setDeviceId] = useState('');
   const [baselines, setBaselines] = useState([]);
-  const [selectedBaselinePath, setSelectedBaselinePath] = useState('');
-  const [baselineName, setBaselineName] = useState('');
-  const [reportName, setReportName] = useState('');
-  const [includePerformance, setIncludePerformance] = useState(true);
+  const [selectedBaselinePath, setSelectedBaselinePath] = useState(initialDraft.selectedBaselinePath || '');
+  const [baselineName, setBaselineName] = useState(initialDraft.baselineName || '');
+  const [reportName, setReportName] = useState(initialDraft.reportName || '');
+  const [includePerformance, setIncludePerformance] = useState(initialDraft.includePerformance ?? true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [lastResult, setLastResult] = useState(null);
   const [suites, setSuites] = useState([]);
-  const [suiteId, setSuiteId] = useState('smoke');
-  const [apkPath, setApkPath] = useState('');
-  const [packageName, setPackageName] = useState('');
-  const [baselineImagePath, setBaselineImagePath] = useState('');
-  const [rounds, setRounds] = useState(5);
-  const [launchWaitMs, setLaunchWaitMs] = useState(5000);
-  const [threshold, setThreshold] = useState(98);
+  const [suiteId, setSuiteId] = useState(initialDraft.suiteId || 'smoke');
+  const [apkPath, setApkPath] = useState(initialDraft.apkPath || '');
+  const [packageName, setPackageName] = useState(initialDraft.packageName || '');
+  const [baselineImagePath, setBaselineImagePath] = useState(initialDraft.baselineImagePath || '');
+  const [rounds, setRounds] = useState(initialDraft.rounds ?? 5);
+  const [launchWaitMs, setLaunchWaitMs] = useState(initialDraft.launchWaitMs ?? 5000);
+  const [threshold, setThreshold] = useState(initialDraft.threshold ?? 98);
   const [lastAcceptanceTask, setLastAcceptanceTask] = useState(null);
-  const [guardIntervalMs, setGuardIntervalMs] = useState(15000);
+  const [guardIntervalMs, setGuardIntervalMs] = useState(initialDraft.guardIntervalMs ?? 15000);
   const [guardState, setGuardState] = useState({ activeGuards: [], history: [] });
   const [lastStoppedGuard, setLastStoppedGuard] = useState(null);
-  const [qualityTab, setQualityTab] = useState('regression');
+  const [qualityTab, setQualityTab] = useState(initialDraft.qualityTab || 'regression');
   const [showTaskDetails, setShowTaskDetails] = useState(false);
   const deviceContextRef = useRef({ deviceId: activeDeviceId || '', generation: 0 });
   const deviceOperationRef = useRef(null);
+  const restoredTaskId = useRef(initialDraft.lastTaskId || '');
+  const [handledGuard, setHandledGuard] = useState('');
+  if (incomingGuardId && incomingGuardId !== handledGuard) {
+    setHandledGuard(incomingGuardId); setQualityTab('guard');
+  }
+  useEffect(() => {
+    onDraftChange?.({ selectedBaselinePath, baselineName, reportName, includePerformance, suiteId, apkPath, packageName, baselineImagePath,
+      rounds, launchWaitMs, threshold, guardIntervalMs, qualityTab, lastTaskId: lastAcceptanceTask?.id || restoredTaskId.current });
+  }, [selectedBaselinePath, baselineName, reportName, includePerformance, suiteId, apkPath, packageName, baselineImagePath,
+    rounds, launchWaitMs, threshold, guardIntervalMs, qualityTab, lastAcceptanceTask?.id, onDraftChange]);
+  useEffect(() => {
+    let alive = true;
+    if (restoredTaskId.current) void window.electronAPI?.taskState?.().then(state => {
+      const task = [...(state?.activeTasks || []), ...(state?.history || [])].find(item => item.id === restoredTaskId.current);
+      if (alive && task?.deviceRuns?.some(run => run.deviceId === activeDeviceId)) setLastAcceptanceTask(task);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [activeDeviceId]);
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';

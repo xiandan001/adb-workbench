@@ -12,7 +12,8 @@ export function AiWorkspaceReportActions({ view, state, theme }) {
   const button = `inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs disabled:opacity-40 ${theme.button.secondary}`;
   return <div className={`space-y-3 rounded-xl border p-4 ${theme.card}`}>
     <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('只读报告：不恢复旧发送授权。请主动保存需要保留的分析；未保存会话会过期。')}</p>
-    {!view.reportRef.historyId && <div className="flex flex-wrap gap-2"><input aria-label={tr('报告名称')} maxLength={80} value={name} disabled={disabled} onChange={event => setName(event.target.value)} className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-xs ${theme.input}`} /><button type="button" onClick={() => state.saveReport(name.trim())} disabled={disabled || !name.trim()} className={button}><Save size={14} />{tr('保存本地历史')}</button></div>}
+    {!view.reportRef.historyId && !view.reportRef.casebookId && <div className="flex flex-wrap gap-2"><input aria-label={tr('报告名称')} maxLength={80} value={name} disabled={disabled} onChange={event => setName(event.target.value)} className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-xs ${theme.input}`} /><button type="button" onClick={() => state.saveReport(name.trim())} disabled={disabled || !name.trim()} className={button}><Save size={14} />{tr('保存本地历史')}</button></div>}
+    {view.report.review && <p className="text-xs leading-5">{tr('案例人工记录：{0} · 适用 {1} {2}', { 0: { verified: tr('已人工验证'), rejected: tr('已确认误判'), unverified: tr('待验证') }[view.report.review.status], 1: view.report.review.packageName, 2: view.report.review.version })}</p>}
     <div className="flex flex-wrap gap-2">
       <button type="button" onClick={() => state.exportReport(true)} disabled={disabled} className={button}><Copy size={14} />{tr('复制报告')}</button>
       <button type="button" onClick={() => state.exportReport(false)} disabled={disabled} className={button}><Download size={14} />{tr('导出 Markdown')}</button>
@@ -52,6 +53,7 @@ export function AiWorkspaceComparison({ state, theme }) {
   const options = [
     ...Object.values(state.cases).flatMap(value => value.turns.map(turn => ({ value: workspaceReportKey({ caseId: value.caseId, turnId: turn.id }), label: turn.preview?.question?.slice(0, 70) || formatDateTime(turn.createdAt) }))),
     ...state.history.map(report => ({ value: workspaceReportKey({ historyId: report.id }), label: report.name })),
+    ...state.casebook.map(report => ({ value: workspaceReportKey({ casebookId: report.id }), label: report.name })),
   ].filter(option => option.value !== currentKey);
   const valid = options.some(option => option.value === current.baseline);
   return <section className={`space-y-3 rounded-xl border p-4 ${theme.card}`}>

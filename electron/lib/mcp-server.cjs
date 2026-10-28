@@ -6,7 +6,7 @@ const { tr } = require('./localization.cjs');
 const http = require('http');
 const { randomUUID } = require('crypto');
 const readline = require('readline');
-const https = require('https');
+const https = require('./ai-outbound-transport.cjs');
 
 const ctx = require('./app-context.cjs');
 const logAnalyzer = require('./log-analyzer.cjs');
@@ -32,6 +32,7 @@ const MCP_PROTOCOL_VERSION = '2025-03-26';
 let mcpPort = 49321;
 let mcpServerInstance = null;
 const mcpSessions = new Map();
+const mcpAiRequests = new Map();
 // MCP 会话清理定时器需要随服务生命周期启停，避免反复启动/停止后累积 interval。
 let mcpSessionCleanupTimer = null;
 
@@ -267,7 +268,7 @@ async function readJsonBody(req, maxBytes) {
   return raw ? JSON.parse(raw) : {};
 }
 
-async function callMcpTool(name, args) {
+async function callMcpTool(name, args, signal) {
   const { filterEntries, countByLevel } = require('../../src/shared/filter');
 
   // 通过 getter 访问 log-analyzer 的内部状态（保持模块边界清晰）
@@ -490,6 +491,7 @@ async function callMcpTool(name, args) {
   }
 
   if (name === 'ai_analyze') {
+    return https.withOperation({ title: tr('MCP 请求 AI 日志分析'), kind: 'mcp', signal }, async () => {
     const source = args.source ?? 'realtime';
     const filter = args.filter ?? {};
     const customPrompt = args.customPrompt;
@@ -547,9 +549,7 @@ async function callMcpTool(name, args) {
 
     // 非流式请求
     const result = await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        resolve({ ok: false, error: tr("AI 分析超时（{0}ms）", { 0: timeoutMs }) });
-      }, timeoutMs);
+      let timer;
 
       const postReq = https.request({
         hostname: urlObj.hostname,
@@ -582,7 +582,14 @@ async function callMcpTool(name, args) {
 
       postReq.on('error', (e) => {
         clearTimeout(timer);
-        resolve({ ok: false, error: e.message });
+        resolve({ ok: false, code: e.code, cancelled: e.name === 'AbortError', error: e.message });
+      });
+
+      postReq.once('ai:authorized', () => {
+        timer = setTimeout(() => {
+          resolve({ ok: false, error: tr("AI 分析超时（{0}ms）", { 0: timeoutMs }) });
+          postReq.destroy(Object.assign(new Error(tr("AI 分析超时（{0}ms）", { 0: timeoutMs })), { code: 'AI_SEND_TIMEOUT' }));
+        }, timeoutMs);
       });
 
       postReq.write(requestBody);
@@ -590,6 +597,7 @@ async function callMcpTool(name, args) {
     });
 
     return mcpText(result);
+    });
   }
 
   if (name === 'ai_get_result') {
@@ -654,6 +662,11 @@ function startMcpHttpServer() {
           return;
         }
 
+        if (body.method === 'notifications/cancelled') {
+          const sessionId = req.headers['mcp-session-id'];
+          if (mcpSessions.has(sessionId)) mcpAiRequests.get(`${sessionId}:${JSON.stringify(body.params?.requestId)}`)?.abort();
+          res.statusCode = 202; res.end(); return;
+        }
         if (body.method?.startsWith('notifications/')) { res.statusCode = 202; res.end(); return; }
         if (body.method === 'ping') {
           res.statusCode = 200; res.setHeader('Content-Type', 'application/json');
@@ -670,13 +683,27 @@ function startMcpHttpServer() {
             res.statusCode = 200; res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(jsonRpcError(id, -32602, 'Missing tool name'))); return;
           }
+          const controller = toolName === 'ai_analyze' ? new AbortController() : null;
+          const sessionId = req.headers['mcp-session-id'];
+          const requestKey = controller && mcpSessions.has(sessionId) ? `${sessionId}:${JSON.stringify(id)}` : null;
+          const disconnected = () => { if (!res.writableEnded) controller?.abort(); };
+          if (controller) res.once('close', disconnected);
+          if (requestKey) {
+            if (mcpAiRequests.has(requestKey)) { res.statusCode = 409; res.end(); return; }
+            mcpAiRequests.set(requestKey, controller);
+          }
           try {
-            const result = await callMcpTool(toolName, toolArgs);
+            const result = await callMcpTool(toolName, toolArgs, controller?.signal);
+            if (res.destroyed) return;
             res.statusCode = 200; res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(jsonRpcResult(id, result)));
           } catch (e) {
+            if (res.destroyed) return;
             res.statusCode = 200; res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(jsonRpcError(id, -32000, e?.message ?? 'Tool execution failed')));
+          } finally {
+            if (requestKey && mcpAiRequests.get(requestKey) === controller) mcpAiRequests.delete(requestKey);
+            if (controller) res.off('close', disconnected);
           }
           return;
         }
@@ -698,6 +725,7 @@ function startMcpHttpServer() {
       }
       if (req.method === 'DELETE') {
         const sid = req.headers['mcp-session-id'];
+        if (sid) for (const [key, controller] of mcpAiRequests) if (key.startsWith(`${sid}:`)) { controller.abort(); mcpAiRequests.delete(key); }
         if (sid) mcpSessions.delete(sid);
         res.statusCode = 204; res.end(); return;
       }
@@ -759,6 +787,8 @@ function register(ipcMain) {
 
 // 供 main 进程退出时调用，关闭 MCP HTTP server
 function closeMcpServer() {
+  for (const controller of mcpAiRequests.values()) controller.abort();
+  mcpAiRequests.clear();
   if (mcpServerInstance) {
     try {
       mcpServerInstance.close();
