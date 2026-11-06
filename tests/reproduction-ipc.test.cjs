@@ -70,6 +70,19 @@ test('reproduction text preview is bounded, requires a declared file and cannot 
   assert.equal((await h.invoke('open', { id: '../outside' })).ok, false);
 });
 
+test('marker neighborhood uses the protected read route and only the chosen manifest marker', async t => {
+  const h = await fixture(t), session = await h.seed();
+  const marker = { id: randomUUID(), note: 'Synthetic marker', at: session.startedAt + 1000, offsetMs: 1000, videoOffsetMs: null };
+  session.markers.push(marker); await h.store.save(session);
+  const result = await h.invoke('read', { id: session.id, markerId: marker.id });
+  assert.equal(result.ok, true);
+  assert.equal(result.neighborhood.marker.id, marker.id);
+  assert.equal(result.neighborhood.sources[0].clockBasis, 'device-unsynchronized');
+  assert.equal((await h.invoke('read', { id: session.id, markerId: randomUUID() })).ok, false);
+  assert.equal((await h.invoke('read', { id: session.id, markerId: marker.id }, { sender: h.sender, senderFrame: {} })).ok, false);
+  assert.equal(h.state.handoffs.length, 0);
+});
+
 test('analysis creates only an explicit frozen handoff and never submits active or unsaved evidence', async t => {
   const h = await fixture(t), session = await h.seed('recording');
   assert.equal((await h.invoke('analyze', { id: session.id })).ok, false);

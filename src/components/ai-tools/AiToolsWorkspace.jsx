@@ -19,10 +19,11 @@ import AiProviderHome from './AiProviderHome';
 import { aiToolsCan, providerDraft, providerInput } from './aiToolsModel';
 import { connectionCompletionNotice, connectionFeedback, providerFeedbackCurrent, providerFeedbackToken } from './aiProviderHomeModel';
 
-export default function AiToolsWorkspace({ active = true, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership }) {
+export default function AiToolsWorkspace({ active = true, incomingTabRequest, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership }) {
   useLocale();
   const [snapshot, setSnapshot] = useState(null); const snapshotRef = useRef(null); const requestRef = useRef(onRequest);
   const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [tab, setTab] = useState('providers');
+  const openedRequest = useRef('');
   const [form, setForm] = useState(null); const [remove, setRemove] = useState(null); const [removing, setRemoving] = useState(false);
   const [preview, setPreview] = useState(null); const [models, setModels] = useState(null);
   const [configurationRevision, setConfigurationRevision] = useState(0);
@@ -70,6 +71,13 @@ export default function AiToolsWorkspace({ active = true, theme, isDark = isDark
     { id: 'portable', label: tr("加密迁移"), enabled: can('portable_export') || can('portable_recoveries_list') }].filter(item => item.enabled);
   const selectedTab = tabs.some(item => item.id === tab) ? tab : 'providers';
   const primaryIds = ['providers', 'projects', 'sessions']; const primaryTabs = tabs.filter(item => primaryIds.includes(item.id)); const advancedTabs = tabs.filter(item => !primaryIds.includes(item.id));
+
+  useEffect(() => {
+    if (!active || !snapshotReady || loading || !incomingTabRequest?.requestId || openedRequest.current === incomingTabRequest.requestId) return;
+    openedRequest.current = incomingTabRequest.requestId;
+    if (tabs.some(item => item.id === incomingTabRequest.tab)) setTab(incomingTabRequest.tab);
+    else setError(tr('此功能暂不可用，请检查会员状态或工具权限。'));
+  }, [active, snapshotReady, loading, incomingTabRequest, tabs]);
 
   const saveProvider = async provider => {
     invalidateFeedback();

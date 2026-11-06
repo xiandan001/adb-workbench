@@ -7,6 +7,8 @@ const DEFAULT_CONFIG = Object.freeze({ baudRate: 9600, dataBits: 8, stopBits: 1,
 const CONFIG_KEYS = ['baudRate', 'dataBits', 'stopBits', 'parity', 'flowControl'];
 const PREF_KEYS_V1 = ['version', 'config', 'receiveMode', 'sendMode', 'lineEnding', 'favorites'];
 const PREF_KEYS_V2 = [...PREF_KEYS_V1, 'terminalConfig'];
+const PREF_KEYS_V3 = [...PREF_KEYS_V2, 'schemes'];
+const SCHEME_KEYS = ['id', 'name', 'workspace', 'config', 'receiveMode', 'sendMode', 'lineEnding', 'terminalEnter'];
 const FAVORITE_KEYS = ['id', 'name', 'mode', 'content', 'lineEnding'];
 const LINE_ENDINGS = Object.freeze({ none: '', lf: '\n', cr: '\r', crlf: '\r\n' });
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -86,19 +88,35 @@ function normalizeFavorite(value) {
   return { id: value.id, name: value.name.trim(), ...message };
 }
 
+function normalizeSerialScheme(value) {
+  exactObject(value, SCHEME_KEYS, tr('串口连接方案'));
+  if (typeof value.id !== 'string' || !value.id.trim() || value.id.length > 200 || UNSAFE_KEYS.has(value.id) || [...value.id].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error(tr('串口连接方案 ID 无效'));
+  if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 80 || [...value.name].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error(tr('方案名称应为 1 至 80 个可见字符'));
+  return { id: value.id, name: value.name.trim(), workspace: enumValue(value.workspace, ['rs232', 'terminal'], tr('串口工作区')),
+    config: normalizeConfig(value.config), receiveMode: enumValue(value.receiveMode, ['text', 'hex', 'ascii'], tr('接收模式')),
+    sendMode: enumValue(value.sendMode, ['text', 'hex', 'ascii'], tr('发送模式')), lineEnding: enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), tr('换行设置')),
+    terminalEnter: enumValue(value.terminalEnter, ['cr', 'lf', 'crlf'], tr('回车发送')) };
+}
+
 function normalizePreferences(value) {
-  if (value?.version !== 1 && value?.version !== 2) throw new Error(tr("串口偏好版本不受支持"));
-  exactObject(value, value.version === 1 ? PREF_KEYS_V1 : PREF_KEYS_V2, tr("串口偏好"));
-  if (value.config === undefined || (value.version === 2 && value.terminalConfig === undefined)) throw new Error(tr("串口偏好缺少连接参数"));
+  if (![1, 2, 3].includes(value?.version)) throw new Error(tr("串口偏好版本不受支持"));
+  exactObject(value, value.version === 1 ? PREF_KEYS_V1 : value.version === 2 ? PREF_KEYS_V2 : PREF_KEYS_V3, tr("串口偏好"));
+  if (value.config === undefined || (value.version >= 2 && value.terminalConfig === undefined)) throw new Error(tr("串口偏好缺少连接参数"));
   const config = normalizeConfig(value.config);
   const terminalConfig = normalizeConfig(value.version === 1 ? value.config : value.terminalConfig);
   if (!Array.isArray(value.favorites) || value.favorites.length > 30) throw new Error(tr("常用命令最多保存 30 条"));
   const favorites = value.favorites.map(normalizeFavorite);
   if (new Set(favorites.map(item => item.id)).size !== favorites.length) throw new Error(tr("常用命令 ID 重复"));
-  return { version: 2, config, terminalConfig,
+  let schemes;
+  if (value.version === 3) {
+    if (!Array.isArray(value.schemes) || value.schemes.length > 20 || encodeUtf8(JSON.stringify(value.schemes)).length > 64 * 1024) throw new Error(tr('串口连接方案最多 20 个，总大小不能超过 64 KiB'));
+    schemes = value.schemes.map(normalizeSerialScheme);
+    if (new Set(schemes.map(item => item.id)).size !== schemes.length || new Set(schemes.map(item => item.workspace + ':' + item.name.toLowerCase())).size !== schemes.length) throw new Error(tr('同一工作区的方案名称或 ID 不能重复'));
+  }
+  return { version: value.version === 3 ? 3 : 2, config, terminalConfig,
     receiveMode: enumValue(value.receiveMode, ['text', 'hex', 'ascii'], tr("接收模式")),
     sendMode: enumValue(value.sendMode, ['text', 'hex', 'ascii'], tr("发送模式")),
-    lineEnding: enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), tr("换行设置")), favorites };
+    lineEnding: enumValue(value.lineEnding, Object.keys(LINE_ENDINGS), tr("换行设置")), favorites, ...(schemes ? { schemes } : {}) };
 }
 
 export const SERIAL_PREFS_KEY = 'adb-workbench.serial-preferences.v1';
@@ -165,4 +183,4 @@ export function appendSerialHistory(value, storage = globalThis.localStorage) {
   return next;
 }
 
-export { DEFAULT_CONFIG, normalizeConfig, encodeMessage, normalizePreferences };
+export { DEFAULT_CONFIG, normalizeConfig, encodeMessage, normalizePreferences, normalizeSerialScheme };

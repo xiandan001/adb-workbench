@@ -30,6 +30,9 @@ function validateReport(report) {
     || !string(report.preview.handoff.origin, 80) || !provenance(report.preview.handoff.provenance))) throw fail();
   if (report.preview.selection !== undefined) normalizeSelection(report.preview.selection);
   if (report.preview.diagnostic !== undefined) normalizeDiagnostic(report.preview.diagnostic);
+  if (report.preview.deviceId !== undefined && (!string(report.preview.deviceId, 160) || !report.preview.deviceId
+    || /[\u0000-\u001f\u007f]/.test(report.preview.deviceId)
+    || report.preview.targetFingerprint && require('node:crypto').createHash('sha256').update(`device:${report.preview.deviceId}`).digest('hex').slice(0, 24) !== report.preview.targetFingerprint)) throw fail();
   if (report.usage != null && (!integer(report.usage.inputTokens, 1000000000) || !integer(report.usage.outputTokens, 1000000000)
     || report.usage.totalTokens !== report.usage.inputTokens + report.usage.outputTokens)) throw fail();
   const ids = new Set();
@@ -184,6 +187,7 @@ function reportText(report) {
   for (const field of ['findings', 'hypotheses', 'nextSteps', 'limitations']) {
     for (const value of report.result[field]) sections.push(fenced(typeof value === 'string' ? value : JSON.stringify(value, null, 2)));
   }
+  for (const card of report.result.verificationChecks || []) sections.push(fenced(JSON.stringify(card, null, 2)));
   if (report.result.verdict) sections.push(fenced(report.result.verdict));
   if (report.review) sections.push(fenced(JSON.stringify(report.review, null, 2)));
   if (report.preview.context) sections.push(fenced(JSON.stringify(report.preview.context, null, 2)));

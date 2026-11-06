@@ -15,7 +15,7 @@ const themes = {
       outline: 'border border-slate-200 hover:border-emerald-400 text-slate-700'
     },
     text: 'text-slate-700',
-    textMuted: 'text-slate-400',
+    textMuted: 'text-slate-500',
     input: 'border-slate-200 bg-white',
       terminal: {
         bg: 'bg-[#202124]',

@@ -1,8 +1,9 @@
 import { tr, useLocale } from '../shared/i18n';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Command, Keyboard, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import SelectMenu from './SelectMenu';
+import { filterSearchItems, selectedSearchIndex } from '../shared/workbenchSearch';
 import {
   COMMAND_ACTIONS,
   DEFAULT_COMMAND_SHORTCUT,
@@ -11,27 +12,43 @@ import {
   formatCommandShortcut
 } from '../data/globalCommands';
 
-function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
+function GlobalCommandPalette({ open, commands, theme, onClose, onRun, loading = false, error = '' }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeId, setActiveId] = useState(null);
+  const resultsRef = useRef(null);
+  const dialogRef = useRef(null);
+  const inputRef = useRef(null);
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
 
   const filtered = useMemo(() => {
     void locale;
-    const keyword = query.trim().toLowerCase();
-    return commands.filter(command => {
-      if (!keyword) return true;
-      return [command.title, command.description, command.group].some(value => String(value || '').toLowerCase().includes(keyword));
-    });
+    return filterSearchItems(commands, query);
   }, [commands, query, locale]);
+  const selectedIndex = selectedSearchIndex(filtered, activeId);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    inputRef.current?.focus();
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+  }, [open]);
+  useEffect(() => {
+    if (open) resultsRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [open, selectedIndex, query]);
 
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
+      if (event.key === 'Tab') {
+        const controls = [...(dialogRef.current?.querySelectorAll('input, button:not([tabindex="-1"])') || [])];
+        const first = controls[0], last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -42,26 +59,31 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
   const runCommand = (command) => {
     onRun(command);
     setQuery('');
-    setActiveIndex(0);
+    setActiveId(null);
     onClose();
   };
 
   const onInputKeyDown = (event) => {
+    if (event.isComposing) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActiveIndex(index => Math.min(index + 1, Math.max(filtered.length - 1, 0)));
+      setActiveId(filtered[Math.min(selectedIndex + 1, Math.max(filtered.length - 1, 0))]?.id ?? null);
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setActiveIndex(index => Math.max(index - 1, 0));
+      setActiveId(filtered[Math.max(selectedIndex - 1, 0)]?.id ?? null);
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      if (filtered[activeIndex]) runCommand(filtered[activeIndex]);
+      if (filtered[selectedIndex]) runCommand(filtered[selectedIndex]);
     }
   };
 
   return (
     <div className="fixed inset-0 z-[220] bg-black/55 backdrop-blur-sm flex items-start justify-center px-4 pt-[12vh]" onMouseDown={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={tr('搜索功能、设置和报告')}
         className={`w-full max-w-2xl rounded-xl border shadow-2xl overflow-hidden ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -70,33 +92,44 @@ function GlobalCommandPalette({ open, commands, theme, onClose, onRun }) {
           <div className="relative flex-1">
             <Search size={16} className={`absolute left-0 top-1/2 -translate-y-1/2 ${muted}`} />
             <input
-              autoFocus
+              ref={inputRef}
+              role="combobox"
+              aria-expanded="true"
+              aria-controls="workbench-search-results"
+              aria-activedescendant={selectedIndex >= 0 ? `workbench-search-result-${selectedIndex}` : undefined}
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
-                setActiveIndex(0);
+                setActiveId(null);
               }}
               onKeyDown={onInputKeyDown}
-              placeholder={tr("搜索命令")}
+              aria-label={tr('搜索功能、设置和报告')}
+              placeholder={tr('搜索功能、设置和报告')}
               className={`w-full pl-7 pr-3 py-2 bg-transparent outline-none text-sm ${text}`}
             />
           </div>
-          <button onClick={onClose} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-[#3E4145] text-[#9AA0A6]' : 'hover:bg-slate-100 text-slate-500'}`}>
+          <button aria-label={tr('关闭')} onClick={onClose} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-[#3E4145] text-[#9AA0A6]' : 'hover:bg-slate-100 text-slate-500'}`}>
             <X size={18} />
           </button>
         </div>
 
-        <div className="max-h-[56vh] overflow-y-auto p-2">
+        {loading && <p role="status" className={`px-4 py-2 text-xs ${muted}`}>{tr('正在读取本地报告和历史…')}</p>}
+        {error && <p role="status" className="px-4 py-2 text-xs text-amber-600">{error}</p>}
+        <div ref={resultsRef} id="workbench-search-results" role="listbox" aria-label={tr('搜索结果')} className="max-h-[56vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <div className={`py-10 text-center text-sm ${muted}`}>{tr("未找到命令")}</div>
           ) : filtered.map((command, index) => (
             <button
               key={command.id}
               type="button"
-              onMouseEnter={() => setActiveIndex(index)}
+              role="option"
+              id={`workbench-search-result-${index}`}
+              tabIndex={-1}
+              aria-selected={selectedIndex === index}
+              onMouseMove={() => setActiveId(command.id)}
               onClick={() => runCommand(command)}
               className={`w-full text-left rounded-lg px-3 py-3 flex items-center justify-between gap-3 transition-colors ${
-                activeIndex === index
+                selectedIndex === index
                   ? isDark ? 'bg-[#3E4145]' : 'bg-emerald-50'
                   : isDark ? 'hover:bg-[#2D2F33]' : 'hover:bg-slate-50'
               }`}

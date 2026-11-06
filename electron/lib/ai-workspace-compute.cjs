@@ -52,6 +52,7 @@ async function computeWorkspaceJob(command, args) {
     result.summary = sanitize(result.summary);
     for (const finding of result.findings) { finding.title = sanitize(finding.title); finding.detail = sanitize(finding.detail); }
     for (const field of ['hypotheses', 'nextSteps', 'limitations']) result[field] = result[field].map(sanitize);
+    for (const card of result.verificationChecks || []) { card.title = sanitize(card.title); card.expectedObservation = sanitize(card.expectedObservation); }
     return result;
   }
   throw Object.assign(new Error(tr('AI 后台操作无效。')), { code: 'AI_WORKER_OPERATION', safe: true });

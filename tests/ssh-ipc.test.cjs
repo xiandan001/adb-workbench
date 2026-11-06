@@ -37,14 +37,14 @@ function fixture(t, { openDirectoryResult = '' } = {}) {
     clear: identity => { historyCalls.push(['clear', identity]); historyEntries.set(keyOf(identity), []); },
     setPaused: (identity, paused) => { historyCalls.push(['pause', identity, paused]); pauses.set(keyOf(identity), paused); }
   };
-  const published = [];
+  const published = []; const connectionStatuses = [];
   const controller = createSshController({ sessions, files, profiles, history, getOwner: () => owner, dialogs,
     openLocalDirectory: async target => { calls.push(['open-directory', target]); return openDirectoryResult; },
-    onPublish: data => published.push(data) });
+    onPublish: data => published.push(data), onConnectionStatus: data => connectionStatuses.push(data) });
   controller.register({ handle: (channel, action) => handlers.set(channel, action) });
   t.after(() => controller.dispose());
   const run = (name, args, event = { sender, senderFrame: mainFrame }) => handlers.get(`ssh:${name}`)(event, args);
-  return { run, handlers, sender, mainFrame, owner, profiles, sessions, files, history, historyCalls, calls, state, transfers, dialogs, published, controller, answer: value => { response = value; } };
+  return { run, handlers, sender, mainFrame, owner, profiles, sessions, files, history, historyCalls, calls, state, transfers, dialogs, published, connectionStatuses, controller, answer: value => { response = value; } };
 }
 test('every SSH IPC rejects foreign windows and subframes before invoking any operation', async t => {
   const h = fixture(t);
@@ -295,4 +295,65 @@ test('terminal-focus IPC restores native shortcuts on hide and ignores old termi
   await h.run('terminal-focus', { sessionId: 'a', terminalId: 'ta', focused: false });
   assert.equal(h.calls.at(-1)[1], true);
   await h.run('subscribe', { active: false }); assert.equal(h.calls.at(-1)[1], false);
+});
+
+test('reconnect uses the old session profile and preserves old terminals/drafts without replay', async t => {
+  const h = fixture(t);
+  h.state[0].status = 'disconnected'; h.state[0].profileId = 'profile-a';
+  h.profiles.list = () => [{ id: 'profile-a', host: 'host-a', port: 22, username: 'u' }, { id: 'profile-b', host: 'host-b', port: 22, username: 'u' }];
+  h.profiles.resolve = args => { h.calls.push(['resolve', args.profileId]); return { host: 'host-a', port: 22, username: 'u', profileId: args.profileId, password: 'fixture' }; };
+  h.sessions.connect = async args => { h.calls.push(['connect', args.config]); return { sessionId: 'new-a' }; };
+  await h.run('set-drafts', { sessionId: 'a', paths: ['/unsaved.conf'] });
+  const original = structuredClone(h.state[0]);
+  const result = await h.run('reconnect', { sessionId: 'a', profileId: 'profile-b', profile: { host: 'evil' }, content: 'do not replay' });
+  assert.equal(result.sessionId, 'new-a');
+  assert.deepEqual(h.calls.find(call => call[0] === 'resolve'), ['resolve', 'profile-a']);
+  assert.equal(h.calls.find(call => call[0] === 'connect')[1].host, 'host-a');
+  assert.deepEqual(h.state[0], original);
+  assert.ok(!h.calls.some(call => ['write', 'remove-session', 'disconnect', 'dispose-files'].includes(call[0])));
+  assert.equal((await h.run('close-session', { sessionId: 'a' })).cancelled, true, 'old dirty editor remains protected');
+});
+
+test('reconnect rejects changed or absent identities, connected sessions, and duplicate attempts', async t => {
+  const h = fixture(t);
+  assert.equal((await h.run('reconnect', { sessionId: 'a' })).success, false);
+  h.state[0].status = 'disconnected';
+  assert.equal((await h.run('reconnect', { sessionId: 'a' })).success, false);
+  h.state[0].profileId = 'profile';
+  h.profiles.list = () => [{ id: 'profile', host: 'changed', port: 22, username: 'u' }];
+  assert.equal((await h.run('reconnect', { sessionId: 'a' })).success, false);
+  h.profiles.list = () => [{ id: 'profile', host: 'host-a', port: 22, username: 'u' }];
+  h.profiles.resolve = () => ({ host: 'changed-after-check', port: 22, username: 'u' });
+  assert.equal((await h.run('reconnect', { sessionId: 'a' })).success, false);
+  assert.ok(!h.calls.some(call => call[0] === 'connect'));
+  h.profiles.resolve = args => ({ host: 'host-a', port: 22, username: 'u', password: args.credential.password });
+  let finish;
+  h.sessions.connect = args => { h.calls.push(['connect', args.config]); return new Promise(resolve => { finish = resolve; }); };
+  const pending = h.run('reconnect', { sessionId: 'a', auth: { password: 'fixture-credential' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await h.run('reconnect', { sessionId: 'a' })).success, false);
+  finish({ sessionId: 'new' });
+  assert.equal((await pending).sessionId, 'new');
+  assert.equal(h.calls.find(call => call[0] === 'connect')[1].password, 'fixture-credential');
+});
+
+test('SSH compact status includes dirty/failed activity but no credentials, output or high-frequency updates', async t => {
+  const h = fixture(t);
+  await h.run('connection-status-subscribe', { active: true });
+  await h.run('subscribe', { active: false });
+  h.controller.publish({ type: 'terminal-output', text: 'private output' });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(h.connectionStatuses.length, 0);
+  await h.run('set-drafts', { sessionId: 'a', paths: ['/private/draft'] });
+  h.transfers.push({ id: 'failed', status: 'failed', source: '/private/file' });
+  h.controller.publish();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(h.connectionStatuses.length, 1);
+  assert.equal(h.connectionStatuses[0].unsavedCount, 1);
+  assert.equal(h.connectionStatuses[0].failedCount, 1);
+  assert.ok(!JSON.stringify(h.connectionStatuses).includes('private'));
+  h.sender.emit('did-start-loading');
+  h.state[0].status = 'disconnected'; h.controller.publish();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(h.connectionStatuses.length, 1);
 });

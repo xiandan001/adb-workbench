@@ -44,7 +44,8 @@ function register(ipcMain) {
   controller = createSshController({ sessions, files, profiles, history, getOwner,
     openLocalDirectory: directory => shell.openPath(directory),
     dialogs: { ask, open: options => dialog.showOpenDialog(getOwner(), options) },
-    onPublish: (snapshot, owner) => owner.webContents.send('ssh:changed', snapshot) });
+    onPublish: (snapshot, owner) => owner.webContents.send('ssh:changed', snapshot),
+    onConnectionStatus: (status, owner) => owner.webContents.send('ssh:connection-status', status) });
   controller.register(ipcMain);
 }
 module.exports = {

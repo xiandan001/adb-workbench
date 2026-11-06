@@ -19,3 +19,10 @@ export function sortArtifacts(items, order) {
     return order === 'oldest' ? -difference : difference;
   });
 }
+
+export function resolveArtifactPreviewRequest(items, request, handledKey, busy = false) {
+  if (!request?.id || busy) return null;
+  const key = `${request.id}:${request.requestId || ''}`;
+  if (key === handledKey) return null;
+  return { key, item: items.find(item => item.id === request.id) || null };
+}

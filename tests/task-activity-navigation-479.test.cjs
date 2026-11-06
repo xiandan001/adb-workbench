@@ -12,18 +12,21 @@ traverse(parser.parse(source, { sourceType: 'module', plugins: ['jsx'] }), { Cal
 } });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function harness() {
-  const opened = [], refreshed = [], notices = []; let reads = 0;
+  const opened = [], refreshed = [], notices = [], receipts = []; let reads = 0;
   const context = { incomingTaskId: '', incomingTaskRequestId: 0, loading: false, incomingTaskRef: { current: '' }, recorderMountedRef: { current: true }, activeTasks: [], history: [], tr: value => value,
     setSelectedTaskId: id => opened.push(id), setActiveTasks: items => refreshed.push(['active', items]), setHistory: items => refreshed.push(['history', items]), showToast: message => notices.push(message),
+    onTaskRequestHandled: value => receipts.push(value),
     window: { electronAPI: { taskState: async () => { reads++; return { ok: true, activeTasks: [{ id: 'unknown-running' }], history: [] }; }, taskRun: () => { throw new Error('Navigation must not execute'); } } } };
-  return { context, opened, refreshed, notices, reads: () => reads, run() { assert.ok(effect); vm.runInNewContext(`(${effect})()`, context); } };
+  return { context, opened, refreshed, notices, receipts, reads: () => reads, run() { assert.ok(effect); vm.runInNewContext(`(${effect})()`, context); } };
 }
 
 test('known incoming run opens the result drawer without fetching, changing editor input or running a task', async () => {
   const h = harness(); h.context.activeTasks = [{ id: 'known' }]; h.context.incomingTaskId = 'known';
   h.run(); await flush(); assert.deepEqual(h.opened, ['known']); assert.equal(h.reads(), 0); assert.deepEqual(h.refreshed, []);
   h.run(); await flush(); assert.deepEqual(h.opened, ['known']);
+  assert.equal(h.receipts.length, 1); assert.equal(h.receipts[0].id, 'known'); assert.equal(h.receipts[0].requestId, 0);
   h.context.incomingTaskRequestId++; h.run(); await flush(); assert.deepEqual(h.opened, ['known', 'known']); assert.equal(h.reads(), 0);
+  assert.equal(h.receipts.length, 2); assert.equal(h.receipts[1].requestId, 1);
   assert.doesNotMatch(effect, /setDraft|setSelectedDeviceIds|setActiveDevice|taskRun/);
 });
 
@@ -31,6 +34,7 @@ test('unknown incoming run refreshes state once and missing records never select
   const h = harness(); h.context.incomingTaskId = 'unknown-running'; h.run(); await flush();
   assert.equal(h.reads(), 1); assert.deepEqual(h.opened, ['unknown-running']); h.run(); await flush(); assert.equal(h.reads(), 1);
   h.context.incomingTaskId = 'missing'; h.run(); await flush(); assert.equal(h.reads(), 2); assert.deepEqual(h.opened, ['unknown-running']); assert.equal(h.notices.length, 1);
+  assert.equal(h.receipts.at(-1).id, 'missing');
 });
 
 test('an older async response or unmounted workspace cannot reopen a stale result drawer', async () => {
@@ -38,7 +42,18 @@ test('an older async response or unmounted workspace cannot reopen a stale resul
   h.context.window.electronAPI.taskState = () => new Promise(resolve => pending.push(resolve));
   h.context.incomingTaskId = 'old'; h.run(); h.context.incomingTaskId = 'new'; h.run();
   pending[0]({ ok: true, activeTasks: [{ id: 'old' }], history: [] }); await flush(); assert.deepEqual(h.opened, []);
+  assert.equal(h.receipts.length, 0);
   pending[1]({ ok: true, activeTasks: [{ id: 'new' }], history: [] }); await flush(); assert.deepEqual(h.opened, ['new']);
   h.context.incomingTaskId = 'closed'; h.run(); h.context.recorderMountedRef.current = false;
   pending[2]({ ok: true, activeTasks: [{ id: 'closed' }], history: [] }); await flush(); assert.deepEqual(h.opened, ['new']);
+  assert.equal(h.receipts.length, 1); assert.equal(h.receipts[0].id, 'new');
+});
+
+test('cancelled requests and temporary read errors do not consume or reopen stale navigation', async () => {
+  const h = harness(); let resolve;
+  h.context.incomingTaskId = 'cancelled'; h.context.window.electronAPI.taskState = () => new Promise(done => { resolve = done; });
+  h.run(); h.context.incomingTaskId = ''; h.run(); resolve({ ok: true, history: [{ id: 'cancelled' }] }); await flush();
+  assert.equal(h.opened.length, 0); assert.equal(h.receipts.length, 0);
+  h.context.incomingTaskId = 'unavailable'; h.context.window.electronAPI.taskState = async () => ({ ok: false, error: 'temporary read failure' });
+  h.run(); await flush(); assert.equal(h.receipts.length, 0); assert.equal(h.notices.at(-1), 'temporary read failure');
 });

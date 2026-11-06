@@ -6,7 +6,7 @@ const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { createAiWorkspaceService } = require('../electron/lib/ai-workspace-service.cjs');
 const { createEvidenceAdapter } = require('../electron/lib/ai-workspace-evidence.cjs');
-const { createReportHistory } = require('../electron/lib/ai-workspace-history.cjs');
+const { createReportHistory, validateReport } = require('../electron/lib/ai-workspace-history.cjs');
 const analysis = { summary: 'fixture summary', findings: [{ title: 'fixture fact', detail: 'fixture details', evidenceIds: ['E1'], citations: [{ evidenceId: 'E1', startLine: 1, endLine: 1 }] }], hypotheses: [], nextSteps: [], limitations: [] };
 function fixture(t, overrides = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'awb-ai-flows-'));
@@ -58,6 +58,20 @@ test('history is manual, survives a new service, and loading never restores an a
   assert.equal((await restarted.call('analyze', { caseId: h.caseId, previewId: loaded.report.preview.id, consent: true })).code, 'AI_PREVIEW_EXPIRED');
   assert.equal((await restarted.call('collect', { caseId: randomUUID(), mode: 'analysis', question: 'historical follow-up', contextRef: { historyId: stored.item.id } })).ok, true);
   assert.equal(h.calls.length, 1); assert.match((await restarted.call('reportText', { reportRef: { historyId: stored.item.id } })).text, /fixture summary/);
+});
+
+test('diagnostic target and optional verification cards survive saved reports without accepting a forged target', async t => {
+  const card = { title: 'Check the device', checkIds: ['device_info'], expectedObservation: 'Match the original device identity.' };
+  const h = fixture(t, { client: async () => ({ ok: true, text: JSON.stringify({ ...analysis, verificationChecks: [card] }) }) });
+  const collected = await h.collect({ mode: 'diagnose', deviceId: 'device-A', checks: ['device_info'], text: '' });
+  assert.equal(collected.ok, true); assert.equal(collected.preview.deviceId, 'device-A');
+  const answer = await h.analyze(collected.preview);
+  const stored = await h.service.call('historySave', { caseId: h.caseId, turnId: answer.turn.id, name: 'Saved target' });
+  assert.equal(stored.ok, true, stored.error);
+  const loaded = await h.service.call('historyLoad', { id: stored.item.id });
+  assert.equal(loaded.report.preview.deviceId, 'device-A'); assert.deepEqual(loaded.report.result.verificationChecks, [card]);
+  assert.throws(() => validateReport({ ...loaded.report, preview: { ...loaded.report.preview, deviceId: 'device-B' } }), { code: 'AI_REPORT' });
+  assert.match((await h.service.call('reportText', { reportRef: { historyId: stored.item.id } })).text, /Match the original device identity/);
 });
 
 test('delete cancellation and owner disposal during confirmation never remove a saved report', async t => {

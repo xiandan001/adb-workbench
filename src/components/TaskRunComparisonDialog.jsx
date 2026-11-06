@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { ArrowLeftRight, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
-import { compareTaskRuns } from '../shared/taskRunComparison';
+import { compareTaskRuns, recommendTaskComparison } from '../shared/taskRunComparison';
 import SelectMenu from './SelectMenu';
 
 const CHANGE_LABELS = () => ({
@@ -22,12 +22,12 @@ function runLabel(run) {
   return `${run.scriptName || tr("未命名脚本")} · ${time} · ${getTaskStatusLabel(run.status)}`;
 }
 
-export default function TaskRunComparisonDialog({ history, theme, onClose, onOpenPath }) {
+export default function TaskRunComparisonDialog({ history, theme, onClose, onOpenPath, initialAfterId = '', initialBeforeId = '' }) {
   const locale = useLocale();
   const dialogRef = useRef(null);
   const isDark = isDarkTheme(theme);
-  const [beforeId, setBeforeId] = useState(history[1]?.id || '');
-  const [afterId, setAfterId] = useState(history[0]?.id || '');
+  const [beforeId, setBeforeId] = useState(() => initialBeforeId || recommendTaskComparison(history, initialAfterId).beforeId);
+  const [afterId, setAfterId] = useState(() => recommendTaskComparison(history, initialAfterId).afterId);
   const [changesOnly, setChangesOnly] = useState(true);
   const before = history.find(run => run.id === beforeId);
   const after = history.find(run => run.id === afterId);
@@ -54,15 +54,17 @@ export default function TaskRunComparisonDialog({ history, theme, onClose, onOpe
           <div className="grid items-end gap-3 md:grid-cols-[1fr_auto_1fr]">
             <div className="min-w-0"><label htmlFor="compare-before" className={`mb-2 block text-xs ${muted}`}>{tr("基准运行")}</label><SelectMenu id="compare-before" value={beforeId} options={options} onChange={setBeforeId} isDark={isDark} placeholder={tr("选择基准运行")} /></div>
             <button type="button" onClick={() => { setBeforeId(afterId); setAfterId(beforeId); }} aria-label={tr("交换基准和本次运行")} className={`justify-self-center rounded-lg border p-2.5 ${theme.button.secondary}`}><ArrowLeftRight size={17} /></button>
-            <div className="min-w-0"><label htmlFor="compare-after" className={`mb-2 block text-xs ${muted}`}>{tr("本次运行")}</label><SelectMenu id="compare-after" value={afterId} options={options} onChange={setAfterId} isDark={isDark} placeholder={tr("选择本次运行")} /></div>
+            <div className="min-w-0"><label htmlFor="compare-after" className={`mb-2 block text-xs ${muted}`}>{tr("本次运行")}</label><SelectMenu id="compare-after" value={afterId} options={options} onChange={id => { setAfterId(id); setBeforeId(recommendTaskComparison(history, id).beforeId); }} isDark={isDark} placeholder={tr("选择本次运行")} /></div>
           </div>
+          {after?.parentTaskId && <p className={`text-xs ${muted}`}>{tr('已优先选择本次复跑的原运行；比较只读取已有结果，不会执行任务。')}</p>}
           {!comparison.comparable ? <p role="status" className={`rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>{comparison.reason}</p> : (
             <>
               <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-current/10 p-3 text-sm">
                 <span className="text-red-500">{tr("新增失败 {0}", { 0: comparison.newFailures })}</span><span className="text-emerald-500">{tr("恢复 {0}", { 0: comparison.recovered })}</span>
                 <span className={muted}>{tr("未完成 / 未执行 {0}", { 0: comparison.unobserved })}</span>
-                <span>{tr("总耗时 {0} → {1}", { 0: durationLabel(comparison.beforeMs), 1: durationLabel(comparison.afterMs) })}</span>
+                {!comparison.unobservedDeviceIds.length && <span>{tr("总耗时 {0} → {1}", { 0: durationLabel(comparison.beforeMs), 1: durationLabel(comparison.afterMs) })}</span>}
               </div>
+              {comparison.unobservedDeviceIds.length > 0 && <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">{tr('本次未复跑的设备不判定为成功或恢复：{0}', { 0: comparison.unobservedDeviceIds.join('、') })}</p>}
               <p className={`text-xs leading-5 ${muted}`}>{tr('只比较两次均实际完成的步骤；取消、未执行或仍在运行的步骤不算成功。耗时受设备状态影响。')}</p>
               <p className={`text-xs leading-5 ${before.inputHash && after.inputHash && before.inputHash === after.inputHash ? muted : 'text-amber-500'}`}>
                 {before.inputHash && after.inputHash ? before.inputHash === after.inputHash ? tr('已记录的输入文件内容一致。') : tr('输入文件内容不同，请结合版本变化判断结果；不能视为完全相同的运行条件。') : tr('至少一次运行缺少输入文件内容校验，不能仅凭相同路径判断输入一致。')}

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isDarkTheme } from '../shared/theme';
 import { getMatchingBaseline, getAcceptanceErrors, qualityErrorMessage, getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
+import { guardNavigationRequest, findGuardRecord } from '../shared/qualityNavigation';
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,7 +22,7 @@ import {
   Trash2
 } from 'lucide-react';
 
-function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange, initialDraft = {}, onDraftChange, incomingGuardId }) {
+function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange, initialDraft = {}, onDraftChange, incomingGuardId, onOpenAnalysis, onGuardRequestHandled }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const onlineDevices = useMemo(() => { void locale; return devices.filter(device => device.status === 'device'); }, [devices, locale]);
@@ -53,9 +54,18 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const deviceOperationRef = useRef(null);
   const restoredTaskId = useRef(initialDraft.lastTaskId || '');
   const [handledGuard, setHandledGuard] = useState('');
-  if (incomingGuardId && incomingGuardId !== handledGuard) {
-    setHandledGuard(incomingGuardId); setQualityTab('guard');
+  const guardReceiptRef = useRef('');
+  const [requestedGuardId, setRequestedGuardId] = useState('');
+  const [guardStateLoaded, setGuardStateLoaded] = useState(false);
+  const guardRequest = guardNavigationRequest(incomingGuardId);
+  if (guardRequest.key && guardRequest.key !== handledGuard) {
+    setHandledGuard(guardRequest.key); setRequestedGuardId(guardRequest.id); setQualityTab('guard');
   }
+  useEffect(() => {
+    if (!incomingGuardId || !guardRequest.key || guardRequest.key !== handledGuard || requestedGuardId !== guardRequest.id || guardReceiptRef.current === guardRequest.key) return;
+    guardReceiptRef.current = guardRequest.key;
+    onGuardRequestHandled?.(incomingGuardId);
+  }, [incomingGuardId, guardRequest.key, guardRequest.id, handledGuard, requestedGuardId, onGuardRequestHandled]);
   useEffect(() => {
     onDraftChange?.({ selectedBaselinePath, baselineName, reportName, includePerformance, suiteId, apkPath, packageName, baselineImagePath,
       rounds, launchWaitMs, threshold, guardIntervalMs, qualityTab, lastTaskId: lastAcceptanceTask?.id || restoredTaskId.current });
@@ -94,6 +104,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
         activeGuards: event?.activeGuards || [],
         history: event?.history || []
       });
+      setGuardStateLoaded(true);
       if (event?.guard?.reportPath && event.guard.deviceId === deviceContextRef.current.deviceId) setLastStoppedGuard(event.guard);
     });
   }, []);
@@ -107,6 +118,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const selectedBaseline = getMatchingBaseline(baselines, selectedDeviceId, selectedBaselinePath);
   const effectiveBaselinePath = selectedBaseline?.path || '';
   const activeGuard = guardState.activeGuards.find(item => item.deviceId === selectedDeviceId);
+  const requestedGuard = findGuardRecord(guardState, selectedDeviceId, requestedGuardId);
+  const visibleStoppedGuard = requestedGuardId ? requestedGuard : (lastStoppedGuard?.deviceId === selectedDeviceId ? lastStoppedGuard : requestedGuard);
   const matchingBaselines = useMemo(() => { void locale; return baselines.filter(item => item.deviceId === selectedDeviceId); }, [baselines, selectedDeviceId, locale]);
   const acceptanceErrors = getAcceptanceErrors({ suiteId, apkPath, packageName, baselineImagePath, rounds, launchWaitMs, threshold });
   const visibleAcceptanceTask = lastAcceptanceTask?.deviceRuns?.some(run => run.deviceId === selectedDeviceId) ? lastAcceptanceTask : null;
@@ -139,7 +152,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     const res = await window.electronAPI?.deviceGuardState?.();
     if (res?.ok) {
       setGuardState({ activeGuards: res.activeGuards || [], history: res.history || [] });
-      setLastStoppedGuard((res.history || [])[0] || null);
+      setLastStoppedGuard(findGuardRecord(res, deviceContextRef.current.deviceId));
+      setGuardStateLoaded(true);
     }
   }
 
@@ -615,6 +629,11 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
 
           {qualityTab === 'guard' && (
           <div className={`rounded-lg border ${soft} overflow-hidden`}>
+            {requestedGuardId && <div role="status" className="border-b border-current/10 px-4 py-3 text-xs">
+              {!guardStateLoaded ? tr('正在定位所选守护记录…') : requestedGuard ? tr('正在查看所选守护记录：{0}', { 0: requestedGuard.name || requestedGuard.id }) : tr('所选守护记录不存在或已移除；未切换到其他记录。')}
+              {requestedGuard && requestedGuard.deviceId !== selectedDeviceId && <p className="mt-2 text-amber-500">{tr('所选记录来自设备 {0}；下方操作仍仅针对当前设备 {1}。', { 0: requestedGuard.deviceId, 1: selectedDeviceId || tr('未选择设备') })}</p>}
+              <button type="button" onClick={() => setRequestedGuardId('')} className="ml-3 text-emerald-500 hover:underline">{tr('返回当前设备守护')}</button>
+            </div>}
             <div className={`px-4 py-3 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
               <div className={`text-sm font-semibold flex items-center gap-2 ${text}`}>
                 <ShieldCheck size={16} className="text-teal-400" />{tr("设备守护")}</div>
@@ -677,16 +696,17 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                 </div>
               )}
 
-              {lastStoppedGuard?.deviceId === selectedDeviceId && lastStoppedGuard.reportPath && (
-                <div className={`rounded-lg border p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
+              {visibleStoppedGuard?.reportPath && (requestedGuardId || visibleStoppedGuard.deviceId === selectedDeviceId) && (
+                <div data-guard-id={visibleStoppedGuard.id} className={`rounded-lg border p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}>
                   <div className="min-w-0">
-                    <div className={`text-sm font-medium ${text}`}>{lastStoppedGuard.name || tr("设备守护报告")}</div>
-                    <div className={`text-xs mt-1 font-mono truncate ${muted}`}>{lastStoppedGuard.outputDir}</div>
+                    <div className={`text-sm font-medium ${text}`}>{visibleStoppedGuard.name || tr("设备守护报告")}</div>
+                    <div className={`text-xs mt-1 ${muted}`}>{tr('记录设备：{0}', { 0: visibleStoppedGuard.deviceId })}</div>
+                    <div className={`text-xs mt-1 font-mono truncate ${muted}`}>{visibleStoppedGuard.outputDir}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => openPath(lastStoppedGuard.reportPath)} className={outlineButton(isDark)}>
+                    <button onClick={() => openPath(visibleStoppedGuard.reportPath)} className={outlineButton(isDark)}>
                       <FileText size={14} />{tr("打开报告")}</button>
-                    <button onClick={() => openPath(lastStoppedGuard.outputDir)} className={outlineButton(isDark)}>
+                    <button onClick={() => openPath(visibleStoppedGuard.outputDir)} className={outlineButton(isDark)}>
                       <FolderOpen size={14} />{tr("打开目录")}</button>
                   </div>
                 </div>
@@ -698,6 +718,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
       </section>
       {showTaskDetails && visibleAcceptanceTask && (
         <TaskCenterResultDrawer
+          onOpenAnalysis={onOpenAnalysis}
           task={visibleAcceptanceTask}
           theme={theme}
           onClose={() => setShowTaskDetails(false)}

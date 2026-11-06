@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { tr, useLocale } from '../shared/i18n';
 import { AI_WORKSPACE_MODES, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, workspaceReportRef, workspaceRequestCurrent } from './AiWorkspaceState';
+import { adoptWorkspaceDefaults, normalizeWorkspaceReportRequest, prepareWorkspaceVerification } from './AiWorkspaceFlow';
 
 const newCase = (mode, deviceId = '') => createWorkspaceCase(mode, deviceId, crypto.randomUUID());
 const api = () => window.electronAPI;
 
-export default function useAiWorkspace({ active, activeDeviceId, incomingHandoffId, onOpenTasks, showToast }) {
+export default function useAiWorkspace({ active, devices = [], activeDeviceId, incomingHandoffId, incomingReportRef, onOpenTasks, showToast }) {
   const locale = useLocale();
   const [mode, setMode] = useState('diagnose');
   const [cases, setCases] = useState(() => Object.fromEntries(AI_WORKSPACE_MODES.map(item => [item, newCase(item, activeDeviceId)])));
@@ -15,15 +16,54 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
   const [history, setHistory] = useState([]);
   const [casebook, setCasebook] = useState([]);
   const [pendingHandoff, setPendingHandoff] = useState(null);
+  const [pendingReport, setPendingReport] = useState(null);
   const [reportBusy, setReportBusy] = useState('');
   const [reportError, setReportError] = useState('');
   const casesRef = useRef(cases); const alive = useRef(true); const refreshTicket = useRef(0); const reportLock = useRef(false);
   const incomingHandled = useRef('');
+  const reportRequestHandled = useRef('');
   const update = useCallback((key, change) => {
     const next = { ...casesRef.current, [key]: change(casesRef.current[key]) };
     casesRef.current = next;
     if (alive.current) setCases(next);
   }, []);
+
+  useEffect(() => {
+    if (reportLock.current) return;
+    for (const key of AI_WORKSPACE_MODES) {
+      const current = casesRef.current[key], next = adoptWorkspaceDefaults(current, devices, activeDeviceId);
+      if (next !== current) update(key, () => next);
+    }
+  }, [devices, activeDeviceId, update]);
+
+  const openRequestedReport = useCallback(async request => {
+    const ref = normalizeWorkspaceReportRequest(request);
+    if (!ref) { setReportError(tr('分析报告引用无效。')); return; }
+    if (reportLock.current || Object.values(casesRef.current).some(value => value.busy)) { setPendingReport(request); return; }
+    const key = ref.caseId ? AI_WORKSPACE_MODES.find(mode => casesRef.current[mode].caseId === ref.caseId) : 'analysis';
+    if (!key) { setReportError(tr('原分析已不在当前会话中，请打开已保存的历史或案例。')); return; }
+    const token = { caseId: casesRef.current[key].caseId, revision: casesRef.current[key].revision };
+    reportLock.current = true; setReportBusy('load'); setReportError(''); setPendingReport(null);
+    try {
+      let report;
+      if (ref.historyId || ref.casebookId) {
+        const response = ref.historyId ? await api().aiWorkspaceHistoryLoad({ id: ref.historyId }) : await api().aiWorkspaceCasebookLoad({ id: ref.casebookId });
+        if (!response?.ok) throw new Error(response?.error || tr('报告操作未完成，请重试。'));
+        report = response.report;
+      } else report = casesRef.current[key].turns.find(turn => turn.id === ref.turnId);
+      if (!report) throw new Error(tr('原分析已不在当前会话中，请打开已保存的历史或案例。'));
+      const current = casesRef.current[key];
+      if (alive.current && current.caseId === token.caseId && current.revision === token.revision && !current.busy) {
+        update(key, value => ({ ...value, preparing: false, reportView: { report, reportRef: ref } })); setMode(key);
+      }
+    } catch (error) { if (alive.current) setReportError(error.message); }
+    finally { reportLock.current = false; if (alive.current) setReportBusy(''); }
+  }, [update]);
+  useEffect(() => {
+    if (!incomingReportRef?.requestId || reportRequestHandled.current === incomingReportRef.requestId) return;
+    reportRequestHandled.current = incomingReportRef.requestId;
+    void openRequestedReport(incomingReportRef);
+  }, [incomingReportRef, openRequestedReport]);
 
   const refreshHistory = useCallback(async () => {
     const result = await api()?.aiWorkspaceHistoryList?.();
@@ -114,8 +154,8 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     }
   };
   const reset = () => update(mode, current => current.busy ? current : {
-    ...createWorkspaceCase(mode, current.deviceId, current.caseId), revision: current.revision + 1,
-    turns: current.turns, reportView: current.reportView,
+    ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId), revision: current.revision + 1,
+    turns: current.turns,
   });
   const plan = () => run('plan', value => api().aiWorkspacePlan({ caseId: value.caseId, question: value.question, deviceId: value.deviceId, diagnostic: value.diagnostic }), (value, response) => ({
     ...value, plan: response.plan, checks: response.plan.checks, preview: null, result: null, planUsage: response.usage, usage: null, cached: false,
@@ -125,19 +165,19 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     question: value.question, ...(!value.contextRef || value.selectionChanged ? { selection: value.selection } : {}),
     ...(value.contextRef ? { contextRef: value.contextRef } : {}),
     ...(mode === 'diagnose' ? { diagnostic: value.diagnostic } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
-  }), (value, response) => ({ ...value, preview: response.preview, result: null, usage: null, cached: false }));
+  }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
   const analyze = () => run('analyze', value => api().aiWorkspaceAnalyze({ caseId: value.caseId, previewId: value.preview.id, consent: true }), completeWorkspaceTurn);
   const generate = () => run('generate', value => api().aiWorkspaceGenerateTask({ caseId: value.caseId, goal: value.question, requirements: value.requirements,
     ...(value.contextRef ? { contextRef: value.contextRef } : {}), ...(Number.isInteger(value.findingIndex) ? { findingIndex: value.findingIndex } : {}),
     ...(value.targetSelection.tokens.length ? { targetSelection: value.targetSelection } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
-  }), (value, response) => ({ ...value, draft: response.draft, usage: response.usage }));
+  }), (value, response) => ({ ...value, preparing: false, draft: response.draft, usage: response.usage }));
   const save = () => run('save', value => api().aiWorkspaceSaveTask({ caseId: value.caseId, draftId: value.draft.id }), value => ({ ...value, draft: null }));
   const compare = () => run('compare', value => api().aiWorkspaceComparisonPreview({ caseId: value.caseId,
     beforeRef: workspaceReportRef(value.baseline), afterRef: value.reportView?.reportRef || { caseId: value.caseId, previewId: value.preview?.id },
-  }), (value, response) => ({ ...value, preview: response.preview, result: null, usage: null, cached: false }));
+  }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
   const selectTurn = id => update(mode, current => {
     const report = current.turns.find(turn => turn.id === id);
-    return report && !current.busy ? { ...current, reportView: { report, reportRef: { caseId: current.caseId, turnId: id } } } : current;
+    return report && !current.busy ? { ...current, preparing: false, reportView: { report, reportRef: { caseId: current.caseId, turnId: id } } } : current;
   });
   const useContext = (kind, findingIndex = null) => {
     const view = casesRef.current[mode].reportView;
@@ -146,6 +186,16 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     update(target, current => prepareWorkspaceContext(current, view, kind, findingIndex));
     setMode(target);
     showToast?.(tr('已带入上下文，请补充目标后手动继续；尚未调用 AI。'));
+  };
+  const prepareVerification = index => {
+    if (reportLock.current || Object.values(casesRef.current).some(value => value.busy)) return;
+    const view = casesRef.current[mode].reportView;
+    const prepared = prepareWorkspaceVerification(casesRef.current.diagnose, view, view?.report.result.verificationChecks?.[index], sources.checks);
+    if (prepared.reason) {
+      setReportError(prepared.reason === 'package' ? tr('专项检查需要明确选择应用包名。') : tr('无法准备此验证，请重新选择有效的检查建议。')); return;
+    }
+    setReportError(''); update('diagnose', () => prepared.state); setMode('diagnose');
+    showToast?.(tr('验证检查已准备，请核对后采集；尚未读取设备或发送 AI。'));
   };
   const reportAction = async (operation, action) => {
     if (reportLock.current || Object.values(casesRef.current).some(value => value.busy)) return;
@@ -164,7 +214,7 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     return reportAction('load', async () => {
       const response = checked(await api().aiWorkspaceHistoryLoad({ id }));
       if (alive.current) update(key, current => current.caseId === token.caseId && current.revision === token.revision && !current.busy
-        ? { ...current, reportView: { report: response.report, reportRef: { historyId: id } } } : current);
+        ? { ...current, preparing: false, reportView: { report: response.report, reportRef: { historyId: id } } } : current);
     });
   };
   const saveReport = name => {
@@ -210,7 +260,7 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     const key = mode, revision = casesRef.current[key].revision;
     return reportAction('casebook', async () => {
       const response = checked(await api().aiWorkspaceCasebookLoad({ id }));
-      if (alive.current) update(key, current => current.revision === revision && !current.busy ? { ...current, reportView: { report: response.report, reportRef: { casebookId: id } } } : current);
+      if (alive.current) update(key, current => current.revision === revision && !current.busy ? { ...current, preparing: false, reportView: { report: response.report, reportRef: { casebookId: id } } } : current);
     });
   };
   const saveCase = (name, review) => {
@@ -236,9 +286,10 @@ export default function useAiWorkspace({ active, activeDeviceId, incomingHandoff
     }
   });
   return { mode, setMode, cases, current: cases[mode], sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, analyze, generate, save,
-    history, reportBusy, reportError, selectTurn, loadHistory, saveReport, deleteHistory, exportReport, useContext, compare,
+    history, reportBusy, reportError, selectTurn, loadHistory, saveReport, deleteHistory, exportReport, useContext, compare, prepareVerification,
     casebook, searchCasebook, similarCases, loadCase, saveCase, deleteCase, pendingHandoff,
     acceptPendingHandoff: () => pendingHandoff && acceptHandoff(pendingHandoff, true),
+    pendingReport, acceptPendingReport: () => pendingReport && openRequestedReport(pendingReport), openRequestedReport,
     setBaseline: baseline => update(mode, value => ({ ...value, baseline })),
     showPreview: () => update(mode, value => ({ ...value, reportView: null })),
   };

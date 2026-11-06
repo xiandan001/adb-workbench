@@ -1,6 +1,8 @@
 import { tr } from '../shared/i18n.js';
 export const COMMAND_ACTIONS = [
   { value: 'tab:devices', get label() { return tr("打开设备列表"); } },
+  { value: 'tab:serial', get label() { return tr('串口 / RS232'); } },
+  { value: 'tab:ai-workspace', get label() { return tr('AI 工作区'); } },
   { value: 'tab:ssh', get label() { return tr("打开 SSH 工作区"); } },
   { value: 'tab:ai-tools', get label() { return tr("打开 AI 工具管理"); } },
   { value: 'environmentCheck', get label() { return tr("打开环境自检弹窗"); } },

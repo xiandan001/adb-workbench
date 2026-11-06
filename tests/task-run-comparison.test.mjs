@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { compareTaskRuns, runDuration } from '../src/shared/taskRunComparison.js';
+import { compareTaskRuns, runDuration, recommendTaskComparison } from '../src/shared/taskRunComparison.js';
 
 const require = createRequire(import.meta.url);
 const { createRunComparisonIdentity, deviceComparisonIdentity } = require('../electron/lib/task-run-manifest.cjs');
@@ -96,4 +96,53 @@ test('duration handles missing or reversed timestamps without inventing zero tim
   assert.equal(runDuration({}), null);
   assert.equal(runDuration({ startedAt: '2026-10-21T00:01:00Z', endedAt: '2026-10-21T00:00:00Z' }), null);
   assert.equal(runDuration({ startedAt: '2026-10-21T00:00:00Z', endedAt: '2026-10-21T00:00:00Z' }), 0);
+});
+
+test('a failed-device child compares only verified devices and marks untouched parent devices unobserved', () => {
+  const before = makeRun('parent');
+  const secondIdentity = deviceComparisonIdentity({ roSerialno: 'unique-device-b' });
+  before.deviceRuns.push({ ...structuredClone(before.deviceRuns[0]), deviceId: 'device-B', comparisonIdentity: secondIdentity });
+  const child = { ...makeRun('child', ['success', 'success']), parentTaskId: 'parent', status: 'success', inputHash: 'changed-input' };
+  child.deviceRuns[0].deviceId = 'B-new-address';
+  child.deviceRuns[0].comparisonIdentity = secondIdentity;
+  before.inputHash = 'original-input';
+  const result = compareTaskRuns(before, child);
+  assert.equal(result.comparable, true);
+  assert.equal(result.recovered, 1);
+  assert.equal(result.unobserved, 2);
+  assert.deepEqual(result.unobservedDeviceIds, [before.deviceRuns[0].deviceId]);
+  assert.ok(result.steps.filter(step => step.deviceId === before.deviceRuns[0].deviceId).every(step => step.change === 'unobserved' && step.after === null));
+  assert.equal(result.inputCompatibility, 'changed');
+  assert.equal(compareTaskRuns(before, { ...child, parentTaskId: 'unrelated' }).comparable, false);
+  assert.equal(compareTaskRuns(before, { ...child, scriptHash: 'changed-script' }).comparable, false);
+  assert.deepEqual(recommendTaskComparison([child, makeRun('unrelated'), before]), { beforeId: 'parent', afterId: 'child' });
+});
+
+test('subset matching rejects unknown/conflicting/duplicate identities and malformed step mapping', () => {
+  const before = makeRun('parent');
+  before.deviceRuns.push({ ...structuredClone(before.deviceRuns[0]), deviceId: 'B', comparisonIdentity: deviceComparisonIdentity({ roSerialno: 'device-B' }) });
+  for (const change of [
+    run => { run.comparisonIdentity = {}; },
+    run => { run.comparisonIdentity = { ...identity, roSerialno: 'conflict' }; },
+    run => { run.steps[0].index = 1; }
+  ]) {
+    const child = { ...makeRun('child'), parentTaskId: 'parent' };
+    change(child.deviceRuns[0]);
+    assert.equal(compareTaskRuns(before, child).comparable, false);
+  }
+  const duplicate = { ...makeRun('child'), parentTaskId: 'parent' };
+  duplicate.deviceRuns.push(structuredClone(duplicate.deviceRuns[0]));
+  assert.equal(compareTaskRuns(before, duplicate).comparable, false);
+  const missingStep = { ...makeRun('child', ['success']), parentTaskId: 'parent' };
+  assert.equal(compareTaskRuns(before, missingStep).recovered, 0);
+  assert.equal(compareTaskRuns(before, missingStep).unobserved, 3);
+});
+
+test('subset comparison is independent of device ordering and preserves strict full-run matching', () => {
+  const before = makeRun('parent');
+  before.deviceRuns.push({ ...structuredClone(before.deviceRuns[0]), deviceId: 'B', comparisonIdentity: deviceComparisonIdentity({ roSerialno: 'device-B' }) });
+  const after = { ...structuredClone(before), id: 'child', parentTaskId: 'parent', deviceRuns: [...before.deviceRuns].reverse() };
+  assert.equal(compareTaskRuns(before, after).comparable, true);
+  assert.deepEqual(compareTaskRuns(before, after).unobservedDeviceIds, []);
+  assert.deepEqual(recommendTaskComparison([makeRun('other'), before], 'missing'), { beforeId: '', afterId: 'missing' });
 });

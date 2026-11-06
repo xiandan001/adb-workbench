@@ -15,6 +15,7 @@ test('replay results are indexed and export accepts only a current artifact ID',
   const evidence = path.join(root, 'task-center-artifacts', 'replay-test');
   fs.mkdirSync(evidence, { recursive: true });
   fs.writeFileSync(path.join(evidence, 'run-result.json'), JSON.stringify({
+    id: 'task-authoritative-run',
     scriptName: 'Replay failure', mode: 'replay', status: 'failed',
     devices: [{ deviceId: 'device-A', status: 'failed' }], endedAt: '2026-10-20T00:00:00Z'
   }));
@@ -37,6 +38,7 @@ test('replay results are indexed and export accepts only a current artifact ID',
   assert.equal(result.ok, true);
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].status, 'failed');
+  assert.equal(result.items[0].taskId, 'task-authoritative-run');
   assert.equal(result.items[0].deviceId, 'device-A');
   assert.equal(result.items[0].summaryPath, path.join(evidence, 'run-result.json'));
   const invalid = await handlers.get('artifacts:export')({ sender: {} }, { id: 'task:outside-index' });
@@ -55,6 +57,7 @@ test('replay results are indexed and export accepts only a current artifact ID',
   assert.equal(historical.items.length, 166);
   assert.ok(historical.items.every(item => item.sizeBytes > 0));
   const oldest = historical.items.at(-1);
+  assert.equal(oldest.taskId, ''); // A directory/title must never be inferred as a task ID.
   const preview = await handlers.get('artifacts:preview')({}, { id: oldest.id, name: 'run-result.json' });
   assert.equal(preview.ok, true);
   assert.ok(preview.content.includes('Older'));

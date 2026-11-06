@@ -44,6 +44,9 @@ test('only checked sources start, duplicate starts reject and stop uses exact ow
 
 test('markers retain monotonic offsets even if the host clock moves backwards', async t => {
   const h = await fixture(t); const { session } = await h.service.start(args({ performance: true }));
+  const sample = JSON.parse((await h.service.store.readTail(session.id, 'performance.jsonl')).text.trim().split('\n')[0]);
+  assert.equal(sample.offsetMs, 0);
+  assert.equal(sample.sourceTime, 'host-sample');
   h.advance(2500); h.jumpWall(-10000);
   const result = await h.service.mark({ id: session.id, note: 'Observed issue' });
   assert.equal(result.marker.offsetMs, 2500); assert.equal(result.marker.videoOffsetMs, null);

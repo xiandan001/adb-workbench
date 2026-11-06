@@ -71,7 +71,7 @@ function createReproductionService({ directory, recording, startLog, samplePerfo
     for (const item of sources.items) {
       if (item.warning) warning(runtime, item.warning);
       if (!item.text) continue;
-      const result = await store.append(runtime.session.id, item.name, { at: now(), sourceTime: 'host-receipt', text: item.text }, 8 * 1024 * 1024);
+      const result = await store.append(runtime.session.id, item.name, { at: now(), offsetMs: Math.max(0, monotonic() - runtime.monotonicStart), sourceTime: 'host-receipt', text: item.text }, 8 * 1024 * 1024);
       file(runtime, item.name, item.label, { ...result, truncated: result.truncated || item.truncated });
       if (result.truncated) warning(runtime, tr('部分来源达到采集上限，已保留已有内容并标记不完整。'));
     }
@@ -80,7 +80,7 @@ function createReproductionService({ directory, recording, startLog, samplePerfo
       try {
         const snapshot = await samplePerformance(runtime.session.deviceId);
         if (active !== runtime || runtime.stopping) return;
-        const result = await store.append(runtime.session.id, 'performance.jsonl', { at: now(), snapshot }, 2 * 1024 * 1024);
+        const result = await store.append(runtime.session.id, 'performance.jsonl', { at: now(), offsetMs: Math.max(0, monotonic() - runtime.monotonicStart), sourceTime: 'host-sample', snapshot }, 2 * 1024 * 1024);
         file(runtime, 'performance.jsonl', tr('性能采样'), result);
       } catch (error) { warning(runtime, tr('性能采样未完成：{0}', { 0: clean(error.message, 500) })); }
     }

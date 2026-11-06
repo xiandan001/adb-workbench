@@ -132,6 +132,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       if (!data.entries.some(entry => entry.text?.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
       const fingerprint = collected ? targetKey(collected.entries, args.deviceId) : prior?.preview.targetFingerprint;
       return freezePreview(state, { question, ...data, selection, ...(diagnostic ? { diagnostic } : {}),
+        ...(args.mode === 'diagnose' && args.deviceId ? { deviceId: args.deviceId } : {}),
         targetFingerprint: handoff ? null : prior ? (prior.preview.targetFingerprint === fingerprint ? fingerprint : null) || null : fingerprint,
         ...(prior ? { context: { question: prior.preview.question, summary: prior.result.summary, ...(prior.review ? { caseReview: prior.review, caseName: prior.name } : {}) } } : {}),
         ...(handoff ? { handoff: { origin: handoff.origin, title: handoff.title, deviceId: handoff.deviceId, provenance: handoff.provenance, createdAt: handoff.createdAt, expiresAt: handoff.expiresAt } } : {}) }, signal);
@@ -156,15 +157,21 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
     analyze: args => operate(args, async (state, signal, assertCurrent) => {
       const preview = state.preview;
       if (args.consent !== true || !preview || args.previewId !== preview.id || now() >= Date.parse(preview.expiresAt)) throw fail('AI_PREVIEW_EXPIRED', tr('请重新生成并确认证据预览后再分析。'));
+      const availableVerificationChecks = checks().map(check => check.id).filter(id => preview.diagnostic?.packageName || !APP_CHECKS.includes(id));
       const payload = { question: preview.question, evidence: preview.entries,
         ...(preview.context ? { context: preview.context } : {}), ...(preview.comparison ? { comparison: preview.comparison } : {}),
         ...(preview.diagnostic ? { diagnostic: preview.diagnostic } : {}), ...(preview.handoff ? { handoff: preview.handoff } : {}) };
-      const analysisPrompt = prompts.analysis + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly.';
+      const analysisPrompt = prompts.analysis + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly. You may add optional verificationChecks (at most 6): each has exactly title (<=200 characters), checkIds (1-3 unique identifiers selected ONLY from the following host allowlist), expectedObservation (<=1000 characters). These are human-reviewed read-only checks, not actions or commands; no deviceId, package or command fields. Explain what observation would support or weaken a hypothesis, never promise a successful check proves a fix. If no relevant available check exists omit verificationChecks. Allowed check identifiers: ' + JSON.stringify(availableVerificationChecks);
       const locale = getLocale(), prepared = await process('request', { prompt: analysisPrompt, payload, locale }, signal), key = prepared.key;
       await entitled(); assertCurrent();
       if (state.cache?.key === key && now() - state.cache.at < 5 * 60 * 1000) return { ...state.cache.value, cached: true };
       const answer = await withLocale(locale, () => infer(analysisPrompt, payload, signal, assertCurrent, prepared));
       const result = await process('analysis', { text: answer.text, entries: preview.entries, comparison: preview.comparison }, signal);
+      if (result.verificationChecks) {
+        const available = result.verificationChecks.filter(card => card.checkIds.every(id => availableVerificationChecks.includes(id)));
+        if (available.length !== result.verificationChecks.length) result.limitations = [...result.limitations.slice(0, 11), tr('部分验证建议缺少应用目标，未提供准备操作。')];
+        result.verificationChecks = available;
+      }
       assertCurrent();
       const turn = { id: randomUUID(), kind: preview.comparison ? 'comparison' : preview.context ? 'followup' : 'analysis',
         createdAt: new Date(now()).toISOString(), preview, result, usage: answer.usage ?? null };

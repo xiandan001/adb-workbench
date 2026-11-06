@@ -132,7 +132,7 @@ const QUICK_TEMPLATES = () => ([
   }
 ]);
 
-function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange, initialScriptId = '', incomingTaskId = '', incomingTaskRequestId = 0 }) {
+function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange, initialScriptId = '', incomingTaskId = '', incomingTaskRequestId = 0, onOpenAnalysis, onTaskRequestHandled }) {
   const initialScriptIdRef = useRef(initialScriptId);
   const incomingTaskRef = useRef('');
   const locale = useLocale();
@@ -153,6 +153,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const [activeTasks, setActiveTasks] = useState([]);
   const [history, setHistory] = useState([]);
   const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [comparisonSelection, setComparisonSelection] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [recorder, setRecorder] = useState(createRecorderState());
@@ -292,18 +293,25 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const selectedTask = [...activeTasks, ...history].find(task => task.id === selectedTaskId);
   useEffect(() => {
     const requestKey = `${incomingTaskId}:${incomingTaskRequestId}`;
-    if (!incomingTaskId || loading || incomingTaskRef.current === requestKey) return;
+    if (!incomingTaskId || loading) { incomingTaskRef.current = ''; return; }
+    if (incomingTaskRef.current === requestKey) return;
     incomingTaskRef.current = requestKey;
     const known = [...activeTasks, ...history].some(task => task.id === incomingTaskId);
     Promise.resolve(known ? null : window.electronAPI?.taskState?.()).then(response => {
       if (!recorderMountedRef.current || incomingTaskRef.current !== requestKey) return;
       if (!known) {
-        if (!response?.ok || ![...(response.activeTasks || []), ...(response.history || [])].some(task => task.id === incomingTaskId)) throw new Error(tr('运行记录不存在或已移除。'));
+        if (!response?.ok) throw new Error(response?.error || tr('读取失败'));
+        if (![...(response.activeTasks || []), ...(response.history || [])].some(task => task.id === incomingTaskId)) {
+          showToast?.(tr('运行记录不存在或已移除。'));
+          onTaskRequestHandled?.({ id: incomingTaskId, requestId: incomingTaskRequestId });
+          return;
+        }
         setActiveTasks(response.activeTasks || []); setHistory(response.history || []);
       }
       setSelectedTaskId(incomingTaskId);
+      onTaskRequestHandled?.({ id: incomingTaskId, requestId: incomingTaskRequestId });
     }).catch(error => { if (recorderMountedRef.current && incomingTaskRef.current === requestKey) showToast?.(error.message); });
-  }, [incomingTaskId, incomingTaskRequestId, loading, activeTasks, history, showToast]);
+  }, [incomingTaskId, incomingTaskRequestId, loading, activeTasks, history, showToast, onTaskRequestHandled]);
   const offlineTargets = selectedDeviceIds.filter(id => !onlineDevices.some(device => device.id === id));
   const recordingTask = useMemo(
     () => { void locale; return findOnboardingTask(recordingTaskId, activeTasks, history); },
@@ -1098,7 +1106,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           scripts={scripts}
           activeTasks={activeTasks}
           history={history}
-          onCompare={() => setComparisonOpen(true)}
+          onCompare={() => { setComparisonSelection({}); setComparisonOpen(true); }}
           onRecord={startRecording}
           onImport={importStressScript}
           onOpenScript={openScriptEditor}
@@ -1348,7 +1356,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           />
           <TaskList
             title={tr("运行历史")}
-            onCompare={history.length > 1 ? () => setComparisonOpen(true) : null}
+            onCompare={history.length > 1 ? () => { setComparisonSelection({}); setComparisonOpen(true); } : null}
             tasks={history}
             empty={tr("暂无运行历史")}
             theme={t}
@@ -1380,8 +1388,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         />
       )}
       {selectedTask && <TaskCenterResultDrawer key={selectedTask.id} task={selectedTask} theme={t} onClose={() => setSelectedTaskId('')} onCancel={cancelTask} onOpenPath={openTaskPath}
+        onOpenAnalysis={onOpenAnalysis}
+        onCompareParent={task => { setComparisonSelection({ beforeId: task.parentTaskId, afterId: task.id }); setSelectedTaskId(''); setComparisonOpen(true); }}
         onRerun={task => { if (task) { setActiveTasks(items => [task, ...items.filter(item => item.id !== task.id)]); setSelectedTaskId(task.id); } }} />}
-      {comparisonOpen && <TaskRunComparisonDialog history={history} theme={t} onClose={() => setComparisonOpen(false)} onOpenPath={openTaskPath} />}
+      {comparisonOpen && <TaskRunComparisonDialog history={history} theme={t} initialAfterId={comparisonSelection.afterId} initialBeforeId={comparisonSelection.beforeId} onClose={() => setComparisonOpen(false)} onOpenPath={openTaskPath} />}
       {pendingDraftAction && (
         <TaskCenterDraftDialog
           name={draft.name}

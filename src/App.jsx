@@ -17,6 +17,8 @@ import WorkbenchActivity from './components/WorkbenchActivity';
 import ReproductionDialog from './components/ReproductionDialog';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
+import useWorkbenchSearch from './components/useWorkbenchSearch';
+import SidebarConnectionStatus from './components/SidebarConnectionStatus';
 import DangerConfirmModal from './components/DangerConfirmModal';
 import AppMessageDialogHost from './components/AppMessageDialogHost';
 import SelectMenu from './components/SelectMenu';
@@ -31,6 +33,7 @@ import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { observeUpdaterState } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
+import { searchDestinations } from './shared/workbenchSearch';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
 import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
@@ -75,7 +78,11 @@ function App() {
   const [aiTaskId, setAiTaskId] = useState('');
   const [activityTaskId, setActivityTaskId] = useState('');
   const [activityTaskRequest, setActivityTaskRequest] = useState(0);
+  const activityTaskRequestRef = useRef(0);
   const [incomingHandoffId, setIncomingHandoffId] = useState('');
+  const [incomingReportRef, setIncomingReportRef] = useState(null);
+  const [incomingArtifactRequest, setIncomingArtifactRequest] = useState(null);
+  const [searchDestination, setSearchDestination] = useState(null);
   const [incomingGuardId, setIncomingGuardId] = useState('');
   const [reproductionTarget, setReproductionTarget] = useState(null);
   const setActiveTab = useCallback(next => setNavigation(previous => {
@@ -219,6 +226,7 @@ function App() {
     return localStorage.getItem('autoUpdateEnabled') !== 'false';
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const indexedSearch = useWorkbenchSearch(commandPaletteOpen);
   useEffect(() => {
     try {
       localStorage.setItem('deviceNames', JSON.stringify(deviceNames));
@@ -452,10 +460,12 @@ function App() {
   };
 
   const globalCommands = useMemo(() => {
+    void locale;
     const builtIns = [
       { id: 'cmd-devices', title: tr("设备列表"), description: tr("查看已连接设备"), action: 'tab:devices', group: tr("导航") },
       { id: 'cmd-serial', title: tr("串口 / RS232"), description: tr("连接电脑串口并查看、发送数据"), action: 'tab:serial', group: tr("导航") },
       { id: 'cmd-ssh', title: tr("SSH 工作区"), description: tr("多主机终端、SFTP 文件传输与远端编辑"), action: 'tab:ssh', group: tr("导航") },
+      { id: 'cmd-ai-workspace', title: tr('AI 工作区'), description: tr('AI 排障助手'), action: 'tab:ai-workspace', group: tr('导航') },
       { id: 'cmd-ai-tools', title: tr("AI 工具管理"), description: tr("供应商、额度、资源和本机路由"), action: 'tab:ai-tools', group: tr("导航") },
       { id: 'cmd-environment', title: tr("环境自检"), description: tr("检查 ADB、scrcpy 和设备授权"), action: 'environmentCheck', group: tr("工具") },
       { id: 'cmd-troubleshoot', title: tr("问题排查"), description: tr("按问题场景自动采集证据"), action: 'tab:troubleshoot', group: tr("导航") },
@@ -468,10 +478,35 @@ function App() {
       { id: 'cmd-log', title: tr("打开日志分析"), description: tr("打开独立日志分析窗口"), action: 'logAnalyzer', group: tr("工具") },
       { id: 'cmd-refresh', title: tr("刷新设备"), description: tr("重新获取设备列表"), action: 'refreshDevices', group: tr("工具") }
     ];
-    return [...builtIns, ...(globalCommandSettings.customCommands || [])];
-  }, [globalCommandSettings.customCommands, locale]);
+    return [...builtIns, ...searchDestinations(), ...(globalCommandSettings.customCommands || []), ...indexedSearch.records];
+  }, [globalCommandSettings.customCommands, indexedSearch.records, locale]);
+
+  const openTaskRun = (id) => {
+    const requestId = ++activityTaskRequestRef.current;
+    setActivityTaskId(id); setActivityTaskRequest(requestId); setActiveTab('tasks');
+  };
+  const taskRequestHandled = ({ id, requestId }) => {
+    if (activityTaskRequestRef.current === requestId) setActivityTaskId(previous => previous === id ? '' : previous);
+  };
+  const openAnalysis = (origin) => {
+    const ref = origin?.casebookId ? { casebookId: origin.casebookId } : origin?.historyId ? { historyId: origin.historyId }
+      : origin?.caseId && origin?.turnId ? { caseId: origin.caseId, turnId: origin.turnId } : null;
+    if (!ref) return;
+    setIncomingReportRef({ ...ref, requestId: crypto.randomUUID() }); setActiveTab('ai-workspace');
+  };
 
   const runGlobalCommand = (command) => {
+    const destination = command?.destination;
+    if (destination) {
+      const requestId = crypto.randomUUID();
+      if (destination.kind === 'settings') { setSearchDestination({ ...destination, requestId }); setActiveTab('settings'); }
+      else if (destination.kind === 'ai-tool') { setSearchDestination({ ...destination, requestId }); setActiveTab('ai-tools'); }
+      else if (destination.kind === 'artifact') { setIncomingArtifactRequest({ id: destination.id, requestId }); setActiveTab('artifacts'); }
+      else if (destination.kind === 'history' || destination.kind === 'casebook') {
+        setIncomingReportRef({ requestId, [destination.kind === 'history' ? 'historyId' : 'casebookId']: destination.id }); setActiveTab('ai-workspace');
+      } else if (destination.kind === 'task') openTaskRun(destination.id);
+      return;
+    }
     const action = String(command?.action || '');
     if (action === 'environmentCheck' || action === 'tab:environment') {
       setEnvironmentCheckModalOpen(true);
@@ -1351,7 +1386,9 @@ function App() {
     setActiveSettingsSection(sectionId);
     document.getElementById(sectionId)?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
   };
-  const settingsSections = useMemo(() => [
+  const settingsSections = useMemo(() => {
+    void locale;
+    return [
     { id: 'settings-commands', label: tr("快捷命令"), icon: ClipboardList },
     { id: 'settings-cast', label: tr("投屏"), icon: Smartphone },
     { id: 'settings-paths', label: tr("保存路径"), icon: Folder },
@@ -1359,7 +1396,20 @@ function App() {
     { id: 'settings-data', label: tr("数据迁移"), icon: DownloadCloud },
     { id: 'settings-update', label: tr("更新"), icon: Package },
     { id: 'settings-danger', label: tr("高危操作"), icon: RotateCcw }
-  ], [locale]);
+    ];
+  }, [locale]);
+
+  useEffect(() => {
+    if (activeTab !== 'settings' || searchDestination?.kind !== 'settings') return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(searchDestination.field || searchDestination.id);
+      target?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
+      if (searchDestination.field) target?.focus({ preventScroll: true });
+      setActiveSettingsSection(searchDestination.id);
+      setSearchDestination(previous => previous?.requestId === searchDestination.requestId ? null : previous);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, searchDestination]);
 
   useEffect(() => {
     if (activeTab !== 'settings') return undefined;
@@ -1418,6 +1468,8 @@ function App() {
       <GlobalCommandPalette
         open={commandPaletteOpen}
         commands={globalCommands}
+        loading={indexedSearch.loading}
+        error={indexedSearch.error}
         theme={theme}
         onClose={() => setCommandPaletteOpen(false)}
         onRun={runGlobalCommand}
@@ -1593,7 +1645,7 @@ function App() {
           <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button>span]:whitespace-nowrap [&>button>svg]:shrink-0">
+        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button]:py-2.5 [&>button>span]:whitespace-nowrap [&>button>svg]:shrink-0">
           <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">{tr("设备与诊断")}</div>
           <button
             onClick={() => setActiveTab('devices')}
@@ -1700,15 +1752,17 @@ function App() {
           </button>
         </nav>
 
+        <SidebarConnectionStatus onNavigate={setActiveTab} />
+
         <BackgroundTaskStack
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
           showToast={showToast}
           onOpen={(tab, deviceId, id) => {
             if (tab === 'reproduction') { setReproductionTarget({ deviceId: deviceId || '', sessionId: id || '' }); return; }
             if (tab === 'logs') { void window.electronAPI?.logAnalyzerOpen?.({ deviceId }).catch(error => showToast(error.message)); return; }
-            if (tab === 'tasks') { setActivityTaskId(id || ''); setActivityTaskRequest(value => value + 1); }
-            if (tab === 'quality') setIncomingGuardId(id ? `${id}:${Date.now()}` : '');
-            if (deviceId) setActiveDeviceId(deviceId);
+            if (tab === 'tasks') { if (deviceId) setActiveDeviceId(deviceId); openTaskRun(id || ''); return; }
+            if (tab === 'quality') setIncomingGuardId(id ? { id, requestId: crypto.randomUUID() } : null);
+            if (deviceId && !(tab === 'quality' && id)) setActiveDeviceId(deviceId);
             setActiveTab(tab);
           }}
         />
@@ -1738,7 +1792,7 @@ function App() {
       <div className="min-w-0 flex-1 flex flex-col pt-5 h-screen overflow-hidden">
         {/* Header */}
         <header className={`px-4 lg:px-6 xl:px-8 pb-3 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${isDark ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
@@ -1748,6 +1802,8 @@ function App() {
             {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("多台主机 · 多个终端 · 文件与终端同屏操作")}</p>}
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>
+
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
 
           {activeTab === 'devices' && (
             <div className="flex items-center gap-2">
@@ -1984,6 +2040,8 @@ function App() {
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
               <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} incomingHandoffId={incomingHandoffId}
+                incomingReportRef={incomingReportRef}
+                onOpenRelatedTask={({ runId, scriptId }) => { if (runId) openTaskRun(runId); else if (scriptId) { setActivityTaskId(''); setAiTaskId(scriptId); setActiveTab('tasks'); } }}
                 showToast={showToast} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }}
                 onOpenTasks={id => { setActivityTaskId(''); setAiTaskId(id); setActiveTab('tasks'); }} />
             </Suspense>
@@ -1995,7 +2053,7 @@ function App() {
           </div>}
           {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
             <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 AI 工具管理…")}</div>}>
-              <AiToolsWorkspace active={activeTab === 'ai-tools'} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }} />
+              <AiToolsWorkspace active={activeTab === 'ai-tools'} incomingTabRequest={searchDestination?.kind === 'ai-tool' ? searchDestination : null} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }} />
             </Suspense>
           </div>}
           {activeTab === 'troubleshoot' && (
@@ -2013,6 +2071,9 @@ function App() {
 
           {activeTab === 'artifacts' && (
             <ArtifactCenter
+              onArtifactRequestHandled={request => setIncomingArtifactRequest(previous => previous === request ? null : previous)}
+              incomingArtifactRequest={incomingArtifactRequest}
+              onOpenTaskRun={openTaskRun}
               onOpenReproduction={id => setReproductionTarget({ deviceId: '', sessionId: String(id).replace(/^reproduction:/, '') })}
               theme={theme}
               showToast={showToast}
@@ -2022,6 +2083,8 @@ function App() {
 
           {activeTab === 'quality' && (
             <QualityCenter
+              onGuardRequestHandled={request => setIncomingGuardId(previous => previous === request ? null : previous)}
+              onOpenAnalysis={openAnalysis}
               incomingGuardId={incomingGuardId}
               devices={devices}
               activeDeviceId={activeDeviceId}
@@ -2160,6 +2223,8 @@ function App() {
 
           {activeTab === 'tasks' && (
             <TaskCenter
+              onTaskRequestHandled={taskRequestHandled}
+              onOpenAnalysis={openAnalysis}
               initialScriptId={aiTaskId}
               incomingTaskId={activityTaskId}
               incomingTaskRequestId={activityTaskRequest}
@@ -2304,6 +2369,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="screenshotPath"
+                      aria-label={tr('截图保存位置')}
                       value={screenshotPath}
                       onChange={(e) => setScreenshotPath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/screenshot/")}
@@ -2350,6 +2417,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="screenRecordPath"
+                      aria-label={tr('录屏保存位置')}
                       value={screenRecordPath}
                       onChange={(e) => setScreenRecordPath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/screenrecord/")}
@@ -2396,6 +2465,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="inspectionPath"
+                      aria-label={tr('巡检报告保存位置')}
                       value={inspectionPath}
                       onChange={(e) => setInspectionPath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/inspection/")}
@@ -2442,6 +2513,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="performancePath"
+                      aria-label={tr('性能报告保存位置')}
                       value={performancePath}
                       onChange={(e) => setPerformancePath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/performance-monitor/")}
@@ -2489,6 +2562,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="taskCenterPath"
+                      aria-label={tr('任务产物保存位置')}
                       value={taskCenterPath}
                       onChange={(e) => setTaskCenterPath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/task-center-artifacts/")}
@@ -2536,6 +2611,8 @@ function App() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
+                      id="qualityCenterPath"
+                      aria-label={tr('质量报告保存位置')}
                       value={qualityCenterPath}
                       onChange={(e) => setQualityCenterPath(e.target.value)}
                       placeholder={tr("默认: %APPDATA%/adb-workbench/quality-center/")}

@@ -28,6 +28,15 @@ test('structured analysis preserves separate facts, hypotheses and validated ref
   assert.throws(() => parseAnalysis(json(analysis), ['other']), { code: 'invalid_output' });
 });
 
+test('optional verification cards preserve legacy analyses and reject executable or unknown checks', () => {
+  const card = { title: 'Inspect process', checkIds: ['app_process', 'logcat_snapshot'], expectedObservation: 'Check whether the process and logs agree.' };
+  assert.deepEqual(parseAnalysis(json({ ...analysis, verificationChecks: [card] }), ['E1']).verificationChecks, [card]);
+  assert.equal(Object.hasOwn(parseAnalysis(json(analysis), ['E1']), 'verificationChecks'), false);
+  for (const value of [{ ...card, checkIds: ['shell'] }, { ...card, checkIds: ['device_info', 'device_info'] }, { ...card, checkIds: [] }, { ...card, command: 'reboot' }, { ...card, deviceId: 'other' }, { ...card, expectedObservation: 'x'.repeat(1001) }]) {
+    assert.throws(() => parseAnalysis(json({ ...analysis, verificationChecks: [value] }), ['E1']), { code: 'invalid_output' });
+  }
+});
+
 test('task drafts map exactly to existing executor field names with no arbitrary commands', () => {
   const steps = [
     { type: 'delay', label: 'Wait', durationMs: 500 },

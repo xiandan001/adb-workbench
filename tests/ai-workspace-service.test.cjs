@@ -32,6 +32,19 @@ test('collection never calls AI; consent sends the exact frozen redacted questio
   assert.equal(h.calls.length, 1);
 });
 
+test('verification recommendations are optional, sanitized and limited to checks applicable to frozen context', async () => {
+  const cards = [{ title: 'Check token=private-value', checkIds: ['device_info'], expectedObservation: 'Compare password=private-observation' },
+    { title: 'Unknown application target', checkIds: ['app_process'], expectedObservation: 'Observe a process.' }];
+  const h = harness({ client: async args => { h.calls.push(args); return { ok: true, text: JSON.stringify({ ...analysis, verificationChecks: cards }) }; } });
+  const caseId = randomUUID(), collected = await collect(h, caseId);
+  const answer = await h.service.call('analyze', { caseId, previewId: collected.preview.id, consent: true });
+  assert.equal(answer.ok, true); assert.equal(answer.result.verificationChecks.length, 1);
+  assert.deepEqual(answer.result.verificationChecks[0].checkIds, ['device_info']);
+  assert.ok(!JSON.stringify(answer.result).includes('private-value')); assert.ok(!JSON.stringify(answer.result).includes('private-observation'));
+  assert.ok(answer.result.limitations.some(item => /缺少应用目标/.test(item)));
+  assert.equal(h.calls.length, 1); assert.match(h.calls[0].systemPrompt, /Allowed check identifiers/);
+});
+
 test('foreign, expired and replaced preview tokens cannot submit old content', async () => {
   const h = harness(); const a = randomUUID(), b = randomUUID();
   const p = await collect(h, a);

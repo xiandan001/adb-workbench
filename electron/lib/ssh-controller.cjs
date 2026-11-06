@@ -3,11 +3,17 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { createSshShortcutGuard } = require('./ssh-shortcuts.cjs');
+const { sshConnectionStatus } = require('./connection-status.cjs');
 
 const ACTIVE_TRANSFERS = new Set(['queued', 'planning', 'running', 'preparing', 'transferring', 'cancelling']);
-function createSshController({ sessions, files, profiles, history, getOwner, dialogs, openLocalDirectory, onPublish = () => {} }) {
+function createSshController({ sessions, files, profiles, history, getOwner, dialogs, openLocalDirectory, onPublish = () => {}, onConnectionStatus = () => {} }) {
   let revision = 0;
   let subscribed = false;
+  let statusSubscribed = false;
+  let statusSubscriber;
+  let statusSignature = '';
+  const statusWatchers = new WeakSet();
+  const reconnecting = new Set();
   let timer;
   let migrationReserved = false;
   let pendingConnections = 0;
@@ -82,15 +88,26 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
     timer = setTimeout(() => {
       timer = undefined;
       shortcuts.validate();
-      if (!subscribed) return;
+      if (!subscribed && !statusSubscribed) return;
       const owner = getOwner();
       if (!owner || owner.isDestroyed()) return;
-      try { onPublish(snapshot(), owner); } catch { /* A closed or reloading owner cannot receive notifications. */ }
+      if (subscribed) {
+        try { onPublish(snapshot(), owner); } catch { /* A closed or reloading owner cannot receive notifications. */ }
+      }
+      if (statusSubscribed && statusSubscriber === owner.webContents && !statusSubscriber.isDestroyed()
+        && owner.isVisible?.() !== false && owner.isMinimized?.() !== true) {
+        const status = connectionStatus();
+        const signature = JSON.stringify(status);
+        if (signature !== statusSignature) {
+          try { onConnectionStatus(status, owner); statusSignature = signature; } catch { statusSubscribed = false; }
+        }
+      }
     }, 80);
     timer.unref?.();
   }
   const busyTransfers = id => files.listTransfers().filter(item => (!id || item.sessionId === id) && ACTIVE_TRANSFERS.has(item.status));
   const dirtyCount = id => id ? (drafts.get(id)?.length || 0) : [...drafts.values()].reduce((sum, paths) => sum + paths.length, 0);
+  const connectionStatus = () => sshConnectionStatus(sessions.snapshot().sessions, files.listTransfers(), drafts);
   const needsQuitConfirmation = () => pendingConnections > 0 || historyTasks.size > 0 || sessions.needsQuitConfirmation() || busyTransfers().length > 0 || dirtyCount() > 0 || mutations.size > 0;
   function reserveForMigration() {
     if (needsQuitConfirmation()) throw new Error(tr("请先保存 SSH 草稿、完成文件操作并断开所有 SSH 连接，再导入数据"));
@@ -204,6 +221,21 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
       if (!subscribed) shortcuts.reset();
       return snapshot();
     }, { offline: true });
+    handle('connection-status-subscribe', (args, event) => {
+      if (typeof args.active !== 'boolean') throw new Error(tr('连接状态订阅参数无效'));
+      statusSubscribed = args.active;
+      statusSubscriber = event.sender;
+      if (!statusWatchers.has(event.sender)) {
+        statusWatchers.add(event.sender);
+        const clear = () => { if (statusSubscriber === event.sender) { statusSubscribed = false; statusSignature = ''; } };
+        event.sender.on('did-start-loading', clear);
+        event.sender.on('render-process-gone', clear);
+        event.sender.once('destroyed', clear);
+      }
+      const status = connectionStatus();
+      statusSignature = args.active ? JSON.stringify(status) : '';
+      return { status };
+    }, { offline: true });
     handle('select-key', (_args, event) => selectKey(event));
     handle('save-profile', async (args, event) => {
       profiles.save({ profile: args.profile, credential: await credential(args, event), rememberCredentials: args.rememberCredentials === true });
@@ -227,6 +259,25 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
         // Resolved credentials stay inside main; service receives no renderer trust decision.
         return await sessions.connect({ config });
       } finally { pendingConnections--; }
+    });
+    handle('reconnect', async (args, event) => {
+      const previous = getSession(args.sessionId);
+      if (!['disconnected', 'error'].includes(previous.status) || reconnecting.has(previous.id) || sessionClosing.has(previous.id)) throw new Error(tr('此 SSH 会话仍在连接或处理中，不能重复重连'));
+      if (!previous.profileId) throw new Error(tr('此会话没有已保存的连接配置，请新建连接；旧输出和草稿仍保留'));
+      const checkIdentity = value => {
+        if (!value || value.host !== previous.host || Number(value.port) !== Number(previous.port) || value.username !== previous.username) throw new Error(tr('原连接配置已删除或主机信息已变更，请新建连接；不会重连到其他主机'));
+      };
+      checkIdentity(profiles.list().find(item => item.id === previous.profileId));
+      reconnecting.add(previous.id); pendingConnections++;
+      try {
+        const config = await resolveConnection({ profileId: previous.profileId, auth: args.auth }, event);
+        authorize(event);
+        if (!['disconnected', 'error'].includes(getSession(previous.id).status) || sessionClosing.has(previous.id)) throw new Error(tr('原 SSH 会话状态已变化，请刷新后重试'));
+        checkIdentity(config);
+        if (migrationReserved || disposed) throw new Error(tr('SSH 工作区正在退出或导入数据'));
+        // New session through the usual host-key/credential path; never close the old session or replay its commands.
+        return await sessions.connect({ config });
+      } finally { reconnecting.delete(previous.id); pendingConnections--; }
     });
     handle('disconnect', args => confirmDisconnect(args.sessionId, false));
     handle('close-session', args => confirmDisconnect(args.sessionId, true));
@@ -294,7 +345,7 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
     handle('set-drafts', args => {
       getSession(args.sessionId);
       if (!Array.isArray(args.paths) || args.paths.length > 32 || args.paths.some(value => typeof value !== 'string' || value.length > 4096 || value.includes('\0'))) throw new Error(tr("SSH 草稿状态无效"));
-      drafts.set(args.sessionId, [...new Set(args.paths)]); return {};
+      drafts.set(args.sessionId, [...new Set(args.paths)]); publish(); return {};
     }, { offline: true });
     handle('list', args => files.list(args));
     handle('preview', args => files.preview(args));
@@ -385,7 +436,7 @@ function createSshController({ sessions, files, profiles, history, getOwner, dia
   async function dispose() {
     disposed = true;
     shortcuts.dispose();
-    clearTimeout(timer); subscribed = false;
+    clearTimeout(timer); subscribed = false; statusSubscribed = false;
     for (const key of keys.values()) key.bytes.fill(0);
     keys.clear(); drafts.clear();
     await Promise.allSettled([...historyTasks]);

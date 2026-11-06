@@ -146,3 +146,28 @@ test('obsolete shared-service injection fails closed before loading native ports
   const serial = require('../electron/lib/serial.cjs');
   assert.throws(() => serial.register({}, { service: {} }), /分别初始化/);
 });
+
+test('compact sidebar status survives page unsubscribe and ignores log-only changes', async () => {
+  const h = fixture();
+  const initial = await h.invoke('serial:connection-status-subscribe', { active: true });
+  assert.equal(initial.status.activeCount, 2);
+  assert.equal(initial.status.unsavedCount, 2);
+  assert.ok(!JSON.stringify(initial).includes('entries'));
+  await h.invoke('serial:subscribe', { active: false });
+  for (let revision = 4; revision < 9; revision++) h.controller.publish({ workspace: 'terminal', revision, entries: [{ text: 'private log' }] });
+  assert.equal(h.calls.filter(call => call.channel === 'serial:connection-status').length, 0);
+  h.controller.publish({ workspace: 'terminal', status: 'error', error: 'unplugged', entries: [] });
+  const changes = h.calls.filter(call => call.channel === 'serial:connection-status');
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].data.activeCount, 1);
+  assert.equal(changes[0].data.failedCount, 1);
+  assert.ok(!JSON.stringify(changes).includes('private log'));
+  await h.invoke('serial:connection-status-subscribe', { active: false });
+  await h.invoke('serial:subscribe', { active: true });
+  h.controller.publish({ workspace: 'terminal', status: 'disconnected', error: '', entries: [] });
+  assert.equal(h.calls.at(-1).channel, 'serial:changed');
+  h.sender.emit('destroyed');
+  const before = h.calls.length;
+  h.controller.publish({ workspace: 'terminal', status: 'connected', entries: [] });
+  assert.equal(h.calls.length, before);
+});

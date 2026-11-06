@@ -1,12 +1,13 @@
 import { tr, useLocale } from '../../shared/i18n.js';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { Loader2, Pencil, Plug, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
+import { Loader2, Pencil, Plug, Plus, RotateCcw, Server, Trash2, Unplug, X } from 'lucide-react';
 import SelectMenu from '../SelectMenu';
 import SshConnectionDialog from './SshConnectionDialog';
 import SshSessionWorkspace from './SshSessionWorkspace';
 import SshTransferQueue from './SshTransferQueue';
 import { DEFAULT_SSH_LAYOUT, dirtySshPaths, emptySshView, normalizeSshLayout, readSshLayout, saveSshLayout, sshResult, sshWorkspaceReducer } from '../../shared/sshWorkspace';
 import { isDarkTheme } from '../../shared/theme';
+import { resolveSshReconnectProfile } from '../../shared/sshReconnect.js';
 
 
 const CLASSIC_THEME = Object.freeze({ isDark: true, card: 'bg-[#161b22] border-[#3E4145]', text: 'text-[#E8EAED]', textMuted: 'text-[#9AA0A6]', input: 'border-[#5F6368] bg-[#0D0E10] text-[#E8EAED]',
@@ -87,6 +88,21 @@ export default function SshWorkspace({ active = true, theme: appTheme, showToast
     } catch (failure) { setError(failure.message); }
     finally { if (alive.current) setBusy(previous => ({ ...previous, [session.id]: false })); }
   };
+  const reconnectSession = async session => {
+    if (busy[session.id]) return;
+    setError('');
+    try {
+      const ownProfile = resolveSshReconnectProfile(session, snapshot.profiles);
+      if (!ownProfile.hasSavedCredential) { setDialog({ profile: ownProfile, reconnectSessionId: session.id }); return; }
+      setBusy(previous => ({ ...previous, [session.id]: true }));
+      const result = sshResult(await window.electronAPI.sshReconnect({ sessionId: session.id }));
+      if (!alive.current || result.cancelled) return;
+      if (result.sessionId) onAction({ type: 'select-session', sessionId: result.sessionId });
+      void refreshRef.current?.();
+      showToast?.(tr('已建立新连接；旧输出和未保存编辑保留在原会话，不会重放命令'));
+    } catch (failure) { if (alive.current) setError(failure.message); }
+    finally { if (alive.current) setBusy(previous => ({ ...previous, [session.id]: false })); }
+  };
   const deleteProfile = async () => {
     if (!profile) return; setError('');
     try { sshResult(await window.electronAPI.sshDeleteProfile({ profileId: profile.id })); setSelectedProfile(''); void refreshRef.current?.(); }
@@ -106,8 +122,12 @@ export default function SshWorkspace({ active = true, theme: appTheme, showToast
     {error && <p role="alert" className="shrink-0 break-words text-xs text-red-500">{tr(error)}</p>}
     <div className="flex shrink-0 items-center gap-2"><div role="tablist" aria-label={tr("SSH 会话标签")} className="flex min-w-0 flex-1 overflow-x-auto">{sessions.map(session => <div key={session.id} className={`mr-1 flex shrink-0 items-center rounded-lg border ${current?.id === session.id ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-400/25'}`}><button type="button" role="tab" aria-selected={current?.id === session.id} onClick={() => onAction({ type: 'select-session', sessionId: session.id })} title={`${session.username}@${session.host}:${session.port}`} className="px-3 py-2 text-left text-xs"><span>{session.name}</span><span className={`ml-2 text-[10px] ${session.status === 'connected' ? 'text-emerald-500' : theme.textMuted}`}>{STATUS[session.status] || session.status}</span>{dirtySshPaths(view.sessions[session.id]).length > 0 && <span className="ml-1 text-amber-500">●</span>}</button><button type="button" aria-label={tr("关闭 SSH 会话 {0}", { 0: session.name })} onClick={() => actSession(session)} disabled={Boolean(busy[session.id])} className="mr-1 rounded p-1 disabled:opacity-40"><X size={13} /></button></div>)}</div>{current && <button type="button" onClick={() => actSession(current)} disabled={Boolean(busy[current.id])} className={button}><Unplug size={13} />{tr("断开当前主机")}</button>}</div>
     {current?.error && <p role="alert" className="shrink-0 break-words text-xs text-amber-500">{tr(current.error)}</p>}
+    {current && ['disconnected', 'error'].includes(current.status) && <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 px-3 py-2">
+      <button type="button" onClick={() => reconnectSession(current)} disabled={Boolean(busy[current.id])} className={button}>{busy[current.id] ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}{tr('重新连接此主机')}</button>
+      <p className={'min-w-0 text-xs ' + theme.textMuted}>{current.username}@{current.host}:{current.port} · {tr('新建独立连接，原输出和草稿保留，不重放命令')}</p>
+    </div>}
     <div className="min-h-[480px] min-w-0 shrink-0" style={{ height: layout.transfersOpen ? 'max(480px, calc(100vh - 440px))' : 'max(480px, calc(100vh - 300px))' }}>{sessions.map(session => <div key={session.id} hidden={current?.id !== session.id} className="h-full min-h-0 min-w-0"><SshSessionWorkspace session={session} view={view.sessions[session.id]} active={active && current?.id === session.id} layout={layout} onLayout={value => setLayout(normalizeSshLayout(value))} onCommitLayout={commitLayout} onAction={onAction} fileRevision={snapshot.fileRevisions?.[session.id] || 0} historyRevision={snapshot.historyRevisions?.[session.id] || 0} theme={theme} isDark={isDark} showToast={showToast} /></div>)}{!sessions.length && <div className={`flex h-full items-center justify-center rounded-xl border p-6 text-center ${theme.card}`}><div><Server size={34} className="mx-auto mb-3 text-emerald-500" /><h2 className="text-lg font-semibold">{tr("连接 SSH，文件与终端同时操作")}</h2><p className={`mt-2 text-sm leading-6 ${theme.textMuted}`}>{tr("左侧浏览远端文件，右上预览或编辑，右下运行终端。")}<br />{tr("每个主机和终端独立，切换页面不影响后台连接与传输。")}</p><button type="button" onClick={() => setDialog({ profile: null })} className={`mt-5 rounded-lg px-5 py-2 text-sm ${theme.button.primary}`}>{tr("新建 SSH 连接")}</button></div></div>}</div>
     <SshTransferQueue transfers={snapshot.transfers} sessions={snapshot.sessions} expanded={layout.transfersOpen} onExpanded={transfersOpen => commitLayout({ ...layout, transfersOpen })} onRevealLocation={revealTransferLocation} onRefresh={() => refreshRef.current?.()} theme={theme} showToast={showToast} />
-    {active && dialog && <SshConnectionDialog key={dialog.profile?.id || 'new'} profile={dialog.profile} theme={theme} isDark={isDark} onClose={() => setDialog(null)} onSaved={profiles => { if (profiles) setSnapshot(previous => ({ ...previous, profiles })); void refreshRef.current?.(); }} onConnected={sessionId => { if (sessionId) onAction({ type: 'select-session', sessionId }); void refreshRef.current?.(); }} />}
+    {active && dialog && <SshConnectionDialog key={dialog.reconnectSessionId || dialog.profile?.id || 'new'} profile={dialog.profile} reconnectSessionId={dialog.reconnectSessionId} theme={theme} isDark={isDark} onClose={() => setDialog(null)} onSaved={profiles => { if (profiles) setSnapshot(previous => ({ ...previous, profiles })); void refreshRef.current?.(); }} onConnected={sessionId => { if (sessionId) onAction({ type: 'select-session', sessionId }); void refreshRef.current?.(); if (dialog.reconnectSessionId) showToast?.(tr('已建立新连接；旧输出和未保存编辑保留在原会话，不会重放命令')); }} />}
   </section>;
 }

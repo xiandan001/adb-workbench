@@ -1,5 +1,5 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { confirmAppMessage } from '../shared/appMessageDialog';
 import {
   Activity,
@@ -21,7 +21,7 @@ import {
   Wrench
 } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
-import { formatBytes, sortArtifacts } from '../shared/artifactWorkspace';
+import { formatBytes, sortArtifacts, resolveArtifactPreviewRequest } from '../shared/artifactWorkspace';
 import SelectMenu from './SelectMenu';
 import ArtifactPreview from './ArtifactPreview';
 
@@ -46,11 +46,12 @@ const TYPE_META = {
   reproduction: { icon: ClipboardCheck, color: 'text-emerald-400', bg: 'bg-emerald-500/15' }
 };
 
-function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
+function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onOpenTaskRun, incomingArtifactRequest, onArtifactRequestHandled }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [listReady, setListReady] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState('');
   const [exportResult, setExportResult] = useState(null);
@@ -61,6 +62,7 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
   const [sortOrder, setSortOrder] = useState('newest');
   const [visibleCount, setVisibleCount] = useState(30);
   const [previewItem, setPreviewItem] = useState(null);
+  const handledPreviewRequest = useRef('');
 
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -74,6 +76,7 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
     const res = await window.electronAPI?.artifactsList?.();
     if (res?.ok) {
       setItems(res.items || []);
+      setListReady(true);
     } else {
       setError(res?.error || tr("产物列表加载失败"));
     }
@@ -83,6 +86,17 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const request = incomingArtifactRequest;
+    const result = resolveArtifactPreviewRequest(items, request, handledPreviewRequest.current, loading || !listReady || deleting || exporting);
+    if (!result) return;
+    handledPreviewRequest.current = result.key;
+    const item = result.item;
+    if (item) { setPreviewItem(item); setError(''); }
+    else setError(tr('所选产物已不存在，请刷新列表后重试。'));
+    onArtifactRequestHandled?.(request);
+  }, [incomingArtifactRequest, items, loading, listReady, deleting, exporting, onArtifactRequestHandled]);
 
   const filteredItems = useMemo(() => {
     void locale;
@@ -343,6 +357,7 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
                   onOpenPath={openPath}
                   onPreview={setPreviewItem}
                   onOpenReproduction={onOpenReproduction}
+                  onOpenTaskRun={onOpenTaskRun}
                 />
               ))}
               {visibleCount < filteredItems.length && <button type="button" onClick={() => setVisibleCount(count => count + 30)} className={`w-full py-3 rounded-lg border text-sm ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>{tr("加载更多 · 已显示 {0} / {1} 项", { 0: Math.min(visibleCount, filteredItems.length), 1: filteredItems.length })}</button>}
@@ -355,7 +370,7 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction }) {
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview, onOpenReproduction }) {
+function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview, onOpenReproduction, onOpenTaskRun }) {
   useLocale();
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
@@ -393,6 +408,7 @@ function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting,
         </div>
         <div className="flex flex-wrap gap-2">
           {item.type === 'reproduction' && onOpenReproduction && <button type="button" disabled={disabled} onClick={() => onOpenReproduction(item.sessionId || item.id)} className={`${buttonClass(isDark)} disabled:opacity-50`}><ClipboardCheck size={14} />{tr('查看复现采证')}</button>}
+          {item.type === 'task' && item.taskId && onOpenTaskRun && <button type="button" disabled={disabled} onClick={() => onOpenTaskRun(item.taskId)} className={`${buttonClass(isDark)} disabled:opacity-50`}><ClipboardCheck size={14} />{tr('查看原运行')}</button>}
           <button type="button" onClick={() => onPreview(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}><Eye size={14} />{tr("预览")}</button>
           <button type="button" onClick={() => onExport(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}>
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}

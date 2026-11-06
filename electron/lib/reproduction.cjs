@@ -6,6 +6,7 @@ const { tr } = require('./localization.cjs');
 const { createReproductionService } = require('./reproduction-session.cjs');
 const { createSourceSnapshots, listSources } = require('./reproduction-sources.cjs');
 const activity = require('./workbench-activity.cjs');
+const { readMarkerNeighborhood } = require('./reproduction-neighborhood.cjs');
 
 let singleton;
 function getService() {
@@ -102,6 +103,7 @@ function register(ipcMain) {
     start: args => getService().start(args), mark: args => getService().mark(args), stop: args => getService().stop(args), retrySave: args => getService().retrySave(args), open: openSession,
     read: async args => {
       const session = await getService().load(args?.id);
+      if (args?.markerId) return { ok: true, neighborhood: await readMarkerNeighborhood(getService().store, session, args.markerId) };
       if (!session.files.some(file => file.name === args?.name) || args.name === 'video.mp4') throw new Error(tr('该证据文件不属于所选复现会话。'));
       return { ok: true, ...await getService().store.readTail(args.id, args.name, 64 * 1024) };
     }, analyze: analyzeSession, export: exportSession,

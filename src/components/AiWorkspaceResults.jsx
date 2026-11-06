@@ -10,19 +10,23 @@ function ResultList({ title, items, theme }) {
   return <section><h4 className="mb-2 text-xs font-semibold">{title}</h4><ul className={`space-y-1.5 pl-4 text-sm leading-6 ${theme.textMuted}`}>{items.map((item, index) => <li key={index} className="list-disc whitespace-pre-wrap break-words">{item}</li>)}</ul></section>;
 }
 
-export function AiWorkspaceReport({ preview, result, usage, cached, theme, readOnly, busy, entitled, onAnalyze, onRegression }) {
+export function AiWorkspaceReport({ preview, result, usage, cached, theme, readOnly, busy, entitled, onAnalyze, onRegression, onPrepareVerification, checks }) {
   const [highlight, setHighlight] = useState(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const citation = value => {
     const valid = workspaceCitation(preview, value);
-    if (valid) setHighlight(current => ({ ...valid, nonce: (current?.nonce || 0) + 1 }));
+    if (valid) { setEvidenceOpen(true); setHighlight(current => ({ ...valid, nonce: (current?.nonce || 0) + 1 })); }
   };
   return <>
-    <AiWorkspaceEvidence preview={preview} theme={theme} readOnly={readOnly} busy={busy} entitled={entitled} onAnalyze={onAnalyze} highlight={highlight} onCitation={citation} />
-    {result && <AiWorkspaceAnalysis result={result} preview={preview} usage={usage} cached={cached} theme={theme} onCitation={citation} onRegression={onRegression} />}
+    {result && <AiWorkspaceAnalysis result={result} preview={preview} usage={usage} cached={cached} theme={theme} onCitation={citation} onRegression={onRegression} onPrepareVerification={onPrepareVerification} checks={checks} />}
+    {result ? <details open={evidenceOpen} onToggle={event => setEvidenceOpen(event.currentTarget.open)} className={`rounded-xl border p-3 ${theme.card}`}>
+      <summary className="cursor-pointer text-sm font-medium">{tr('核对原始证据与引用')}</summary>
+      <div className="mt-3"><AiWorkspaceEvidence preview={preview} theme={theme} readOnly busy={busy} highlight={highlight} onCitation={citation} /></div>
+    </details> : <AiWorkspaceEvidence preview={preview} theme={theme} readOnly={readOnly} busy={busy} entitled={entitled} onAnalyze={onAnalyze} highlight={highlight} onCitation={citation} />}
   </>;
 }
 
-export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onCitation, onRegression }) {
+export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onCitation, onRegression, onPrepareVerification, checks = [] }) {
   useLocale();
   const verdicts = { improved: tr('有所改善'), unchanged: tr('未见明显变化'), regressed: tr('出现退化'), inconclusive: tr('无法判断') };
   return <section aria-label={tr('分析结果')} className={`space-y-4 rounded-xl border p-4 ${theme.card}`}>
@@ -38,6 +42,13 @@ export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onC
     </article>)}</section>}
     <ResultList title={tr('待验证的推测')} items={result.hypotheses} theme={theme} />
     <ResultList title={tr('建议的下一步')} items={result.nextSteps} theme={theme} />
+    {result.verificationChecks?.length > 0 && <section className="space-y-2"><h4 className="text-xs font-semibold">{tr('可以准备的验证检查')}</h4>
+      {result.verificationChecks.map((card, index) => <article key={index} className={`space-y-2 rounded-lg border p-3 ${theme.input}`}>
+        <h5 className="text-sm font-medium">{card.title}</h5><p className={`whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{card.expectedObservation}</p>
+        <p className={`text-xs ${theme.textMuted}`}>{card.checkIds.map(id => checks.find(check => check.id === id)?.label || id).join(' · ')}</p>
+        <button type="button" disabled={!onPrepareVerification} onClick={() => onPrepareVerification(index)} className={`rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${theme.button.secondary}`}>{tr('准备这项验证')}</button>
+      </article>)}<p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr('只填写下一轮只读检查；核对后再采集，不会自动操作设备或调用 AI。')}</p>
+    </section>}
     <ResultList title={tr('分析限制')} items={result.limitations} theme={theme} />
     <div className="space-y-2 border-t border-slate-400/15 pt-3"><p className={`flex items-start gap-2 text-xs leading-5 ${theme.textMuted}`}><TriangleAlert size={14} className="mt-0.5 shrink-0" />{tr('AI 结论需要结合证据验证；此处的建议不会自动执行。')}</p><AiWorkspaceUsage usage={usage} cached={cached} theme={theme} /></div>
   </section>;

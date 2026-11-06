@@ -1,12 +1,17 @@
 const { tr } = require('./localization.cjs');
 const path = require('node:path');
 const { writeSerialSnapshot } = require('./serial-export.cjs');
+const { serialStatusMetadata, serialConnectionStatus } = require('./connection-status.cjs');
 
 const WORKSPACES = ['rs232', 'terminal'];
 
 function createSerialController({ workspaces, getOwner, saveSnapshot }) {
   let subscribed = false;
   let subscriber;
+  let statusSubscribed = false;
+  let statusSubscriber;
+  let statusSignature = '';
+  let statusStates = {};
   let saving = false;
   let migrationReserved = false;
   const watched = new WeakSet();
@@ -14,6 +19,26 @@ function createSerialController({ workspaces, getOwner, saveSnapshot }) {
     const owner = getOwner();
     if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) throw new Error(tr("请在主窗口操作串口"));
   };
+  const watch = sender => {
+    if (watched.has(sender)) return;
+    watched.add(sender);
+    const clear = () => {
+      if (subscriber === sender) subscribed = false;
+      if (statusSubscriber === sender) { statusSubscribed = false; statusSignature = ''; }
+    };
+    sender.on('did-start-loading', clear);
+    sender.on('render-process-gone', clear);
+    sender.once('destroyed', clear);
+  };
+  function publishStatus(owner) {
+    if (!statusSubscribed || !owner || owner.isDestroyed() || !owner.isVisible() || owner.isMinimized()
+      || owner.webContents !== statusSubscriber || statusSubscriber.isDestroyed()) return;
+    const status = serialConnectionStatus(statusStates);
+    const signature = JSON.stringify(status);
+    if (signature === statusSignature) return;
+    try { statusSubscriber.send('serial:connection-status', status); statusSignature = signature; }
+    catch { statusSubscribed = false; }
+  }
   async function saveCurrent(workspace = 'rs232') {
     const service = workspaces.get(workspace);
     if (saving) throw new Error(tr("正在保存串口记录，请稍候"));
@@ -39,6 +64,10 @@ function createSerialController({ workspaces, getOwner, saveSnapshot }) {
   }
   function publish(delta) {
     const owner = getOwner();
+    if (WORKSPACES.includes(delta?.workspace)) {
+      statusStates[delta.workspace] = serialStatusMetadata({ ...statusStates[delta.workspace], ...delta });
+      publishStatus(owner);
+    }
     if (!WORKSPACES.includes(delta?.workspace) || !subscribed || !owner || owner.isDestroyed() || !owner.isVisible() || owner.isMinimized()
       || owner.webContents !== subscriber || subscriber.isDestroyed()) return;
     try { subscriber.send('serial:changed', delta); } catch { subscribed = false; }
@@ -68,15 +97,19 @@ function createSerialController({ workspaces, getOwner, saveSnapshot }) {
     handle('serial:subscribe', (args, event) => {
       if (typeof args?.active !== 'boolean') throw new Error(tr("串口订阅状态无效"));
       subscribed = args.active; subscriber = event.sender;
-      if (!watched.has(subscriber)) {
-        watched.add(subscriber);
-        const clear = () => { if (subscriber === event.sender) subscribed = false; };
-        subscriber.on('did-start-loading', clear);
-        subscriber.on('render-process-gone', clear);
-        subscriber.once('destroyed', clear);
-      }
+      watch(subscriber);
       return { snapshots: workspaces.snapshots() };
     });
+    handle('serial:connection-status-subscribe', (args, event) => {
+      if (typeof args?.active !== 'boolean') throw new Error(tr('连接状态订阅参数无效'));
+      statusSubscribed = args.active;
+      statusSubscriber = event.sender;
+      watch(statusSubscriber);
+      if (args.active) statusStates = Object.fromEntries(Object.entries(workspaces.snapshots()).map(([workspace, value]) => [workspace, serialStatusMetadata(value)]));
+      const status = serialConnectionStatus(statusStates);
+      statusSignature = args.active ? JSON.stringify(status) : '';
+      return { status };
+    }, { compact: true });
     handle('serial:connect', async (args, _event, workspace) => {
       if (migrationReserved) throw new Error(tr("数据导入已准备，请重启应用后再连接串口"));
       await workspaces.get(workspace).connect(args);

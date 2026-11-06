@@ -95,6 +95,20 @@ test('saving an AI draft creates a new task, preserves existing scripts, and nev
   assert.equal(h.control.executed, 0);
 });
 
+test('related AI tasks read real scripts-list separately from task state and survive run updates', async t => {
+  const h = fixture(t), handlers = new Map(); h.api.register({ handle: (name, handler) => handlers.set(name, handler) });
+  const origin = { caseId: '11111111-1111-4111-8111-111111111111', turnId: '22222222-2222-4222-8222-222222222222', question: 'Synthetic analysis' };
+  const saved = h.api.saveAiDraft(draft, { origin });
+  const state = await handlers.get('task-center:state')(); assert.equal(state.ok, true); assert.equal(Object.hasOwn(state, 'scripts'), false);
+  const { loadWorkspaceRelatedSnapshot, mergeWorkspaceRelatedState, workspaceRelatedTasks } = await import('../src/components/AiWorkspaceFlow.js');
+  const snapshot = await loadWorkspaceRelatedSnapshot({ taskState: () => handlers.get('task-center:state')(), taskScriptsList: () => handlers.get('task-center:scripts:list')() });
+  const view = { report: { id: origin.turnId }, reportRef: { caseId: origin.caseId, turnId: origin.turnId } };
+  assert.equal(workspaceRelatedTasks(view, snapshot)[0].scriptId, saved.id);
+  const updated = mergeWorkspaceRelatedState(snapshot, { activeTasks: [], history: [] });
+  assert.equal(workspaceRelatedTasks(view, updated)[0].scriptId, saved.id);
+  assert.equal(h.control.executed, 0);
+});
+
 for (const failure of ['write', 'fsync', 'rename']) {
   test(`a ${failure} failure preserves file and cache; retry saves exactly one new draft`, t => {
     const h = fixture(t);

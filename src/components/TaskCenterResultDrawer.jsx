@@ -6,7 +6,7 @@ import TaskRerunPanel from './TaskRerunPanel';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 
-export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel, onOpenPath, onRerun }) {
+export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel, onOpenPath, onRerun, onCompareParent, onOpenAnalysis }) {
   useLocale();
   const dialogRef = useRef(null);
   const [rerunOpen, setRerunOpen] = useState(false);
@@ -28,6 +28,8 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
   const steps = (task.deviceRuns || []).flatMap(run => (run.steps || []).map(step => ({ ...step, deviceId: run.deviceId })));
   const failures = steps.filter(step => step.status === 'failed' || step.error);
   const visibleSteps = failures.length ? failures : steps;
+  const origin = task.analysisOrigin;
+  const canOpenOrigin = origin && (origin.casebookId || origin.historyId || (origin.caseId && origin.turnId));
   async function analyzeRun() {
     if (handoffBusy) return;
     setHandoffBusy(true); setHandoffError('');
@@ -87,6 +89,8 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {task.artifactDir && <p className={`text-xs font-mono break-all ${muted}`}>{task.artifactDir}</p>}
         </div>
         <footer className="flex flex-wrap gap-2 border-t border-current/10 p-4">
+          {canOpenOrigin && onOpenAnalysis && <button type="button" onClick={() => onOpenAnalysis(origin)} className={`rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>{tr('查看原分析')}</button>}
+          {!running && task.mode === 'replay' && task.parentTaskId && onCompareParent && <button type="button" onClick={() => onCompareParent(task)} className={`rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>{tr('与原失败运行比较')}</button>}
           <button type="button" disabled={handoffBusy} onClick={analyzeRun} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Sparkles size={15} />{tr('分析本次运行')}</button>
           {!running && ((task.deviceRuns || []).some(run => run.status === 'failed') || failures.length > 0) && <button type="button" onClick={() => setRerunOpen(value => !value)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}><RotateCcw size={15} />{tr('仅复跑失败设备')}</button>}
           {task.stressReportPath && <button type="button" onClick={() => onOpenPath(task.stressReportPath)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}><FileText size={15} />{tr("打开报告")}</button>}

@@ -5,7 +5,7 @@ export const workspaceRequirements = () => ({ application: '', preconditions: ''
 export const workspaceCaseReview = () => ({ status: 'unverified', rootCause: '', solution: '', verification: '', packageName: '', version: '', tags: [] });
 
 export function createWorkspaceCase(mode, deviceId, caseId) {
-  return { mode, caseId, revision: 0, question: '', deviceId: deviceId || '', checks: [], sourceIds: [], text: '',
+  return { mode, caseId, revision: 0, pristine: true, preparing: true, question: '', deviceId: deviceId || '', checks: mode === 'diagnose' ? ['device_info', 'logcat_snapshot'] : [], sourceIds: [], text: '',
     plan: null, planUsage: null, preview: null, result: null, draft: null, usage: null, cached: false, error: '', busy: '',
     selection: workspaceSelection(), selectionChanged: false, requirements: workspaceRequirements(), turns: [], reportView: null,
     contextRef: null, context: null, findingIndex: null, baseline: '', diagnostic: { packageName: '', symptom: '' },
@@ -13,10 +13,10 @@ export function createWorkspaceCase(mode, deviceId, caseId) {
 }
 
 export function completeWorkspaceTurn(current, response) {
-  if (!response.turn?.id) return { ...current, result: response.result, usage: response.usage, cached: response.cached === true };
+  if (!response.turn?.id) return { ...current, preparing: false, result: response.result, usage: response.usage, cached: response.cached === true };
   const turn = response.turn;
   const turns = [turn, ...current.turns.filter(item => item.id !== turn.id)].slice(0, AI_WORKSPACE_TURN_LIMIT);
-  return { ...current, turns, result: response.result, usage: response.usage, cached: response.cached === true,
+  return { ...current, turns, preparing: false, result: response.result, usage: response.usage, cached: response.cached === true,
     reportView: { report: turn, reportRef: { caseId: current.caseId, turnId: turn.id }, cached: response.cached === true } };
 }
 
@@ -33,9 +33,10 @@ export function prepareWorkspaceContext(current, reportView, kind, findingIndex 
 
 export function prepareWorkspaceHandoff(current, metadata) {
   const targets = metadata.taskTargets || [];
-  return editWorkspaceCase(current, { question: metadata.question || '', contextRef: null, context: null, sourceIds: [], text: '',
+  const prepared = editWorkspaceCase(current, { question: metadata.question || metadata.title || '', deviceId: metadata.deviceId || targets[0]?.deviceId || current.deviceId, contextRef: null, context: null, sourceIds: [], text: '',
     preview: null, reportView: null, handoffId: metadata.id || metadata.handoffId, handoff: metadata,
     targetSelection: { tokens: targets.map(target => target.token) }, targets, findingIndex: null });
+  return current.busy ? current : { ...prepared, targetSelection: { tokens: targets.map(target => target.token) }, targets };
 }
 
 export function workspaceReportKey(reportRef) {
@@ -68,7 +69,7 @@ export function workspaceLinePage(total, requested, size = 80) {
 export function editWorkspaceCase(current, changes) {
   if (current.busy) return current;
   const changedDevice = Object.hasOwn(changes, 'deviceId') && changes.deviceId !== current.deviceId;
-  return { ...current, ...changes, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, usage: null,
+  return { ...current, ...changes, pristine: false, preparing: true, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, usage: null,
     cached: false, error: '', ...(Object.hasOwn(changes, 'selection') ? { selectionChanged: changes.selectionChanged ?? true } : {}),
     ...(Object.hasOwn(changes, 'question') || Object.hasOwn(changes, 'deviceId') ? { plan: null, planUsage: null } : {}) };
 }

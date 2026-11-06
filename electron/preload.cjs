@@ -50,7 +50,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiToolsRequest: args => ipcRenderer.invoke('ai-tools:request', args),
   sshSnapshot: () => ipcRenderer.invoke('ssh:snapshot'),
   sshSubscribe: args => ipcRenderer.invoke('ssh:subscribe', args),
+  sshConnectionStatusSubscribe: args => ipcRenderer.invoke('ssh:connection-status-subscribe', args),
+  onSshConnectionStatus: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('ssh:connection-status', listener);
+    return () => ipcRenderer.off('ssh:connection-status', listener);
+  },
   sshConnect: args => ipcRenderer.invoke('ssh:connect', args),
+  sshReconnect: args => ipcRenderer.invoke('ssh:reconnect', args),
   sshDisconnect: args => ipcRenderer.invoke('ssh:disconnect', args),
   sshCloseSession: args => ipcRenderer.invoke('ssh:close-session', args),
   sshSaveProfile: args => ipcRenderer.invoke('ssh:save-profile', args),
@@ -102,6 +108,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   serialClear: args => ipcRenderer.invoke('serial:clear', args),
   serialSave: args => ipcRenderer.invoke('serial:save', args),
   serialSubscribe: args => ipcRenderer.invoke('serial:subscribe', args),
+  serialConnectionStatusSubscribe: args => ipcRenderer.invoke('serial:connection-status-subscribe', args),
+  onSerialConnectionStatus: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('serial:connection-status', listener);
+    return () => ipcRenderer.off('serial:connection-status', listener);
+  },
   onSerialChanged: callback => {
     const listener = safeListener(callback);
     ipcRenderer.on('serial:changed', listener);

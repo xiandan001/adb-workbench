@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import * as stateHelpers from '../src/components/AiWorkspaceState.js';
+import * as flowHelpers from '../src/components/AiWorkspaceFlow.js';
 
 function harness(overrides = {}) {
   const slots = []; let cursor = 0;
@@ -30,7 +31,7 @@ function harness(overrides = {}) {
   const source = fs.readFileSync(new URL('../src/components/AiWorkspaceController.js', import.meta.url), 'utf8')
     .replace(/^import .+;\n/gm, '').replace('export default function useAiWorkspace', 'function useAiWorkspace');
   const controller = vm.runInNewContext(`${source}\nuseAiWorkspace`, {
-    ...stateHelpers, crypto: { randomUUID }, window: { electronAPI }, navigator: { clipboard: { writeText: async text => clipboard.push(text) } },
+    ...stateHelpers, ...flowHelpers, crypto: { randomUUID }, window: { electronAPI }, navigator: { clipboard: { writeText: async text => clipboard.push(text) } },
     tr: text => text, useLocale: () => 'zh-CN', useCallback: fn => fn, useEffect: () => {},
     useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
@@ -96,4 +97,40 @@ test('late history load cannot overwrite a newly edited case', async () => {
   const pending = h.render().loadHistory('saved-report'); h.render().edit({ question: 'new input' });
   finish({ ok: true, report: h.turn }); await pending;
   assert.equal(h.render().current.question, 'new input'); assert.equal(h.render().current.reportView, null);
+});
+
+test('verification click prepares the original question and device without collecting or sending', async () => {
+  const h = harness({ aiWorkspaceSources: async () => ({ ok: true, entitled: true, sources: [], checks: [{ id: 'device_info' }, { id: 'logcat_snapshot' }] }) });
+  h.preview.deviceId = 'fixture-A'; h.turn.result.verificationChecks = [{ title: 'Check device', checkIds: ['device_info'], expectedObservation: 'Compare identity.' }];
+  let ui = await h.complete(); await ui.refresh(); ui = h.render(); const before = h.calls.length;
+  ui.prepareVerification(0); ui = h.render();
+  assert.equal(h.calls.length, before); assert.equal(ui.mode, 'diagnose'); assert.equal(ui.current.deviceId, 'fixture-A');
+  assert.equal(ui.current.question, h.preview.question); assert.deepEqual(Array.from(ui.current.checks), ['device_info']);
+  assert.equal(ui.current.contextRef.turnId, h.turn.id); assert.equal(ui.current.preview, null);
+  await ui.collect(); assert.equal(h.calls.at(-1).name, 'aiWorkspaceCollect'); assert.equal(h.calls.at(-1).args.deviceId, 'fixture-A');
+  assert.equal(h.calls.at(-1).args.contextRef.turnId, h.turn.id); assert.equal(h.calls.filter(call => call.name === 'aiWorkspaceAnalyze').length, 1);
+});
+
+test('external report requests queue while collecting and require explicit opening afterwards', async () => {
+  let release;
+  const h = harness({ aiWorkspaceCollect: () => new Promise(resolve => { release = resolve; }) });
+  let ui = h.render(); ui.edit({ question: 'Preserve this draft' }); const collecting = h.render().collect();
+  const request = { requestId: 'request', historyId: '11111111-1111-4111-8111-111111111111' };
+  await h.render().openRequestedReport(request); assert.equal(h.calls.filter(call => call.name === 'aiWorkspaceHistoryLoad').length, 0);
+  assert.equal(h.render().pendingReport.requestId, 'request');
+  release({ ok: true, preview: h.preview }); await collecting;
+  assert.equal(h.calls.filter(call => call.name === 'aiWorkspaceHistoryLoad').length, 0);
+  await h.render().acceptPendingReport(); ui = h.render();
+  assert.equal(ui.mode, 'analysis'); assert.equal(ui.current.reportView.reportRef.historyId, request.historyId);
+  assert.equal(ui.current.preview, null); assert.equal(ui.cases.diagnose.question, 'Preserve this draft');
+  assert.equal(h.calls.filter(call => call.name === 'aiWorkspaceAnalyze').length, 0);
+});
+
+test('a late external report load cannot replace newly edited analysis input', async () => {
+  let release;
+  const h = harness({ aiWorkspaceHistoryLoad: () => new Promise(resolve => { release = resolve; }) });
+  h.render().setMode('analysis'); h.render().edit({ question: 'before' });
+  const pending = h.render().openRequestedReport({ requestId: 'request', historyId: '11111111-1111-4111-8111-111111111111' });
+  h.render().edit({ question: 'after' }); release({ ok: true, report: h.turn }); await pending;
+  assert.equal(h.render().current.question, 'after'); assert.equal(h.render().current.reportView, null);
 });

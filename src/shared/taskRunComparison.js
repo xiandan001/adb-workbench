@@ -20,16 +20,16 @@ function sameDevice(left, right) {
   return matched;
 }
 
-function matchDevices(before, after) {
-  if (!before.length || before.length !== after.length) return null;
-  const pairs = before.map(run => ({ before: run, matches: after.filter(other => sameDevice(run, other)) }));
-  if (pairs.some(pair => pair.matches.length !== 1)) return null;
-  if (new Set(pairs.map(pair => pair.matches[0])).size !== after.length) return null;
-  return pairs.map(pair => ({ before: pair.before, after: pair.matches[0] }));
+function matchDevices(before, after, allowSubset) {
+  if (!before.length || !after.length || (allowSubset ? after.length > before.length : before.length !== after.length)) return null;
+  const matches = after.map(run => ({ after: run, before: before.filter(other => sameDevice(run, other)) }));
+  if (matches.some(pair => pair.before.length !== 1)) return null;
+  if (new Set(matches.map(pair => pair.before[0])).size !== after.length) return null;
+  return before.map(run => ({ before: run, after: matches.find(pair => pair.before[0] === run)?.after || null }));
 }
 
 function validStepRecords(run, definitions) {
-  const steps = run.steps || [];
+  const steps = run?.steps || [];
   return new Set(steps.map(step => step.id)).size === steps.length && steps.every(step => (
     definitions[step.index]?.id === step.id && definitions[step.index]?.type === step.type
   ));
@@ -68,21 +68,32 @@ export function compareTaskRuns(before, after) {
     || JSON.stringify(definitions.map(({ id, type }) => ({ id, type }))) !== JSON.stringify(after.scriptSteps.map(({ id, type }) => ({ id, type })))) {
     return reject(tr("步骤身份缺失、重复或不一致，无法安全比较。"));
   }
-  const pairs = matchDevices(before.deviceRuns || [], after.deviceRuns || []);
+  const parentComparison = after.parentTaskId === before.id;
+  const pairs = matchDevices(before.deviceRuns || [], after.deviceRuns || [], parentComparison);
   if (!pairs) return reject(tr("设备不一致或无法唯一确认设备身份。仅连接地址相同不足以证明是同一台设备，请在原设备上重新运行。"));
   if (pairs.some(pair => !validStepRecords(pair.before, definitions) || !validStepRecords(pair.after, definitions))) {
     return reject(tr("运行中的步骤与脚本版本不一致，无法安全比较。"));
   }
   const steps = pairs.flatMap(pair => {
     const previous = new Map((pair.before.steps || []).map(step => [step.id, step]));
-    const current = new Map((pair.after.steps || []).map(step => [step.id, step]));
-    return definitions.map(step => compareStep(step, previous.get(step.id), current.get(step.id), pair.after.deviceId));
+    const current = new Map((pair.after?.steps || []).map(step => [step.id, step]));
+    return definitions.map(step => compareStep(step, previous.get(step.id), current.get(step.id), pair.after?.deviceId || pair.before.deviceId));
   });
   return {
-    comparable: true, reason: '', steps,
+    comparable: true, reason: '', steps, parentComparison,
+    unobservedDeviceIds: pairs.filter(pair => !pair.after).map(pair => pair.before.deviceId),
+    inputCompatibility: before.inputHash && after.inputHash ? (before.inputHash === after.inputHash ? 'same' : 'changed') : 'unknown',
     newFailures: steps.filter(step => step.change === 'new-failure').length,
     recovered: steps.filter(step => step.change === 'recovered').length,
     unobserved: steps.filter(step => step.change === 'unobserved').length,
     beforeMs: runDuration(before), afterMs: runDuration(after)
   };
+}
+
+export function recommendTaskComparison(history, selectedAfterId = '') {
+  const after = selectedAfterId ? history.find(run => run.id === selectedAfterId) : history[0];
+  if (!after) return { beforeId: '', afterId: selectedAfterId };
+  const parent = after.parentTaskId && history.find(run => run.id === after.parentTaskId);
+  const before = parent || history.find(run => run.id !== after.id && compareTaskRuns(run, after).comparable);
+  return { beforeId: before?.id || '', afterId: after.id };
 }

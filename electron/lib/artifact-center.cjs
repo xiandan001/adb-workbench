@@ -219,6 +219,7 @@ async function scanTaskCenter(baseDirs) {
     const stat = await safeStat(dir);
     return {
       id: `task:${dir}`,
+      taskId: typeof result.id === 'string' && /^task-[a-zA-Z0-9-]{1,175}$/.test(result.id) ? result.id : '',
       type: 'task',
       typeLabel: result.mode === 'stress' ? tr("自动化压测") : tr("任务中心"),
       title: result.scriptName || path.basename(dir),

@@ -1,4 +1,8 @@
 {
+  "此功能暂不可用，请检查会员状态或工具权限。": "This feature is currently unavailable. Check your membership status or tool permissions.",
+  "重新连接此主机": "Reconnect to this host",
+  "已建立新连接；旧输出和未保存编辑保留在原会话，不会重放命令": "A new connection was established. Previous output and unsaved edits remain in the original session; commands are not replayed.",
+  "新建独立连接，原输出和草稿保留，不重放命令": "Create a separate connection; keep previous output and drafts without replaying commands",
   "继续后将显示最终发送预览；确认前不会联网。": "Continue to review the final outgoing messages. Nothing is sent before confirmation.",
   "查看并确认发送": "Review and confirm sending",
   "任务结果文件不完整或格式无效，不能安全排除私有脚本；请使用任务结果分析入口。": "The task result is incomplete or invalid, so private scripts cannot be safely excluded. Use the task-result analysis entry.",
