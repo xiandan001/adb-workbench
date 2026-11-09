@@ -1,0 +1,7 @@
+{
+  global:
+    UiTestExtension_OnInit;
+    UiTestExtension_OnRun;
+  local:
+    *;
+};

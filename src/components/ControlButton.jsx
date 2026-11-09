@@ -1,7 +1,7 @@
 import { RefreshCw } from 'lucide-react';
 import themes from '../data/themes';
 
-function ControlButton({ icon, label, onClick, disabled, loading, theme, isRecording }) {
+function ControlButton({ icon, label, onClick, disabled, loading, theme, isRecording, title }) {
   const t = theme || themes.default;
   const primaryColor = t.primary;
 
@@ -23,6 +23,7 @@ function ControlButton({ icon, label, onClick, disabled, loading, theme, isRecor
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={buttonClass}
     >
       {loading ? (

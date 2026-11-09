@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const { findExecutable } = require('./android-tool-cleanup.cjs');
+const { isHdcInvocation, compileHdcOperation, deviceIdFromAdbArgs } = require('./device-invocation.cjs');
+const { resolveDeviceRef } = require('./device-registry.cjs');
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
@@ -22,6 +24,7 @@ function getAdbCommand() {
 
 function runAdb(args, options = {}) {
   const normalizedArgs = normalizeArgs(args);
+  if (isHdcInvocation(normalizedArgs)) return runHarmonyEquivalent(normalizedArgs, options);
   const action = () => {
     if (isCancelled(options)) return Promise.resolve(cancelledResult(options));
     return execAdb(normalizedArgs, options);
@@ -35,10 +38,34 @@ function runAdb(args, options = {}) {
 }
 
 function spawnAdb(args, options = {}) {
+  const normalized = normalizeArgs(args);
+  if (isHdcInvocation(normalized)) {
+    const deviceId = deviceIdFromAdbArgs(normalized);
+    const ref = resolveDeviceRef(deviceId, options);
+    const plan = compileHdcOperation(normalized.slice(normalized.indexOf('-s') + 2), ref);
+    return require('./hdc-runtime.cjs').spawnHdc(deviceId, plan.args, options);
+  }
   return spawn(getAdbCommand(), normalizeArgs(args), {
     windowsHide: true,
     ...options
   });
+}
+
+async function runHarmonyEquivalent(args, options) {
+  try {
+    const deviceId = deviceIdFromAdbArgs(args);
+    const ref = resolveDeviceRef(deviceId, options);
+    const plan = compileHdcOperation(args.slice(args.indexOf('-s') + 2), ref);
+    const result = await require('./hdc-runtime.cjs').runHdc(deviceId, plan.args, options);
+    if (plan.state && result.ok) {
+      if (!String(result.stdout).includes('__AWB_DEVICE_READY__')) return { ...result, ok: false, error: 'HDC target readiness response missing' };
+      return { ...result, stdout: options.encoding === 'buffer' ? Buffer.from('device') : 'device' };
+    }
+    return result;
+  } catch (error) {
+    const empty = options.encoding === 'buffer' ? Buffer.alloc(0) : '';
+    return { ok: false, stdout: empty, stderr: empty, error: error.message, code: error.code || 'DEVICE_OPERATION_FAILED', safe: true };
+  }
 }
 
 function execAdb(args, options) {

@@ -1,10 +1,19 @@
 # 卓控台
 
-> 基于 Electron + React 19 + TailwindCSS 构建的 Android 设备全生命周期管理桌面工具，封装 `adb`、`scrcpy`、日志分析、性能监控、质量自动化、产物管理、会员授权与 OTA 更新能力。
+> 基于 Electron + React 19 + TailwindCSS 构建的 Android、HarmonyOS / OpenHarmony 设备管理桌面工具，封装 `adb`、`hdc`、投屏、日志分析、性能监控、质量自动化、产物管理、会员授权与 OTA 更新能力。
 
 ![设备管理与 APK 管理](docs/readme-device-management.png)
 
 ## 核心能力
+
+### HarmonyOS / OpenHarmony
+
+- 与 Android 共用设备列表和功能入口，自动区分 ADB / HDC；USB 调试需在设备上授权。
+- Windows 安装包自带 `hdc/hdc.exe` 和 USB 依赖，不要求用户安装 Python、DevEco Studio 或配置 PATH。
+- 原生应用管理使用 Bundle / Ability，安装文件为 HAP/HSP；不会把 APK、Android 数字按键或历史脚本直接用于鸿蒙设备。
+- 支持 HiLog 日志、原生截图、文件传输、系统采样、AI 排障及平台匹配的测试任务；不可读取的指标显示不可用，不推测为正常。
+- 原生投屏与录屏需要设备提供兼容的 UITest 扩展和录屏接口，并保留系统授权。系统版本、ROM 权限或接口不兼容时会说明原因；不把截图轮询当作实时投屏。
+- ADB 与 HDC 的终端历史和快捷操作分别保存，默认不会改变现有 Android 配置。
 
 ### 设备管理与 APK 管理
 
@@ -56,7 +65,7 @@
 
 ## 环境要求
 
-使用前请确保系统已安装以下依赖，并已加入 `PATH`：
+安装版已内置运行环境及设备工具，双击安装即可使用，不要求安装 Node.js 或修改 PATH。源码开发需要 Node.js；Android 调试使用内置 `scrcpy-win64`，鸿蒙调试使用内置 `hdc`：
 
 1. [Node.js](https://nodejs.org/)
 2. [ADB (Android Debug Bridge)](https://developer.android.com/studio/releases/platform-tools)

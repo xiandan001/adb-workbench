@@ -42,6 +42,26 @@ test('only checked sources start, duplicate starts reject and stop uses exact ow
   assert.equal(finished.session.status, 'completed');
 });
 
+test('native WebM reproduction retains its format without renaming it to MP4', async t => {
+  const bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x01, 0x02]);
+  const h = await fixture(t, { recording: {
+    start: async () => ({ success: true, session: { id: 'owned-native-video', startedAt: 10000 } }),
+    stopOwned: async ({ id }) => {
+      assert.equal(id, 'owned-native-video');
+      const filename = path.join(h.root, 'owned.webm'); await fs.writeFile(filename, bytes);
+      return { success: true, path: filename, session: { durationMs: 1200, format: 'webm' } };
+    }
+  } });
+  const started = await h.service.start({ ...args({ video: true }), deviceId: 'hdc:fixture-native' });
+  const stopped = await h.service.stop({ id: started.session.id });
+  assert.equal(stopped.ok, true); assert.equal(stopped.session.status, 'completed');
+  assert.equal(stopped.session.files[0].name, 'video.webm');
+  assert.deepEqual(await fs.readFile(await h.service.store.filePath(started.session.id, 'video.webm', true)), bytes);
+  const loaded = await h.service.load(started.session.id);
+  assert.equal(loaded.files[0].name, 'video.webm');
+  assert.equal(loaded.files.some(file => file.name === 'video.mp4'), false);
+});
+
 test('markers retain monotonic offsets even if the host clock moves backwards', async t => {
   const h = await fixture(t); const { session } = await h.service.start(args({ performance: true }));
   const sample = JSON.parse((await h.service.store.readTail(session.id, 'performance.jsonl')).text.trim().split('\n')[0]);

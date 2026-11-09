@@ -72,18 +72,19 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     const stored = await api()?.aiWorkspaceCasebookList?.({});
     if (stored?.ok && alive.current) setCasebook(stored.items || []);
   }, []);
+  const sourceDeviceId = cases[mode].deviceId;
   const refresh = useCallback(async () => {
     const ticket = ++refreshTicket.current;
     setLoading(true); setSourceError('');
     try {
-      const result = await api()?.aiWorkspaceSources?.();
+      const result = await api()?.aiWorkspaceSources?.({ deviceId: sourceDeviceId });
       if (!result?.ok) throw new Error(result?.error || tr('无法读取 AI 工作区状态，请刷新后重试。'));
       if (alive.current && ticket === refreshTicket.current) setSources(result);
       await refreshHistory();
     } catch (error) {
       if (alive.current && ticket === refreshTicket.current) setSourceError(error.message);
     } finally { if (alive.current && ticket === refreshTicket.current) setLoading(false); }
-  }, [refreshHistory]);
+  }, [refreshHistory, sourceDeviceId]);
 
   useEffect(() => {
     alive.current = true;
@@ -167,7 +168,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     ...(mode === 'diagnose' ? { diagnostic: value.diagnostic } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
   }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
   const analyze = () => run('analyze', value => api().aiWorkspaceAnalyze({ caseId: value.caseId, previewId: value.preview.id, consent: true }), completeWorkspaceTurn);
-  const generate = () => run('generate', value => api().aiWorkspaceGenerateTask({ caseId: value.caseId, goal: value.question, requirements: value.requirements,
+  const generate = () => run('generate', value => api().aiWorkspaceGenerateTask({ caseId: value.caseId, deviceId: value.deviceId, goal: value.question, requirements: value.requirements,
     ...(value.contextRef ? { contextRef: value.contextRef } : {}), ...(Number.isInteger(value.findingIndex) ? { findingIndex: value.findingIndex } : {}),
     ...(value.targetSelection.tokens.length ? { targetSelection: value.targetSelection } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
   }), (value, response) => ({ ...value, preparing: false, draft: response.draft, usage: response.usage }));

@@ -93,6 +93,10 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
           <label className="block space-y-2"><span className="text-xs font-medium">{mode === 'task' ? tr('测试目标') : tr('描述你要分析的问题')}</span><textarea value={current.question} onChange={event => state.edit({ question: event.target.value })} disabled={busy} maxLength={4000} rows={4} className={`${input} resize-y leading-6`} placeholder={mode === 'task' ? tr('例如：等待首页出现“设置”，点击坐标 (100, 200)，截图并采集性能。请给出可核对的参数。') : tr('说明现象、复现条件和期望结果。不要填写密码、密钥或账号信息。')} /></label>
           <AiWorkspaceContext context={current.context} disabled={busy} onClear={() => state.edit({ contextRef: null, context: null, findingIndex: null })} theme={theme} />
           <AiWorkspaceHandoff handoff={current.handoff} targets={current.targets} disabled={busy} onClear={() => state.edit({ handoffId: '', handoff: null, targets: [], targetSelection: { tokens: [] } })} theme={theme} />
+          {mode === 'task' && <div className="space-y-2"><p className="text-xs font-medium">{tr('任务准备设备（不会执行）')}</p><SelectMenu ariaLabel={tr('任务准备设备（不会执行）')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
+            { value: '', label: tr('暂不指定设备（Android 草案）') }, ...(current.deviceId && !online ? [{ value: current.deviceId, label: tr('{0} · 已断开', { 0: current.deviceId }) }] : []),
+            ...onlineDevices.map(device => ({ value: device.id, label: `${device.model || device.id} · ${device.id}` })),
+          ]} /><p className={`text-xs ${theme.textMuted}`}>{current.deviceId.startsWith('hdc:') ? tr('按鸿蒙原生能力准备草案，不使用 Android 命令。') : tr('按 Android 能力准备草案，保存后仍需核对设备再执行。')}</p></div>}
           {mode === 'diagnose' && <>
             <div className="space-y-2"><p className="text-xs font-medium">{tr('本次排障设备')}</p><SelectMenu ariaLabel={tr('本次排障设备')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
               { value: '', label: tr('请选择在线设备') },

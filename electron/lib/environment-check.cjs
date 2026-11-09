@@ -7,6 +7,7 @@ const path = require('path');
 
 const { getAdbCommand } = require('./adb-runtime.cjs');
 const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
 
 const BUNDLED_DIR = path.join(__dirname, '../../scrcpy-win64');
 const BUNDLED_SCRCPY_PATH = path.join(BUNDLED_DIR, 'scrcpy.exe');
@@ -36,6 +37,39 @@ function register(ipcMain) {
 }
 
 async function runEnvironmentCheck(selectedDeviceId) {
+  if (isHarmonyDevice(selectedDeviceId)) return runHarmonyEnvironmentCheck(selectedDeviceId);
+  const android = await runAndroidEnvironmentCheck(selectedDeviceId);
+  if (selectedDeviceId) return android;
+  const harmony = await runHarmonyEnvironmentCheck('');
+  return buildResult([...android.checks, ...harmony.checks], [...android.suggestions, ...harmony.suggestions], [...android.devices, ...harmony.devices], android.deviceInfo || harmony.deviceInfo);
+}
+
+async function runHarmonyEnvironmentCheck(selectedDeviceId) {
+  const checks = [], suggestions = [];
+  const runtime = require('./hdc-runtime.cjs');
+  let command;
+  try { command = runtime.getHdcCommand(); }
+  catch (error) { return buildResult([{ key: 'hdc', label: tr('HDC 可用性'), ok: false, level: 'error', detail: error.message, action: tr('请修复安装包内的 hdc 目录。') }], [], [], null); }
+  const version = await runtime.runHdcHost(['-v']);
+  checks.push({ key: 'hdc', label: tr('HDC 可用性'), ok: version.ok, level: version.ok ? 'pass' : 'error', detail: version.ok ? firstLine(version.stdout) : version.error, action: command });
+  const result = await require('./device-discovery.cjs').discoverDevices();
+  const devices = result.devices.filter(device => device.transport === 'hdc');
+  const target = selectedDeviceId ? devices.find(device => device.id === selectedDeviceId) : devices.find(device => device.status === 'device');
+  checks.push({ key: 'hdc-devices', label: tr('鸿蒙设备连接'), ok: Boolean(target?.status === 'device'), level: target?.status === 'device' ? 'pass' : 'warning', detail: target ? `${target.displayId} · ${target.rawStatus}` : tr('未发现已授权的鸿蒙设备'), action: tr('请开启开发者模式和 USB 调试，并在设备上允许连接。') });
+  if (target?.status === 'device') {
+    const response = await runtime.runHdc(target.id, ['shell', 'printf HDC_READY']);
+    checks.push({ key: 'hdc-shell', label: tr('选中设备命令通路'), ok: response.ok && response.stdout.trim() === 'HDC_READY', level: response.ok ? 'pass' : 'error', detail: response.ok ? target.model : response.error, action: '' });
+    for (const [key, label] of [['ui', tr('原生界面操作')], ['screenshot', tr('截图')], ['logs', tr('设备日志')], ['apps', tr('应用管理')]]) {
+      const supported = target.capabilities?.[key] === true;
+      checks.push({ key: `hdc-${key}`, label, ok: supported, level: supported ? 'pass' : 'warning', detail: supported ? tr('设备已提供对应工具') : tr('设备未提供对应能力或限制了调试权限'), action: '' });
+    }
+  }
+  if (!target) suggestions.push(tr('UART Ready 仅表示串口可用，不代表设备已经连接。'));
+  if (!checks.some(check => check.level !== 'pass')) suggestions.push(tr('鸿蒙调试通路已就绪；具体功能仍受设备系统版本和权限限制。'));
+  return buildResult(checks, suggestions, devices, target || null);
+}
+
+async function runAndroidEnvironmentCheck(selectedDeviceId) {
   const checks = [];
   const suggestions = [];
 

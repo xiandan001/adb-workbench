@@ -2,6 +2,7 @@ const { tr } = require('./localization.cjs');
 const { runAdb } = require('./adb-runtime.cjs');
 const { normalizeDeviceShortcuts } = require('./device-shortcuts-policy.cjs');
 const spec = require('./device-shortcuts-spec.json');
+const { isHarmonyDevice } = require('./device-platform.cjs');
 
 const CACHE_MS = 30000;
 const PROBE_TIMEOUT_MS = 2500;
@@ -71,6 +72,7 @@ function createCapabilityService({ run = runAdb, now = Date.now, cacheMs = CACHE
     } catch (error) { return { ok: false, error: error.message }; }
   }
   async function inspect(deviceId, config) {
+    if (isHarmonyDevice(deviceId)) return inspectHarmony(deviceId, config);
     const needsPackages = config.slots.some(slot => slot.type === 'app' || spec.actions.find(item => item.id === slot.action)?.packageName);
     const packageResult = needsPackages ? await probe(deviceId, ['pm', 'list', 'packages', '--user', 'current']) : null;
     const packages = parsePackages(packageResult);
@@ -127,6 +129,22 @@ function createCapabilityService({ run = runAdb, now = Date.now, cacheMs = CACHE
     } catch (error) { return { success: false, error: error.message }; }
   }
   return { check };
+}
+
+async function inspectHarmony(deviceId, config) {
+  const ref = require('./device-registry.cjs').resolveDeviceRef(deviceId);
+  let packages;
+  if (config.slots.some(slot => slot.type === 'app' || slot.action === 'settings')) {
+    try { packages = await require('./harmony-apps.cjs').listPackages(deviceId); } catch { packages = null; }
+  }
+  const checks = config.slots.map(slot => {
+    if (slot.type === 'shell') return status(slot.id, 'confirm', tr('自定义 HDC shell 命令，每次执行前均需确认'));
+    if (slot.type === 'app') return packages ? status(slot.id, packages.some(item => item.packageName === slot.packageName) ? 'supported' : 'unsupported', tr('将使用应用实际提供的 Ability 启动入口')) : status(slot.id, 'unknown', tr('暂时无法读取鸿蒙应用列表'));
+    if (['home', 'back', 'power'].includes(slot.action)) return status(slot.id, ref.capabilities?.ui === false ? 'unsupported' : 'supported', tr('原生 UITest 按键操作'));
+    if (slot.action === 'settings' && packages?.some(item => ['com.ohos.settings', 'com.huawei.hmos.settings'].includes(item.packageName))) return status(slot.id, 'supported', tr('将使用设备实际提供的系统设置应用'));
+    return status(slot.id, 'unsupported', tr('此操作适用于 Android，请编辑替换为鸿蒙设备上的应用或命令'));
+  });
+  return { success: true, checks, checkedAt: Date.now() };
 }
 
 function register(ipcMain) {

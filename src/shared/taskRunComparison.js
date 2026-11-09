@@ -9,6 +9,9 @@ export function runDuration(run) {
 }
 
 function sameDevice(left, right) {
+  const aTransport = left?.comparisonIdentity?.transport || 'adb', bTransport = right?.comparisonIdentity?.transport || 'adb';
+  if (aTransport !== bTransport) return false;
+  if (aTransport === 'hdc') return /^[a-f\d]{64}$/.test(left.comparisonIdentity.harmonyUdid || '') && left.comparisonIdentity.harmonyUdid === right.comparisonIdentity.harmonyUdid;
   let matched = false;
   for (const key of STRONG_IDENTITY_KEYS) {
     const a = left?.comparisonIdentity?.[key];
@@ -55,6 +58,8 @@ export function compareTaskRuns(before, after) {
   const reject = reason => ({ comparable: false, reason, steps: [] });
   if (!before || !after) return reject(tr("请选择两次运行：左侧为基准，右侧为本次。"));
   if (before.id === after.id) return reject(tr("请选择两条不同的运行记录。"));
+  if ((before.targetPlatform || 'android') !== (after.targetPlatform || 'android')) return reject(tr('不同设备平台的运行不能比较为恢复或新增失败。'));
+  if (before.targetPlatform === 'harmony' && [before, after].some(run => (run.deviceRuns || []).some(device => device.comparisonIdentity?.transport !== 'hdc' || !String(device.deviceId || '').startsWith('hdc:')))) return reject(tr('鸿蒙运行缺少一致的平台身份，无法安全比较。'));
   if (before.mode !== 'replay' || after.mode !== 'replay') return reject(tr("当前只比较普通回放，自动化压测请查看各自报告。"));
   if (![before, after].every(run => ['success', 'failed', 'cancelled'].includes(run.status))) return reject(tr("请选择已经结束的运行记录，运行中的数据仍在变化。"));
   if (![before, after].every(run => run.comparisonVersion === 1 && run.scriptId && run.scriptHash && Array.isArray(run.scriptSteps) && run.scriptSteps.length)) {

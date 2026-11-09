@@ -291,6 +291,7 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   await serial.cleanup().catch(error => console.warn('[Serial] quit cleanup failed:', error.message));
   await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
   await aiCleanup;
+  await require('./lib/harmony-media-window.cjs').shutdownAll().catch(() => console.warn('[HDC] media cleanup failed'));
   cleanupRuntimeResources();
   // Flush optional diagnostic records without delaying device cleanup or waiting indefinitely on disk IO.
   await new Promise(resolve => {

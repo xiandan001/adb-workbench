@@ -1,4 +1,4 @@
-const { tr } = require('./localization.cjs');
+const { tr, getLocale } = require('./localization.cjs');
 // One-click troubleshooting wizard backend.
 
 const { app, shell } = require('electron');
@@ -13,6 +13,11 @@ const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const { collectHarmonySnapshot } = require('./harmony-metrics.cjs');
+const { getPackageDetail: getHarmonyPackageDetail } = require('./harmony-apps.cjs');
+const { readHiLogSnapshot } = require('./harmony-log.cjs');
+const { checkHarmonyDevice, readHarmonyDeviceInfo, taskReadOptions, analyzeHarmonyLogs } = require('./harmony-quality-native.cjs');
 
 const COMMAND_TIMEOUT_MS = 15000;
 const LOG_TIMEOUT_MS = 30000;
@@ -137,6 +142,7 @@ async function runTroubleshootingBody(task) {
     taskId: task.id,
     appVersion: getAppVersion(),
     deviceId: task.deviceId,
+    ...(isHarmonyDevice(task.deviceId) ? { platform: 'harmony', logScope: 'device' } : {}),
     deviceLabel: task.deviceLabel,
     issueType: task.issueType,
     issueLabel: tr(ISSUE_TYPES[task.issueType].label),
@@ -149,11 +155,13 @@ async function runTroubleshootingBody(task) {
     artifacts: [],
     checks: []
   };
+  if (context.platform === 'harmony') task.qualityChecks = context.checks;
 
   await writeJson(path.join(outputDir, 'metadata.json'), {
     taskId: task.id,
     appVersion: context.appVersion,
     deviceId: task.deviceId,
+    ...(context.platform === 'harmony' ? { platform: 'harmony' } : {}),
     issueType: task.issueType,
     packageName: task.packageName,
     includeAiSummary: task.includeAiSummary,
@@ -161,6 +169,17 @@ async function runTroubleshootingBody(task) {
   });
 
   await runStep(task, 'device', tr("检查设备连接"), async () => {
+    if (context.platform === 'harmony') {
+      const native = taskReadOptions(task, task.deviceId, { timeoutMs: COMMAND_TIMEOUT_MS });
+      const state = await checkHarmonyDevice(task.deviceId, native);
+      context.checks.push({ key: 'device', ok: state.ok, label: state.ok ? tr('鸿蒙设备在线，可执行 HDC 命令') : tr('设备不可用'), detail: state.error || task.deviceId });
+      if (!state.ok) throw new Error(state.error || tr('所选鸿蒙设备不在线或不可用。'));
+      const info = await readHarmonyDeviceInfo(task.deviceId, native); context.device = info.device;
+      await writeJson(path.join(rawDir, 'harmony-device.json'), info);
+      context.artifacts.push({ type: 'json', label: tr('鸿蒙设备参数'), path: path.join(rawDir, 'harmony-device.json') });
+      if (info.errors.length) context.checks.push({ key: 'device-info', ok: false, unavailable: true, label: tr('部分设备参数未验证'), detail: info.errors.join('\n') });
+      return { detail: info.device.model || task.deviceId };
+    }
     const state = await runAdb(task, ['-s', task.deviceId, 'get-state'], COMMAND_TIMEOUT_MS);
     const devices = await runAdb(task, ['devices', '-l'], COMMAND_TIMEOUT_MS);
     const props = await runAdb(task, ['-s', task.deviceId, 'shell', 'getprop ro.product.model; getprop ro.build.version.release; getprop ro.build.display.id'], COMMAND_TIMEOUT_MS);
@@ -182,7 +201,7 @@ async function runTroubleshootingBody(task) {
 
   if (task.packageName) {
     await runStep(task, 'package', tr("读取应用包信息"), async () => {
-      const detail = await packageManager.getPackageDetail(task.deviceId, task.packageName);
+      const detail = context.platform === 'harmony' ? await getHarmonyPackageDetail(task.deviceId, task.packageName, taskReadOptions(task, task.deviceId)) : await packageManager.getPackageDetail(task.deviceId, task.packageName);
       context.packageDetail = detail;
       const detailPath = path.join(rawDir, 'package-detail.json');
       await writeJson(detailPath, detail);
@@ -203,7 +222,7 @@ async function runTroubleshootingBody(task) {
   if (task.cancelled) return finishCancelled(task, context);
 
   await runStep(task, 'performance', tr("采集性能快照"), async () => {
-    const snapshot = await performanceMonitor.collectSnapshot(task.deviceId, vipStatus.activated === true, {
+    const snapshot = context.platform === 'harmony' ? await collectHarmonySnapshot(task.deviceId, taskReadOptions(task, task.deviceId, { timeoutMs: 12000 })) : await performanceMonitor.collectSnapshot(task.deviceId, vipStatus.activated === true, {
       timeoutMs: 12000,
       fallbackToLegacy: true
     });
@@ -212,6 +231,13 @@ async function runTroubleshootingBody(task) {
     await writeJson(snapshotPath, snapshot);
     context.artifacts.push({ type: 'json', label: tr("性能快照"), path: snapshotPath });
     const warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings : [];
+    if (context.platform === 'harmony') {
+      const unavailable = snapshot.unavailable || [];
+      context.checks.push({ key: 'performance', ok: !snapshot.sampleError && !unavailable.length && !warnings.length,
+        unavailable: Boolean(snapshot.sampleError || unavailable.length), label: snapshot.sampleError || unavailable.length ? tr('部分鸿蒙性能项目未验证') : tr('已采集的性能指标未发现阈值告警'),
+        detail: [snapshot.sampleError, ...unavailable.map(item => `${item.metric}: ${item.reason}`), summarizePerformance(snapshot)].filter(Boolean).join('\n') });
+      return { detail: summarizePerformance(snapshot) };
+    }
     context.checks.push({
       key: 'performance',
       ok: warnings.length === 0,
@@ -224,12 +250,13 @@ async function runTroubleshootingBody(task) {
   if (task.cancelled) return finishCancelled(task, context);
 
   await runStep(task, 'logs', tr("抓取并筛选关键日志"), async () => {
-    const log = await runAdb(task, ['-s', task.deviceId, 'logcat', '-d', '-v', 'threadtime', '-t', '600'], LOG_TIMEOUT_MS);
+    const log = context.platform === 'harmony' ? await readHiLogSnapshot(task.deviceId, { ...taskReadOptions(task, task.deviceId), maxLines: 600 }) : await runAdb(task, ['-s', task.deviceId, 'logcat', '-d', '-v', 'threadtime', '-t', '600'], LOG_TIMEOUT_MS);
     const logText = log.stdout || log.stderr || '';
-    const logPath = path.join(rawDir, 'logcat-tail.txt');
+    const logPath = path.join(rawDir, context.platform === 'harmony' ? 'hilog-tail.txt' : 'logcat-tail.txt');
     await writeText(logPath, logText);
     context.artifacts.push({ type: 'text', label: tr("最近日志"), path: logPath });
-    context.logSummary = analyzeLogs(logText, task.issueType, task.packageName);
+    if (context.platform === 'harmony' && !log.ok) throw new Error(log.error || tr('鸿蒙日志采集失败。'));
+    context.logSummary = context.platform === 'harmony' ? analyzeHarmonyLogs(logText) : analyzeLogs(logText, task.issueType, task.packageName);
     const excerptPath = path.join(rawDir, 'matched-log-excerpt.txt');
     await writeText(excerptPath, context.logSummary.matchedLines.join('\n'));
     context.artifacts.push({ type: 'text', label: tr("命中日志片段"), path: excerptPath });
@@ -239,6 +266,8 @@ async function runTroubleshootingBody(task) {
       label: context.logSummary.matchedCount ? tr("命中 {0} 条可疑日志", { 0: context.logSummary.matchedCount }) : tr("最近日志未命中高风险关键词"),
       detail: context.logSummary.topPatterns.join('、') || tr("无明显异常关键词")
     });
+    if (context.platform === 'harmony' && task.packageName) context.checks.push({ key: 'log-scope', ok: false, unavailable: true,
+      label: tr('HiLog 为设备范围，所属应用未验证'), detail: tr('不能仅凭设备范围日志将异常归因于所选应用。') });
     return { detail: tr("{0} 条命中", { 0: context.logSummary.matchedCount }) };
   });
 
@@ -285,6 +314,10 @@ async function runStep(task, stepId, label, action) {
     return result;
   } catch (error) {
     markStep(task, stepId, 'failed', error.message || tr("{0}失败", { 0: label }));
+    if (isHarmonyDevice(task.deviceId) && task.qualityChecks) {
+      if (!task.qualityChecks.some(item => item.key === stepId && item.ok === false)) task.qualityChecks.push({ key: stepId, ok: false, unavailable: true, label, detail: error.message || '' });
+      return { ok: false, error: error.message };
+    }
     throw error;
   }
 }
@@ -314,6 +347,7 @@ async function finishTask(task, context) {
   const endedAt = new Date().toISOString();
   const conclusion = buildConclusion(context);
   const summary = {
+    ...(context.platform === 'harmony' ? { platform: 'harmony', deviceId: context.deviceId, logScope: context.logScope } : {}),
     ok: true,
     cancelled: false,
     taskId: task.id,
@@ -337,6 +371,7 @@ async function finishTask(task, context) {
 
 async function finishCancelled(task, context) {
   const summary = {
+    ...(context.platform === 'harmony' ? { platform: 'harmony', deviceId: context.deviceId, logScope: context.logScope } : {}),
     ok: false,
     cancelled: true,
     taskId: task.id,
@@ -362,13 +397,13 @@ function buildConclusion(context) {
   const failed = context.checks.filter(item => item.ok === false && !item.skipped);
   const suggestions = [];
   if (failed.some(item => item.key === 'device')) {
-    suggestions.push(tr("先确认设备授权弹窗已允许，并尝试重新插拔 USB 或执行 adb kill-server 后重试。"));
+    suggestions.push(context.platform === 'harmony' ? tr('确认鸿蒙设备已连接并授权 HDC；不会自动切换设备或重启其他调试服务。') : tr("先确认设备授权弹窗已允许，并尝试重新插拔 USB 或执行 adb kill-server 后重试。"));
   }
   if (failed.some(item => item.key === 'package')) {
     suggestions.push(tr("确认包名是否正确，或先在 App 包管理中搜索应用后复制包名。"));
   }
   if (failed.some(item => item.key === 'logs')) {
-    suggestions.push(tr("优先查看命中日志片段，结合 crash/ANR 关键词定位最近一次异常。"));
+    suggestions.push(context.platform === 'harmony' ? tr('查看 HiLog 中 JS_CRASH、CPP_CRASH、APP_FREEZE 等线索，并核对是否属于目标应用。') : tr("优先查看命中日志片段，结合 crash/ANR 关键词定位最近一次异常。"));
   }
   if (failed.some(item => item.key === 'performance')) {
     suggestions.push(tr("查看性能快照中的 CPU、内存、温度或存储告警，再按进程占用继续排查。"));
@@ -427,7 +462,7 @@ function buildReport(context, summary) {
   lines.push('', tr("## 设备信息"), '');
   if (context.device) {
     lines.push(tr("- 型号：{0}", { 0: context.device.model || '-' }));
-    lines.push(`- Android：${context.device.android || '-'}`);
+    lines.push(context.platform === 'harmony' ? tr('- Harmony/OpenHarmony：{0}', { 0: context.device.systemVersion || '-' }) : `- Android：${context.device.android || '-'}`);
     lines.push(tr("- 构建：{0}", { 0: context.device.build || '-' }));
   } else {
     lines.push(tr("- 未采集到设备属性。"));
@@ -438,7 +473,7 @@ function buildReport(context, summary) {
     lines.push(tr("- 包名：{0}", { 0: context.packageDetail.packageName || context.packageName }));
     lines.push(tr("- 版本名：{0}", { 0: context.packageDetail.versionName || '-' }));
     lines.push(tr("- 版本号：{0}", { 0: context.packageDetail.versionCode || '-' }));
-    lines.push(tr("- APK 路径：{0}", { 0: context.packageDetail.apkPath || context.packageDetail.path || '-' }));
+    lines.push(context.platform === 'harmony' ? tr('- 应用安装路径：{0}', { 0: context.packageDetail.path || '-' }) : tr("- APK 路径：{0}", { 0: context.packageDetail.apkPath || context.packageDetail.path || '-' }));
   }
 
   if (context.performance) {
@@ -523,11 +558,11 @@ function buildTroubleshootingAiSummary(context, signal) {
     signal,
     timeoutMs: 60000,
     temperature: 0.2,
-    systemPrompt: tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
+    systemPrompt: context.platform === 'harmony' ? tr('你是 Harmony/OpenHarmony 排查助手，只根据证据总结；不可用项目和未归属到应用的日志不能作为确定结论。') : tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
     userContent: [
       tr("请为以下一键问题排查报告生成可直接追加到 Markdown 报告末尾的 AI 总结。"),
       tr("输出要求："),
-      tr("1. 使用简体中文。"),
+      context.platform === 'harmony' ? tr('1. 回答语言：{0}。', { 0: getLocale() }) : tr("1. 使用简体中文。"),
       tr("2. 包含：总体判断、关键证据、优先排查建议。"),
       tr("3. 不要输出 Markdown 一级/二级标题，报告中已有“AI 总结”标题。"),
       tr("4. 不要编造未提供的数据。"),
@@ -573,6 +608,7 @@ function summarizePerformance(snapshot) {
 }
 
 function formatMetric(value, unit) {
+  if (value === null || value === undefined || value === '') return '-';
   return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}${unit}` : '-';
 }
 

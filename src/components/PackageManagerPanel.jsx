@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import DangerConfirmModal from './DangerConfirmModal';
 import SelectMenu from './SelectMenu';
+import { acceptsPackagePath, harmonyPackages, launchEntryValue, selectedLaunchEntry } from '../shared/packagePlatform';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
 import { executePersistedPackageBatch, readPackageBatchResult, storePackageBatchResult, PACKAGE_BATCH_RESULT_EVENT } from '../shared/packageBatchStore';
@@ -91,6 +92,9 @@ function PackageManagerPanel({
   const isDark = isDarkTheme(t);
   const isVip = vipStatus?.activated === true;
   const isOnline = device.status === 'device';
+  const isHarmony = harmonyPackages(device);
+  const [capabilities, setCapabilities] = useState(null);
+  const [launchEntry, setLaunchEntry] = useState('');
   const [packages, setPackages] = useState([]);
   const [query, setQuery] = useState('');
   const [showSystem, setShowSystem] = useState(false);
@@ -146,7 +150,15 @@ function PackageManagerPanel({
   const isLoading = (key) => operationLoading?.[key];
   const packageCount = packages.length;
   const userPackageCount = packages.filter(item => !item.system).length;
-  const filteredPackages = useMemo(() => { void locale; return filterPackages(packages, { query, showSystem, onlyFavorites, favorites: favoritePackages }); }, [packages, query, showSystem, onlyFavorites, favoritePackages, locale]);
+  const filteredPackages = useMemo(() => { void locale; return filterPackages(packages, { query, showSystem: isHarmony || showSystem, onlyFavorites, favorites: favoritePackages }); }, [packages, query, showSystem, isHarmony, onlyFavorites, favoritePackages, locale]);
+  const recentInstallPackages = recentApks.filter(value => acceptsPackagePath(device, value));
+  const installPathValid = acceptsPackagePath(device, apkInstallPath);
+  const actionCapability = (key) => {
+    if (!isHarmony || key === 'permissions') return { supported: true };
+    const action = { stop: 'forceStop', clear: 'clearData' }[key] || key;
+    if (action === 'launch' && !selectedLaunchEntry(detail, launchEntry)) return { supported: false, reason: detailLoading ? tr('正在读取应用入口。') : tr('请先选择设备返回的有效 Ability 入口。') };
+    return capabilities?.[action] || { supported: false, reason: tr('正在核对设备的原生应用能力。') };
+  };
   const visiblePackageNames = useMemo(() => { void locale; return filteredPackages.map(item => item.packageName); }, [filteredPackages, locale]);
   const selectedCount = selectedPackageNames.size;
   const allVisibleSelected = visiblePackageNames.length > 0 && visiblePackageNames.every(name => selectedPackageNames.has(name));
@@ -200,6 +212,7 @@ function PackageManagerPanel({
       const res = await window.electronAPI.packageList({ deviceId: device.id });
       if (res.ok) {
         setPackages(res.packages || []);
+        setCapabilities(res.capabilities || null);
       } else {
         reportFailure(tr("应用列表加载失败：{0}", { 0: res.error || tr("未知错误") }));
       }
@@ -218,6 +231,7 @@ function PackageManagerPanel({
     setSelectedPackage(pkg);
     setPermissions([]);
     setDetail(null);
+    setLaunchEntry('');
     const requestId = ++detailRequestRef.current;
     if (!window.electronAPI?.packageDetail || !isOnline) return;
     setDetailLoading(true);
@@ -293,6 +307,7 @@ function PackageManagerPanel({
 
   const exportApk = async () => {
     if (!selectedPackage || !isOnline || !requireVip()) return;
+    if (isHarmony) { reportFailure(tr('不能将 APK 导出方式用于 HAP；此设备尚无已验证的应用包导出能力。')); return; }
     const result = await window.electronAPI.showSaveDialog({
       title: tr("导出 APK"),
       defaultPath: `${selectedPackage.packageName}.apk`,
@@ -324,7 +339,9 @@ function PackageManagerPanel({
     if (!selectedPackage || !isOnline) return;
     setActionLoading('launch');
     try {
-      const res = await window.electronAPI.packageLaunch({ deviceId: device.id, packageName: selectedPackage.packageName });
+      const entry = isHarmony ? selectedLaunchEntry(detail, launchEntry) : null;
+      if (isHarmony && !entry) throw new Error(tr('请先选择设备返回的有效 Ability 入口。'));
+      const res = await window.electronAPI.packageLaunch({ deviceId: device.id, packageName: selectedPackage.packageName, ...(entry || {}) });
       if (res.ok) showToast?.(tr("启动完成"));
       else reportFailure(tr("启动失败：{0}", { 0: res.error || tr("未知错误") }));
     } catch (error) {
@@ -360,6 +377,8 @@ function PackageManagerPanel({
 
   const runBatchAction = async (action, label, confirmOptions) => {
     if (selectedCount === 0 || batchLoading || !isOnline || !requireVip()) return;
+    const capability = actionCapability(action);
+    if (!capability.supported) { reportFailure(capability.reason); return; }
     const selectedNames = Array.from(selectedPackageNames);
     const targetDeviceId = device.id;
     const execute = async () => {
@@ -409,6 +428,7 @@ function PackageManagerPanel({
   };
 
   const packageActionButton = (key, label, icon, onClick, tone = 'normal', vipRequired = true) => {
+    const capability = actionCapability(key === 'disable' && detail?.enabled === false ? 'enable' : key);
     const toneClass = tone === 'danger'
       ? 'border-red-500/30 text-red-400 hover:bg-red-500/10'
       : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100';
@@ -416,7 +436,8 @@ function PackageManagerPanel({
       <button
         type="button"
         onClick={onClick}
-        disabled={!selectedPackage || !isOnline || Boolean(actionLoading) || Boolean(batchLoading)}
+        disabled={!selectedPackage || !isOnline || Boolean(actionLoading) || Boolean(batchLoading) || !capability.supported}
+        title={!capability.supported ? capability.reason : undefined}
         className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 ${toneClass}`}
       >
         {actionLoading === key ? <RefreshCw size={13} className="animate-spin" /> : icon}
@@ -483,10 +504,10 @@ function PackageManagerPanel({
       )}
       <div className="flex items-center justify-between mb-4">
         <h4 className={`text-sm font-semibold flex items-center gap-2 ${t.text}`}>
-          <Package size={16} />{tr("App 包管理")}</h4>
+          <Package size={16} />{isHarmony ? tr("鸿蒙应用管理（HAP/HSP）") : tr("App 包管理")}</h4>
         <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded ${isDark ? 'bg-[#3E4145] text-[#9AA0A6]' : 'bg-white text-slate-500 border border-slate-200'}`}>
-            {userPackageCount}/{packageCount}
+            {isHarmony ? tr('共 {0} 个应用', { 0: packageCount }) : userPackageCount + '/' + packageCount}
           </span>
           <button
             type="button"
@@ -517,6 +538,9 @@ function PackageManagerPanel({
         </div>
       </div>
 
+      {isHarmony && <p className={'mb-3 text-xs leading-5 ' + t.textMuted}>{tr('使用原生 Bundle/Ability 信息；未读取的系统类型和权限状态不会当作已确认。')}
+        {capabilities && Object.values(capabilities).filter(item => item.supported === false).map(item => item.reason).join(' ')}
+      </p>}
       <div className="space-y-4">
         <div className="space-y-4">
           <div className={`p-4 rounded-lg border ${isDark ? 'bg-[#202124]/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
@@ -524,38 +548,39 @@ function PackageManagerPanel({
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Download size={14} className={t.primary === 'pink' ? 'text-pink-500' : t.primary === 'orange' ? 'text-orange-500' : 'text-emerald-500'} />
-                  <span className={`text-sm font-medium ${t.text}`}>{tr("安装 APK")}</span>
+                  <span className={`text-sm font-medium ${t.text}`}>{isHarmony ? tr("安装 HAP/HSP") : tr("安装 APK")}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={apkInstallPath}
                     readOnly
-                    placeholder={tr("选择 APK 文件")}
+                    placeholder={isHarmony ? tr("选择已签名的 HAP/HSP 文件") : tr("选择 APK 文件")}
                     className={`min-w-[260px] flex-[1_1_260px] px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                   />
                   <button onClick={onSelectApkForInstall} disabled={isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm border rounded-lg transition-colors flex items-center gap-1 ${t.button.secondary}`}>
                     <FolderOpen size={14} />{tr("选择")}</button>
-                  <button onClick={onInstallApk} disabled={!isOnline || !apkInstallPath || isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
+                  <button onClick={onInstallApk} disabled={!isOnline || !installPathValid || isLoading(`install_${device.id}`)} className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}>
                     {isLoading(`install_${device.id}`) ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}{tr("安装")}</button>
                 </div>
-                {recentApks.length > 0 && <div className="mt-2">
+                {apkInstallPath && !installPathValid && <p className="mt-2 text-xs text-amber-500">{isHarmony ? tr('当前设备需要 HAP/HSP，不能安装 APK。') : tr('当前 Android 设备需要 APK 文件。')}</p>}
+                {recentInstallPackages.length > 0 && <div className="mt-2">
                   <SelectMenu
                     id={`recent-apks-${device.id}`}
-                    value={recentApks.includes(apkInstallPath) ? apkInstallPath : ''}
-                    options={recentApks.map(path => ({ value: path, label: path }))}
+                    value={recentInstallPackages.includes(apkInstallPath) ? apkInstallPath : ''}
+                    options={recentInstallPackages.map(path => ({ value: path, label: path }))}
                     onChange={onSelectRecentApk}
-                    placeholder={tr("最近使用的 APK")}
+                    placeholder={isHarmony ? tr("最近使用的 HAP/HSP") : tr("最近使用的 APK")}
                     isDark={isDark}
                     compact
                     disabled={isLoading(`install_${device.id}`)}
                   />
-                  <p className={`mt-1 text-[11px] ${t.textMuted}`}>{tr("最近 5 个 APK · 选择后仅填入路径，点击“安装”才会执行")}</p>
+                  <p className={`mt-1 text-[11px] ${t.textMuted}`}>{isHarmony ? tr("仅显示当前平台安装包；选择后不安装，点击“安装”才会执行。") : tr("最近 5 个 APK · 选择后仅填入路径，点击“安装”才会执行")}</p>
                 </div>}
                 <OperationResult
                   isDark={isDark}
                   loading={isLoading(`install_${device.id}`)}
-                  loadingText={tr("APK 安装中")}
+                  loadingText={isHarmony ? tr("HAP/HSP 安装中") : tr("APK 安装中")}
                   result={apkInstallResult}
                 />
               </div>
@@ -619,7 +644,7 @@ function PackageManagerPanel({
               </button>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {['/', '/system/app', '/system_ext/app', '/data/app'].map(item => (
+              {(isHarmony ? ['/', '/data/local/tmp'] : ['/', '/system/app', '/system_ext/app', '/data/app']).map(item => (
                 <button key={item} disabled={!isOnline} onClick={() => onBrowsePath?.(item)} className={`px-3 py-2 text-sm border rounded-lg transition-colors disabled:opacity-50 ${t.button.secondary}`}>
                   {item === '/' ? tr("/ 根目录") : item}
                 </button>
@@ -703,7 +728,8 @@ function PackageManagerPanel({
               <button
                 type="button"
                 onClick={() => setShowSystem(prev => !prev)}
-                disabled={onlyFavorites}
+                disabled={onlyFavorites || isHarmony}
+                title={isHarmony ? tr('鸿蒙列表保留全部 Bundle；系统类型仅以已读取的原生详情为准。') : undefined}
                 className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${showSystem ? 'border-blue-500/30 bg-blue-500/10 text-blue-400' : t.button.secondary}`}
               >
                 {showSystem ? <Eye size={13} /> : <EyeOff size={13} />}{tr("系统")}</button>
@@ -720,14 +746,14 @@ function PackageManagerPanel({
             {selectedCount > 0 && (
               <div className={`mt-3 rounded-lg border px-3 py-2 flex flex-wrap items-center gap-2 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className={`text-xs mr-auto ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("已选 {0} 个应用", { 0: selectedCount })}</span>
-                <button type="button" onClick={() => runBatchAction('forceStop', tr("批量停止"))} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}{tr("停止")}</button>
+                <button type="button" onClick={() => runBatchAction('forceStop', tr("批量停止"))} disabled={!isOnline || !!batchLoading || !!actionLoading || !actionCapability('forceStop').supported} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'forceStop' ? <RefreshCw size={12} className="animate-spin" /> : <Power size={12} />}{tr("停止")}</button>
                 <button type="button" onClick={() => runBatchAction('clearData', tr("批量清数据"), {
                   title: tr("批量清除应用数据"),
                   message: tr("确定清除 {0} 个应用的数据吗？", { 0: selectedCount }),
                   detail: tr("清数据会删除应用本地账号、缓存和配置，无法从本工具直接恢复。"),
                   confirmLabel: tr("清除数据"),
                   rememberKey: 'package.batchClearData'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}{tr("清数据")}</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading || !actionCapability('clearData').supported} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'clearData' ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}{tr("清数据")}</button>
                 <button type="button" onClick={() => runBatchAction('disable', tr("批量停用"), {
                   title: tr("批量停用应用"),
                   message: tr("确定停用 {0} 个应用吗？", { 0: selectedCount }),
@@ -735,15 +761,15 @@ function PackageManagerPanel({
                   confirmLabel: tr("停用应用"),
                   rememberKey: 'package.batchDisable',
                   tone: 'warning'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}{tr("停用")}</button>
-                <button type="button" onClick={() => runBatchAction('enable', tr("批量启用"))} disabled={!isOnline || !!batchLoading || !!actionLoading} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}{tr("启用")}</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading || !actionCapability('disable').supported} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'disable' ? <RefreshCw size={12} className="animate-spin" /> : <EyeOff size={12} />}{tr("停用")}</button>
+                <button type="button" onClick={() => runBatchAction('enable', tr("批量启用"))} disabled={!isOnline || !!batchLoading || !!actionLoading || !actionCapability('enable').supported} className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1 disabled:opacity-50 ${t.button.secondary}`}>{batchLoading === 'enable' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}{tr("启用")}</button>
                 <button type="button" onClick={() => runBatchAction('uninstall', tr("批量卸载"), {
                   title: tr("批量卸载应用"),
                   message: tr("确定卸载 {0} 个应用吗？", { 0: selectedCount }),
-                  detail: tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
+                  detail: isHarmony ? tr("卸载会移除所选 Bundle。需要回退时请保留签名有效的 HAP/HSP，并重新安装对应版本。") : tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
                   confirmLabel: tr("卸载应用"),
                   rememberKey: 'package.batchUninstall'
-                })} disabled={!isOnline || !!batchLoading || !!actionLoading} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}{tr("卸载")}</button>
+                })} disabled={!isOnline || !!batchLoading || !!actionLoading || !actionCapability('uninstall').supported} className="px-2.5 py-1.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs flex items-center gap-1 disabled:opacity-50">{batchLoading === 'uninstall' ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}{tr("卸载")}</button>
               </div>
             )}
           </div>
@@ -830,6 +856,13 @@ function PackageManagerPanel({
                     </div>
                   )}
 
+                  {isHarmony && detail && <div className="space-y-2">
+                    <label className={'block text-xs ' + t.textMuted} htmlFor={'ability-' + device.id}>{tr('应用页面入口')}</label>
+                    <SelectMenu id={'ability-' + device.id} value={selectedLaunchEntry(detail, launchEntry) ? launchEntryValue(selectedLaunchEntry(detail, launchEntry)) : ''}
+                      options={(detail.launchCandidates || []).map(entry => ({ value: launchEntryValue(entry), label: [entry.moduleName, entry.abilityName].filter(Boolean).join(' / ') }))}
+                      onChange={setLaunchEntry} isDark={isDark} disabled={Boolean(actionLoading)} placeholder={tr('选择设备返回的 Ability')}
+                      emptyText={tr('没有可确认的页面入口，不会猜测 EntryAbility。')} />
+                  </div>}
                   <div className="flex flex-wrap gap-2">
                     {onViewApplicationLogs && <button
                       type="button"
@@ -856,7 +889,7 @@ function PackageManagerPanel({
                     {packageActionButton('uninstall', tr("卸载"), <Trash2 size={13} />, () => confirmPackageAction({
                       title: tr("卸载应用"),
                       message: tr("确定卸载 {0} 吗？", { 0: selectedPackage.packageName }),
-                      detail: tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
+                      detail: isHarmony ? tr("卸载会移除所选 Bundle。需要回退时请保留签名有效的 HAP/HSP，并重新安装对应版本。") : tr("卸载会从当前用户移除应用。需要回退时请保留 APK，并重新安装对应版本。"),
                       confirmLabel: tr("卸载应用"),
                       rememberKey: 'package.uninstall'
                     }, () => runPackageAction('uninstall', tr("卸载应用"), packageName => window.electronAPI.packageUninstall({ deviceId: device.id, packageName }))), 'danger')}
@@ -868,7 +901,7 @@ function PackageManagerPanel({
                         <div key={`${perm.name}-${index}`} className={`px-3 py-2 text-xs border-b last:border-b-0 ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
                           <div className={`break-all ${t.text}`}>{perm.name}</div>
                           <div className={perm.granted === true ? 'text-emerald-400' : perm.granted === false ? 'text-red-400' : 'text-[#9AA0A6]'}>
-                            {perm.granted === true ? 'granted' : perm.granted === false ? 'denied' : perm.source}
+                            {isHarmony && perm.granted == null ? tr('声明的权限（未确认授权状态）') : perm.granted === true ? 'granted' : perm.granted === false ? 'denied' : perm.source}
                           </div>
                         </div>
                       ))}

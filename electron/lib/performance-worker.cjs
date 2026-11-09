@@ -2,6 +2,8 @@ const { tr, setLocale, withLocale, normalizeLocale } = require('./localization.c
 const { parentPort, workerData } = require('worker_threads');
 setLocale(normalizeLocale(workerData?.locale));
 const { execFile } = require('child_process');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const { collectHarmonySnapshot } = require('./harmony-metrics.cjs');
 
 const DEFAULT_THRESHOLDS = {
   cpu: 85,
@@ -28,6 +30,7 @@ const monitors = new Map();
 const cpuTicksByDevice = new Map();
 const lastSnapshotByDevice = new Map();
 const snapshotRequestsByDevice = new Map();
+const nativeGenerationByDevice = new Map();
 const looseProcs = new Set();
 
 parentPort.on('message', (message) => {
@@ -58,6 +61,8 @@ async function handleMessage(message) {
     const snapshot = await collectSnapshotForRequest(message.deviceId, {
       includeProcesses: message.includeProcesses === true,
       forceHeavy: message.forceHeavy !== false,
+      deviceRef: message.deviceRef,
+      command: message.hdcPath,
       timeoutMs: CORE_TIMEOUT_MS
     });
     respond(message.id, { ok: true, snapshot });
@@ -79,12 +84,18 @@ async function handleMessage(message) {
 function startMonitor(message) {
   const deviceId = normalizeDeviceId(message.deviceId);
   if (!deviceId) throw new Error('device_required');
+  if (isHarmonyDevice(deviceId) && (!Number.isSafeInteger(message.deviceRef?.generation)
+    || nativeGenerationByDevice.has(deviceId) && message.deviceRef.generation < nativeGenerationByDevice.get(deviceId))) throw new Error(tr('设备连接已变化，请重新开始采样。'));
   stopMonitor(deviceId);
+  if (isHarmonyDevice(deviceId)) nativeGenerationByDevice.set(deviceId, message.deviceRef?.generation);
   const intervalMs = normalizeInterval(message.intervalMs);
   const monitor = {
     deviceId,
     intervalMs,
     includeProcesses: message.includeProcesses === true,
+    deviceRef: message.deviceRef,
+    hdcPath: message.hdcPath,
+    abortController: new AbortController(),
     running: true,
     startedAt: message.startedAt || new Date().toISOString(),
     sampleIndex: 0,
@@ -105,6 +116,7 @@ function stopMonitor(deviceId) {
   const monitor = monitors.get(key);
   if (!monitor) return false;
   monitor.running = false;
+  monitor.abortController.abort();
   if (monitor.timer) clearInterval(monitor.timer);
   killProc(monitor.currentProc);
   killProc(monitor.heavyProc);
@@ -114,6 +126,10 @@ function stopMonitor(deviceId) {
   cpuTicksByDevice.delete(key);
   lastSnapshotByDevice.delete(key);
   snapshotRequestsByDevice.delete(key);
+  if (isHarmonyDevice(key)) {
+    nativeGenerationByDevice.delete(key);
+    snapshotRequestsByDevice.delete(`${key}:${monitor.deviceRef?.generation}`);
+  }
   return true;
 }
 
@@ -124,13 +140,13 @@ async function runMonitorTick(monitor) {
   try {
     const snapshot = await collectCoreSnapshot(monitor.deviceId, {
       monitor,
-      includeProcesses: false,
+      includeProcesses: isHarmonyDevice(monitor.deviceId) && monitor.includeProcesses,
       timeoutMs: Math.max(800, Math.min(CORE_TIMEOUT_MS, monitor.intervalMs - 200 || CORE_TIMEOUT_MS))
     });
     if (!monitor.running || monitors.get(monitor.deviceId) !== monitor) return;
     lastSnapshotByDevice.set(monitor.deviceId, snapshot);
     parentPort.postMessage({ type: 'snapshot', deviceId: monitor.deviceId, snapshot });
-    maybeStartHeavySample(monitor);
+    if (!isHarmonyDevice(monitor.deviceId)) maybeStartHeavySample(monitor);
   } catch (error) {
     if (monitor.running && monitors.get(monitor.deviceId) === monitor) {
       parentPort.postMessage({ type: 'monitorError', deviceId: monitor.deviceId, error: error.message, timestamp: Date.now() });
@@ -142,6 +158,19 @@ async function runMonitorTick(monitor) {
 
 async function collectCoreSnapshot(deviceId, options = {}) {
   const monitor = options.monitor || null;
+  if (isHarmonyDevice(deviceId)) {
+    const snapshot = await collectHarmonySnapshot(deviceId, {
+      ...options,
+      command: monitor?.hdcPath || options.command,
+      deviceRef: monitor?.deviceRef || options.deviceRef,
+      signal: monitor?.abortController.signal,
+      onProcess: proc => { if (monitor) monitor.currentProc = proc; }
+    });
+    if (nativeGenerationByDevice.get(deviceId) !== (monitor?.deviceRef || options.deviceRef)?.generation) throw new Error(tr('设备连接已变化，请重新开始采样。'));
+    snapshot.warnings = buildWarnings(snapshot, thresholds);
+    lastSnapshotByDevice.set(deviceId, snapshot);
+    return snapshot;
+  }
   const previous = lastSnapshotByDevice.get(deviceId) || null;
   const timeoutMs = options.timeoutMs || CORE_TIMEOUT_MS;
   const core = await runAdb(['-s', deviceId, 'shell', buildCoreCommand()], timeoutMs, monitor, 'currentProc');
@@ -172,22 +201,33 @@ async function collectCoreSnapshot(deviceId, options = {}) {
 async function collectSnapshotForRequest(deviceId, options = {}) {
   const key = normalizeDeviceId(deviceId);
   if (!key) throw new Error('device_required');
+  const harmony = isHarmonyDevice(key), generation = options.deviceRef?.generation;
+  if (harmony) {
+    if (!Number.isSafeInteger(generation) || generation < 0) throw new Error(tr('设备信息无效。'));
+    if (nativeGenerationByDevice.has(key) && generation < nativeGenerationByDevice.get(key)) throw new Error(tr('设备连接已变化，请重新开始采样。'));
+    nativeGenerationByDevice.set(key, generation);
+  }
 
   const monitor = monitors.get(key);
+  if (isHarmonyDevice(key) && monitor && options.deviceRef && monitor.deviceRef?.generation !== options.deviceRef.generation) {
+    stopMonitor(key);
+    throw new Error(tr('设备连接已变化，请重新开始采样。'));
+  }
   const previous = lastSnapshotByDevice.get(key);
   const maxSnapshotAge = monitor ? Math.max(5000, monitor.intervalMs * 2) : 0;
-  if (monitor?.running && previous && Date.now() - previous.timestamp <= maxSnapshotAge) {
+  if (monitor?.running && previous && (!harmony || previous.generation === generation) && Date.now() - previous.timestamp <= maxSnapshotAge) {
     return previous;
   }
 
-  const existing = snapshotRequestsByDevice.get(key);
+  const requestKey = harmony ? `${key}:${generation}` : key;
+  const existing = snapshotRequestsByDevice.get(requestKey);
   if (existing) return existing;
 
   const request = collectCoreSnapshot(key, options)
     .finally(() => {
-      if (snapshotRequestsByDevice.get(key) === request) snapshotRequestsByDevice.delete(key);
+      if (snapshotRequestsByDevice.get(requestKey) === request) snapshotRequestsByDevice.delete(requestKey);
     });
-  snapshotRequestsByDevice.set(key, request);
+  snapshotRequestsByDevice.set(requestKey, request);
   return request;
 }
 

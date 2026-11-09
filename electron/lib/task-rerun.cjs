@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { tr } = require('./localization.cjs');
+const { devicePlatform } = require('./device-platform.cjs');
 
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024;
@@ -107,15 +108,20 @@ function createTaskRerunService({ getRun, getOnlineDevices, verifyDevices = asyn
       if (!record || !['failed', 'cancelled', 'success'].includes(record.status)) throw invalid();
       if (!record.rerunSnapshot?.script) return { available: false, reason: tr('此运行没有可靠的原脚本快照，不能自动复跑；请在任务编辑器重新核对。') };
       const snapshot = validateSnapshot(record.rerunSnapshot);
+      const platform = record.targetPlatform || 'android';
+      if (!['android', 'harmony'].includes(platform) || (snapshot.script.targetPlatform || 'android') !== platform
+        || (record.deviceRuns || []).some(run => devicePlatform(run.deviceId) !== platform)) throw invalid();
       const failed = (record.deviceRuns || []).filter(run => run.status === 'failed' || (run.steps || []).some(step => step.status === 'failed'));
       const ids = [...new Set(failed.map(run => run.deviceId))];
       if (!ids.length) return { available: false, reason: tr('此运行没有可复跑的失败设备。') };
+      const unverifiedDeviceIds = platform === 'harmony' ? failed.filter(run => run.comparisonIdentity?.transport !== 'hdc' || !run.comparisonIdentity?.harmonyUdid).map(run => run.deviceId) : [];
+      if (unverifiedDeviceIds.length === ids.length) return { available: false, reason: tr('原运行没有可靠的鸿蒙 UDID，不能自动复跑；请重新选择设备并创建新运行。') };
       const current = await fingerprints(snapshot.script), online = new Set((await getOnlineDevices()).filter(device => device.status === 'device').map(device => device.id));
       const id = randomUUID(), expiresAt = now() + TTL;
       const preview = { id, available: true, parentTaskId: record.id, scriptName: snapshot.script.name, scriptHash: snapshot.scriptHash,
         script: clone(snapshot.script),
         steps: snapshot.script.steps.map(step => ({ id: step.id, type: step.type, label: step.label })),
-        failedDeviceIds: ids, offlineDeviceIds: ids.filter(deviceId => !online.has(deviceId)), inputs: compareInputs(snapshot.inputs, current),
+        failedDeviceIds: ids, unverifiedDeviceIds, offlineDeviceIds: ids.filter(deviceId => !online.has(deviceId)), inputs: compareInputs(snapshot.inputs, current),
         expiresAt: new Date(expiresAt).toISOString(), fromStep: 1 };
       while (previews.size >= 8) previews.delete(previews.keys().next().value);
       previews.set(id, { owner: ownerKey(owner), record: clone(record), snapshot, current, preview, expiresAt, running: false });
@@ -125,6 +131,7 @@ function createTaskRerunService({ getRun, getOnlineDevices, verifyDevices = asyn
       prune(); const stored = previews.get(previewId);
       if (!stored || stored.owner !== ownerKey(owner) || stored.running || !Array.isArray(deviceIds) || !deviceIds.length
         || new Set(deviceIds).size !== deviceIds.length || deviceIds.some(id => !stored.preview.failedDeviceIds.includes(id))) throw invalid();
+      if (deviceIds.some(id => stored.preview.unverifiedDeviceIds.includes(id))) throw fail('TASK_RERUN_DEVICE', tr('所选鸿蒙设备缺少可靠身份记录，未开始复跑。'));
       if (stored.current.some(input => input.state !== 'available')) throw fail('TASK_INPUT_UNAVAILABLE', tr('输入文件缺失或不可读取，未开始复跑。'));
       if (stored.preview.inputs.some(input => input.changed) && acceptInputChanges !== true) throw fail('TASK_INPUT_CHANGED', tr('输入文件已变化，请明确确认变化后再复跑。'));
       stored.running = true;

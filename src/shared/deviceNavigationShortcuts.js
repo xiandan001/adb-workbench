@@ -2,11 +2,13 @@ import { tr } from './i18n.js';
 import spec from '../../electron/lib/device-shortcuts-spec.json' with { type: 'json' };
 
 export const SHORTCUTS_KEY = spec.storageKey;
+export const HARMONY_SHORTCUTS_KEY = 'adb-workbench.harmony-device-shortcuts.v1';
 export const SHORTCUTS_CHANGED = 'device-shortcuts-changed';
 export const BUILTIN_SHORTCUTS = spec.actions;
 
-export function defaultDeviceShortcuts() {
-  return { version: spec.version, slots: spec.defaultActions.map((action, index) => ({
+export function defaultDeviceShortcuts(deviceId = '') {
+  const actions = deviceId.startsWith('hdc:') ? ['home', 'back', 'settings', 'power'] : spec.defaultActions;
+  return { version: spec.version, slots: actions.map((action, index) => ({
     id: spec.slots[index], type: 'builtin', action, label: spec.actions.find(item => item.id === action).label
   })) };
 }
@@ -45,16 +47,16 @@ export function normalizeDeviceShortcuts(value) {
   return { version: spec.version, slots };
 }
 
-export function readDeviceShortcuts(storage = globalThis.localStorage) {
+export function readDeviceShortcuts(storage = globalThis.localStorage, deviceId = '') {
   try {
-    const raw = storage.getItem(SHORTCUTS_KEY);
-    return { config: raw === null ? defaultDeviceShortcuts() : normalizeDeviceShortcuts(JSON.parse(raw)), error: '' };
+    const raw = storage.getItem(deviceId.startsWith('hdc:') ? HARMONY_SHORTCUTS_KEY : SHORTCUTS_KEY);
+    return { config: raw === null ? defaultDeviceShortcuts(deviceId) : normalizeDeviceShortcuts(JSON.parse(raw)), error: '' };
   } catch (error) { return { config: null, error: tr("快捷操作读取失败，原配置未改动：{0}", { 0: error.message }) }; }
 }
 
-export function saveDeviceShortcuts(config, storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED))) {
+export function saveDeviceShortcuts(config, storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED)), deviceId = '') {
   const normalized = normalizeDeviceShortcuts(config);
-  storage.setItem(SHORTCUTS_KEY, JSON.stringify(normalized));
+  storage.setItem(deviceId.startsWith('hdc:') ? HARMONY_SHORTCUTS_KEY : SHORTCUTS_KEY, JSON.stringify(normalized));
   notify();
   return normalized;
 }
@@ -83,6 +85,23 @@ export function createShortcutExecutor() {
       }
       if (!api?.adbShell) throw new Error(tr("设备控制需要在桌面应用中使用"));
       const builtin = action.type === 'builtin' ? BUILTIN_SHORTCUTS.find(item => item.id === action.action) : null;
+      if (deviceId.startsWith('hdc:') && builtin) {
+        if (['home', 'back', 'power'].includes(action.action)) {
+          const nativeKey = { home: 'Home', back: 'Back', power: 'Power' }[action.action];
+          const result = await api.adbShell(deviceId, `uitest uiInput keyEvent ${nativeKey}`);
+          if (!result?.success) throw new Error(result?.error || tr('设备未能执行指令'));
+          return { ok: true };
+        }
+        if (action.action === 'settings') {
+          const response = await api.packageList({ deviceId });
+          const pkg = response?.packages?.find(item => ['com.ohos.settings', 'com.huawei.hmos.settings'].includes(item.packageName));
+          if (!response?.ok || !pkg) throw new Error(tr('设备未提供可确认的系统设置应用，请编辑替换按钮'));
+          const result = await api.packageLaunch({ deviceId, packageName: pkg.packageName });
+          if (!result?.ok) throw new Error(result?.error || tr('应用启动失败'));
+          return { ok: true };
+        }
+        throw new Error(tr('此操作适用于 Android，请编辑替换为鸿蒙设备上的应用或命令'));
+      }
       if (builtin?.packageName) {
         const probe = await api.adbShell(deviceId, `pm path ${builtin.packageName}`);
         if (!probe.success) throw new Error(probe.error || tr("无法读取设备应用信息"));

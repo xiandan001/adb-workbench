@@ -1,5 +1,5 @@
 import { tr } from './i18n.js';
-import { normalizeDeviceShortcuts, SHORTCUTS_KEY } from './deviceNavigationShortcuts.js';
+import { normalizeDeviceShortcuts, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY } from './deviceNavigationShortcuts.js';
 import { normalizePinnedDevices, PINNED_DEVICES_KEY } from './deviceDiscovery.js';
 import { normalizePreferences as normalizeSerialPreferences, SERIAL_PREFS_KEY } from './serialSettings.js';
 import { normalizeSerialTerminalStyle, SERIAL_TERMINAL_STYLE_KEY } from './serialTerminalStyle.js';
@@ -9,7 +9,7 @@ import { normalizeUiMotionPreferences, UI_MOTION_PREFS_KEY } from './uiMotionPre
 export const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY
 ]);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -31,7 +31,7 @@ function parsePreference(key, raw) {
   if (key === UI_MOTION_PREFS_KEY && raw.length > 256) throw new Error(tr("启动与动效偏好数据过长"));
   const value = JSON.parse(raw);
   assertSafeValue(value);
-  if (key === SHORTCUTS_KEY) return normalizeDeviceShortcuts(value);
+  if (key === SHORTCUTS_KEY || key === HARMONY_SHORTCUTS_KEY) return normalizeDeviceShortcuts(value);
   if (key === PINNED_DEVICES_KEY) return normalizePinnedDevices(value);
   if (key === SERIAL_PREFS_KEY) return normalizeSerialPreferences(value);
   if (key === SERIAL_TERMINAL_STYLE_KEY) return normalizeSerialTerminalStyle(value);

@@ -19,16 +19,20 @@ function diagnosticPresets() {
     { id: 'slow', label: tr('应用卡顿 / 内存'), checks: ['app_process', 'app_memory', 'performance_snapshot'], requiresPackage: true },
   ];
 }
-function diagnosticChecks() {
-  return [
-    { id: 'device_info', label: tr('设备基础信息'), description: tr('只读采集型号、Android 版本和启动时长。') },
-    { id: 'logcat_snapshot', label: tr('近期设备日志'), description: tr('只读最近 2000 行日志，不清空或持续抓取。') },
+function diagnosticChecks(platform = 'android', capabilities = {}) {
+  const harmony = platform === 'harmony';
+  const rows = [
+    { id: 'device_info', label: tr('设备基础信息'), description: harmony ? tr('只读采集鸿蒙型号、系统与 API 版本。') : tr('只读采集型号、Android 版本和启动时长。') },
+    { id: 'logcat_snapshot', label: harmony ? tr('近期 HiLog 日志') : tr('近期设备日志'), description: tr('只读最近 2000 行日志，不清空或持续抓取。') },
     { id: 'performance_snapshot', label: tr('性能基础读数'), description: tr('只读内存、CPU 统计和存储空间。') },
-    { id: 'app_package', label: tr('应用版本与安装状态'), description: tr('仅读取所选包的版本、安装与启用状态，不修改权限。') },
+    { id: 'app_package', label: tr('应用版本与安装状态'), description: harmony ? tr('只读 Bundle 信息；未知权限与启用状态不会推测为已授权。') : tr('仅读取所选包的版本、安装与启用状态，不修改权限。') },
     { id: 'app_process', label: tr('应用进程状态'), description: tr('仅读取所选包的进程编号，不启动或结束进程。') },
     { id: 'app_memory', label: tr('应用内存快照'), description: tr('仅读取所选应用的内存统计，不执行清理。') },
-    { id: 'app_activity', label: tr('应用页面状态'), description: tr('仅读取所选应用相关的 Activity 状态，不打开页面。') },
+    { id: 'app_activity', label: tr('应用页面状态'), description: harmony ? tr('只读所选 Bundle 的 Ability 状态，不启动组件。') : tr('仅读取所选应用相关的 Activity 状态，不打开页面。') },
   ];
+  if (!harmony) return rows;
+  const required = { device_info: 'shell', logcat_snapshot: 'logs', performance_snapshot: 'performance', app_package: 'apps', app_process: 'shell', app_memory: 'performance', app_activity: 'apps' };
+  return rows.map(row => capabilities[required[row.id]] === false ? { ...row, available: false, description: `${row.description} ${tr('此设备尚未提供该能力，读取结果会标记为不可用。')}` } : row);
 }
 function diagnosticCommand(check, diagnostic) {
   if (!APP_CHECKS.includes(check)) return null;
@@ -39,6 +43,7 @@ function diagnosticCommand(check, diagnostic) {
     app_memory: ['shell', 'dumpsys', 'meminfo', name], app_activity: ['shell', 'dumpsys', 'activity', 'activities'] }[check];
 }
 function shapeDiagnosticSource(source) {
+  if (source.kind === 'hdc') return source;
   if (!APP_CHECKS.includes(source.checkId)) return source;
   const name = normalizeDiagnostic(source.diagnostic)?.packageName;
   const lines = String(source.text || '').split(/\r?\n/);

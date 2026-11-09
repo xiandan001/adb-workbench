@@ -63,13 +63,14 @@ function createDeviceMediaStore({ directory, shell, nativeImage, clipboard, onCh
   async function addNow(input) {
     if (!['image', 'video'].includes(input.type) || typeof input.deviceId !== 'string' || !input.deviceId) throw new Error(tr("媒体类型或设备无效"));
     const file = path.resolve(input.path);
-    if (!(input.type === 'image' ? /\.png$/i : /\.mp4$/i).test(file)) throw new Error(tr("不支持的媒体文件类型"));
+    if (!(input.type === 'image' ? /\.png$/i : /\.(mp4|webm)$/i).test(file)) throw new Error(tr("不支持的媒体文件类型"));
     const stat = await fs.promises.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || !stat.size) throw new Error(tr("媒体文件不存在或内容为空"));
     const items = await read();
     const item = {
       id: randomUUID(), type: input.type, deviceId: input.deviceId, path: file,
       realPath: await fs.promises.realpath(file), name: path.basename(file), bytes: stat.size,
+      format: path.extname(file).slice(1).toLowerCase(),
       createdAt: Number.isFinite(input.createdAt) ? input.createdAt : Date.now(),
       ...(Number.isFinite(input.durationMs) ? { durationMs: Math.max(0, input.durationMs) } : {})
     };
@@ -201,7 +202,7 @@ function validItem(item) {
   return item && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(item.id) && ['image', 'video'].includes(item.type)
     && typeof item.deviceId === 'string' && typeof item.path === 'string' && path.isAbsolute(item.path)
     && typeof item.realPath === 'string' && typeof item.name === 'string' && Number.isFinite(item.createdAt)
-    && Number.isFinite(item.bytes) && (item.type === 'image' ? /\.png$/i : /\.mp4$/i).test(item.path)
+    && Number.isFinite(item.bytes) && (item.type === 'image' ? /\.png$/i : /\.(mp4|webm)$/i).test(item.path)
     && (!item.logPath || (typeof item.logPath === 'string' && path.isAbsolute(item.logPath) && /\.log$/i.test(item.logPath)
       && path.dirname(item.logPath) === path.dirname(item.path) && typeof item.logRealPath === 'string'));
 }

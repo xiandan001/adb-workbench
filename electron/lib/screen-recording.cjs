@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { validateRecordingMp4 } = require('./screen-recording-mp4.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
 
 const ACTIVE = new Set(['starting', 'recording', 'stopping', 'saving']);
 const RETAIN_HISTORY = 60;
@@ -236,6 +237,7 @@ function createScreenRecordingService({
   }
 
   async function start({ deviceId, withLogs = false } = {}) {
+    if (isHarmonyDevice(deviceId)) return { success: false, code: 'DEVICE_UNSUPPORTED', error: tr('尚无已验证的鸿蒙录像归属与停止协议；不会调用系统录屏开关或用 uiRecord 冒充视频。') };
     if (initializationError) return { success: false, error: initializationError };
     if (!validDeviceId(deviceId)) return { success: false, error: tr("请选择有效设备") };
     const pending = [...sessions.values()].find(session => session.deviceId === deviceId && (ACTIVE.has(session.status) || session.status === 'needs-save' && !session.remoteStopped));
@@ -349,9 +351,19 @@ function createScreenRecordingService({
 }
 
 let singleton;
+let harmonySubscribed = false;
+function getHarmonyService() { return require('./harmony-media-window.cjs').getRecordingService(); }
+function listRecordings(args) {
+  return [...getService().list(args), ...getHarmonyService().list(args)].sort((a, b) => b.startedAt - a.startedAt);
+}
+function publishRecordingState() {
+  const { BrowserWindow } = require('electron');
+  const payload = { sessions: listRecordings() };
+  for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('screenrecord:state', payload);
+}
 function getService() {
   if (singleton) return singleton;
-  const { app, BrowserWindow } = require('electron');
+  const { app } = require('electron');
   const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
   const directory = app.getPath('userData');
   singleton = createScreenRecordingService({
@@ -362,26 +374,33 @@ function getService() {
       return typeof settings.screenRecordPath === 'string' && settings.screenRecordPath.trim() ? settings.screenRecordPath : path.join(directory, 'screenrecord');
     },
     onSaved: item => require('./device-media.cjs').recordMedia(item),
-    broadcast: payload => { for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('screenrecord:state', payload); }
+    broadcast: () => publishRecordingState()
   });
+  if (!harmonySubscribed) {
+    harmonySubscribed = true;
+    require('./harmony-media-window.cjs').onRecordingState(publishRecordingState);
+  }
   return singleton;
 }
 
 function register(ipcMain) {
   const service = getService();
-  ipcMain.handle('adb:screenrecord:start', (_event, args) => service.start(args));
-  ipcMain.handle('adb:screenrecord:stop', (_event, args) => service.stop(args));
-  ipcMain.handle('adb:screenrecord:status', (_event, args) => ({ success: true, recording: service.list(args).some(session => ACTIVE.has(session.status)), sessions: service.list(args) }));
-  ipcMain.handle('screenrecord:list', (_event, args) => ({ success: true, sessions: service.list(args) }));
-  ipcMain.handle('screenrecord:retry', (_event, args) => service.retry(args));
+  ipcMain.handle('adb:screenrecord:start', (_event, args) => isHarmonyDevice(args?.deviceId) ? getHarmonyService().start(args) : service.start(args));
+  ipcMain.handle('adb:screenrecord:stop', (_event, args) => isHarmonyDevice(args?.deviceId) ? getHarmonyService().stop(args) : service.stop(args));
+  ipcMain.handle('adb:screenrecord:status', (_event, args) => ({ success: true, recording: listRecordings(args).some(session => ACTIVE.has(session.status)), sessions: listRecordings(args) }));
+  ipcMain.handle('screenrecord:list', (_event, args) => ({ success: true, sessions: listRecordings(args) }));
+  ipcMain.handle('screenrecord:retry', (_event, args) => getHarmonyService().has(args?.id) ? getHarmonyService().retry(args) : service.retry(args));
 }
 
 module.exports = {
   createScreenRecordingService, register,
-  start: args => getService().start(args),
-  stopOwned: args => getService().stopOwned(args),
-  list: args => getService().list(args),
-  hasActiveRecordings: () => getService().hasActiveRecordings(),
-  listUnresolved: () => getService().listUnresolved(),
-  stopAllRecordings: () => getService().stopAllRecordings()
+  start: args => isHarmonyDevice(args?.deviceId) ? getHarmonyService().start(args) : getService().start(args),
+  stopOwned: args => getHarmonyService().has(args?.id) ? getHarmonyService().stopOwned(args) : getService().stopOwned(args),
+  list: listRecordings,
+  hasActiveRecordings: () => getService().hasActiveRecordings() || getHarmonyService().hasActiveRecordings(),
+  listUnresolved: () => [...getService().listUnresolved(), ...getHarmonyService().listUnresolved()],
+  stopAllRecordings: async () => {
+    const results = await Promise.all([getService().stopAllRecordings(), getHarmonyService().stopAllRecordings()]);
+    return { success: results.every(result => result.success), failed: results.flatMap(result => result.failed || []) };
+  }
 };

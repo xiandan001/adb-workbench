@@ -5,7 +5,6 @@ const { tr } = require('./localization.cjs');
 
 const http = require('http');
 const { randomUUID } = require('crypto');
-const readline = require('readline');
 const https = require('./ai-outbound-transport.cjs');
 
 const ctx = require('./app-context.cjs');
@@ -16,7 +15,6 @@ const performanceMonitor = require('./performance-monitor.cjs');
 const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
 const { getAppVersion } = require('./version.cjs');
-const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const {
   AGNES_API_URL,
   AGNES_API_KEY,
@@ -26,7 +24,7 @@ const {
   AI_CHUNK_LINES,
 } = aiAnalyze.aiKeys;
 
-const MCP_SERVER_NAME = 'Android Log Analyzer MCP';
+const MCP_SERVER_NAME = 'Device Log Analyzer MCP';
 const MCP_SERVER_VERSION = getAppVersion();
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 let mcpPort = 49321;
@@ -40,16 +38,17 @@ function buildMcpTools() {
   return [
     {
       name: 'device_list',
-      description: tr("列出当前通过 ADB 连接的所有设备（USB 和 WiFi），返回设备 ID、型号等信息"),
+      description: tr('列出 ADB/HDC 发现的设备、平台和连接状态；仅 status=device 可执行设备操作，Ready 不代表已连接。'),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'capture_start',
-      description: tr("选择设备并开始抓取 logcat 日志。会先清空旧日志再开始。如不指定 deviceId 则使用默认设备。可选指定 buffers 数组同时抓取多个日志缓冲区。"),
+      description: tr('开始采集所选设备日志。Android 使用 Logcat，鸿蒙使用 HiLog；多设备时必须明确指定目标。'),
       inputSchema: {
         type: 'object',
         properties: {
-          deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取），不填则使用默认设备") },
+          deviceId: { type: 'string', description: tr('设备 ID（从 device_list 获取）；仅有一台已连接设备时可以省略。') },
+          types: { type: 'array', description: tr('鸿蒙 HiLog 类型；内核日志须单独选择。'), items: { type: 'string', enum: ['app', 'core', 'init', 'kmsg'] } },
           buffers: {
             type: 'array',
             description: tr("要抓取的日志缓冲区列表。默认不传（adb 默认 main/system/crash）。可选值：main, system, radio, events, crash, kernel"),
@@ -61,16 +60,17 @@ function buildMcpTools() {
     },
     {
       name: 'capture_stop',
-      description: tr("停止当前正在进行的 logcat 日志抓取"),
+      description: tr('停止当前设备日志采集，不影响其他采集进程。'),
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     },
     {
       name: 'log_clear',
-      description: tr("清空指定日志源的所有日志，同时清空设备端 log buffer"),
+      description: tr('清空所选日志来源；实时来源仅清理其绑定设备的日志缓冲，文件来源不操作设备。'),
       inputSchema: {
         type: 'object',
         properties: {
-          source: { type: 'string', enum: ['realtime', 'file'], description: tr("要清空的日志源，默认 realtime") }
+          source: { type: 'string', enum: ['realtime', 'file'], description: tr("要清空的日志源，默认 realtime") },
+          deviceId: { type: 'string', description: tr('可选的实时来源设备 ID；与当前采集目标不一致时拒绝清理。') }
         },
         additionalProperties: false
       }
@@ -101,7 +101,7 @@ function buildMcpTools() {
         type: 'object',
         properties: {
           deviceId: { type: 'string', description: tr("设备 ID（从 device_list 获取）") },
-          packageName: { type: 'string', description: tr("Android 包名，例如 com.example.app") }
+          packageName: { type: 'string', description: tr('Android 包名或鸿蒙 Bundle 名，例如 com.example.app') }
         },
         required: ['deviceId', 'packageName'],
         additionalProperties: false
@@ -109,7 +109,7 @@ function buildMcpTools() {
     },
     {
       name: 'perf_snapshot',
-      description: tr("对指定设备执行一次性能采样，返回 CPU、内存、磁盘、电池、温度、FPS 和告警。"),
+      description: tr('读取所选平台支持的性能指标；缺失指标返回不可用原因，不代表零占用或健康。'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -163,7 +163,8 @@ function buildMcpTools() {
               minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: tr("最低日志级别") },
               tag: { type: 'string', description: tr("Tag 关键词（包含）") },
               pid: { type: 'string', description: tr("进程 PID") },
-              pkg: { type: 'string', description: tr("包名关键词（包含），如 com.example.app") },
+              pkg: { type: 'string', description: tr('包名或 HiLog 进程名关键词') },
+              domain: { type: 'string', description: tr('HiLog Domain 关键词') },
               text: { type: 'string', description: tr("消息关键词（包含）") },
               excludeText: { type: 'string', description: tr("排除消息关键词") },
               regex: { type: 'string', description: tr("正则表达式匹配消息") }
@@ -218,7 +219,8 @@ function buildMcpTools() {
               minLevel: { type: 'string', enum: ['V', 'D', 'I', 'W', 'E', 'F'], description: tr("最低日志级别") },
               tag: { type: 'string', description: tr("Tag 关键词") },
               pid: { type: 'string', description: 'PID' },
-              pkg: { type: 'string', description: tr("包名关键词") },
+              pkg: { type: 'string', description: tr('包名或 HiLog 进程名关键词') },
+              domain: { type: 'string', description: tr('HiLog Domain 关键词') },
               text: { type: 'string', description: tr("消息关键词") },
               excludeText: { type: 'string', description: tr("排除消息关键词") },
               regex: { type: 'string', description: tr("正则表达式") }
@@ -277,93 +279,21 @@ async function callMcpTool(name, args, signal) {
   let logcatProc = logAnalyzer.getLogcatProc();
 
   if (name === 'device_list') {
-    const devices = await new Promise((resolve) => {
-      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
-        if (!res.ok) return resolve([]);
-        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const out = [];
-        for (const line of lines.slice(1)) {
-          const match = line.match(/^(\S+)\s+device\b(.*)$/);
-          if (!match) continue;
-          const id = match[1];
-          const info = match[2] ?? '';
-          const model = info.match(/model:([^\s]+)/)?.[1];
-          const device = info.match(/device:([^\s]+)/)?.[1];
-          out.push({ id, model, device });
-        }
-        resolve(out);
-      });
-    });
+    const devices = await require('./device-discovery.cjs').listDevices();
     return mcpText({ devices, count: devices.length });
   }
 
   if (name === 'capture_start') {
-    if (logcatProc) {
-      return mcpText({ ok: false, message: tr("当前已在抓取中，请先停止当前抓取") });
+    if (logcatProc) return mcpText({ ok: false, message: tr("当前已在抓取中，请先停止当前抓取") });
+    let deviceId = normalizeMcpDeviceId(args.deviceId);
+    if (args.deviceId && !deviceId) return mcpText({ ok: false, error: tr('请选择有效的目标设备。') });
+    if (!deviceId) {
+      const devices = (await require('./device-discovery.cjs').listDevices()).filter(device => device.status === 'device');
+      if (devices.length !== 1) return mcpText({ ok: false, error: tr('请明确选择一台已连接设备。') });
+      deviceId = devices[0].id;
     }
-    const devices = await new Promise((resolve) => {
-      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
-        if (!res.ok) return resolve([]);
-        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const out = [];
-        for (const line of lines.slice(1)) {
-          const match = line.match(/^(\S+)\s+device\b/);
-          if (match) out.push(match[1]);
-        }
-        resolve(out);
-      });
-    });
-    if (devices.length === 0) {
-      return mcpText({ ok: false, message: tr("无设备连接，请先通过 USB 或 WiFi 连接 Android 设备并授权调试") });
-    }
-    const deviceId = args.deviceId || undefined;
-    logAnalyzer.setCurrentLogSource('realtime', deviceId || '');
-    logAnalyzer.resetLogStoreRealtime();
-    runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
-    ctx.broadcastToAllWindows('log:reset', { source: 'realtime', entries: [] });
-    logAnalyzer.getStartPidPackageResolver()(deviceId);
-
-    const adbArgs = [];
-    if (deviceId) adbArgs.push('-s', deviceId);
-    adbArgs.push('logcat', '-v', 'threadtime');
-    // 与 IPC adb:startLog 保持一致：支持 buffers 多缓冲区抓取
-    const SUPPORTED_BUFFERS_MCP = ['main', 'system', 'radio', 'events', 'crash', 'kernel'];
-    const wantedBuffers = Array.isArray(args.buffers)
-      ? args.buffers.filter(b => SUPPORTED_BUFFERS_MCP.includes(b))
-      : [];
-    if (wantedBuffers.length > 0) {
-      wantedBuffers.forEach(b => adbArgs.push('-b', b));
-    }
-    const p = spawnAdb(adbArgs);
-    logAnalyzer.setLogcatProc(p);
-
-    const parseLogLine = logAnalyzer.getParseLogLine();
-    const resolvePkg = logAnalyzer.getResolvePkg();
-    const pushLogToBatch = logAnalyzer.getPushLogToBatch();
-
-    const rl = readline.createInterface({ input: p.stdout });
-    rl.on('line', (line) => {
-      if (logAnalyzer.getLogcatProc() !== p) return;
-      const entry = parseLogLine('realtime', line);
-      entry.deviceId = deviceId || '';
-      const pkg = resolvePkg(entry.pid);
-      if (pkg) entry.pkg = pkg;
-      logAnalyzer.appendRealtimeEntry(entry);
-      // 与 UI 捕获共用有界缓存及 100ms 合并推送。
-      pushLogToBatch(entry);
-    });
-    // 消费 stderr 防止缓冲区满导致进程挂起（参考 IPC adb:startLog 实现）
-    p.stderr.on('data', () => {});
-    p.on('exit', () => {
-      rl.close();
-      if (logAnalyzer.getLogcatProc() !== p) return;
-      logAnalyzer.setLogcatProc(null);
-      logAnalyzer.getStopPidPackageResolver()();
-      // 进程退出时 flush 剩余批次，避免日志丢失
-      logAnalyzer.clearLogBatchFlushTimer();
-      logAnalyzer.getFlushLogBatch()();
-    });
-    return mcpText({ ok: true, message: deviceId ? tr("已开始在设备 {0} 上抓取日志", { 0: deviceId }) : tr("已开始在默认设备上抓取日志") });
+    const result = await logAnalyzer.startLogCapture({ deviceId, buffers: args.buffers, types: args.types });
+    return mcpText({ ...result, ...(result.ok ? { message: tr("已开始在设备 {0} 上抓取日志", { 0: deviceId }) } : {}) });
   }
 
   if (name === 'package_list') {
@@ -371,7 +301,7 @@ async function callMcpTool(name, args, signal) {
     if (!deviceId) return mcpText({ ok: false, error: 'device_required' });
     const limit = Math.max(1, Math.min(Number(args.limit ?? 200) || 200, 1000));
     const packages = await packageManager.listPackages(deviceId);
-    const filtered = args.showSystem === true ? packages : packages.filter(item => !item.system);
+    const filtered = args.showSystem === true ? packages : packages.filter(item => item.system !== true);
     return mcpText({ ok: true, deviceId, count: filtered.length, packages: filtered.slice(0, limit) });
   }
 
@@ -389,7 +319,7 @@ async function callMcpTool(name, args, signal) {
     const status = await vip.getStatusAsync();
     const includeProcesses = status.activated === true && args.includeProcesses !== false;
     const snapshot = await performanceMonitor.collectSnapshot(deviceId, includeProcesses);
-    return mcpText({ ok: true, deviceId, snapshot });
+    return mcpText({ ok: !snapshot.sampleError, deviceId, snapshot });
   }
 
   if (name === 'inspection_run') {
@@ -411,23 +341,13 @@ async function callMcpTool(name, args, signal) {
   }
 
   if (name === 'capture_stop') {
-    logAnalyzer.getStopPidPackageResolver()();
-    // 停止抓取时 flush 剩余批次，避免日志丢失
-    logAnalyzer.clearLogBatchFlushTimer();
-    logAnalyzer.getFlushLogBatch()();
-    const proc = logAnalyzer.getLogcatProc();
-    if (proc) { try { proc.kill(); } catch {} logAnalyzer.setLogcatProc(null); }
-    return mcpText({ ok: true, message: tr("已停止抓取") });
+    return mcpText({ ...await logAnalyzer.stopLogCapture(), message: tr("已停止抓取") });
   }
 
   if (name === 'log_clear') {
     const source = args.source ?? 'realtime';
-    if (!source || source === 'realtime') {
-      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
-    }
-    logAnalyzer.clearLogStoreBySource(source);
-    ctx.broadcastToAllWindows('log:reset', { source: source ?? logAnalyzer.getCurrentLogSource(), entries: [] });
-    return mcpText({ ok: true, message: tr("{0} 日志已清空", { 0: source }) });
+    const result = await logAnalyzer.clearLogs({ source, deviceId: args.deviceId });
+    return mcpText({ ...result, ...(result.ok ? { message: tr("{0} 日志已清空", { 0: source }) } : {}) });
   }
 
   if (name === 'log_sources') {
@@ -504,6 +424,7 @@ async function callMcpTool(name, args, signal) {
 
     // 格式化日志行
     const lines = allEntries.map(e => {
+      if (e.logFormat === 'hilog' && e.raw) return e.raw;
       const d = new Date(e.ts);
       const ts = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`;
       return `${ts} ${e.pid ?? 0} ${e.tid ?? e.pid ?? 0} ${e.level ?? 'V'} ${e.tag ?? ''}: ${e.message ?? e.raw}${e.pkg ? ` [pkg:${e.pkg}]` : ''}`;
@@ -529,7 +450,7 @@ async function callMcpTool(name, args, signal) {
       systemPrompt = aiAnalyze.buildAiSystemPrompt(filter);
       userContent = customPrompt
         ? tr("{0}\n\n--- 日志内容 ---\n{1}", { 0: customPrompt, 1: logContent })
-        : tr("请分析以下 Android logcat 日志：\n\n--- 日志内容 ---\n{0}", { 0: logContent });
+        : tr('请分析以下设备日志：\n\n--- 日志内容 ---\n{0}', { 0: logContent });
     }
 
     // 构建消息（MCP 调用不使用多轮上下文，独立分析）

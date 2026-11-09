@@ -1,14 +1,15 @@
 const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
+const { isHarmonyDevice } = require('./device-platform.cjs');
 
 const LOG_LIMIT_BYTES = 100 * 1024 * 1024;
 
 async function startRecordingLog({ deviceId, videoPath, onState = () => {} }, {
-  spawnAdb = require('./adb-runtime.cjs').spawnAdb, maxBytes = LOG_LIMIT_BYTES
+  spawnAdb = require('./adb-runtime.cjs').spawnAdb, spawnHiLog = require('./harmony-log.cjs').spawnHiLog, maxBytes = LOG_LIMIT_BYTES
 } = {}) {
-  if (!deviceId || !path.isAbsolute(videoPath) || !/\.mp4$/i.test(videoPath)) throw new Error(tr("录屏日志参数无效"));
-  const file = videoPath.replace(/\.mp4$/i, '.log');
+  if (!deviceId || !path.isAbsolute(videoPath) || !/\.(?:mp4|webm)$/i.test(videoPath)) throw new Error(tr("录屏日志参数无效"));
+  const file = videoPath.replace(/\.(?:mp4|webm)$/i, '.log');
   const handle = await fs.promises.open(file, 'wx', 0o600);
   const writer = handle.createWriteStream({ autoClose: true });
   const result = { path: file, bytes: 0, truncated: false, error: '' };
@@ -25,7 +26,7 @@ async function startRecordingLog({ deviceId, videoPath, onState = () => {} }, {
   const fail = error => { result.error = error.message; notify(); if (!writer.destroyed) writer.end(); };
   try {
     // This stream is independent of AI Log Analyzer and never clears device log buffers.
-    child = spawnAdb(['-s', deviceId, 'logcat', '-v', 'threadtime', '-T', '1']);
+    child = isHarmonyDevice(deviceId) ? spawnHiLog(deviceId, { maxLines: 1 }) : spawnAdb(['-s', deviceId, 'logcat', '-v', 'threadtime', '-T', '1']);
     child.on('error', fail);
     let diagnostic = '';
     child.stderr.on('data', data => { diagnostic = (diagnostic + data.toString()).slice(-2000); });

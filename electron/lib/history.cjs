@@ -9,6 +9,7 @@ const path = require('path');
 const MAX_HISTORY_SIZE = 20;
 // 终端命令历史记录上限
 const MAX_TERMINAL_HISTORY_SIZE = 100;
+const terminalFile = deviceId => String(deviceId || '').startsWith('hdc:') ? 'hdc_terminal_command_history.json' : 'terminal_command_history.json';
 
 function register(ipcMain) {
   // 连接历史记录持久化
@@ -24,6 +25,7 @@ function register(ipcMain) {
       const newEntry = {
         id: Date.now().toString(),
         deviceId: entry.deviceId,
+        transport: String(entry.deviceId || '').startsWith('hdc:') ? 'hdc' : 'adb',
         deviceName: entry.deviceName || entry.deviceId,
         ip: entry.ip || null,
         type: entry.type || 'usb',
@@ -79,13 +81,13 @@ function register(ipcMain) {
   ipcMain.handle('terminalHistory:save', async (event, command) => {
     try {
       const userDataPath = app.getPath('userData');
-      const historyFilePath = path.join(userDataPath, 'terminal_command_history.json');
+      const historyFilePath = path.join(userDataPath, terminalFile(command?.deviceId));
       let history = [];
       if (fs.existsSync(historyFilePath)) {
         const data = fs.readFileSync(historyFilePath, 'utf-8');
         history = JSON.parse(data);
       }
-      const trimmedCmd = (command || '').trim();
+      const trimmedCmd = (typeof command === 'object' ? command.command : command || '').trim();
       if (!trimmedCmd) {
         return { success: true };
       }
@@ -105,10 +107,10 @@ function register(ipcMain) {
     }
   });
 
-  ipcMain.handle('terminalHistory:load', async () => {
+  ipcMain.handle('terminalHistory:load', async (_event, args) => {
     try {
       const userDataPath = app.getPath('userData');
-      const historyFilePath = path.join(userDataPath, 'terminal_command_history.json');
+      const historyFilePath = path.join(userDataPath, terminalFile(args?.deviceId));
       if (fs.existsSync(historyFilePath)) {
         const data = fs.readFileSync(historyFilePath, 'utf-8');
         const history = JSON.parse(data);
@@ -121,10 +123,10 @@ function register(ipcMain) {
     }
   });
 
-  ipcMain.handle('terminalHistory:clear', async () => {
+  ipcMain.handle('terminalHistory:clear', async (_event, args) => {
     try {
       const userDataPath = app.getPath('userData');
-      const historyFilePath = path.join(userDataPath, 'terminal_command_history.json');
+      const historyFilePath = path.join(userDataPath, terminalFile(args?.deviceId));
       if (fs.existsSync(historyFilePath)) {
         fs.unlinkSync(historyFilePath);
       }

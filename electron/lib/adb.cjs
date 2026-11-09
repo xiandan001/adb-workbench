@@ -11,6 +11,7 @@ const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
 const { createScreenshotActions } = require('./screenshot-actions.cjs');
 const screenRecording = require('./screen-recording.cjs');
 const { recordMedia } = require('./device-media.cjs');
+const { isHarmonyDevice, unsupportedDeviceOperation } = require('./device-platform.cjs');
 
 // 终端 shell 执行：记录运行中的进程，支持主动中断
 // key: requestId, value: { proc, deviceId, timer, settle }
@@ -352,19 +353,17 @@ function parseAdbDevices(text) {
 }
 
 async function fillMissingDeviceModels(devices) {
-  await Promise.all(devices.map(async (device) => {
-    if (device.status !== 'device') return;
-    if (device.model) return;
+  return Promise.all(devices.map(async (device) => {
+    if (device.status !== 'device' || device.model) return { ...device };
     try {
-      const model = await runAdbText(['-s', device.id, 'shell', 'getprop', 'ro.product.model'], {
+      const model = await runAdbText(['-s', device.id, 'shell', ...(isHarmonyDevice(device.id) ? ['param', 'get', 'const.product.model'] : ['getprop', 'ro.product.model'])], {
         timeoutMs: 8000
       });
-      device.model = model || 'Unknown Device';
+      return { ...device, model: model || 'Unknown Device' };
     } catch {
-      device.model = 'Unknown Device';
+      return { ...device, model: 'Unknown Device' };
     }
   }));
-  return devices;
 }
 
 // 应用退出时清理所有未结束的终端 shell 进程
@@ -381,20 +380,24 @@ function stopAllShellProcs() {
 function register(ipcMain) {
   const screenshots = createScreenshotActions(require('electron'));
   screenRecording.register(ipcMain);
+  require('./harmony-media-window.cjs').register(ipcMain);
   ipcMain.handle('adb:screenshotAction', (_event, args) => screenshots.perform(args));
   // IPC Handlers for ADB
   ipcMain.handle('adb:getDevices', async () => {
     try {
-      const output = await runAdbText(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true });
-      return fillMissingDeviceModels(parseAdbDevices(output));
+      const result = await require('./device-discovery.cjs').discoverDevices();
+      if (!result.available) throw new Error(tr('无法读取设备列表，请运行环境自检。'));
+      require('./performance-monitor.cjs').syncDeviceConnections(result.devices);
+      return fillMissingDeviceModels(result.devices);
     } catch (error) {
       console.error('ADB error:', error);
-      throw new Error(tr('ADB 未安装或未运行。'));
+      throw new Error(tr('无法读取设备列表，请运行环境自检。'));
     }
   });
 
   ipcMain.handle('scrcpy:start', async (event, { deviceId, settings }) => {
     try {
+      if (isHarmonyDevice(deviceId)) return await require('./harmony-media-window.cjs').openWindow(deviceId);
       const scrcpyPath = await findScrcpyPath();
       if (!scrcpyPath) {
         throw new Error(tr("Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH"));
@@ -432,6 +435,14 @@ function register(ipcMain) {
   ipcMain.handle('adb:shell', async (event, { deviceId, command }) => {
     const requestId = `${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const abort = new AbortController();
+        shellProcs.set(requestId, { deviceId, proc: { kill: () => abort.abort(), get killed() { return abort.signal.aborted; } }, settle: () => abort.abort() });
+        try {
+          const result = await runAdb(['-s', deviceId, 'shell', command], { signal: abort.signal, timeoutMs: SHELL_TIMEOUT_MS });
+          return { success: result.ok, output: String(result.stdout || '').trim(), error: result.error, cancelled: result.cancelled };
+        } finally { shellProcs.delete(requestId); }
+      }
       const result = await new Promise((resolve) => {
         const proc = spawnAdb(['-s', deviceId, 'shell', command], {
           encoding: 'utf8'
@@ -501,7 +512,15 @@ function register(ipcMain) {
   // Screenshot: pull file from device
   ipcMain.handle('adb:screenshot', async (event, { deviceId, localPath }) => {
     try {
-      const output = await runAdbText(['-s', deviceId, 'pull', '/sdcard/screen.png', localPath]);
+      let output;
+      if (isHarmonyDevice(deviceId)) {
+        const captured = await require('./harmony-media.cjs').captureScreenshot(deviceId, localPath);
+        if (!captured.ok) return { success: false, ...captured };
+        output = captured.cleanupWarning || '';
+      } else {
+        await runAdbText(['-s', deviceId, 'shell', 'screencap', '-p', '/sdcard/screen.png']);
+        output = await runAdbText(['-s', deviceId, 'pull', '/sdcard/screen.png', localPath]);
+      }
       const saved = screenshots.remember(localPath);
       try {
         const media = await recordMedia({ type: 'image', deviceId, path: localPath, createdAt: Date.now() });
@@ -517,6 +536,10 @@ function register(ipcMain) {
   // Reboot device
   ipcMain.handle('adb:reboot', async (event, { deviceId }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['target', 'boot'], { timeoutMs: 15000 });
+        return result.ok ? { success: true, message: tr('重启请求已发送，设备可能短暂断开。') } : { success: false, error: result.error };
+      }
       spawnAdb(['-s', deviceId, 'reboot'], {
         detached: true,
         stdio: 'ignore'
@@ -530,6 +553,7 @@ function register(ipcMain) {
   // Reboot to loader mode
   ipcMain.handle('adb:rebootLoader', async (event, { deviceId }) => {
     try {
+      if (isHarmonyDevice(deviceId)) throw unsupportedDeviceOperation('Loader');
       spawnAdb(['-s', deviceId, 'reboot', 'loader'], {
         detached: true,
         stdio: 'ignore'
@@ -542,6 +566,7 @@ function register(ipcMain) {
 
   ipcMain.handle('adb:unlock', async (event, { deviceId }) => {
     try {
+      if (isHarmonyDevice(deviceId)) throw unsupportedDeviceOperation('Unlock');
       const adbCommand = getAndroidToolCommand('adb.exe');
       const fastbootCommand = getAndroidToolCommand('fastboot.exe');
       const unlockPlan = await resolveUnlockPlan(deviceId);
@@ -581,6 +606,10 @@ function register(ipcMain) {
   // Adb root
   ipcMain.handle('adb:root', async (event, { deviceId }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['smode']);
+        return result.ok ? { success: true, message: tr('调试提权请求已发送，请等待设备重新连接后核对。') } : { success: false, error: result.error };
+      }
       const output = await runAdbText(['-s', deviceId, 'root']);
       if (output.includes('restarting') || output.includes('running as root')) {
         return { success: true, message: output || tr("Root 权限获取成功") };
@@ -595,6 +624,10 @@ function register(ipcMain) {
   // Adb remount
   ipcMain.handle('adb:remount', async (event, { deviceId }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['target', 'mount']);
+        return result.ok ? { success: true, message: result.stdout || tr('挂载请求已完成。') } : { success: false, error: result.error };
+      }
       const output = await runAdbText(['-s', deviceId, 'remount']);
       if (output.includes('remount') || output.includes('succeeded') || output.includes('success')) {
         return { success: true, message: output || tr("Remount 成功") };
@@ -609,14 +642,7 @@ function register(ipcMain) {
   // Wi-Fi Connection
   ipcMain.handle('adb:connect', async (event, ipAddress) => {
     try {
-      const output = await runAdbText(['connect', ipAddress], { queueGlobal: true });
-      if (output.includes('connected to') && !output.includes('already connected')) {
-        return { success: true, message: output };
-      } else if (output.includes('already connected')) {
-        return { success: true, message: output };
-      } else {
-        return { success: false, error: output };
-      }
+      return await require('./device-connection.cjs').connectDevice(ipAddress);
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -625,6 +651,10 @@ function register(ipcMain) {
   // Install APK
   ipcMain.handle('adb:install', async (event, { deviceId, apkPath }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./harmony-apps.cjs').installPackage(deviceId, apkPath);
+        return result.ok ? { success: true, message: tr('安装成功') } : { success: false, error: result.error, code: result.code };
+      }
       const output = await runAdbText(['-s', deviceId, 'install', '-r', '-d', apkPath], { timeoutMs: 120000 });
       if (output.includes('Success')) {
         return { success: true, message: tr("安装成功") };
@@ -639,6 +669,10 @@ function register(ipcMain) {
   // Push APK to device
   ipcMain.handle('adb:push', async (event, { deviceId, localPath, remotePath }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['file', 'send', localPath, remotePath], { timeoutMs: 120000 });
+        return result.ok ? { success: true, message: tr('推送成功') } : { success: false, error: result.error };
+      }
       const output = await runAdbText(['-s', deviceId, 'push', localPath, remotePath], { timeoutMs: 120000 });
       if (output.includes('pushed') || output.includes('pushing')) {
         return { success: true, message: tr("推送成功") };
@@ -653,6 +687,10 @@ function register(ipcMain) {
   // Pull file from device
   ipcMain.handle('adb:pull', async (event, { deviceId, remotePath, localPath }) => {
     try {
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['file', 'recv', remotePath, localPath], { timeoutMs: 120000 });
+        return result.ok ? { success: true, message: tr('文件已保存到 {0}', { 0: localPath }) } : { success: false, error: result.error };
+      }
       const output = await runAdbText(['-s', deviceId, 'pull', remotePath, localPath], { timeoutMs: 120000 });
       if (output.includes('pulled') || output.includes('pulling')) {
         return { success: true, message: tr("拉取成功！\n设备: {0}\n本地: {1}", { 0: remotePath, 1: localPath }) };
@@ -669,6 +707,7 @@ function register(ipcMain) {
   // List files on device (for browsing APK paths)
   ipcMain.handle('adb:shellLs', async (event, { deviceId, path }) => {
     try {
+      if (isHarmonyDevice(deviceId)) return await require('./harmony-files.cjs').listHarmonyDirectory(deviceId, path);
       const cleanPath = (p) => {
         if (p === '/' || p === '') return '/';
         const parts = p.split('/').filter(part => part && part !== '.');
@@ -728,8 +767,7 @@ function register(ipcMain) {
   // Disconnect Device
   ipcMain.handle('adb:disconnect', async (event, deviceId) => {
     try {
-      const output = await runAdbText(['disconnect', deviceId], { queueGlobal: true });
-      return { success: true, message: output };
+      return await require('./device-connection.cjs').disconnectDevice(deviceId);
     } catch (error) {
       return { success: false, error: error.message };
     }

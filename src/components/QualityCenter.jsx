@@ -745,7 +745,7 @@ function BaselineRow({ item, selected, isDark, text, muted, busy, onSelect, onDe
       <button onClick={onSelect} className="min-w-0 flex-1 text-left">
         <div className={`text-sm font-medium truncate ${text}`}>{item.name}</div>
         <div className={`text-xs mt-1 ${muted}`}>
-          {item.model || item.deviceId || tr("未记录设备")} · Android {item.android || '-'} · {item.packageCount || 0}{tr(" 个应用")}</div>
+          {item.model || item.deviceId || tr("未记录设备")} · {item.platform === 'harmony' ? `Harmony/OpenHarmony ${item.systemVersion || '-'}` : `Android ${item.android || '-'}`} · {item.packageCount || 0}{tr(" 个应用")}</div>
         <div className={`text-[11px] mt-1 font-mono truncate ${muted}`}>{item.path}</div>
       </button>
       <div className="flex items-center gap-2 shrink-0">

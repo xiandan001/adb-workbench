@@ -12,6 +12,7 @@ function deviceShortcutDisplayLabel(action) {
 
 export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDark, pending, onTest, onSave, onClose }) {
   useLocale();
+  const harmony = deviceId.startsWith('hdc:');
   const dialogRef = useRef(null);
   const titleId = useId();
   const fieldId = useId();
@@ -107,7 +108,7 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-1 text-xs">{tr("按钮名称")}<input value={slot.label} maxLength={16} onChange={event => update({ label: event.target.value })} className={field} /></label>
           <div className="space-y-1 text-xs"><label htmlFor={`${fieldId}-type`}>{tr("操作类型")}</label><SelectMenu id={`${fieldId}-type`} isDark={isDark} value={slot.type} onChange={replace} disabled={Boolean(pending)}
-            options={[{ value: 'builtin', label: tr("系统操作") }, { value: 'app', label: tr("打开应用") }, ...(advanced ? [{ value: 'shell', label: tr("ADB 命令（高级）") }] : [])]} /></div>
+            options={[{ value: 'builtin', label: tr("系统操作") }, { value: 'app', label: tr("打开应用") }, ...(advanced ? [{ value: 'shell', label: harmony ? tr('HDC 命令（高级）') : tr("ADB 命令（高级）") }] : [])]} /></div>
         </div>
         {slot.type === 'builtin' && <div className="space-y-1 text-xs"><label htmlFor={`${fieldId}-action`}>{tr("系统操作")}</label><SelectMenu id={`${fieldId}-action`} isDark={isDark} value={slot.action} disabled={Boolean(pending)}
           options={BUILTIN_SHORTCUTS.map(item => ({ value: item.id, label: tr(item.label) }))} onChange={action => update({ action, label: BUILTIN_SHORTCUTS.find(item => item.id === action).label })} /></div>}
@@ -120,9 +121,9 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
           {!isOnline && <p className="text-amber-500">{tr("请先连接当前设备再选择应用。")}</p>}
           {packageError && <p role="alert" className="text-red-500">{tr("{0}。关闭后重试。", { 0: packageError })}</p>}
         </div>}
-        {slot.type === 'shell' && <label className="block space-y-2 text-xs">{tr("ADB shell 命令")}<input value={slot.command} maxLength={2000} onChange={event => update({ command: event.target.value })} placeholder={tr("例如 input keyevent KEYCODE_BACK")} className={`${field} font-mono`} />
-          <span className={`block leading-5 ${muted}`}>{tr("无需填写 adb shell。仅一条命令，不支持管道、重定向或命令拼接。每次点击和测试均需确认完整命令，名称不能代替风险判断。")}</span></label>}
-        {!advanced && <button type="button" onClick={() => setAdvanced(true)} className={`text-xs underline underline-offset-4 ${muted}`}>{tr("显示高级 ADB 命令")}</button>}
+        {slot.type === 'shell' && <label className="block space-y-2 text-xs">{harmony ? tr('HDC shell 命令') : tr("ADB shell 命令")}<input value={slot.command} maxLength={2000} onChange={event => update({ command: event.target.value })} placeholder={harmony ? tr('例如 {0}', { 0: 'uitest uiInput keyEvent Back' }) : tr("例如 input keyevent KEYCODE_BACK")} className={`${field} font-mono`} />
+          <span className={`block leading-5 ${muted}`}>{harmony ? tr('无需填写 hdc shell。仅一条命令，不支持管道、重定向或命令拼接。每次点击和测试均需确认完整命令，名称不能代替风险判断。') : tr("无需填写 adb shell。仅一条命令，不支持管道、重定向或命令拼接。每次点击和测试均需确认完整命令，名称不能代替风险判断。")}</span></label>}
+        {!advanced && <button type="button" onClick={() => setAdvanced(true)} className={`text-xs underline underline-offset-4 ${muted}`}>{harmony ? tr('显示高级 HDC 命令') : tr("显示高级 ADB 命令")}</button>}
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-400/10 p-3">
         <p className={`min-w-0 break-all text-xs ${muted}`}>{tr("测试目标：")}{deviceId}{!isOnline ? tr("（离线）") : ''}</p>
@@ -132,8 +133,8 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
       {error && <p role="alert" className="break-words text-xs text-red-500">{tr(error)}</p>}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-400/20 px-5 py-4">
-      <button type="button" disabled={Boolean(pending)} onClick={() => { setDraft(defaultDeviceShortcuts()); setSelected(0); setError(''); }} className={`${button} flex items-center gap-1.5`}><RotateCcw size={14} />{tr("恢复默认")}</button>
-      <div className="flex gap-2"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={submit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{tr("保存到所有设备")}</button></div>
+      <button type="button" disabled={Boolean(pending)} onClick={() => { setDraft(defaultDeviceShortcuts(deviceId)); setSelected(0); setError(''); }} className={`${button} flex items-center gap-1.5`}><RotateCcw size={14} />{tr("恢复默认")}</button>
+      <div className="flex gap-2"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={submit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{harmony ? tr('保存到鸿蒙设备') : tr("保存到所有设备")}</button></div>
     </div>
   </dialog>;
 }

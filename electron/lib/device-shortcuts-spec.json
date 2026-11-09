@@ -4,6 +4,7 @@
   "slots": ["slot-1", "slot-2", "slot-3", "slot-4"],
   "defaultActions": ["home", "sidebar", "settings", "whiteboard"],
   "actions": [
+    { "id": "power", "label": "点亮 / 熄灭屏幕", "command": "input keyevent KEYCODE_POWER" },
     { "id": "home", "label": "回到桌面", "command": "input keyevent KEYCODE_HOME" },
     { "id": "back", "label": "返回", "command": "input keyevent KEYCODE_BACK" },
     { "id": "recents", "label": "最近任务", "command": "input keyevent KEYCODE_APP_SWITCH" },

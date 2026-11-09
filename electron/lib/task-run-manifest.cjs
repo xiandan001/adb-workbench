@@ -26,7 +26,9 @@ function createRunComparisonIdentity(script, options = {}) {
     continueOnError: options.continueOnError ?? script.continueOnError ?? true,
     concurrency: Math.max(1, Math.min(Number(options.concurrency) || 1, 4))
   };
+  if (script.targetPlatform === 'harmony') content.targetPlatform = 'harmony';
   return {
+    ...(script.targetPlatform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     comparisonVersion: 1,
     scriptId: script.id || '',
     scriptHash: crypto.createHash('sha256').update(canonicalJson(content)).digest('hex'),
@@ -38,6 +40,11 @@ function createRunComparisonIdentity(script, options = {}) {
 }
 
 function deviceComparisonIdentity(identity) {
+  if (identity?.transport === 'hdc') {
+    const value = String(identity.harmonyUdid || '').trim().toLowerCase();
+    return { transport: 'hdc', ...(/^[a-f\d]{8,128}$/.test(value) && !/^0+$/.test(value)
+      ? { harmonyUdid: crypto.createHash('sha256').update(`hdc:harmonyUdid:${value}`).digest('hex') } : {}) };
+  }
   const result = {};
   for (const key of ['androidId', 'wifiMac', 'roBootSerialno', 'roSerialno']) {
     const value = String(identity?.[key] || '').trim();
@@ -61,6 +68,7 @@ function writeRunManifest(record, { rerunSnapshot } = {}) {
     schemaVersion: 1,
     id: record.id,
     scriptName: record.scriptName,
+    ...(record.targetPlatform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     comparisonVersion: record.comparisonVersion,
     scriptId: record.scriptId || '',
     scriptHash: record.scriptHash || '',

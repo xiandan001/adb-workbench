@@ -15,7 +15,7 @@ function normalizeEntries(entries, limit, withReferences = false) {
   return entries.map(entry => {
     if (!entry || typeof entry.id !== 'string' || typeof entry.raw !== 'string') throw new Error(tr("日志条目格式无效"));
     const next = { id: entry.id, raw: entry.raw };
-    for (const key of ['source', 'message', 'pkg', 'tag', 'level', 'deviceId']) {
+    for (const key of ['source', 'message', 'pkg', 'tag', 'level', 'deviceId', 'platform', 'logFormat', 'domain', 'processName', 'clockBasis', 'timestamp']) {
       if (typeof entry[key] === 'string') next[key] = entry[key];
     }
     for (const key of ['ts', 'pid', 'tid']) {
@@ -35,7 +35,7 @@ function normalizeSession(input) {
   const name = String(input.name || '').trim();
   if (!name || name.length > 80) throw new Error(tr("会话名称需为 1–80 字"));
   const filter = {};
-  for (const key of ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'minLevel']) {
+  for (const key of ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel']) {
     if (typeof input.filter?.[key] === 'string') filter[key] = input.filter[key];
   }
   if (Number.isFinite(input.filter?.pid)) filter.pid = input.filter.pid;
@@ -52,7 +52,7 @@ function normalizeSession(input) {
       reasoning: String(turn.reasoning || ''), reasoningExpanded: false, evidenceRefs
     };
   });
-  const buffers = Array.isArray(input.buffers) ? input.buffers.filter(item => ['main', 'system', 'radio', 'events', 'crash', 'kernel'].includes(item)) : ['main'];
+  const buffers = Array.isArray(input.buffers) ? input.buffers.filter(item => ['main', 'system', 'radio', 'events', 'crash', 'kernel', 'app', 'core', 'init', 'kmsg'].includes(item)) : ['main'];
   const markers = normalizeMarkers(input.markers || []);
   return {
     schemaVersion: 1, name, source: input.source, sourceLabel: String(input.sourceLabel || ''),

@@ -9,11 +9,11 @@ const { normalizePreferences: normalizeSerialPreferences } = require('./serial-p
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', 'adb-workbench.pinned-devices.v1',
   'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1'
 ]);
 const FILES = new Set([
-  'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json',
+  'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json', 'hdc_terminal_command_history.json',
   'task-center-scripts.json', 'task-center-history.json', 'auto-diagnose-rules.json', 'performance-thresholds.json'
 ]);
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -21,9 +21,10 @@ const SESSION_FILE = new RegExp(`^log-analysis-sessions/(${UUID})\\.json$`);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const COMMAND_ACTIONS = new Set(['tab:devices', 'tab:serial', 'tab:ssh', 'tab:ai-tools', 'environmentCheck', 'tab:troubleshoot', 'tab:artifacts',
   'tab:quality', 'tab:history', 'tab:tasks', 'tab:performance', 'tab:settings', 'logAnalyzer', 'refreshDevices']);
-const RULE_IDS = new Set(['builtin-crash', 'builtin-anr', 'builtin-native-crash', 'builtin-oom', 'builtin-watchdog', 'builtin-kernel-panic']);
+const RULE_IDS = new Set(['builtin-crash', 'builtin-anr', 'builtin-native-crash', 'builtin-oom', 'builtin-watchdog', 'builtin-kernel-panic',
+  'builtin-harmony-js-crash', 'builtin-harmony-app-freeze', 'builtin-harmony-cpp-crash']);
 const STEP_TYPES = new Set(['shell', 'installApk', 'pushFile', 'screenshot', 'imageCompare', 'perfSnapshot', 'tap',
-  'longPress', 'swipe', 'input', 'keyevent', 'waitText', 'assertText', 'inspection', 'waitLog', 'delay', 'externalScript']);
+  'longPress', 'swipe', 'input', 'keyevent', 'waitText', 'assertText', 'inspection', 'waitLog', 'delay', 'externalScript', 'launchApp']);
 const EVIDENCE_KEYS = new Set(['artifact', 'artifactDir', 'artifactBaseDir', 'artifactWorkDir', 'runResultPath',
   'stressReportPath', 'stressResultPath', 'reportPath', 'resultPath', 'outputPath', 'outputDir']);
 
@@ -120,19 +121,23 @@ function validateScript(script, allowEmpty = false) {
   if (script.continueOnError !== undefined) boolean(script.continueOnError, tr("脚本继续开关"));
   for (const key of ['loop', 'acceptance', 'report']) if (script[key] !== undefined) object(script[key], tr("脚本 {0}", { 0: key }));
   if (script.mode !== undefined && !['replay', 'stress'].includes(script.mode)) invalid(tr("脚本模式"));
+  if (script.targetPlatform !== undefined && !['android', 'harmony'].includes(script.targetPlatform)) invalid(tr('任务平台'));
   const steps = array(script.steps, 10000, tr("脚本步骤"));
   if (!allowEmpty && !steps.length) invalid(tr("空脚本"));
   uniqueIds(steps.map(step => {
     object(step, tr("脚本步骤"));
     text(step.id, 200, tr("步骤 ID"), false);
     if (!STEP_TYPES.has(step.type)) invalid(tr("脚本步骤类型"));
+    if (step.type === 'launchApp' && script.targetPlatform !== 'harmony') invalid(tr('鸿蒙应用步骤平台'));
+    if (step.longPressMode !== undefined && (script.targetPlatform !== 'harmony' || step.type !== 'longPress' || step.longPressMode !== 'native')) invalid(tr('原生长按模式'));
+    if (!allowEmpty && step.longPressMode === 'native' && step.durationMs != null) invalid(tr('原生长按不接受自定义时长'));
     for (const key of ['command', 'localPath', 'remotePath', 'baselinePath', 'scriptPath', 'workingDir', 'outputBaseDir', 'text', 'label']) {
       if (step[key] !== undefined) text(step[key], 100000, tr("步骤 {0}", { 0: key }));
     }
-    optionalTextFields(step, ['keyword', 'regex', 'textContains', 'resourceId', 'contentDesc', 'className', 'xpath', 'keyCode', 'adapter']);
+    optionalTextFields(step, ['keyword', 'regex', 'textContains', 'resourceId', 'contentDesc', 'className', 'xpath', 'keyCode', 'adapter', 'packageName']);
     if (step.selector !== undefined) {
       object(step.selector, tr("步骤选择器"));
-      optionalTextFields(step.selector, ['text', 'textContains', 'resourceId', 'contentDesc', 'className', 'xpath']);
+      optionalTextFields(step.selector, ['text', 'textContains', 'resourceId', 'contentDesc', 'className', 'xpath', 'packageName']);
     }
     if (step.points !== undefined) {
       // The unsaved editor deliberately keeps partially typed gesture JSON as text.
@@ -166,7 +171,7 @@ function normalizePreference(key, raw) {
   let value;
   try { value = JSON.parse(raw); } catch { invalid(tr("偏好 {0} JSON", { 0: key })); }
   assertSafeJson(value);
-  if (key === SHORTCUTS_KEY) value = normalizeDeviceShortcuts(value);
+  if (key === SHORTCUTS_KEY || key === 'adb-workbench.harmony-device-shortcuts.v1') value = normalizeDeviceShortcuts(value);
   if (key === 'adb-workbench.serial-preferences.v1') value = normalizeSerialPreferences(value);
   if (key === 'adb-workbench.serial-terminal-style.v1' && !['current', 'classic'].includes(value)) invalid(tr("串口终端样式"));
   if (key === 'adb-workbench.ui-motion.v1' && (!value || typeof value !== 'object' || Array.isArray(value)
@@ -249,6 +254,7 @@ function sanitizeConnections(value) {
     if (!['usb', 'wifi'].includes(entry.type)) invalid(tr("连接类型"));
     return { id: text(entry.id, 200, tr("连接 ID"), false), deviceId: text(entry.deviceId, 300, tr("设备 ID"), false),
       deviceName: text(entry.deviceName, 300, tr("设备名称"), false), ip: entry.ip === null ? null : text(entry.ip, 300, tr("连接地址")),
+      ...(entry.transport || String(entry.deviceId || '').startsWith('hdc:') ? { transport: String(entry.deviceId || '').startsWith('hdc:') ? 'hdc' : 'adb' } : {}),
       type: entry.type, timestamp: date(entry.timestamp, tr("连接时间")) };
   });
 }
@@ -264,6 +270,7 @@ function sanitizeHistory(value) {
     object(record, tr("任务记录"));
     text(record.id, 200, tr("任务 ID"), false);
     text(record.scriptName, 80, tr("任务名称"), false);
+    if (record.targetPlatform !== undefined && !['android', 'harmony'].includes(record.targetPlatform)) invalid(tr('任务平台'));
     optionalTextFields(record, ['mode', 'error', 'createdAt', 'startedAt', 'endedAt', 'scriptId', 'scriptHash']);
     optionalNumberFields(record, ['comparisonVersion', 'completedSteps', 'failedSteps', 'totalSteps']);
     if (!['success', 'failed', 'cancelled', 'queued', 'running', 'passed'].includes(record.status)) invalid(tr("任务状态"));
@@ -272,6 +279,8 @@ function sanitizeHistory(value) {
     }
     for (const run of record.deviceRuns || []) {
       object(run, tr("设备运行记录")); text(run.deviceId, 300, tr("运行设备"), false);
+      if (record.targetPlatform === 'harmony' && !/^hdc:(?!-)[^\s\x00-\x1f\x7f]{1,156}$/.test(run.deviceId)) invalid(tr('鸿蒙运行设备标识'));
+      if (run.comparisonIdentity !== undefined) validateTaskIdentity(run.comparisonIdentity, record.targetPlatform || 'android');
       optionalTextFields(run, ['originalDeviceId', 'status', 'error', 'startedAt', 'endedAt']);
       for (const step of array(run.steps || [], 100000, tr("运行步骤"))) {
         object(step, tr("运行步骤"));
@@ -293,6 +302,18 @@ function sanitizeHistory(value) {
     return stripEvidence(record);
   }), tr("任务"));
   return { version: 1, history };
+}
+
+function validateTaskIdentity(identity, platform) {
+  object(identity, tr('设备比较身份'));
+  if (identity.transport !== undefined && !['adb', 'hdc'].includes(identity.transport)) invalid(tr('设备身份通道'));
+  if (identity.transport === 'hdc') {
+    if (platform !== 'harmony' || Object.keys(identity).some(key => !['transport', 'harmonyUdid'].includes(key))) invalid(tr('鸿蒙设备比较身份'));
+    if (identity.harmonyUdid !== undefined && !/^[a-f\d]{64}$/.test(identity.harmonyUdid)) invalid(tr('鸿蒙 UDID 摘要'));
+  } else {
+    if (identity.harmonyUdid !== undefined || platform === 'harmony' && Object.keys(identity).length) invalid(tr('设备平台与比较身份不一致'));
+    optionalTextFields(identity, ['androidId', 'wifiMac', 'roBootSerialno', 'roSerialno'], 512);
+  }
 }
 function sanitizeRules(value) {
   object(value, tr("诊断规则"));
@@ -332,7 +353,7 @@ function sanitizeFile(name, data) {
   if (name === 'settings.json') return sanitizeSettings(data);
   if (name === 'customThemes.json') return sanitizeThemes(data);
   if (name === 'connection_history.json') return sanitizeConnections(data);
-  if (name === 'terminal_command_history.json') return array(data, 100, tr("终端历史")).map(item => text(item, 100000, tr("终端命令"), false));
+  if (name === 'terminal_command_history.json' || name === 'hdc_terminal_command_history.json') return array(data, 100, tr("终端历史")).map(item => text(item, 100000, tr("终端命令"), false));
   if (name === 'task-center-history.json') return sanitizeHistory(data);
   if (name === 'auto-diagnose-rules.json') return sanitizeRules(data);
   if (name === 'task-center-scripts.json') {

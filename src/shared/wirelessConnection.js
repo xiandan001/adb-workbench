@@ -1,6 +1,6 @@
 import { tr } from './i18n.js';
 export function historyConnectionAddress(entry) {
-  return String(entry.ip || (entry.type === 'wifi' ? entry.deviceId : '') || '').trim();
+  return String(entry.ip || (entry.type === 'wifi' ? entry.deviceId : '') || '').trim().replace(/^hdc:/, '');
 }
 
 // A connected device stays successful even if the optional history write fails.
@@ -8,13 +8,15 @@ export async function connectWirelessDevice(address, { api, refreshDevices, hist
   const target = String(address || '').trim();
   if (!target) return { success: false, message: tr("请输入设备 IP 地址和端口") };
   if (!api?.adbConnect) return { success: false, message: tr("连接功能需要 Electron 环境") };
+  let connected;
   try {
-    const result = await api.adbConnect(target);
+    const result = await api.adbConnect(historyEntry?.deviceId?.startsWith('hdc:') ? `hdc:${target}` : target);
     if (!result.success) return { success: false, message: result.error || tr("设备连接失败") };
+    connected = result;
   } catch (error) {
     return { success: false, message: error.message || tr("设备连接失败") };
   }
-  const result = { success: true, message: tr("已连接 {0}", { 0: target }) };
+  const result = { success: true, deviceId: connected.deviceId || target, message: tr("已连接 {0}", { 0: target }) };
   const warnings = [];
   try {
     await refreshDevices();
@@ -23,7 +25,8 @@ export async function connectWirelessDevice(address, { api, refreshDevices, hist
   }
   try {
     const saved = await api.saveConnectionHistory({
-      deviceId: target,
+      deviceId: connected.deviceId || target,
+      transport: connected.transport || 'adb',
       deviceName: historyEntry?.deviceName || target,
       ip: target,
       type: 'wifi'

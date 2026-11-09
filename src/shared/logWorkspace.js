@@ -2,8 +2,8 @@ import { tr } from './i18n.js';
 export const LOG_PRESETS_KEY = 'logFilterPresets.v1';
 export const MAX_LOG_PRESETS = 20;
 export const MAX_EVIDENCE_ENTRIES = 100000;
-const FILTER_TEXT_KEYS = ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'minLevel'];
-const BUFFERS = ['main', 'system', 'radio', 'events', 'crash', 'kernel'];
+const FILTER_TEXT_KEYS = ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel'];
+const BUFFERS = ['main', 'system', 'radio', 'events', 'crash', 'kernel', 'app', 'core', 'init', 'kmsg'];
 
 export function normalizeLogFilter(value = {}) {
   const filter = {};

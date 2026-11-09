@@ -56,11 +56,15 @@ test('final configuration stage uses an actual install hook and leaves the stock
 test('installer paths are passed as environment data, never interpolated as PowerShell code', () => {
   const source = read('build/installer.nsh');
   const calls = source.split('\n').filter(line => line.includes('nsExec::ExecToStack'));
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   for (const call of calls) {
-    assert.match(call, /\$\$dir=\$\$env:VEYLO_INSTALLER_TOOL_DIR/);
+    assert.match(call, /\$\$(?:dir=\$\$env:VEYLO_INSTALLER_TOOL_DIR|target=\[IO.Path\]::GetFullPath\(\$\$env:VEYLO_INSTALLER_HDC\))/);
     assert.ok(!call.includes('$INSTDIR') && !call.includes('$R0'));
     assert.match(call, /\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe/);
   }
   assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_TOOL_DIR", p 0\)/g) || []).length, 3);
+  assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_HDC", p 0\)/g) || []).length, 1);
+  const hdc = calls.find(call => call.includes('VEYLO_INSTALLER_HDC'));
+  assert.match(hdc, /\[string\]::Equals\(\$\$_\.ExecutablePath,\$\$target/);
+  assert.doesNotMatch(hdc, /kill-server|killall|Stop-Process -Name|StartsWith/);
 });

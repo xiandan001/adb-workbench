@@ -1,0 +1,23 @@
+HDC runtime components supplied with this project
+
+hdc.exe (Windows x64, Ver 1.3.0a)
+SHA-256: 8e3c14f38178cd381e03005d7e55e9426e99d410ec41d4fa6c7047d881a8b628
+libusb_shared.dll (Windows x64)
+SHA-256: 3c29d049eb75963d798116cdae7870887e7963ac56fc41e3ab68f86394c1e6a8
+
+HDC upstream source and license:
+https://github.com/openharmony/developtools_hdc
+Apache License 2.0: see LICENSE-HDC.
+
+libusb upstream source and license:
+https://github.com/openharmony/third_party_libusb
+https://libusb.info/
+GNU Lesser General Public License 2.1: see LICENSE-libusb.
+
+The original native binaries are retained without modification. Their exact
+build revision is not supplied with the binaries. The unrelated setuptools
+wheel in the source directory is not included in the application installer.
+
+The optional Veylo media extension is built from native/harmony-media in this
+repository. Its runtime manifest identifies the source and binary hashes.
+Development SDKs and intermediate build files are not shipped.

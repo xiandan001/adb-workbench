@@ -19,7 +19,10 @@ export function workspacePrimaryBlock(current, { devices = [], sources = [], loa
   if (current.busy || reportBusy) return 'busy';
   if (loading) return 'loading';
   if (!current.question.trim()) return 'question';
-  if (current.mode === 'task') return entitled ? '' : 'membership';
+  if (current.mode === 'task') {
+    if (current.deviceId.startsWith('hdc:') && !workspaceDeviceOnline(devices, current.deviceId)) return 'device';
+    return entitled ? '' : 'membership';
+  }
   if (current.mode === 'diagnose') {
     if (!workspaceDeviceOnline(devices, current.deviceId)) return 'device';
     if (!current.checks.length) return 'checks';

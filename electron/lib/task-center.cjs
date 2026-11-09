@@ -4,7 +4,6 @@ const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity 
 const { createTaskTargetRegistry, materializeAiSteps } = require('./task-ai-targets.cjs');
 const { captureRunSnapshot, createTaskRerunService } = require('./task-rerun.cjs');
 const { normalizeTaskOrigin, runEvidence } = require('./task-run-provenance.cjs');
-const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
 const { createTaskAiBridge, normalizeSummary } = require('./task-ai-summary-bridge.cjs');
 
 const { app } = require('electron');
@@ -21,6 +20,13 @@ const inspection = require('./inspection.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice, devicePlatform, deviceTarget } = require('./device-platform.cjs');
+const { resolveDeviceRef } = require('./device-registry.cjs');
+const { getHdcCommand } = require('./hdc-runtime.cjs');
+const { assertTaskPlatform, taskPlatform, sameTaskPlatform } = require('./task-platform.cjs');
+const { captureHarmonyLayout, normalizeHarmonyCoordinate, normalizeHarmonyDuration, normalizeHarmonyPoints } = require('./harmony-task-ui.cjs');
+const { evaluateHarmonyThresholds } = require('./harmony-quality-data.cjs');
+const { withHarmonyTask, findHarmonyNode, executeHarmonyCoreStep, readHarmonyIdentity, detectHarmonyCrashAnr, preflightHarmonyInputs } = require('./harmony-task-execution.cjs');
 
 const SCRIPTS_FILE = 'task-center-scripts.json';
 const HISTORY_FILE = 'task-center-history.json';
@@ -64,8 +70,7 @@ function watchTaskOwner(sender) {
   sender.on?.('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (!inPlace && mainFrame) clear(); });
 }
 async function onlineTaskDevices() {
-  const result = await runRuntimeAdb(['devices', '-l'], { timeoutMs: 10000, maxBuffer: 128 * 1024 });
-  return result.ok ? parseAdbDeviceRows(result.stdout) : [];
+  return require('./device-discovery.cjs').listDevices();
 }
 async function indexedTaskRun(taskId) {
   if (typeof taskId !== 'string' || !/^[\w.-]{1,180}$/.test(taskId)) throw new Error(tr('运行记录无效。'));
@@ -88,7 +93,13 @@ async function verifyRerunDevices(record, deviceIds) {
   const commands = { roSerialno: ['getprop', 'ro.serialno'], roBootSerialno: ['getprop', 'ro.boot.serialno'],
     androidId: ['settings', 'get', 'secure', 'android_id'], wifiMac: ['cat', '/sys/class/net/wlan0/address'] };
   for (const deviceId of deviceIds) {
+    if (!sameTaskPlatform(record, deviceId)) return false;
     const expected = record.deviceRuns.find(run => run.deviceId === deviceId)?.comparisonIdentity || {};
+    if (isHarmonyDevice(deviceId)) {
+      const actual = deviceComparisonIdentity(await readHarmonyIdentity(createRecorderTask(null, deviceId), deviceId));
+      if (expected.transport !== 'hdc' || !expected.harmonyUdid || expected.harmonyUdid !== actual.harmonyUdid) return false;
+      continue;
+    }
     const keys = Object.keys(commands).filter(key => typeof expected[key] === 'string');
     if (!keys.length) return false;
     const actual = {};
@@ -214,7 +225,7 @@ function register(ipcMain) {
     try {
       const deviceId = normalizeDeviceId(args?.deviceId);
       if (!deviceId) return { ok: false, error: 'device_required' };
-      const snapshot = await captureUiSnapshot(createRecorderTask(event.sender), deviceId, args?.timeoutMs || DEFAULT_TIMEOUT_MS);
+      const snapshot = await captureUiSnapshot(createRecorderTask(event.sender, deviceId), deviceId, args?.timeoutMs || DEFAULT_TIMEOUT_MS);
       if (snapshot.error) return { ok: false, error: snapshot.error, nodes: snapshot.nodes || [] };
       if (ownsTaskWindow(event)) { watchTaskOwner(event.sender); return { ok: true, ...taskTargets.remember(snapshot, deviceId, event.sender.id) }; }
       return { ok: true, ...snapshot };
@@ -227,7 +238,7 @@ function register(ipcMain) {
     try {
       const deviceId = normalizeDeviceId(args?.deviceId);
       if (!deviceId) return { ok: false, error: 'device_required' };
-      const result = await recordStressAction(createRecorderTask(event.sender), deviceId, args || {});
+      const result = await recordStressAction(createRecorderTask(event.sender, deviceId), deviceId, args || {});
       return { ok: result.ok, ...result };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -275,12 +286,22 @@ async function runInlineScript(script, deviceIds, sender, args = {}, trusted = {
   try {
     const devices = normalizeDeviceIds(deviceIds);
     if (devices.length === 0) return { ok: false, error: tr("请至少选择一台在线设备") };
-    const nextScript = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(script);
+    let nextScript = args?.scriptId ? readScripts().find(item => item.id === args.scriptId) : normalizeScript(script);
     if (!nextScript) return { ok: false, error: 'script_not_found' };
+    if (devices.every(isHarmonyDevice) && nextScript.id === DEFAULT_SCRIPT.id && !nextScript.targetPlatform
+      && createRunComparisonIdentity(nextScript).scriptHash === createRunComparisonIdentity(normalizeScript(DEFAULT_SCRIPT)).scriptHash) {
+      nextScript = normalizeScript({ ...nextScript, id: 'default-harmony-smoke-test', targetPlatform: 'harmony',
+        steps: [{ ...nextScript.steps[0], command: 'param get const.product.model' }, ...nextScript.steps.slice(1)] });
+    }
+    assertTaskPlatform(nextScript, devices);
+    const deviceRefs = Object.fromEntries(devices.map(id => [id, resolveDeviceRef(id)]));
     const savedScript = readScripts().find(item => item.id === nextScript.id);
     const aiTargetDeviceId = trusted.aiTargetDeviceId || savedScript?.aiTargetDeviceId || '';
     if (aiTargetDeviceId && (devices.length !== 1 || devices[0] !== aiTargetDeviceId)) return { ok: false, code: 'TASK_TARGET_DEVICE', error: tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: aiTargetDeviceId }) };
     const task = createTask(nextScript, devices, sender, args || {});
+    task.deviceRefs = deviceRefs;
+    task.adbPath = getAdbCommand();
+    task.hdcPath = devices.some(isHarmonyDevice) ? getHdcCommand() : '';
     task.analysisOrigin = normalizeTaskOrigin(trusted.analysisOrigin || savedScript?.analysisOrigin);
     task.aiTargetDeviceId = aiTargetDeviceId;
     task.parentTaskId = typeof trusted.parentTaskId === 'string' ? trusted.parentTaskId : '';
@@ -292,8 +313,11 @@ async function runInlineScript(script, deviceIds, sender, args = {}, trusted = {
     activeTasks.set(task.id, task);
     broadcastState();
     require('./workbench-activity.cjs').update(task.id, { stage: tr('正在核验运行输入'), progress: null });
-    try { task.rerunSnapshot = trusted.rerunSnapshot || await captureRunSnapshot(task.script, task, { signal: controller.signal }); }
-    catch (error) { task.error = error.message; task.cancelled = error.code === 'CANCELLED'; }
+    try {
+      for (const deviceId of devices.filter(isHarmonyDevice)) await preflightHarmonyInputs(task, deviceId, controller.signal);
+      task.rerunSnapshot = trusted.rerunSnapshot || await captureRunSnapshot(task.script, task, { signal: controller.signal });
+    }
+    catch (error) { task.error = error.message; task.cancelled ||= error.code === 'CANCELLED'; }
     finally { inputControllers.delete(task.id); }
     if (task.cancelled || task.error) {
       task.status = task.cancelled ? 'cancelled' : 'failed'; task.endedAt = new Date().toISOString();
@@ -319,6 +343,7 @@ function startWorkerTask(task) {
   postTaskWorker({
     action: 'run',
     adbPath: getAdbCommand(),
+    hdcPath: task.hdcPath || '',
     task: toWorkerTask(task)
   });
   return { ok: true };
@@ -843,6 +868,10 @@ async function runStressDevice(task, run) {
 }
 
 async function executeStep(task, deviceId, step) {
+  if (isHarmonyDevice(deviceId)) {
+    const native = await executeHarmonyCoreStep(task, deviceId, step, sleepWithCancel);
+    if (native) return native;
+  }
   const type = step.type;
   if (type === 'shell') {
     const command = String(step.command || '').trim();
@@ -913,6 +942,10 @@ async function captureScreenshot(task, deviceId, step) {
     ? path.resolve(String(step.localPath))
     : path.join(artifactDir, `${sanitizeName(deviceId)}-${formatStamp(new Date())}.png`);
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  if (isHarmonyDevice(deviceId)) {
+    const result = await withHarmonyTask(task, deviceId, options => require('./harmony-media.cjs').captureScreenshot(deviceId, filePath, { ...options, timeoutMs: step.timeoutMs || DEFAULT_TIMEOUT_MS }));
+    return { ...result, output: result.ok ? filePath : result.error, artifact: result.ok ? filePath : '' };
+  }
   const cap = await runAdb(task, ['-s', deviceId, 'shell', 'screencap', '-p', DEVICE_TEMP_SCREEN], step.timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!cap.ok) return { ok: false, error: cap.error || cap.stderr || 'screencap_failed' };
   const pull = await runAdb(task, ['-s', deviceId, 'pull', DEVICE_TEMP_SCREEN, filePath], step.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -971,6 +1004,7 @@ async function capturePerformance(task, deviceId, step) {
     `Memory: ${snapshot.memory?.usage ?? '-'}`,
     `Warnings: ${(snapshot.warnings || []).map(item => item.label).join(', ') || '-'}`
   ].join('\n');
+  if (snapshot.platform === 'harmony') return { ok: !snapshot.sampleError, error: snapshot.sampleError || '', output: [summary, ...(snapshot.unavailable || []).map(item => `${item.metric}: ${item.reason}`)].join('\n'), artifact: filePath, snapshot };
   return { ok: true, output: summary, artifact: filePath, snapshot };
 }
 
@@ -1121,10 +1155,12 @@ async function waitForLog(task, deviceId, step) {
   return { ok: false, error: tr("等待日志超时：{0}", { 0: keyword || regexText }) };
 }
 
-function createRecorderTask(sender) {
+function createRecorderTask(sender, deviceId = '') {
   return {
     id: `recorder-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     sender,
+    deviceRefs: deviceId ? { [deviceId]: resolveDeviceRef(deviceId) } : {},
+    hdcPath: isHarmonyDevice(deviceId) ? getHdcCommand() : '',
     cancelled: false,
     currentProc: null,
     logs: []
@@ -1132,6 +1168,11 @@ function createRecorderTask(sender) {
 }
 
 async function captureUiSnapshot(task, deviceId, timeoutMs) {
+  if (isHarmonyDevice(deviceId)) {
+    const snapshot = await withHarmonyTask(task, deviceId, options => captureHarmonyLayout(deviceId, { ...options, timeoutMs }));
+    return { nodes: snapshot.nodes.map(toPublicUiNode).slice(0, 300), rawLength: snapshot.rawLength,
+      ...await captureRecorderScreenshot(task, deviceId, timeoutMs || DEFAULT_TIMEOUT_MS) };
+  }
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!res.ok) return { nodes: [], rawLength: 0, error: res.error || 'uiautomator_dump_failed' };
   const raw = res.stdout || res.output || '';
@@ -1144,6 +1185,17 @@ async function captureUiSnapshot(task, deviceId, timeoutMs) {
 }
 
 async function captureRecorderScreenshot(task, deviceId, timeoutMs) {
+  if (isHarmonyDevice(deviceId)) {
+    const filePath = path.join(app.getPath('temp'), `awb-task-screen-${crypto.randomUUID()}.png`);
+    try {
+      const result = await withHarmonyTask(task, deviceId, options => require('./harmony-media.cjs').captureScreenshot(deviceId, filePath, { ...options, timeoutMs }));
+      if (!result.ok) return { screenshotDataUrl: '', screenshotWidth: 0, screenshotHeight: 0, screenshotError: result.error };
+      if ((await fs.promises.stat(filePath)).size > MAX_SCREENSHOT_BYTES) throw new Error(tr('截图文件过大，未载入预览。'));
+      const bytes = await fs.promises.readFile(filePath), size = getPngSize(bytes);
+      if (!size) throw new Error(tr('截图文件不是有效 PNG。'));
+      return { screenshotDataUrl: `data:image/png;base64,${bytes.toString('base64')}`, screenshotWidth: size.width, screenshotHeight: size.height, screenshotError: '' };
+    } finally { await fs.promises.unlink(filePath).catch(() => {}); }
+  }
   const res = await runAdbBuffer(task, ['-s', deviceId, 'exec-out', 'screencap', '-p'], timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!res.ok || !res.stdout?.length) {
     return { screenshotDataUrl: '', screenshotWidth: 0, screenshotHeight: 0, screenshotError: res.error || 'screenshot_failed' };
@@ -1162,7 +1214,7 @@ async function captureRecorderScreenshot(task, deviceId, timeoutMs) {
 
 async function recordStressAction(task, deviceId, args) {
   const action = String(args.action || '').trim();
-  const step = buildRecordedStep(action, args);
+  const step = buildRecordedStep(action, { ...args, targetPlatform: devicePlatform(deviceId) });
   if (!step) return { ok: false, error: 'unsupported_record_action' };
 
   let result = { ok: true, output: tr("已记录") };
@@ -1174,11 +1226,12 @@ async function recordStressAction(task, deviceId, args) {
 }
 
 function buildRecordedStep(action, args) {
+  const normalizeRecorded = raw => normalizeStep(raw, undefined, args.targetPlatform);
   const node = args.node && typeof args.node === 'object' ? args.node : null;
   if (action === 'tap') {
     const selector = selectorFromRecordedNode(node);
     const point = pointFromRecordedNodeOrArgs(node, args);
-    return normalizeStep({
+    return normalizeRecorded({
       type: 'tap',
       label: tr("点击 {0}", { 0: node?.label || formatPointLabel(point) }),
       ...selector,
@@ -1188,19 +1241,20 @@ function buildRecordedStep(action, args) {
   if (action === 'longPress') {
     const selector = selectorFromRecordedNode(node);
     const point = pointFromRecordedNodeOrArgs(node, args);
-    return normalizeStep({
+    return normalizeRecorded({
       type: 'longPress',
       label: tr("长按 {0}", { 0: node?.label || formatPointLabel(point) }),
       ...selector,
       ...point,
-      durationMs: args.durationMs || 800
+      ...(args.targetPlatform === 'harmony' && args.longPressMode === 'native' && args.durationMs == null
+        ? { longPressMode: 'native', durationMs: null } : { durationMs: args.durationMs || 800 })
     });
   }
   if (action === 'waitText' || action === 'assertText') {
     const selector = selectorFromRecordedNode(node);
     const text = String(args.text || node?.text || '').trim();
     const label = text || node?.label || describeSelector(selector);
-    return normalizeStep({
+    return normalizeRecorded({
       type: action,
       label: action === 'waitText' ? tr("等待 {0}", { 0: label || tr("控件") }) : tr("断言 {0}", { 0: label || tr("控件") }),
       ...(text ? { text } : {}),
@@ -1209,22 +1263,25 @@ function buildRecordedStep(action, args) {
     });
   }
   if (action === 'input') {
-    return normalizeStep({
+    const inputSelector = selectorFromRecordedNode(node);
+    if (args.targetPlatform === 'harmony' && (inputSelector.resourceId || inputSelector.contentDesc || inputSelector.xpath)) delete inputSelector.text;
+    return normalizeRecorded({
       type: 'input',
       label: tr("输入文本"),
-      text: String(args.text || '')
+      text: String(args.text || ''),
+      ...(args.targetPlatform === 'harmony' && node ? { selector: inputSelector, ...pointFromRecordedNodeOrArgs(node, args) } : {})
     });
   }
   if (action === 'keyevent') {
-    return normalizeStep({
+    return normalizeRecorded({
       type: 'keyevent',
       label: tr("按键 {0}", { 0: args.keyCode || '' }),
       keyCode: String(args.keyCode || '')
     });
   }
   if (action === 'swipe') {
-    const points = normalizeGesturePoints(args.points || args.curvePoints || args.pathPoints);
-    return normalizeStep({
+    const points = args.targetPlatform === 'harmony' ? normalizeHarmonyPoints(args.points || args.curvePoints || args.pathPoints) : normalizeGesturePoints(args.points || args.curvePoints || args.pathPoints);
+    return normalizeRecorded({
       type: 'swipe',
       label: points.length > 2 ? tr("曲线滑动") : tr("滑动"),
       x: args.x,
@@ -1236,7 +1293,7 @@ function buildRecordedStep(action, args) {
     });
   }
   if (action === 'delay') {
-    return normalizeStep({
+    return normalizeRecorded({
       type: 'delay',
       label: tr("等待 {0}ms", { 0: args.durationMs || 1000 }),
       durationMs: args.durationMs || 1000
@@ -1318,6 +1375,7 @@ async function findUiPoint(task, deviceId, step, timeoutMs) {
 }
 
 async function findUiNode(task, deviceId, step, timeoutMs) {
+  if (isHarmonyDevice(deviceId)) return withHarmonyTask(task, deviceId, options => findHarmonyNode(deviceId, step, { ...options, timeoutMs }));
   const selector = normalizeSelector(step);
   if (!hasSelector(selector)) return null;
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -1712,6 +1770,8 @@ async function runExternalScriptStep(task, deviceId, step) {
   const artifactDir = await ensureTaskArtifactDir(task, 'external-scripts');
   const context = {
     adb: getAdbCommand(),
+    hdc: isHarmonyDevice(deviceId) ? task.hdcPath : '',
+    targetKey: deviceTarget(deviceId),
     artifactDir,
     deviceId,
     scriptPath: String(step.scriptPath || '').trim()
@@ -1813,7 +1873,9 @@ function replaceStepPlaceholders(value, context) {
     .replace(/\{deviceId\}/g, context.deviceId || '')
     .replace(/\{artifactDir\}/g, context.artifactDir || '')
     .replace(/\{scriptPath\}/g, context.scriptPath || '')
-    .replace(/\{adb\}/g, context.adb || '');
+    .replace(/\{adb\}/g, context.adb || '')
+    .replace(/\{hdc\}/g, context.hdc || '')
+    .replace(/\{targetKey\}/g, context.targetKey || '');
 }
 
 function createTask(script, deviceIds, sender, args) {
@@ -1934,7 +1996,8 @@ function createStepRun(step, index) {
 
 function normalizeScript(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const steps = Array.isArray(source.steps) ? source.steps.map(normalizeStep).filter(Boolean) : [];
+  const platform = taskPlatform(source);
+  const steps = Array.isArray(source.steps) ? source.steps.map((step, index) => normalizeStep(step, index, platform)).filter(Boolean) : [];
   if (steps.length === 0) throw new Error(tr("脚本至少需要一个步骤"));
   const mode = source.mode === 'stress' || source.type === 'stress' ? 'stress' : 'replay';
   return {
@@ -1942,6 +2005,7 @@ function normalizeScript(raw) {
     name: String(source.name || tr("未命名脚本")).trim().slice(0, 80),
     description: String(source.description || '').trim().slice(0, 500),
     mode,
+    ...(platform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     continueOnError: source.continueOnError !== false,
     loop: normalizeStressLoop(source.loop || source.stress || {}),
     acceptance: normalizeStressAcceptance(source.acceptance || {}),
@@ -1950,12 +2014,14 @@ function normalizeScript(raw) {
   };
 }
 
-function normalizeStep(raw, index) {
+function normalizeStep(raw, index, platform = 'android') {
   if (!raw || typeof raw !== 'object') return null;
   const type = String(raw.type || 'shell').trim();
+  const coordinate = platform === 'harmony' ? normalizeHarmonyCoordinate : nullableNumber;
   return {
     id: String(raw.id || `step-${Date.now()}-${index ?? 0}-${Math.random().toString(16).slice(2)}`),
     type,
+    ...(platform === 'harmony' && raw.longPressMode === 'native' ? { longPressMode: 'native' } : {}),
     label: String(raw.label || getStepTypeLabel(type)).trim().slice(0, 80),
     command: String(raw.command || ''),
     localPath: String(raw.localPath || ''),
@@ -1971,11 +2037,11 @@ function normalizeStep(raw, index) {
     xpath: String(raw.xpath || raw.path || ''),
     selector: normalizeStepSelector(raw.selector || {}),
     requireUnique: raw.requireUnique === true,
-    x: nullableNumber(raw.x),
-    y: nullableNumber(raw.y),
-    endX: nullableNumber(raw.endX),
-    endY: nullableNumber(raw.endY),
-    points: normalizeGesturePoints(raw.points || raw.curvePoints || raw.pathPoints),
+    x: coordinate(raw.x),
+    y: coordinate(raw.y),
+    endX: coordinate(raw.endX),
+    endY: coordinate(raw.endY),
+    points: platform === 'harmony' ? normalizeHarmonyPoints(raw.points || raw.curvePoints || raw.pathPoints) : normalizeGesturePoints(raw.points || raw.curvePoints || raw.pathPoints),
     keyCode: String(raw.keyCode || ''),
     baselinePath: String(raw.baselinePath || ''),
     threshold: clampNumber(raw.threshold, 0, 100, 98),
@@ -1989,7 +2055,7 @@ function normalizeStep(raw, index) {
     includeAiSummary: raw.includeAiSummary !== false,
     timeoutMs: clampNumber(raw.timeoutMs, 1000, 600000, DEFAULT_TIMEOUT_MS),
     intervalMs: clampNumber(raw.intervalMs, 500, 60000, 2000),
-    durationMs: clampNumber(raw.durationMs, 100, 600000, 1000),
+    durationMs: platform === 'harmony' ? normalizeHarmonyDuration(raw) : clampNumber(raw.durationMs, 100, 600000, 1000),
     continueOnError: raw.continueOnError === true
   };
 }
@@ -2079,6 +2145,7 @@ function shouldStopStressOnFailure(task, step) {
 
 function evaluatePerformanceSnapshot(snapshot, thresholds = {}) {
   if (!snapshot) return [];
+  if (snapshot.platform === 'harmony') return evaluateHarmonyThresholds(snapshot, thresholds);
   const warnings = [];
   const push = (type, label, value, limit) => {
     if (limit && Number.isFinite(value) && value > limit) {
@@ -2108,6 +2175,7 @@ function getSnapshotDataUsage(snapshot) {
 }
 
 async function detectCrashAnr(task, deviceId, acceptance) {
+  if (isHarmonyDevice(deviceId)) return detectHarmonyCrashAnr(task, deviceId, acceptance);
   const warnings = [];
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'logcat -d -v time -t 300'], 10000);
   const text = res.output || res.stdout || '';
@@ -2328,6 +2396,7 @@ function importStressScript(filePath, scriptArgs = '') {
 function toStressExportScript(script) {
   return {
     version: 1,
+    ...(script.targetPlatform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     name: script.name,
     description: script.description,
     mode: 'stress',
@@ -2679,16 +2748,20 @@ function cleanup() {
   }
 }
 
-function saveAiDraft(draft, { origin, targets = [] } = {}) {
+function saveAiDraft(draft, { origin, targets = [], targetPlatform, deviceId = '' } = {}) {
   const { parseTask } = require('./ai-workspace-schema.cjs');
-  const valid = parseTask(JSON.stringify(draft), { targets });
+  const targetId = deviceId || targets[0]?.deviceId || '';
+  const platform = targetId ? resolveDeviceRef(targetId, { allowOffline: true }).platform : 'android';
+  if (targetPlatform && targetPlatform !== platform || draft.targetPlatform && draft.targetPlatform !== platform) throw new Error(tr('任务与所选设备平台不一致。'));
+  const { targetPlatform: _targetPlatform, ...modelDraft } = draft;
+  const valid = parseTask(JSON.stringify(modelDraft), { targets, platform });
   valid.steps = materializeAiSteps(valid.steps, targets);
   const aiTargetDeviceId = targets.length ? targets[0].deviceId : '';
   if (targets.length && (typeof aiTargetDeviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(aiTargetDeviceId)
     || targets.some(target => target.deviceId !== aiTargetDeviceId))) throw Object.assign(new Error(tr('控件引用已失效或不属于当前设备，请重新读取并选择控件。')), { code: 'TASK_TARGET_INVALID' });
   const analysisOrigin = normalizeTaskOrigin(origin);
   const timestamp = new Date().toISOString();
-  const script = { ...normalizeScript({ ...valid, id: `ai-${crypto.randomUUID()}`, continueOnError: false,
+  const script = { ...normalizeScript({ ...valid, ...(platform === 'harmony' ? { targetPlatform: 'harmony' } : {}), id: `ai-${crypto.randomUUID()}`, continueOnError: false,
     report: { includeAiSummary: false, includePerformance: false } }),
     ...(analysisOrigin ? { analysisOrigin } : {}), ...(aiTargetDeviceId ? { aiTargetDeviceId } : {}), createdAt: timestamp, updatedAt: timestamp };
   writeScripts([script, ...readScripts()]);

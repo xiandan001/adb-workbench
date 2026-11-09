@@ -15,11 +15,17 @@ const readline = require('readline');
 const ctx = require('./app-context.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const { createLogCaptureBuffer } = require('./log-capture-buffer.cjs');
+const { isHarmonyDevice, devicePlatform } = require('./device-platform.cjs');
+const { parseHiLogLine, buildHiLogArgs, spawnHiLog, clearHiLog } = require('./harmony-log.cjs');
 const { isDev } = ctx;
 
 let logcatProc = null;
 let currentLogSource = 'realtime';
 let currentLogDeviceId = '';
+let realtimeLogDeviceId = '';
+let captureSerial = 0;
+let captureError = '';
+const captureOperations = {};
 let navigationContext = null;
 let pkgResolverTimer = null;
 let pidPackageMap = new Map();
@@ -112,6 +118,8 @@ function parseLogLine(source, line) {
   }
 
   const trimmed = line.replace(/\r?\n$/, '');
+  const hilog = parseHiLogLine(trimmed);
+  if (hilog) return { id: cryptoRandomId(), source, ...hilog };
   const m1 = trimmed.match(threadtimeRe);
   if (m1) {
     const [, mmdd, hhmmss, pid, tid, level, tag, msg] = m1;
@@ -142,6 +150,7 @@ function startPidPackageResolver(adbPathOrDeviceId, maybeDeviceId) {
     ? maybeDeviceId
     : (adbPathOrDeviceId && adbPathOrDeviceId !== 'adb' ? adbPathOrDeviceId : '');
   stopPidPackageResolver();
+  if (isHarmonyDevice(deviceId)) return;
   function refresh() {
     const args = [];
     if (deviceId) args.push('-s', deviceId);
@@ -252,49 +261,42 @@ function register(ipcMain) {
       aiModule.clearAiConversation();
       currentLogSource = session.source;
       currentLogDeviceId = session.deviceId;
+      if (session.source === 'realtime') realtimeLogDeviceId = session.deviceId;
       logStore[session.source] = session.entries;
       if (session.source !== 'realtime') logStoreBytes[session.source] = session.entries.reduce((sum, entry) => sum + entryBytes(entry), 0);
     }
   });
   // ADB 设备列表（Log Analyzer 专用）
   ipcMain.handle('adb:listDevices', async () => {
-    return new Promise((resolve) => {
-      runAdb(['devices', '-l'], { timeoutMs: 10000, queueGlobal: true }).then((res) => {
-        if (!res.ok) return resolve([]);
-        const lines = String(res.stdout || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const out = [];
-        for (const line of lines.slice(1)) {
-          const match = line.match(/^(\S+)\s+device\b(.*)$/);
-          if (!match) continue;
-          const id = match[1];
-          const info = match[2] ?? '';
-          const model = info.match(/model:([^\s]+)/)?.[1];
-          const device = info.match(/device:([^\s]+)/)?.[1];
-          const transportId = info.match(/transport_id:([^\s]+)/)?.[1];
-          out.push({ id, model, device, transportId });
-        }
-        resolve(out);
-      });
-    });
+    return (await require('./device-discovery.cjs').listDevices()).filter(device => device.status === 'device');
   });
 
   // 开始抓取日志
-  ipcMain.handle('adb:startLog', async (event, args) => {
+  const startCapture = async (_event, args) => {
     try {
       // 延迟 require 以打破与 auto-diagnose 的循环依赖
       const autoDiagnose = require('./auto-diagnose.cjs');
-
-      if (logcatProc) {
-        try { logcatProc.kill(); } catch {}
-        logcatProc = null;
+      const captureDeviceId = args?.deviceId || '';
+      const harmony = isHarmonyDevice(captureDeviceId);
+      if (harmony) {
+        require('./device-registry.cjs').resolveDeviceRef(captureDeviceId);
+        if (args?.buffers?.length || args?.extraArgs?.length) throw new Error(tr('鸿蒙日志使用 HiLog 类型，不接受 Logcat 参数。'));
+        buildHiLogArgs({ types: args?.types || [] });
       }
 
-      const captureDeviceId = args?.deviceId || '';
+      if (logcatProc) {
+        const previous = logcatProc;
+        logcatProc = null;
+        try { previous.kill(); } catch {}
+      }
+
       currentLogSource = 'realtime';
       currentLogDeviceId = captureDeviceId;
+      realtimeLogDeviceId = captureDeviceId;
+      const captureId = String(++captureSerial); captureError = '';
       clearLogBatchState();
       resetLogStoreSource('realtime');
-      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
+      if (!harmony && captureDeviceId) runAdb(['-s', captureDeviceId, 'logcat', '-c'], { timeoutMs: 5000 }).catch(() => {});
       ctx.broadcastToAllWindows('log:reset', { source: 'realtime', entries: [] });
 
       startPidPackageResolver(args?.deviceId);
@@ -315,14 +317,18 @@ function register(ipcMain) {
       // 兼容旧 extraArgs 参数（追加在 -b 之后）
       if (args?.extraArgs?.length) adbArgs.push(...args.extraArgs);
 
-      const p = spawnAdb(adbArgs);
+      const p = harmony ? spawnHiLog(captureDeviceId, { types: args?.types || [] }) : spawnAdb(adbArgs);
       logcatProc = p;
+      let diagnostic = '', receivedHiLog = false;
 
       const rl = readline.createInterface({ input: p.stdout });
       rl.on('line', (line) => {
         if (logcatProc !== p) return;
         const entry = parseLogLine('realtime', line);
+        if (harmony && !receivedHiLog && /^\s*\[Fail\]/i.test(line)) { diagnostic = line.slice(0, 2000); p.kill(); return; }
+        receivedHiLog ||= entry.logFormat === 'hilog';
         entry.deviceId = captureDeviceId;
+        if (harmony) entry.platform = 'harmony';
         const pkg = resolvePkg(entry.pid);
         if (pkg) entry.pkg = pkg;
         const lineIndex = appendRealtimeEntry(entry);
@@ -333,12 +339,13 @@ function register(ipcMain) {
       });
 
       // 消费 stderr 防止缓冲区满导致进程挂起
-      p.stderr.on('data', () => {});
+      p.stderr.on('data', data => { diagnostic = (diagnostic + data.toString()).slice(-2000); });
 
-      p.on('exit', () => {
+      const stopped = error => {
         rl.close();
         if (logcatProc !== p) return;
         logcatProc = null;
+        captureError = error || diagnostic;
         stopPidPackageResolver();
         // 进程退出时 flush 剩余批次，避免日志丢失
         if (logBatchFlushTimer) {
@@ -346,17 +353,22 @@ function register(ipcMain) {
           logBatchFlushTimer = null;
         }
         flushLogBatch();
-      });
+        ctx.broadcastToAllWindows('log:capture-state', { source: 'realtime', captureId, deviceId: captureDeviceId, platform: devicePlatform(captureDeviceId), running: false, error: captureError });
+      };
+      p.on('error', error => stopped(error.message));
+      p.on('exit', code => stopped(code ? diagnostic || tr('日志采集已退出（{0}）', { 0: code }) : ''));
 
-      return { ok: true };
+      return { ok: true, captureId, platform: devicePlatform(captureDeviceId) };
     } catch (error) {
       console.error('Failed to start logcat:', error);
       return { ok: false, error: error.message };
     }
-  });
+  };
+  captureOperations.start = args => startCapture(null, args);
+  ipcMain.handle('adb:startLog', startCapture);
 
   // 停止抓取日志
-  ipcMain.handle('adb:stopLog', async () => {
+  const stopCapture = async () => {
     stopPidPackageResolver();
     // 停止抓取时 flush 剩余批次，避免日志丢失
     if (logBatchFlushTimer) {
@@ -365,18 +377,28 @@ function register(ipcMain) {
     }
     flushLogBatch();
     if (logcatProc) {
-      try { logcatProc.kill(); } catch {}
+      const previous = logcatProc;
       logcatProc = null;
+      try { previous.kill(); } catch {}
     }
     return { ok: true };
-  });
+  };
+  captureOperations.stop = stopCapture;
+  ipcMain.handle('adb:stopLog', stopCapture);
 
   // 清空日志
-  ipcMain.handle('log:clear', async (event, args) => {
+  const clearCapture = async (_event, args) => {
+    try {
     const autoDiagnose = require('./auto-diagnose.cjs');
     const s = args?.source ?? currentLogSource;
+    if (!['realtime', 'file'].includes(s)) throw new Error(tr('日志来源无效。'));
     if (!s || s === 'realtime') {
-      runAdb(['logcat', '-c'], { timeoutMs: 5000, queueGlobal: true }).catch(() => {});
+      const target = realtimeLogDeviceId || currentLogDeviceId;
+      if (args?.deviceId && target && args.deviceId !== target) throw new Error(tr('日志目标已变化，未清理其他设备。'));
+      if (target) {
+        const result = isHarmonyDevice(target) ? await clearHiLog(target) : await runAdb(['-s', target, 'logcat', '-c'], { timeoutMs: 5000 });
+        if (!result.ok) throw new Error(result.error || tr('设备日志清理失败，本机证据已保留。'));
+      }
       clearLogBatchState();
     }
     if (!s || s === 'realtime') resetLogStoreSource('realtime');
@@ -385,7 +407,10 @@ function register(ipcMain) {
     autoDiagnose.resetAutoDiagnoseLastFire();
     ctx.broadcastToAllWindows('log:reset', { source: s ?? currentLogSource, entries: [] });
     return { ok: true };
-  });
+    } catch (error) { return { ok: false, error: error.message }; }
+  };
+  captureOperations.clear = args => clearCapture(null, args);
+  ipcMain.handle('log:clear', clearCapture);
 
   // 打开日志文件
   ipcMain.handle('log:openFile', async () => {
@@ -449,7 +474,7 @@ function register(ipcMain) {
   ipcMain.handle('log:getState', async () => {
     const entries = logStore[currentLogSource] || [];
     const limited = entries.length > 50000 ? entries.slice(entries.length - 50000) : entries;
-    return { source: currentLogSource, deviceId: currentLogDeviceId, running: !!logcatProc, entries: limited, truncated: entries.length !== limited.length || (currentLogSource === 'realtime' && realtimeLogStore.truncated) };
+    return { source: currentLogSource, deviceId: currentLogDeviceId, platform: devicePlatform(currentLogDeviceId), captureId: String(captureSerial), captureError, running: !!logcatProc, entries: limited, truncated: entries.length !== limited.length || (currentLogSource === 'realtime' && realtimeLogStore.truncated) };
   });
 
   // 导出日志到文件
@@ -512,6 +537,7 @@ function setLogcatProc(proc) { logcatProc = proc; }
 function setCurrentLogSource(source, deviceId = '') {
   currentLogSource = source;
   currentLogDeviceId = deviceId;
+  if (source === 'realtime') realtimeLogDeviceId = deviceId;
 }
 function resetLogStoreRealtime() {
   clearLogBatchState();
@@ -555,6 +581,9 @@ function setLogStoreFileEntries(entries) {
 }
 
 module.exports = {
+  startLogCapture: args => captureOperations.start?.(args) || Promise.resolve({ ok: false, error: tr('日志服务尚未就绪。') }),
+  stopLogCapture: () => captureOperations.stop?.() || Promise.resolve({ ok: false, error: tr('日志服务尚未就绪。') }),
+  clearLogs: args => captureOperations.clear?.(args) || Promise.resolve({ ok: false, error: tr('日志服务尚未就绪。') }),
   // Local AI preview only: metadata stays bound to the retained source.
   getAnalysisSnapshots: () => ['realtime', 'file'].map(source => {
     const all = logStore[source] || [];

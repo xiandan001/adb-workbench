@@ -1,7 +1,19 @@
 !include "installer-ui.nsh"
 
+!macro VeyloStopBundledHdc
+  IfFileExists "$INSTDIR\hdc\hdc.exe" 0 +8
+  StrCpy $0 "$INSTDIR\hdc\hdc.exe"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_HDC", w r0)'
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$target=[IO.Path]::GetFullPath($$env:VEYLO_INSTALLER_HDC); Get-CimInstance Win32_Process -Filter 'Name=''hdc.exe''' | Where-Object { $$_.ExecutablePath -and [string]::Equals($$_.ExecutablePath,$$target,[StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+  Pop $0
+  Pop $1
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_HDC", p 0)'
+  DetailPrint "Prepared bundled HDC for update"
+!macroend
+
 !macro customInit
   Call VeyloInitLanguage
+  !insertmacro VeyloStopBundledHdc
   StrCpy $0 "$INSTDIR\scrcpy-win64"
   System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_TOOL_DIR", w r0)'
   nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$dir=$$env:VEYLO_INSTALLER_TOOL_DIR; $$names=@('adb.exe','scrcpy.exe','fastboot.exe'); $$procs=Get-CimInstance Win32_Process | Where-Object { $$path=$$_.ExecutablePath; $$name=$$_.Name; $$path -and $$name -and ($$names -contains $$name) -and $$path.StartsWith(($$dir.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase) }; foreach($$proc in $$procs){ Stop-Process -Id $$proc.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 350; Write-Host 'TOOLS_CLEANED'"`
@@ -43,6 +55,7 @@
 !macroend
 
 !macro customUnInstall
+  !insertmacro VeyloStopBundledHdc
   Push $R0
   StrCpy $R0 "$INSTDIR\scrcpy-win64"
 

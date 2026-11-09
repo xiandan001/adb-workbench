@@ -43,6 +43,7 @@ function harness() {
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
     localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
     feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
+    require(name) { assert.equal(name, './lib/harmony-media-window.cjs'); return { shutdownAll: async () => { calls.push('harmony-media'); } }; },
     startupPresentation: null, startupPresented: false, ipcMain: {},
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1.25 }) },
     getMainWindowBounds: require('../electron/lib/main-window-bounds.cjs').getMainWindowBounds,
@@ -151,6 +152,19 @@ test('quit flushes reproduction evidence before closing serial and SSH sources',
   const pending = vm.runInContext(beforeQuitSource, h.context)();
   assert.deepEqual(order, []); finish(); await pending;
   assert.deepEqual(order, ['evidence-saved', 'serial', 'ssh']);
+});
+
+test('quit awaits owned Harmony media cleanup before clearing runtime resources or Android tools', async () => {
+  const h = harness(); h.create(); const order = []; let finish;
+  Object.assign(h.context, { appMessageDialog: { cleanup() {} }, aiTools: { cleanup: async () => {} },
+    serial: { cleanup: async () => order.push('serial') }, ssh: { cleanup: async () => order.push('ssh') },
+    require(name) { assert.equal(name, './lib/harmony-media-window.cjs'); return { shutdownAll: () => new Promise(resolve => { order.push('harmony-start'); finish = resolve; }) }; },
+    cleanupRuntimeResources: () => order.push('runtime'), cleanupAndroidToolProcesses: async () => order.push('android') });
+  const pending = vm.runInContext(beforeQuitSource, h.context)();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(order, ['serial', 'ssh', 'harmony-start']);
+  finish({ success: true }); await pending;
+  assert.deepEqual(order, ['serial', 'ssh', 'harmony-start', 'runtime', 'android']);
 });
 
 test('a stalled optional diagnostic flush cannot block starting device cleanup or hold exit forever', async () => {

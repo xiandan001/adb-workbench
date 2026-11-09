@@ -460,6 +460,12 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             <MetricCard icon={<Zap size={20} />} label={tr("合成 FPS")} value={formatFps(surfaceFlingerFps?.fps)} sub={formatSurfaceFpsSub(surfaceFlingerFps)} color="cyan" theme={t} />
           </div>
 
+          {snapshot?.unavailable?.length > 0 && (
+            <div className={`p-4 rounded-xl border text-sm ${panelClass}`}>
+              {snapshot.unavailable.map(item => <div key={item.metric}>{item.reason}</div>)}
+            </div>
+          )}
+
           {snapshot?.warnings?.length > 0 && (
             <div className={`p-4 rounded-xl border flex items-start gap-3 ${isDark ? 'bg-red-500/10 border-red-500/20 text-red-300' : 'bg-red-50 border-red-200 text-red-600'}`}>
               <AlertTriangle size={18} className="mt-0.5" />
@@ -538,8 +544,8 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                     <tr key={`${proc.pid}-${proc.name}`} className={isDark ? 'text-[#E8EAED]' : 'text-slate-700'}>
                       <td className="px-5 py-3 font-mono text-xs">{proc.pid}</td>
                       <td className="px-5 py-3 max-w-[520px] truncate">{proc.name}</td>
-                      <td className="px-5 py-3 text-right">{proc.cpu.toFixed(1)}%</td>
-                      <td className="px-5 py-3 text-right">{proc.memory.toFixed(1)}%</td>
+                      <td className="px-5 py-3 text-right">{formatPercent(proc.cpu)}</td>
+                      <td className="px-5 py-3 text-right">{formatPercent(proc.memory)}</td>
                     </tr>
                   ))}
                 </tbody>

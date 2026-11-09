@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
+const { createRequire } = require('node:module');
 const { createSessionStore, normalizeSession, register } = require('../electron/lib/log-sessions.cjs');
 
 function fixture() {
@@ -215,7 +216,7 @@ test('logger context changes never start capture or AI; session restore uses loc
       if (name === './ai-analyze.cjs') return { hasActiveAiRequest: () => false, clearAiConversation: () => { aiClears += 1; } };
       if (name === './log-sessions.cjs') return require('../electron/lib/log-sessions.cjs');
       if (name === './log-capture-buffer.cjs') return require('../electron/lib/log-capture-buffer.cjs');
-      return require(name);
+      return createRequire(sourcePath)(name);
     }
   }, { filename: sourcePath });
   module.exports.register({ handle: (channel, action) => handlers.set(channel, action) });

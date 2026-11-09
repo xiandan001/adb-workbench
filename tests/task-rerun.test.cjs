@@ -46,6 +46,24 @@ test('rerun includes only selected original failures, starts the complete snapsh
   await assert.rejects(h.service.run({ previewId: preview.id, deviceIds: ['fixture-B'] }, 1), { code: 'TASK_RERUN_INVALID' });
 });
 
+test('Harmony rerun refuses missing native identity and platform-conflicting snapshots', async () => {
+  const script = { id: 'harmony-script', name: 'Fixture', targetPlatform: 'harmony', continueOnError: false, steps: [{ id: 'delay', type: 'delay', durationMs: 100 }] };
+  const record = { id: 'h-run', status: 'failed', targetPlatform: 'harmony', rerunSnapshot: await captureRunSnapshot(script),
+    deviceRuns: [{ deviceId: 'hdc:QA', status: 'failed', steps: [] }] };
+  const started = [];
+  const service = createTaskRerunService({ getRun: async () => record, getOnlineDevices: async () => [{ id: 'hdc:QA', status: 'device' }],
+    confirm: async () => true, startRun: (...args) => { started.push(args); return { id: 'child' }; } });
+  const unavailable = await service.preview({ taskId: record.id }, 1);
+  assert.equal(unavailable.available, false); assert.match(unavailable.reason, /UDID/);
+  record.deviceRuns[0].comparisonIdentity = { transport: 'hdc', harmonyUdid: 'a'.repeat(64) };
+  const preview = await service.preview({ taskId: record.id }, 1);
+  assert.equal(preview.available, true);
+  await assert.rejects(service.run({ previewId: preview.id, deviceIds: ['QA'] }, 1), { code: 'TASK_RERUN_INVALID' });
+  record.targetPlatform = 'android';
+  await assert.rejects(service.preview({ taskId: record.id }, 1), { code: 'TASK_RERUN_INVALID' });
+  assert.equal(started.length, 0);
+});
+
 test('changed inputs require explicit acceptance and a second change after preview always invalidates consent', async t => {
   const h = await harness(t); fs.writeFileSync(h.filename, 'changed once');
   const preview = await h.service.preview({ taskId: h.record.id }, 1); assert.equal(preview.inputs[0].changed, true);

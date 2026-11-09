@@ -9,6 +9,7 @@ const activity = require('./workbench-activity.cjs');
 const { readMarkerNeighborhood } = require('./reproduction-neighborhood.cjs');
 
 let singleton;
+const isVideoEvidence = file => /^video\.(?:mp4|webm)$/.test(file.name);
 function getService() {
   if (singleton) return singleton;
   const { app } = require('electron');
@@ -19,6 +20,12 @@ function getService() {
     samplePerformance: async deviceId => require('./performance-monitor.cjs').collectSnapshot(deviceId, false, { timeoutMs: 12000 }),
     sourceSnapshots: createSourceSnapshots(sources),
     verifyDevice: async deviceId => {
+      if (require('./device-platform.cjs').isHarmonyDevice(deviceId)) {
+        require('./device-registry.cjs').resolveDeviceRef(deviceId);
+        const result = await require('./hdc-runtime.cjs').runHdc(deviceId, ['shell', 'echo', 'AWB_READY'], { timeoutMs: 5000, maxBuffer: 1024 });
+        if (!result.ok || String(result.stdout).trim() !== 'AWB_READY') throw new Error(tr('所选设备已离线，未切换到其他设备。'));
+        return;
+      }
       const result = await require('./adb-runtime.cjs').runAdb(['-s', deviceId, 'get-state'], { timeoutMs: 5000, maxBuffer: 1024 });
       if (!result.ok || String(result.stdout).trim() !== 'device') throw new Error(tr('所选设备已离线，未切换到其他设备。'));
     },
@@ -41,8 +48,9 @@ function getService() {
 async function openSession({ id } = {}) {
   const service = getService(), session = await service.load(id);
   let videoUrl = '';
-  if (session.files.some(file => file.name === 'video.mp4')) {
-    try { videoUrl = pathToFileURL(await service.store.filePath(id, 'video.mp4', true)).href; } catch { /* A missing video does not hide the remaining evidence. */ }
+  const video = session.files.find(isVideoEvidence);
+  if (video) {
+    try { videoUrl = pathToFileURL(await service.store.filePath(id, video.name, true)).href; } catch { /* A missing video does not hide the remaining evidence. */ }
   }
   return { ok: true, session, videoUrl };
 }
@@ -53,7 +61,7 @@ async function analyzeSession({ id } = {}) {
   const parts = [JSON.stringify({ title: session.title, deviceId: session.deviceId, startedAt: session.startedAt, endedAt: session.endedAt,
     status: session.status, markers: session.markers, warnings: session.warnings, clockBasis: tr('标记按本机时间记录，各来源设备时钟未经同步。') }, null, 2)];
   let bytes = Buffer.byteLength(parts[0]);
-  for (const file of session.files.filter(file => file.name !== 'video.mp4')) {
+  for (const file of session.files.filter(file => !isVideoEvidence(file))) {
     if (bytes >= 440 * 1024) break;
     const evidence = await service.store.readTail(id, file.name, Math.min(64 * 1024, 440 * 1024 - bytes));
     const text = `${file.label}\n${evidence.truncated || file.truncated ? tr('仅包含保留的近期片段，并非完整原始数据。') : ''}\n${evidence.text}`;
@@ -104,7 +112,7 @@ function register(ipcMain) {
     read: async args => {
       const session = await getService().load(args?.id);
       if (args?.markerId) return { ok: true, neighborhood: await readMarkerNeighborhood(getService().store, session, args.markerId) };
-      if (!session.files.some(file => file.name === args?.name) || args.name === 'video.mp4') throw new Error(tr('该证据文件不属于所选复现会话。'));
+      if (!session.files.some(file => file.name === args?.name) || isVideoEvidence({ name: args.name })) throw new Error(tr('该证据文件不属于所选复现会话。'));
       return { ok: true, ...await getService().store.readTail(args.id, args.name, 64 * 1024) };
     }, analyze: analyzeSession, export: exportSession,
   };

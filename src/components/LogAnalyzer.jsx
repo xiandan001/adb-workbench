@@ -97,6 +97,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [running, setRunning] = useState(false);
   // runningRef: 在事件回调（useEffect 内）中同步读取捕获状态，判断是否应切换到 clean 状态
   const runningRef = useRef(false);
+  const captureSessionRef = useRef({ captureId: '', deviceId: '', source: 'realtime' });
   const [source, setSource] = useState('realtime');
   const [entries, setEntries] = useState([]);
   const logBatchBufferRef = useRef(null);
@@ -192,7 +193,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const noteTimerRef = useRef(null);
   // 多缓冲区抓取：默认仅 main（与原行为一致）
   // 可选项：main / system / radio / events / crash / kernel
-  const LOG_BUFFERS = [
+  const isHarmonyTarget = deviceId.startsWith('hdc:');
+  const isHarmonyLog = captureDeviceId.startsWith('hdc:') || entries.slice(0, 64).some(entry => entry.logFormat === 'hilog');
+  const LOG_BUFFERS = isHarmonyTarget ? [
+    { id: 'app', label: tr('应用日志'), desc: 'HiLog app' }, { id: 'core', label: tr('系统日志'), desc: 'HiLog core' },
+    { id: 'init', label: tr('启动日志'), desc: 'HiLog init' }, { id: 'kmsg', label: tr('内核日志'), desc: tr('内核日志须单独选择。') },
+  ] : [
     { id: 'main', label: tr("主日志"), desc: tr("应用与大部分系统日志（默认）") },
     { id: 'system', label: tr("系统日志"), desc: tr("SystemServer、系统服务") },
     { id: 'radio', label: tr("通信日志"), desc: 'Telephony / Wi-Fi / Bluetooth' },
@@ -201,6 +207,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     { id: 'kernel', label: tr("内核日志"), desc: tr("Linux kernel 日志") }
   ];
   const [buffers, setBuffers] = useState(['main']);
+  const compatibleBuffers = buffers.filter(id => LOG_BUFFERS.some(buffer => buffer.id === id));
+  const selectedBuffers = compatibleBuffers.length || isHarmonyTarget ? compatibleBuffers : ['main'];
   const [bufferDropdownOpen, setBufferDropdownOpen] = useState(false);
   // 下拉外部点击关闭用的 ref
   const bufferDropdownRef = useRef(null);
@@ -300,6 +308,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   useEffect(() => {
     runningRef.current = running;
   }, [running]);
+  useEffect(() => { captureSessionRef.current = { ...captureSessionRef.current, source, deviceId: captureDeviceId }; }, [source, captureDeviceId]);
 
   useEffect(() => {
     aiAnalyzingRef.current = aiAnalyzing;
@@ -499,6 +508,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           setCaptureDeviceId(s.deviceId || '');
           setRunning(s.running === true);
           runningRef.current = s.running === true;
+          captureSessionRef.current = { captureId: s.captureId || '', deviceId: s.deviceId || '', source: s.source };
           if (s.running && s.deviceId) setDeviceId(s.deviceId);
           const initialEntries = (s.entries || []).slice(-LOG_VIEW_LIMIT);
           setEntries(initialEntries);
@@ -531,6 +541,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
     function setupLogListeners() {
       const listeners = [];
+      const offCapture = window.electronAPI?.onLogCaptureState?.(value => {
+        const current = captureSessionRef.current;
+        if (value.source !== 'realtime' || current.source !== 'realtime' || value.captureId !== current.captureId || value.deviceId !== current.deviceId) return;
+        setRunning(value.running === true);
+        if (!value.running) { setNote(value.error || tr('日志采集已结束。')); setNoteType(value.error ? 'error' : 'info'); }
+      });
+      if (offCapture) listeners.push(offCapture);
       if (window.electronAPI && window.electronAPI.onLogReset) {
         const offReset = window.electronAPI.onLogReset((payload) => {
           batchBuffer.reset();
@@ -836,11 +853,17 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       try {
         // 传递用户选择的缓冲区（默认 ['main']）
         const startArgs = { deviceId: targetDeviceId };
-        if (buffers && buffers.length > 0) {
-          startArgs.buffers = buffers;
-        }
+        if (isHarmonyTarget) startArgs.types = selectedBuffers;
+        else if (selectedBuffers.length > 0) startArgs.buffers = selectedBuffers;
         const res = await window.electronAPI.adbStartLog(startArgs);
         if (res.ok) {
+          if (res.captureId && window.electronAPI.logGetState) {
+            const actual = await window.electronAPI.logGetState();
+            captureSessionRef.current = { captureId: res.captureId, deviceId: targetDeviceId, source: 'realtime' };
+            if (!actual.running || actual.captureId !== res.captureId || actual.deviceId !== targetDeviceId) {
+              setRunning(false); setLoading(false); setNote(actual.captureError || tr('日志采集未能持续运行，请检查所选设备。')); setNoteType('error'); return;
+            }
+          }
           setRunning(true);
           setSource('realtime');
           setCaptureDeviceId(targetDeviceId);
@@ -859,7 +882,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             });
           }
         } else {
-          setNote(tr("启动失败（请确认已安装 adb 且设备已授权）"));
+          setNote(res.error || tr('日志启动失败，请检查所选设备连接和调试授权。')); setNoteType('error');
         }
       } catch (e) {
         setNote(tr('启动失败：{0}', { 0: e.message }));
@@ -932,13 +955,16 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   }
 
   async function onClear() {
+    try {
+      if (window.electronAPI?.logClear) {
+        const result = await window.electronAPI.logClear({ source, deviceId: captureDeviceId || undefined });
+        if (result?.ok === false) throw new Error(result.error || tr('设备日志清理失败，本机证据已保留。'));
+      }
+    } catch (error) { setNote(error.message); setNoteType('error'); return; }
     logBatchBufferRef.current?.reset();
     setEntries([]);
     loadedEntryCountRef.current = 0;
     setTruncated(false);
-    if (window.electronAPI && window.electronAPI.logClear) {
-      await window.electronAPI.logClear({ source });
-    }
     // UX1: 操作反馈，3 秒后自动清除
     setNote(markers.length ? tr("已清空日志；问题标记及冻结的上下文仍保留，可保存到会话") : tr("已清空日志"));
     if (noteTimerRef.current) clearTimeout(noteTimerRef.current);
@@ -1337,8 +1363,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <div className="flex items-center gap-2 mr-2">
             <Terminal size={18} className={isDark ? 'text-cyan-400' : 'text-emerald-500'} />
             <div>
-              <div className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("Android Log Analyzer")}</div>
-              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("实时抓取 ADB Logcat · 文件加载 · MCP 服务")}</div>
+              <div className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr('设备日志分析')}</div>
+              <div className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr('Logcat / HiLog · 文件加载 · MCP 服务')}</div>
             </div>
           </div>
 
@@ -1369,7 +1395,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <div className="relative" ref={deviceDropdownRef}>
               <button
                 onClick={() => setDeviceDropdownOpen((v) => !v)}
-                disabled={running}
+                disabled={running || loading}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 ${deviceDropdownOpen ? (isDark ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-cyan-400 bg-cyan-50 text-cyan-600') : (isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm')}`}
                 title={running ? tr("抓取中无法切换设备") : tr("选择 ADB 设备")}
               >
@@ -1409,14 +1435,14 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           <div className="relative" ref={bufferDropdownRef}>
             <button
               onClick={() => setBufferDropdownOpen((v) => !v)}
-              disabled={running}
+              disabled={running || loading}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 ${bufferDropdownOpen ? (isDark ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-cyan-400 bg-cyan-50 text-cyan-600') : (isDark ? 'border-slate-500 hover:bg-[#3E4145] text-[#E8EAED] active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-700 active:scale-95 shadow-sm')}`}
               title={running ? tr("抓取中无法切换缓冲区") : tr("选择要抓取的日志缓冲区")}
             >
               <Layers size={14} />
               <span>{tr("日志类型")}</span>
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isDark ? 'bg-[#3E4145] text-cyan-400' : 'bg-slate-100 text-cyan-600'}`}>
-                {buffers.length}
+                {selectedBuffers.length || tr('默认')}
               </span>
               <ChevronDown size={12} className={bufferDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
             </button>
@@ -1425,18 +1451,21 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 <div className={`px-3 py-2 text-xs font-semibold border-b ${isDark ? 'text-[#E8EAED] border-[#3E4145]' : 'text-slate-700 border-slate-100'}`}>{tr("选择日志类型（可多选）")}</div>
                 <div className="max-h-72 overflow-y-auto py-1">
                   {LOG_BUFFERS.map((b) => {
-                    const checked = buffers.includes(b.id);
+                    const checked = selectedBuffers.includes(b.id);
                     return (
                       <button
                         key={b.id}
                         onClick={() => {
                           setBuffers((prev) => {
-                            if (prev.includes(b.id)) {
+                            const compatible = prev.filter(id => LOG_BUFFERS.some(item => item.id === id));
+                            const values = compatible.length || isHarmonyTarget ? compatible : ['main'];
+                            if (values.includes(b.id)) {
                               // 至少保留一个
-                              if (prev.length === 1) return prev;
-                              return prev.filter((x) => x !== b.id);
+                              if (!isHarmonyTarget && values.length === 1) return values;
+                              return values.filter((x) => x !== b.id);
                             }
-                            return [...prev, b.id];
+                            if (isHarmonyTarget && (b.id === 'kmsg' || values.includes('kmsg'))) return [b.id];
+                            return [...values, b.id];
                           });
                         }}
                         className={`w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors ${isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'}`}
@@ -1453,9 +1482,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   })}
                 </div>
                 <div className={`px-3 py-2 border-t flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-                  <span className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("已选 {0} 个", { 0: buffers.length })}</span>
+                  <span className={`text-[11px] ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("已选 {0} 个", { 0: selectedBuffers.length })}</span>
                   <button
-                    onClick={() => setBuffers(['main'])}
+                    onClick={() => setBuffers(isHarmonyTarget ? [] : ['main'])}
                     className={`text-[11px] px-2 py-0.5 rounded ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
                   >{tr("重置为默认")}</button>
                 </div>
@@ -1527,7 +1556,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             truncated={truncated}
             getSnapshot={() => ({
               entries, source, sourceLabel, deviceId: captureDeviceId, filter: { ...filter, text: filterTextInput || undefined },
-              buffers, aiTurns: aiTurnsRef.current, evidence, markers, truncated
+              buffers: selectedBuffers, aiTurns: aiTurnsRef.current, evidence, markers, truncated
             })}
             onRestore={restoreSession}
             onMessage={setNote}
@@ -1765,7 +1794,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               </div>
 
               <div>
-                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("包名")}</label>
+                <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{isHarmonyLog ? tr('应用 / 进程名') : tr("包名")}</label>
                 <input
                   type="text"
                   value={filter.pkg ?? ''}
@@ -1775,6 +1804,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 />
               </div>
 
+              {isHarmonyLog && <div><label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr('日志域（Domain）')}</label>
+                <input type="text" aria-label={tr('日志域（Domain）')} value={filter.domain || ''} onChange={event => setFilter({ ...filter, domain: event.target.value || undefined })} placeholder="A03200" className={`w-full rounded-lg border px-3 py-2 text-xs ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED]' : 'bg-slate-50 border-slate-200 text-slate-700'}`} />
+              </div>}
               <div>
                 <label className={`block text-xs mb-1 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("Tag")}</label>
                 <input
@@ -1900,7 +1932,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               />
             </span>
             <span className="text-center">{tr("级别")}</span>
-            <span className="relative truncate">{tr("包名")}<span
+            <span className="relative truncate">{isHarmonyLog ? tr('应用 / 进程名') : tr("包名")}<span
                 onMouseDown={(e) => onColResizeStart(e, 'pkg')}
                 className={`absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 cursor-col-resize rounded ${isDark ? 'hover:bg-cyan-500/50' : 'hover:bg-cyan-500/40'}`}
                 title={tr("拖拽调整包名列宽度")}
@@ -2567,8 +2599,8 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
 const LogRow = memo(function LogRow({ entry, isDark, colWidths, highlighted, marked, onMark }) {
   useLocale();
   const lvl = entry.level ?? 'V';
-  const tag = entry.tag ?? '';
-  const pkg = entry.pkg ?? '';
+  const tag = entry.domain ? `${entry.domain}/${entry.tag || ''}` : entry.tag ?? '';
+  const pkg = entry.pkg || entry.processName || '';
   const msg = entry.message ?? entry.raw;
 
   // 使用动态列宽（与表头保持一致），消息列自适应剩余空间

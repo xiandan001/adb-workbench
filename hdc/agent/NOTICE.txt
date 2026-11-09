@@ -1,0 +1,9 @@
+AWB Harmony Media Agent
+Application-owned source: native/harmony-media.
+Built using OpenHarmony Native SDK 5.1.0.107.
+The shared libraries statically link the SDK libc++, libc++abi, unwind and compiler runtime components.
+Their upstream LLVM/Apache license terms and LLVM exceptions are preserved in NOTICE-LLVM.txt.
+Additional SDK runtime notices (including musl) are retained in NOTICE-OpenHarmony-Runtime.txt.
+SDK notices are retained for completeness; not all listed SDK components are distributed here.
+The device provides its native libc and AVScreenCapture/AVCodec/window libraries; they are not bundled.
+The OpenHarmony SDK and toolchain are build dependencies only and are not included in the installer.

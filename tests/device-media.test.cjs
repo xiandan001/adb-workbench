@@ -33,6 +33,20 @@ test('recent images/videos persist across instances, filter by exact device and 
   await assert.rejects(restored.perform({ id: 'fake', action: 'open' }), /不在最近记录/);
 });
 
+test('native WebM and Android MP4 keep their actual extension format across persisted media history', async t => {
+  const h = await fixture(t);
+  const webm = await h.store.add({ type: 'video', deviceId: 'hdc:a', path: await h.file('native.webm'),
+    format: 'mp4', logPath: await h.file('native.log') });
+  const mp4 = await h.store.add({ type: 'video', deviceId: 'a', path: await h.file('android.mp4'), format: 'webm' });
+  assert.equal(webm.format, 'webm'); assert.equal(mp4.format, 'mp4');
+  const restored = createDeviceMediaStore(h.options);
+  assert.equal((await restored.list({ deviceId: 'hdc:a' }))[0].format, 'webm');
+  await restored.perform({ id: webm.id, action: 'open' });
+  await restored.perform({ id: webm.id, action: 'log' });
+  assert.deepEqual(h.calls, [webm.path, webm.logPath]);
+  await assert.rejects(h.store.add({ type: 'video', deviceId: 'hdc:a', path: await h.file('unsupported.avi') }), /文件类型/);
+});
+
 test('metadata trimming never deletes media and missing files are removed persistently', async t => {
   const h = await fixture(t, 2);
   const original = await h.file('old.png');

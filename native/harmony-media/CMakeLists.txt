@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(awb_harmony_media LANGUAGES CXX)
+add_library(awb-media-agent SHARED agent.cpp av_capture.cpp)
+set_target_properties(awb-media-agent PROPERTIES PREFIX "" CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
+target_compile_options(awb-media-agent PRIVATE -Wall -Wextra -Werror -Wno-unused-command-line-argument -fvisibility=hidden)
+target_link_libraries(awb-media-agent PRIVATE dl)
+target_link_options(awb-media-agent PRIVATE -Wl,-z,relro,-z,now,-z,noexecstack)
+target_link_options(awb-media-agent PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map")

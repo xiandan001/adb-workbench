@@ -4,14 +4,15 @@ const { redactText } = require('./feedback-policy.cjs');
 const limits = require('./ai-workspace-limits.cjs');
 const { normalizeSelection, selectLines } = require('./ai-workspace-selection.cjs');
 const { APP_CHECKS, diagnosticChecks, diagnosticCommand, normalizeDiagnostic } = require('./ai-workspace-diagnostics.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
 
 const MAX_SOURCE_BYTES = limits.sourceBytes;
 const MAX_EVIDENCE_BYTES = limits.evidenceBytes;
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const digest = value => createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
 
-function checks() {
-  return diagnosticChecks();
+function checks(platform, capabilities) {
+  return diagnosticChecks(platform, capabilities);
 }
 
 function stripControls(text) {
@@ -82,11 +83,12 @@ function freezeEntry(source, index, now, selection = normalizeSelection()) {
   const uncertain = rows.some(row => !selected.observations[row.position]
     || selected.observations[row.position].clockBasis !== 'explicit-offset');
   return { id: `E${index + 1}`, source: source.kind, label: sanitize(source.label),
-    evidenceKind: source.checkId ? `adb:${source.checkId}` : source.kind,
+    evidenceKind: source.checkId ? `${source.kind}:${source.checkId}` : source.kind,
     target: sanitize(source.target || ''), capturedAt: new Date(source.capturedAt ?? now).toISOString(),
     timeBasis: source.timeBasis || tr('采集时间；内容中的设备时钟未经同步'),
     text: rows.map((row, line) => `[L${line + 1}] ${row.text}`).join('\n'), numbered: true,
-    targetKey: source.kind === 'adb' || source.deviceId ? digest(`device:${source.deviceId || source.target}`)
+    ...(source.kind === 'hdc' || source.platform === 'harmony' ? { platform: 'harmony' } : {}),
+    targetKey: ['adb', 'hdc'].includes(source.kind) || source.deviceId ? digest(`device:${source.deviceId || source.target}`)
       : source.target && source.kind !== 'text' && source.target !== tr('文件来源') ? digest(`${source.kind}:${source.target}`) : null,
     truncated: Boolean(source.truncated || windowed || cutLine || rows.length < selected.selectedLineCount),
     redactions: rows.filter(row => row.text !== selected.lines[row.position]).length,
@@ -97,14 +99,16 @@ function freezeEntry(source, index, now, selection = normalizeSelection()) {
     ...(uncertain || selected.omittedUnknownTimeLines ? { timeWarning: tr('时间仅代表各来源自身时钟；无年份或未知时间的内容不能确定跨源先后关系。时间筛选会排除无法匹配的时间行。') } : {}) };
 }
 
-function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), getSsh = () => [], readSsh, runAdb, now = Date.now, processor }) {
+function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), getSsh = () => [], readSsh, runAdb, now = Date.now, processor, harmony }) {
+  const harmonyEvidence = () => harmony || (harmony = require('./harmony-evidence.cjs').createHarmonyEvidence());
   function descriptors() {
     const result = [];
     for (const log of getLogs()) {
       if (!log.entries?.length) continue;
       const id = `log:${digest(`${log.source}:${log.deviceId || ''}:${log.identity}`)}`;
-      result.push({ id, label: log.source === 'file' ? tr('已打开的日志文件') : tr('ADB 日志缓冲'), kind: 'log',
-        detail: log.deviceId || tr('文件来源'), read: () => ({ kind: 'log', label: log.source === 'file' ? tr('已打开的日志文件') : tr('ADB 日志缓冲'),
+      const label = log.source === 'file' ? tr('已打开的日志文件') : isHarmonyDevice(log.deviceId) ? tr('HiLog 日志缓冲') : tr('ADB 日志缓冲');
+      result.push({ id, label, kind: 'log',
+        detail: log.deviceId || tr('文件来源'), read: () => ({ kind: 'log', label, ...(isHarmonyDevice(log.deviceId) ? { platform: 'harmony' } : {}),
           target: log.deviceId || tr('文件来源'), deviceId: log.deviceId || null,
           ...captureRows(log.entries, row => row.raw || ''), ...(log.truncated ? { truncated: true } : {}) }) });
     }
@@ -159,6 +163,13 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     });
     if (text.trim()) raw.push({ kind: 'text', label: tr('手动补充'), target: '', text, capturedAt: now(), timeBasis: tr('用户提供内容，事件时间未经验证') });
     if (selectedChecks.length) {
+      if (isHarmonyDevice(deviceId)) {
+        const first = await harmonyEvidence().verifyTarget(deviceId, signal);
+        for (const id of selectedChecks) raw.push({ ...await harmonyEvidence().readCheck(deviceId, id, diagnostic, signal),
+          label: checks('harmony').find(check => check.id === id).label, capturedAt: now() });
+        const last = await harmonyEvidence().verifyTarget(deviceId, signal);
+        if (first.generation !== last.generation) throw fail('AI_SOURCE_CHANGED', tr('所选来源已变化，请刷新来源后重新选择。'));
+      } else {
       const state = await adbRead(deviceId, ['get-state'], signal);
       if (state.trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
       for (const id of selectedChecks) {
@@ -185,6 +196,7 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
           ...(APP_CHECKS.includes(id) ? { diagnostic, unavailable } : {}) });
       }
       if ((await adbRead(deviceId, ['get-state'], signal)).trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
+      }
     }
     if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
     if (!raw.length || raw.every(item => !item.text.trim() && !item.unavailable)) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
@@ -199,6 +211,7 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
   return { list: () => descriptors().map(({ read: _read, ...item }) => item), collect,
     async verifyTarget(deviceId, signal) {
       if (typeof deviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(deviceId)) throw fail('AI_DEVICE_REQUIRED', tr('请选择有效的目标设备。'));
+      if (isHarmonyDevice(deviceId)) { await harmonyEvidence().verifyTarget(deviceId, signal); return; }
       if ((await adbRead(deviceId, ['get-state'], signal)).trim() !== 'device') throw fail('AI_DEVICE_OFFLINE', tr('所选设备已离线，未切换到其他设备。'));
     } };
 }

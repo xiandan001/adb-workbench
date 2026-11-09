@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
 import { draftFingerprint, readTaskDraft, writeTaskDraft, resolveScriptAfterSave } from '../shared/taskCenterWorkspace';
+import { taskPlatformForDevice, taskPlatformMismatch, adaptPristineBuiltin, createHarmonyTaskTemplate } from '../shared/taskPlatform';
 import {
   advanceOnboardingStage,
   createSingleReplayScript,
@@ -49,9 +50,10 @@ import {
   Upload
 } from 'lucide-react';
 
-const STEP_TYPES = () => ([
+const STEP_TYPES = (platform = 'android') => ([
   { value: 'shell', label: tr("Shell 命令"), description: tr("执行一条 ADB shell 命令"), icon: Terminal },
   { value: 'installApk', label: tr("安装 APK"), description: tr("安装本地 APK 到设备"), icon: Package },
+  { value: 'launchApp', label: tr('启动鸿蒙应用'), description: tr('按 Bundle 名称读取真实 Ability 后启动'), icon: Package },
   { value: 'pushFile', label: tr("推送文件"), description: tr("推送本地文件到设备路径"), icon: Upload },
   { value: 'screenshot', label: tr("截图"), description: tr("保存当前设备画面"), icon: Camera },
   { value: 'imageCompare', label: tr("截图比对"), description: tr("采集截图并与基准图做相似度验收"), icon: Camera },
@@ -67,7 +69,12 @@ const STEP_TYPES = () => ([
   { value: 'waitLog', label: tr("等待日志"), description: tr("轮询直到日志命中"), icon: Search },
   { value: 'externalScript', label: tr("外部脚本"), description: tr("调用 Appium、Maestro、UIAutomator2 或自定义命令"), icon: Terminal },
   { value: 'delay', label: tr("等待"), description: tr("等待指定毫秒数"), icon: Clock3 }
-]);
+]).filter(item => platform === 'harmony' || item.value !== 'launchApp').map(item => platform === 'harmony' ? {
+  ...item,
+  ...(item.value === 'installApk' ? { label: tr('安装 HAP/HSP'), description: tr('安装本地鸿蒙应用包到设备') } : {}),
+  ...(item.value === 'shell' ? { description: tr('执行所选鸿蒙设备的 Shell 命令') } : {}),
+  ...(item.value === 'keyevent' ? { description: tr('发送鸿蒙逻辑按键或显式原生键码') } : {})
+} : item);
 
 const LONG_PRESS_RECORD_THRESHOLD_MS = 600;
 const RECORD_ACTIONS_REFRESH_SNAPSHOT = new Set(['tap', 'longPress', 'swipe', 'input', 'keyevent']);
@@ -290,6 +297,12 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const activeCount = activeTasks.filter(task => task.status === 'running' || task.status === 'queued').length;
   const selectedScript = scripts.find(script => script.id === selectedScriptId);
   const draftDirty = draftFingerprint(draft) !== savedFingerprint;
+  const platformMismatch = taskPlatformMismatch(draft, selectedDeviceIds);
+  useEffect(() => {
+    if (loading || draftDirty) return;
+    const next = adaptPristineBuiltin(draft, activeDeviceId);
+    if (next) { setDraft(next); setSelectedScriptId(next.id); setSavedFingerprint(draftFingerprint(next)); }
+  }, [activeDeviceId, draft, draftDirty, loading]);
   const selectedTask = [...activeTasks, ...history].find(task => task.id === selectedTaskId);
   useEffect(() => {
     const requestKey = `${incomingTaskId}:${incomingTaskRequestId}`;
@@ -494,7 +507,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
 
   const createScript = () => {
     replaceDraft(() => {
-      const next = createEmptyScript();
+      const next = createEmptyScript(taskPlatformForDevice(activeDeviceId || selectedDeviceIds[0]));
       setSelectedScriptId(next.id);
       setDraft(next);
       setSavedFingerprint(draftFingerprint(next));
@@ -508,7 +521,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       return;
     }
     replaceDraft(() => {
-      const next = createTemplateScript(templateId);
+      const next = createTemplateScript(templateId, taskPlatformForDevice(activeDeviceId || selectedDeviceIds[0]));
       setSelectedScriptId(next.id);
       setDraft(next);
       setSavedFingerprint('');
@@ -516,7 +529,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       if (templateId === 'record') showToast?.(tr("已创建录制流程，选择设备后读取界面即可开始"));
       if (templateId === 'launch') showToast?.(tr("已创建启动应用压测模板，请先填写应用包名"));
       if (templateId === 'compare') showToast?.(tr("已创建截图比对模板，请设置基准图后运行"));
-      if (templateId === 'install-launch') showToast?.(tr("已创建安装后启动验证模板，请先选择 APK 并填写包名"));
+      if (templateId === 'install-launch') showToast?.(next.targetPlatform === 'harmony' ? tr('已创建鸿蒙安装启动流程，请选择 HAP/HSP 并填写 Bundle 名称。') : tr("已创建安装后启动验证模板，请先选择 APK 并填写包名"));
       if (templateId === 'crash-capture') showToast?.(tr("已创建崩溃复现采集模板，请填写目标应用包名"));
       if (templateId === 'smoke') showToast?.(tr("已创建基础冒烟检查模板，可直接选择设备运行"));
       if (templateId === 'performance-watch') showToast?.(tr("已创建性能观察模板，请填写目标应用包名"));
@@ -664,6 +677,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
 
   const runScript = async () => {
     if (starting) return;
+    if (platformMismatch) { showToast?.(tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。')); return; }
     if (selectedDeviceIds.length === 0) {
       showToast?.(tr("请至少选择一台在线设备"));
       return;
@@ -779,9 +793,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     }, RECORDER_BACKGROUND_REFRESH_DELAY_MS);
   };
 
-  const appendRecordedStep = (step, mode = 'stress') => {
+  const appendRecordedStep = (step, mode = 'stress', platform = 'android') => {
     setDraft(prev => ({
       ...prev,
+      targetPlatform: platform === 'harmony' ? 'harmony' : undefined,
       mode,
       steps: [...(prev.steps || []), { ...step, id: `step-${Date.now()}-${Math.random().toString(16).slice(2)}` }]
     }));
@@ -794,6 +809,10 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     }
     if (!onlineDevices.some(device => device.id === recorder.deviceId)) {
       showToast?.(tr("录制设备已离线，请重新连接或主动选择另一台设备"));
+      return null;
+    }
+    if (draft.steps.length && taskPlatformMismatch(draft, [recorder.deviceId])) {
+      showToast?.(tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。'));
       return null;
     }
     if (recorderActionInFlightRef.current || recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
@@ -817,7 +836,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       if (!isCurrent()) return null;
       if (res?.ok && res.step) {
         const recordingMode = workspaceView === 'recording' ? 'replay' : 'stress';
-        appendRecordedStep(res.step, recordingMode);
+        appendRecordedStep(res.step, recordingMode, taskPlatformForDevice(deviceId));
         recordedStep = res.step;
         if (RECORD_ACTIONS_REFRESH_SNAPSHOT.has(action) && !options.skipRefresh) {
           shouldRefreshSnapshot = true;
@@ -841,6 +860,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const changeRecordingDevice = (patch) => {
     updateRecorder(patch);
     if (!Object.prototype.hasOwnProperty.call(patch, 'deviceId')) return;
+    if (patch.deviceId) setDraft(prev => prev.steps.length ? prev : { ...prev, targetPlatform: taskPlatformForDevice(patch.deviceId) === 'harmony' ? 'harmony' : undefined });
     setSelectedDeviceIds(patch.deviceId ? [patch.deviceId] : []);
     setRecordingTaskId('');
     if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.DEVICE_SELECT && patch.deviceId) {
@@ -1003,7 +1023,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const addStep = (type) => {
     setDraft(prev => ({
       ...prev,
-      steps: [...prev.steps, createStep(type)]
+      steps: [...prev.steps, createStep(type, prev.targetPlatform)]
     }));
   };
 
@@ -1042,6 +1062,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
             <h3 className={`text-lg font-semibold flex items-center gap-2 ${text}`}>
               <ClipboardList size={20} className="text-emerald-500" />{tr("任务中心")}</h3>
             <p className={`text-sm mt-1 ${muted}`}>{tr("先选择目标，复杂设置会在需要时再显示。")}</p>
+            <p className={`mt-1 text-xs ${muted}`}>{draft.targetPlatform === 'harmony' ? tr('任务平台：Harmony/OpenHarmony') : tr('任务平台：Android（旧脚本默认）')}</p>
             <p className={`mt-2 text-xs ${draftStorageError ? 'text-red-500' : muted}`}>
               {draftDirty ? tr("有未保存修改 · ") : ''}{draftRecovered ? tr("已恢复上次工作 · ") : ''}{draftStorageError || tr("当前草稿已自动保存在本机")}
             </p>
@@ -1100,6 +1121,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           {offlineTargets.length > 0 && <button type="button" onClick={() => setSelectedDeviceIds(prev => prev.filter(id => !offlineTargets.includes(id)))} className="underline">{tr("取消勾选离线目标")}</button>}
         </div>
       )}
+      {platformMismatch && <p role="status" className="rounded-lg border border-amber-500/30 p-3 text-sm text-amber-500">{tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。')}</p>}
       {workspaceView === 'home' ? (
         <TaskCenterQuickStart
           theme={t}
@@ -1229,7 +1251,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                 selectedDeviceIds={selectedDeviceIds}
                 recorder={recorder}
                 saving={saving}
-                runDisabled={starting || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0}
+                runDisabled={starting || platformMismatch || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0}
                 onApplyTemplate={applyQuickTemplate}
                 onDraftChange={(patch) => setDraft(prev => ({ ...prev, ...patch }))}
                 onToggleDevice={toggleDevice}
@@ -1257,7 +1279,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                     <div className="flex items-center gap-2">
                       <button onClick={() => setSelectedDeviceIds(onlineDevices.map(device => device.id))} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>{tr("全选")}</button>
                       <button onClick={() => setSelectedDeviceIds([])} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>{tr("清空")}</button>
-                      <button onClick={runScript} disabled={starting || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
+                      <button onClick={runScript} disabled={starting || platformMismatch || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
                         <Play size={15} />
                         {draft.mode === 'stress' ? tr("开始压测") : tr("运行")}
                       </button>
@@ -1310,7 +1332,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                       <div className={`text-xs mt-1 ${muted}`}>{tr("{0} 个步骤", { 0: draft.steps.length })}</div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {STEP_TYPES().map(type => {
+                      {STEP_TYPES(draft.targetPlatform).map(type => {
                         const Icon = type.icon;
                         return (
                           <button key={type.value} onClick={() => addStep(type.value)} className={`px-2.5 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 ${t.button.secondary}`}>
@@ -1326,6 +1348,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
                       <div className={`py-12 text-center text-sm ${muted}`}>{tr("添加一个步骤开始编排复现流程")}</div>
                     ) : draft.steps.map((step, index) => (
                       <StepEditor
+                        platform={draft.targetPlatform}
                         key={step.id}
                         step={step}
                         index={index}
@@ -1465,8 +1488,8 @@ function SimpleModePanel({
   const loop = draft.loop || {};
   const acceptance = draft.acceptance || {};
   const report = draft.report || {};
-  const launchStepIndex = (draft.steps || []).findIndex(step => step.type === 'shell' && /^monkey\s+-p\s+/i.test(step.command || ''));
-  const launchPackage = launchStepIndex >= 0 ? extractMonkeyPackage(draft.steps[launchStepIndex].command) : '';
+  const launchStepIndex = (draft.steps || []).findIndex(step => step.type === 'launchApp' || step.type === 'shell' && /^monkey\s+-p\s+/i.test(step.command || ''));
+  const launchPackage = launchStepIndex < 0 ? '' : draft.steps[launchStepIndex].type === 'launchApp' ? draft.steps[launchStepIndex].packageName || '' : extractMonkeyPackage(draft.steps[launchStepIndex].command);
   const setLoop = (patch) => onDraftChange({ loop: { ...loop, ...patch } });
   const setAcceptance = (patch) => onDraftChange({ acceptance: { ...acceptance, ...patch } });
   const setReport = (patch) => onDraftChange({ report: { ...report, ...patch } });
@@ -1474,6 +1497,7 @@ function SimpleModePanel({
 
   const updateLaunchPackage = (value) => {
     if (launchStepIndex < 0) return;
+    if (draft.steps[launchStepIndex].type === 'launchApp') { onUpdateStep(launchStepIndex, { packageName: value.trim() }); return; }
     onUpdateStep(launchStepIndex, { command: value.trim() ? `monkey -p ${value.trim()} 1` : 'monkey -p com.example.app 1' });
   };
 
@@ -1881,6 +1905,8 @@ function CheckOption({ label, checked, onChange, isDark }) {
 }
 
 function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode = false, focusedMode = false, tapOnly = false, onChange, onRefresh, onRefreshDevices, onRecord, onClearSteps }) {
+  const harmony = taskPlatformForDevice(recorder.deviceId) === 'harmony';
+  const keyValue = harmony && /^\d+$/.test(String(recorder.keyCode || '')) ? '' : recorder.keyCode;
   useLocale();
   const selectedNode = recorder.nodes.find(node => String(node.index) === String(recorder.selectedNodeIndex));
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
@@ -2182,7 +2208,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button disabled={!selectedNode || recorderBusy} onClick={() => onRecord('tap')} className={recorderButtonClass(isDark)}>
                 <Smartphone size={13} />{tr("点击")}</button>
-              <button disabled={!selectedNode || recorderBusy} onClick={() => onRecord('longPress', { durationMs: recorder.longPress.durationMs })} className={recorderButtonClass(isDark)}>
+              <button disabled={!selectedNode || recorderBusy} onClick={() => onRecord('longPress', harmony ? { longPressMode: 'native', durationMs: null } : { durationMs: recorder.longPress.durationMs })} className={recorderButtonClass(isDark)}>
                 <Smartphone size={13} />{tr("长按")}</button>
               <button disabled={!selectedNode || recorderBusy} onClick={() => onRecord('waitText', { timeoutMs: recorder.timeoutMs })} className={recorderButtonClass(isDark)}>
                 <Clock3 size={13} />{tr("等待")}</button>
@@ -2200,8 +2226,8 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
 
             {!simpleMode && (
               <div className={`rounded-lg border p-3 space-y-2 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
-                <TextField label="KeyCode" value={recorder.keyCode} onChange={(value) => onChange({ keyCode: value })} placeholder={tr("例如：66")} isDark={isDark} />
-                <button disabled={!recorder.keyCode || recorderBusy} onClick={() => onRecord('keyevent', { keyCode: recorder.keyCode })} className={recorderButtonClass(isDark, true)}>
+                <TextField label="KeyCode" value={keyValue} onChange={(value) => onChange({ keyCode: value })} placeholder={harmony ? 'Home / Back / Power / native:2072' : tr("例如：66")} isDark={isDark} />
+                <button disabled={!keyValue || recorderBusy} onClick={() => onRecord('keyevent', { keyCode: keyValue })} className={recorderButtonClass(isDark, true)}>
                   <Terminal size={13} />{tr("按键并记录")}</button>
               </div>
             )}
@@ -2214,6 +2240,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
           <div>
             <div className={`text-sm font-semibold ${text}`}>{tr("手势与等待")}</div>
             <div className={`text-xs mt-1 ${muted}`}>{tr("在设备画面上点击会记录点击，拖拽会记录滑动；手动坐标只作为兜底。")}</div>
+            {harmony && <p className="mt-1 text-xs text-amber-500">{tr('鸿蒙长按请使用原生长按按钮；曲线手势不自动转换。')}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <button disabled={recorderBusy} onClick={() => onRecord('delay', { durationMs: recorder.delayMs })} className={recorderButtonClass(isDark)}>
@@ -2237,8 +2264,8 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                 <Smartphone size={13} />{tr("按手动坐标滑动并记录")}</button>
               <NumberField label={tr("长按X")} value={recorder.longPress.x} onChange={(value) => onChange({ longPress: { ...recorder.longPress, x: value } })} isDark={isDark} />
               <NumberField label={tr("长按Y")} value={recorder.longPress.y} onChange={(value) => onChange({ longPress: { ...recorder.longPress, y: value } })} isDark={isDark} />
-              <NumberField label={tr("长按时长(ms)")} value={recorder.longPress.durationMs} onChange={(value) => onChange({ longPress: { ...recorder.longPress, durationMs: value } })} isDark={isDark} />
-              <button disabled={recorderBusy || recorder.longPress.x === '' || recorder.longPress.y === ''} onClick={() => onRecord('longPress', recorder.longPress)} className={`${recorderButtonClass(isDark, true)} lg:col-span-2`}>
+              {harmony ? <p className="text-xs text-amber-500">{tr('使用设备原生长按时长')}</p> : <NumberField label={tr("长按时长(ms)")} value={recorder.longPress.durationMs} onChange={(value) => onChange({ longPress: { ...recorder.longPress, durationMs: value } })} isDark={isDark} />}
+              <button disabled={recorderBusy || recorder.longPress.x === '' || recorder.longPress.y === ''} onClick={() => onRecord('longPress', harmony ? { x: recorder.longPress.x, y: recorder.longPress.y, longPressMode: 'native', durationMs: null } : recorder.longPress)} className={`${recorderButtonClass(isDark, true)} lg:col-span-2`}>
                 <Smartphone size={13} />{tr("按手动坐标长按并记录")}</button>
             </div>
           </details>
@@ -2386,15 +2413,15 @@ function nodeOverlayStyle(node, recorder) {
   };
 }
 
-function StepTypeDropdown({ value, isDark, onChange }) {
+function StepTypeDropdown({ value, isDark, onChange, platform = 'android' }) {
   useLocale();
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
-  const selectedIndex = Math.max(0, STEP_TYPES().findIndex(type => type.value === value));
+  const selectedIndex = Math.max(0, STEP_TYPES(platform).findIndex(type => type.value === value));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
-  const selected = STEP_TYPES()[selectedIndex] || STEP_TYPES()[0];
+  const selected = STEP_TYPES(platform)[selectedIndex] || STEP_TYPES(platform)[0];
   const SelectedIcon = selected.icon;
 
   useEffect(() => {
@@ -2438,17 +2465,17 @@ function StepTypeDropdown({ value, isDark, onChange }) {
       }
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setActiveIndex(prev => (prev + 1) % STEP_TYPES().length);
+        setActiveIndex(prev => (prev + 1) % STEP_TYPES(platform).length);
         return;
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        setActiveIndex(prev => (prev - 1 + STEP_TYPES().length) % STEP_TYPES().length);
+        setActiveIndex(prev => (prev - 1 + STEP_TYPES(platform).length) % STEP_TYPES(platform).length);
         return;
       }
       if (event.key === 'Enter') {
         event.preventDefault();
-        const next = STEP_TYPES()[activeIndex] || STEP_TYPES()[0];
+        const next = STEP_TYPES(platform)[activeIndex] || STEP_TYPES(platform)[0];
         onChange(next.value);
         setOpen(false);
       }
@@ -2459,7 +2486,7 @@ function StepTypeDropdown({ value, isDark, onChange }) {
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [activeIndex, onChange, open]);
+  }, [activeIndex, onChange, open, platform]);
 
   useEffect(() => {
     setActiveIndex(selectedIndex);
@@ -2478,7 +2505,7 @@ function StepTypeDropdown({ value, isDark, onChange }) {
       }}
       className={`z-[120] overflow-y-auto rounded-xl border p-1.5 shadow-2xl ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200'}`}
     >
-      {STEP_TYPES().map((type, index) => {
+      {STEP_TYPES(platform).map((type, index) => {
         const Icon = type.icon;
         const selectedOption = type.value === value;
         const active = index === activeIndex;
@@ -2530,12 +2557,12 @@ function StepTypeDropdown({ value, isDark, onChange }) {
   );
 }
 
-function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, onMoveDown }) {
+function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, onMoveDown, platform = 'android' }) {
   useLocale();
   const t = theme;
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const selectedType = STEP_TYPES().find(type => type.value === step.type) || STEP_TYPES()[0];
+  const selectedType = STEP_TYPES(platform).find(type => type.value === step.type) || STEP_TYPES(platform)[0];
   const Icon = selectedType.icon;
   const unlimitedScriptTimeout = hasUnlimitedExternalScriptTimeout(step);
 
@@ -2555,9 +2582,10 @@ function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, 
           <div className={`text-xs mt-0.5 ${muted}`}>{tr("步骤 {0}", { 0: index + 1 })}</div>
         </div>
         <StepTypeDropdown
+          platform={platform}
           value={step.type}
           isDark={isDark}
-          onChange={(value) => onChange({ ...createStep(value), id: step.id, label: getTypeLabel(value) })}
+          onChange={(value) => onChange({ ...createStep(value, platform), id: step.id, label: getTypeLabel(value, platform) })}
         />
         <button onClick={onMoveUp} className={`px-2 py-2 rounded-lg border text-xs ${t.button.secondary}`}>{tr("上移")}</button>
         <button onClick={onMoveDown} className={`px-2 py-2 rounded-lg border text-xs ${t.button.secondary}`}>{tr("下移")}</button>
@@ -2567,7 +2595,7 @@ function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, 
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {renderStepFields(step, onChange, isDark)}
+        {renderStepFields(step, onChange, isDark, platform)}
         {unlimitedScriptTimeout ? (
           <div>
             <FieldLabel label={tr("执行超时")} isDark={isDark} />
@@ -2587,7 +2615,8 @@ function hasUnlimitedExternalScriptTimeout(step) {
   return extension === 'py' || extension === 'sh';
 }
 
-function renderStepFields(step, onChange, isDark) {
+function renderStepFields(step, onChange, isDark, platform = 'android') {
+  const harmony = platform === 'harmony';
   if (step.type === 'shell') {
     return (
       <label className="lg:col-span-2 block">
@@ -2596,20 +2625,21 @@ function renderStepFields(step, onChange, isDark) {
           value={step.command}
           onChange={(e) => onChange({ command: e.target.value })}
           rows={3}
-          placeholder={tr("例如：dumpsys window | grep mCurrentFocus")}
+          placeholder={harmony ? 'param get const.product.model' : tr("例如：dumpsys window | grep mCurrentFocus")}
           className={fieldClass(isDark, 'font-mono')}
         />
       </label>
     );
   }
   if (step.type === 'installApk') {
-    return <TextField label={tr("APK 路径")} value={step.localPath} onChange={(value) => onChange({ localPath: value })} placeholder="C:\\path\\app.apk" isDark={isDark} />;
+    return <TextField label={harmony ? tr('HAP/HSP 路径') : tr("APK 路径")} value={step.localPath} onChange={(value) => onChange({ localPath: value })} placeholder={harmony ? 'C:\\path\\app.hap' : 'C:\\path\\app.apk'} isDark={isDark} />;
   }
+  if (step.type === 'launchApp') return <TextField label={tr('Bundle 名称')} value={step.packageName || ''} onChange={value => onChange({ packageName: value })} placeholder="com.example.app" isDark={isDark} />;
   if (step.type === 'pushFile') {
     return (
       <>
         <TextField label={tr("本地文件")} value={step.localPath} onChange={(value) => onChange({ localPath: value })} placeholder="C:\\path\\file.txt" isDark={isDark} />
-        <TextField label={tr("设备路径")} value={step.remotePath} onChange={(value) => onChange({ remotePath: value })} placeholder="/sdcard/" isDark={isDark} />
+        <TextField label={tr("设备路径")} value={step.remotePath} onChange={(value) => onChange({ remotePath: value })} placeholder={harmony ? '/data/local/tmp/' : '/sdcard/'} isDark={isDark} />
       </>
     );
   }
@@ -2634,7 +2664,7 @@ function renderStepFields(step, onChange, isDark) {
         <TextField label={tr("XPath-like 路径")} value={step.xpath} onChange={(value) => onChange({ xpath: value })} placeholder={tr("录制后自动生成，可手动调整")} isDark={isDark} />
         <NumberField label={tr("X坐标（可选）")} value={step.x ?? ''} onChange={(value) => onChange({ x: value })} isDark={isDark} />
         <NumberField label={tr("Y坐标（可选）")} value={step.y ?? ''} onChange={(value) => onChange({ y: value })} isDark={isDark} />
-        {step.type === 'longPress' && <NumberField label={tr("长按时长(ms)")} value={step.durationMs} onChange={(value) => onChange({ durationMs: value })} isDark={isDark} />}
+        {step.type === 'longPress' && (harmony ? <div className="text-xs text-amber-500">{tr('UITest 使用设备原生长按时长，不支持自定义毫秒。')}{(step.longPressMode !== 'native' || step.durationMs != null) && <button type="button" onClick={() => onChange({ longPressMode: 'native', durationMs: null })} className="mt-2 block underline">{tr('改用设备原生长按')}</button>}</div> : <NumberField label={tr("长按时长(ms)")} value={step.durationMs} onChange={(value) => onChange({ durationMs: value })} isDark={isDark} />)}
       </>
     );
   }
@@ -2646,15 +2676,17 @@ function renderStepFields(step, onChange, isDark) {
         <NumberField label={tr("终点X")} value={step.endX ?? ''} onChange={(value) => onChange({ endX: value })} isDark={isDark} />
         <NumberField label={tr("终点Y")} value={step.endY ?? ''} onChange={(value) => onChange({ endY: value })} isDark={isDark} />
         <NumberField label={tr("滑动时长(ms)")} value={step.durationMs} onChange={(value) => onChange({ durationMs: value })} isDark={isDark} />
+        {harmony && <p className="text-xs text-amber-500">{tr('鸿蒙直线滑动会按距离与时长换算速度；超出 UITest 范围或曲线路径将拒绝执行。')}</p>}
         <TextAreaField label={tr("曲线路径点(JSON，可选)")} value={formatGesturePointsInput(step.points)} onChange={(value) => onChange({ points: value })} placeholder={tr("例如：[{\"x\":100,\"y\":200},{\"x\":180,\"y\":260},{\"x\":260,\"y\":220}]")} isDark={isDark} />
       </>
     );
   }
   if (step.type === 'input') {
+    if (harmony) return <><TextField label={tr('输入文本')} value={step.text} onChange={value => onChange({ text: value })} isDark={isDark} /><NumberField label={tr('X坐标（可选）')} value={step.x ?? ''} onChange={value => onChange({ x: value })} isDark={isDark} /><NumberField label={tr('Y坐标（可选）')} value={step.y ?? ''} onChange={value => onChange({ y: value })} isDark={isDark} /><p className="text-xs text-amber-500">{tr('未指定控件或坐标时，当前焦点输入需 API 18 及以上。')}</p></>;
     return <TextField label={tr("输入文本")} value={step.text} onChange={(value) => onChange({ text: value })} placeholder={tr("输入到当前焦点")} isDark={isDark} />;
   }
   if (step.type === 'keyevent') {
-    return <TextField label="KeyCode" value={step.keyCode} onChange={(value) => onChange({ keyCode: value })} placeholder={tr("例如：66 表示 Enter")} isDark={isDark} />;
+    return <TextField label="KeyCode" value={step.keyCode} onChange={(value) => onChange({ keyCode: value })} placeholder={harmony ? 'Home / Back / Power / native:2072' : tr("例如：66 表示 Enter")} isDark={isDark} />;
   }
   if (step.type === 'waitText' || step.type === 'assertText') {
     return (
@@ -2675,7 +2707,7 @@ function renderStepFields(step, onChange, isDark) {
         <TextField label={tr("适配器")} value={step.adapter} onChange={(value) => onChange({ adapter: value })} placeholder="custom / maestro / appium / uiautomator2" isDark={isDark} />
         <TextField label={tr("脚本路径")} value={step.scriptPath} onChange={(value) => onChange({ scriptPath: value })} placeholder={tr("C:\\\\path\\\\script.py 或 .yaml")} isDark={isDark} />
         <TextField label={tr("命令（可选）")} value={step.command} onChange={(value) => onChange({ command: value })} placeholder={tr("留空时按脚本后缀或适配器推断")} isDark={isDark} />
-        <TextField label={tr("参数")} value={step.args} onChange={(value) => onChange({ args: value })} placeholder="{deviceId} {artifactDir} {scriptPath} {adb}" isDark={isDark} />
+        <TextField label={tr("参数")} value={step.args} onChange={(value) => onChange({ args: value })} placeholder={harmony ? '{hdc} {targetKey} {artifactDir} {scriptPath}' : '{deviceId} {artifactDir} {scriptPath} {adb}'} isDark={isDark} />
         <TextField label={tr("工作目录（可选）")} value={step.workingDir} onChange={(value) => onChange({ workingDir: value })} placeholder={tr("留空默认脚本所在目录")} isDark={isDark} />
       </>
     );
@@ -2875,7 +2907,8 @@ function fieldClass(isDark, extra = '') {
   return `w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${isDark ? 'bg-[#2D2F33] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'} ${extra}`;
 }
 
-function createTemplateScript(templateId) {
+function createTemplateScript(templateId, platform = 'android') {
+  if (platform === 'harmony') return createHarmonyTaskTemplate(templateId, createEmptyScript(platform), type => createStep(type, platform));
   const script = {
     ...createEmptyScript(),
     id: `script-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -3009,7 +3042,8 @@ function getStepSummary(step) {
   if (step.type === 'imageCompare') return { title: step.label || tr("截图比对"), detail: tr("{0}，阈值 {1}%", { 0: step.baselinePath || tr("未设置基准图"), 1: step.threshold || 98 }), icon: Camera };
   if (step.type === 'perfSnapshot') return { title: step.label || tr("采集性能快照"), detail: tr("记录 CPU、内存、温度和存储空间"), icon: Gauge };
   if (step.type === 'tap') return { title: step.label || tr("点击 {0}", { 0: target }), detail: target, icon: Smartphone };
-  if (step.type === 'longPress') return { title: step.label || tr("长按 {0}", { 0: target }), detail: `${target}，${step.durationMs || 800}ms`, icon: Smartphone };
+  if (step.type === 'longPress') return { title: step.label || tr("长按 {0}", { 0: target }), detail: step.longPressMode === 'native' ? tr('使用设备原生长按时长') : `${target}，${step.durationMs || 800}ms`, icon: Smartphone };
+  if (step.type === 'launchApp') return { title: step.label || tr('启动鸿蒙应用'), detail: step.packageName || tr('请填写 Bundle 名称'), icon: Package };
   if (step.type === 'swipe') return { title: step.label || tr("滑动屏幕"), detail: getSwipeSummary(step), icon: Smartphone };
   if (step.type === 'input') return { title: step.label || tr("输入文本"), detail: step.text || tr("未填写输入文本"), icon: Terminal };
   if (step.type === 'keyevent') return { title: step.label || tr("发送按键"), detail: `KeyCode ${step.keyCode || '-'}`, icon: Terminal };
@@ -3050,17 +3084,18 @@ function extractMonkeyPackage(command) {
   return match?.[1] || '';
 }
 
-function createEmptyScript() {
+function createEmptyScript(platform = 'android') {
   return {
     id: `script-${Date.now()}`,
     name: tr("新复现脚本"),
     description: '',
+    ...(platform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     mode: 'replay',
     continueOnError: true,
     loop: { count: 1, durationMs: 0, intervalMs: 1000, continueOnError: true },
     acceptance: { minSuccessRate: 100, failOnCrash: true, failOnAnr: true, thresholds: { cpu: '', memory: '', batteryTemp: '', dataUsed: '' } },
     report: { includeAiSummary: false, includePerformance: false },
-    steps: [createStep('shell')]
+    steps: [createStep('shell', platform)]
   };
 }
 
@@ -3096,14 +3131,14 @@ function createRecorderState() {
   };
 }
 
-function createStep(type) {
+function createStep(type, platform = 'android') {
   return {
     id: `step-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     type,
-    label: getTypeLabel(type),
-    command: type === 'shell' ? 'getprop ro.product.model' : '',
+    label: getTypeLabel(type, platform),
+    command: type === 'shell' ? (platform === 'harmony' ? 'param get const.product.model' : 'getprop ro.product.model') : '',
     localPath: '',
-    remotePath: type === 'pushFile' ? '/sdcard/' : '',
+    remotePath: type === 'pushFile' ? (platform === 'harmony' ? '/data/local/tmp/' : '/sdcard/') : '',
     keyword: '',
     regex: '',
     text: '',
@@ -3131,13 +3166,14 @@ function createStep(type) {
     includeAiSummary: true,
     timeoutMs: type === 'waitLog' ? 60000 : 30000,
     intervalMs: 2000,
-    durationMs: type === 'longPress' ? 800 : 1000,
+    ...(type === 'longPress' && platform === 'harmony' ? { longPressMode: 'native' } : {}),
+    durationMs: type === 'longPress' ? (platform === 'harmony' ? null : 800) : 1000,
     continueOnError: false
   };
 }
 
-function getTypeLabel(type) {
-  return STEP_TYPES().find(item => item.value === type)?.label || tr("执行步骤");
+function getTypeLabel(type, platform = 'android') {
+  return STEP_TYPES(platform).find(item => item.value === type)?.label || tr("执行步骤");
 }
 
 function cloneScript(script) {

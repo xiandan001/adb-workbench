@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const { tr } = require('./localization.cjs');
@@ -181,9 +182,12 @@ function createReproductionService({ directory, recording, startLog, samplePerfo
         try {
           const result = await recording.stopOwned({ id: runtime.recordingId });
           if (!result.success) throw new Error(result.error || tr('录屏尚未保存，请在设备录屏记录中恢复。'));
-          const target = await store.filePath(id, 'video.mp4');
+          const extension = path.extname(result.path).toLowerCase();
+          if (!['.mp4', '.webm'].includes(extension)) throw new Error(tr('不支持的媒体文件类型'));
+          const videoName = 'video' + extension;
+          const target = await store.filePath(id, videoName);
           if (result.path !== target) await fs.copyFile(result.path, target, require('node:fs').constants.COPYFILE_EXCL);
-          file(runtime, 'video.mp4', tr('复现视频'), { bytes: (await fs.stat(target)).size });
+          file(runtime, videoName, tr('复现视频'), { bytes: (await fs.stat(target)).size });
           runtime.session.videoDurationMs = result.session?.durationMs || 0;
         } catch (error) { warning(runtime, error.message); }
       }

@@ -11,6 +11,13 @@ const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const { resolveDeviceRef } = require('./device-registry.cjs');
+const { getHdcCommand } = require('./hdc-runtime.cjs');
+
+function performanceTarget(deviceId) {
+  return isHarmonyDevice(deviceId) ? { deviceRef: resolveDeviceRef(deviceId), hdcPath: getHdcCommand() } : {};
+}
 
 // 默认 3 秒采样，减少性能面板数值延后感；1 秒高频仍由会员权限控制。
 const DEFAULT_INTERVAL_MS = 3000;
@@ -62,6 +69,7 @@ function register(ipcMain) {
     await stopMonitor(deviceId);
     const monitor = {
       deviceId,
+      ...performanceTarget(deviceId),
       intervalMs,
       includeProcesses: isVip && args?.includeProcesses !== false,
       vip: isVip,
@@ -76,6 +84,7 @@ function register(ipcMain) {
       includeProcesses: monitor.includeProcesses,
       startedAt: monitor.startedAt,
       thresholds: readThresholds(),
+      ...performanceTarget(deviceId),
       adbPath: getAdbCommand()
     }, 3000);
     if (!workerResult.ok) {
@@ -241,15 +250,19 @@ function updateReportProgress(task, progress) {
 async function collectSnapshot(deviceId, includeProcesses, options = {}) {
   const normalizedDeviceId = normalizeDeviceId(deviceId);
   if (!normalizedDeviceId) throw new Error('device_required');
+  const target = performanceTarget(normalizedDeviceId);
   const result = await requestWorker('snapshot', {
     deviceId: normalizedDeviceId,
     includeProcesses: includeProcesses === true,
     forceHeavy: options.includeFps !== false,
     thresholds: readThresholds(),
+    ...target,
     adbPath: getAdbCommand()
   }, options.timeoutMs || 12000);
+  if (isHarmonyDevice(normalizedDeviceId) && resolveDeviceRef(normalizedDeviceId).generation !== target.deviceRef.generation) throw new Error(tr('设备连接已变化，请重新开始采样。'));
   if (result.ok && result.snapshot) return result.snapshot;
   if (options.fallbackToLegacy === true) {
+    if (isHarmonyDevice(normalizedDeviceId)) return require('./harmony-metrics.cjs').collectHarmonySnapshot(normalizedDeviceId, { ...options, includeProcesses });
     return collectSnapshotLegacy(normalizedDeviceId, includeProcesses, options);
   }
   throw new Error(result.error || 'snapshot_failed');
@@ -720,6 +733,18 @@ function broadcastUpdate(deviceId, payload) {
   ctx.broadcastToAllWindows('performance:update', { deviceId, ...payload });
 }
 
+function syncDeviceConnections(devices) {
+  for (const monitor of monitors.values()) {
+    if (!isHarmonyDevice(monitor.deviceId)) continue;
+    const current = devices.find(device => device.id === monitor.deviceId);
+    if (current?.status === 'device' && current.generation === monitor.deviceRef?.generation) continue;
+    void stopMonitor(monitor.deviceId).catch(() => {});
+    historyByDevice.delete(monitor.deviceId);
+    lastSnapshotByDevice.delete(monitor.deviceId);
+    broadcastUpdate(monitor.deviceId, { running: false, error: tr('设备连接已变化，请重新开始采样。') });
+  }
+}
+
 function ensurePerformanceWorker() {
   if (performanceWorker) return performanceWorker;
   performanceWorker = new Worker(getPerformanceWorkerPath(), {
@@ -1145,4 +1170,4 @@ function firstPercent(parts) {
   return value ? Number(value.replace('%', '')) : null;
 }
 
-module.exports = { register, cleanup, collectSnapshot };
+module.exports = { register, cleanup, collectSnapshot, syncDeviceConnections };

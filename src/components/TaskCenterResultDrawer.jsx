@@ -62,6 +62,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {task.stressSummary?.reason && task.stressSummary.reason !== task.error && <p className="text-sm text-amber-500">{task.stressSummary.reason}</p>}
           <section>
             <h4 className="font-medium">{tr("运行设备")}</h4>
+            {task.targetPlatform === 'harmony' && (task.deviceRuns || []).some(run => !run.comparisonIdentity?.harmonyUdid) && <p className="mt-2 text-xs text-amber-500">{tr('未记录可靠鸿蒙 UDID；本连接可执行，但不能据此跨连接恢复、比较或自动复跑。')}</p>}
             <div className="mt-2 space-y-2">
               {(task.deviceRuns || []).map(run => <div key={run.originalDeviceId || run.deviceId} className="flex flex-wrap justify-between gap-2 rounded-lg border border-current/10 p-3 text-sm"><span className="font-mono break-all">{run.deviceId}</span><span>{getTaskStatusLabel(run.status)}</span></div>)}
             </div>

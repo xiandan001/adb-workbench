@@ -102,7 +102,7 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
             </div>
             <div className="min-w-0">
               <h3 className={`text-lg font-semibold ${text}`}>{tr("设备连接与环境自检")}</h3>
-              <p className={`text-xs mt-1 ${muted}`}>{tr("检查 ADB、scrcpy、设备授权和命令通路")}</p>
+              <p className={`text-xs mt-1 ${muted}`}>{tr("检查 ADB、HDC、投屏工具、设备授权和命令通路")}</p>
             </div>
           </div>
           <button
@@ -152,7 +152,7 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
               <button
                 type="button"
                 onClick={restartAdb}
-                disabled={running || restarting}
+                disabled={running || restarting || String(selectedDeviceId).startsWith('hdc:')}
                 className={`px-4 py-2.5 rounded-lg border font-medium flex items-center justify-center gap-2 disabled:opacity-60 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`}
               >
                 {restarting ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}{tr("重启 ADB")}</button>

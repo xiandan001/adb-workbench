@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { tr } from '../src/shared/i18n.js';
+import { taskPlatformMismatch, taskPlatformForDevice } from '../src/shared/taskPlatform.js';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser'); const traverse = require('@babel/traverse').default;
 function handler(file, name, context) {
@@ -18,6 +19,7 @@ function recorderContext(api) {
   const state = { recorder: { deviceId: 'A', nodes: [], selectedNodeIndex: '', recording: false }, steps: [], refreshes: [] };
   const context = {
     recorder: state.recorder, onlineDevices: [{ id: 'A' }, { id: 'B' }], workspaceView: 'recording',
+    draft: { steps: [] }, taskPlatformMismatch, taskPlatformForDevice,
     recorderMountedRef: { current: true }, recorderActionInFlightRef: { current: false },
     recorderContextRef: { current: { deviceId: 'A', generation: 1 } },
     clearScheduledRecorderRefresh() {}, showToast() {}, RECORD_ACTIONS_REFRESH_SNAPSHOT: new Set(['tap']),
@@ -41,6 +43,17 @@ test('auto-switch clearing visual flags cannot admit another recorded action whi
   let calls = 0; const h = recorderContext({ taskStressRecordAction: async () => { calls++; return { ok: true, step: {} }; } });
   h.context.recorderActionInFlightRef.current = true;
   await handler('TaskCenter.jsx', 'recordAction', h.context)('tap'); assert.equal(calls, 0);
+});
+
+test('recording refuses to append Harmony actions to an existing legacy Android script', async () => {
+  let calls = 0;
+  const h = recorderContext({ taskStressRecordAction: async () => { calls++; return { ok: true, step: {} }; } });
+  h.context.recorder = { ...h.context.recorder, deviceId: 'hdc:A' };
+  h.context.onlineDevices = [{ id: 'hdc:A' }];
+  h.context.draft = { steps: [{ type: 'tap' }] };
+  h.context.recorderContextRef.current = { deviceId: 'hdc:A', generation: 2 };
+  assert.equal(await handler('TaskCenter.jsx', 'recordAction', h.context)('tap'), null);
+  assert.equal(calls, 0); assert.deepEqual(h.state.steps, []);
 });
 
 test('an A-to-B-to-A context round trip rejects the earlier A recorder screenshot', async () => {

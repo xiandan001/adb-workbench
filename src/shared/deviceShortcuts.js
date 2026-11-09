@@ -12,13 +12,15 @@ function readList(key, storage) {
 }
 
 export function readRecentApks(storage = globalThis.localStorage) {
-  return readList(RECENT_APKS_KEY, storage).filter(item => /\.apk$/i.test(item)).slice(0, 5);
+  const paths = readList(RECENT_APKS_KEY, storage);
+  return [...paths.filter(item => /\.apk$/i.test(item)).slice(0, 5), ...paths.filter(item => /\.(hap|hsp)$/i.test(item)).slice(0, 5)];
 }
 
 export function addRecentApk(paths, filePath) {
-  if (typeof filePath !== 'string' || !/\.apk$/i.test(filePath)) return paths;
+  if (typeof filePath !== 'string' || !/\.(apk|hap|hsp)$/i.test(filePath)) return paths;
   const key = value => value.replaceAll('\\', '/').toLowerCase();
-  return [filePath, ...paths.filter(item => key(item) !== key(filePath))].slice(0, 5);
+  const samePlatform = value => /\.apk$/i.test(value) === /\.apk$/i.test(filePath);
+  return [filePath, ...paths.filter(item => samePlatform(item) && key(item) !== key(filePath))].slice(0, 5).concat(paths.filter(item => !samePlatform(item)));
 }
 
 export function readFavoritePackages(storage = globalThis.localStorage) {

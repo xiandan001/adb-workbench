@@ -84,6 +84,7 @@ export function AiWorkspaceTask({ draft, busy, onSave, usage, theme }) {
   return <section aria-label={tr('测试任务草案')} className={`space-y-4 rounded-xl border p-4 ${theme.card}`}>
     <div className="flex items-center gap-2"><FileCheck2 size={19} className="text-emerald-500" /><h3 className="text-sm font-semibold">{tr('测试任务草案')}</h3></div>
     <div><h4 className="text-base font-semibold">{draft.name}</h4><p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-6 ${theme.textMuted}`}>{draft.description}</p></div>
+    {draft.targetPlatform === 'harmony' && <p className="rounded-lg border border-cyan-500/30 p-3 text-xs">{tr('鸿蒙原生任务 · 目标设备：{0}', { 0: draft.deviceId })}</p>}
     {draft.targets?.length > 0 && <><AiWorkspaceHandoff targets={draft.targets} theme={theme} /><div className="space-y-1">{draft.targets.map(target => <p key={target.id} className={`break-all text-[11px] leading-5 ${theme.textMuted}`}>{target.id}: {Object.entries(target.selector || {}).map(([key, value]) => `${key}=${value}`).join(', ')}</p>)}</div></>}
     <p className={`text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600 dark:text-amber-400'}`}>{fresh ? tr('草案有效至 {0}', { 0: formatDateTime(draft.expiresAt) }) : tr('草案已过期，不能保存；请保留目标并手动重新生成。')}</p>
     {(observationOnly || draft.missingInformation?.length > 0) && <div className="space-y-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5">

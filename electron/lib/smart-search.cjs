@@ -162,7 +162,7 @@ function register(rawIpcMain) {
     }
 
     // 构造系统 prompt - 优化 prompt 提高准确性
-    const systemPrompt = tr("你是 Android 日志分析专家。用户会用自然语言描述想查找的日志内容，你需要在提供的日志块中找到所有匹配的行。\n\n任务：\n1. 仔细阅读每一行日志\n2. 找出所有与用户查询语义相关的行（包括同义词、关联词、错误堆栈等）\n3. 宁可多匹配也不要漏匹配\n\n返回严格的 JSON 格式（只返回 JSON，不要 markdown 代码块，不要其他文字）：\n{\"matchedLines\":[行号1,行号2],\"explanation\":\"说明\"}\n\n注意：\n- matchedLines 中的行号必须是日志行开头方括号中的数字，例如 [123] 则行号为 123\n- 如果没有匹配，返回 {\"matchedLines\":[],\"explanation\":\"未找到匹配\"}\n- 行号必须是整数，不要带引号");
+    const systemPrompt = tr('你是 Android/鸿蒙日志分析专家。保留 Logcat 与 HiLog 的原生语义，不要混淆 Domain、进程、Tag、Bundle 和包名。用户会用自然语言描述想查找的日志内容，你需要在提供的日志块中找到匹配的行。\n\n任务：\n1. 仔细阅读每一行日志\n2. 找出与用户查询语义相关的行（包括同义词、关联词、错误堆栈等）\n3. 未匹配不代表设备正常\n\n只返回 JSON：{\"matchedLines\":[行号1,行号2],\"explanation\":\"说明\"}。行号必须是日志行开头方括号内实际存在的整数；没有匹配时返回空数组。不要返回 Markdown 或其他文字。');
 
     // 本地精确匹配：从查询中提取关键词，本地保证 100% 准确匹配
     // 即使 AI 漏掉，本地匹配也能兜底

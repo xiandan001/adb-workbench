@@ -1,4 +1,4 @@
-const { tr } = require('./localization.cjs');
+const { tr, getLocale } = require('./localization.cjs');
 // AI 自动诊断引擎：实时检测 logcat 中的崩溃/ANR/OOM 等关键问题
 // 触发后向渲染进程推送 onAutoDiagnose 事件，由用户确认是否调用 AI 分析
 //
@@ -27,6 +27,18 @@ const {
 // 日志诊断规则库：内置规则基础版可用，自定义规则与导入导出由会员版解锁。
 const AUTO_DIAGNOSE_RULES_FILE = 'auto-diagnose-rules.json';
 const AUTO_DIAGNOSE_BUILTIN_RULES = [
+  {
+    id: 'builtin-harmony-js-crash', type: 'harmony_js_crash', get label() { return tr('鸿蒙 JS 崩溃'); }, severity: 'fatal',
+    pattern: '\\bJS_CRASH\\b', flags: 'i', keywords: ['JS_CRASH'], enabled: true, builtIn: true
+  },
+  {
+    id: 'builtin-harmony-app-freeze', type: 'harmony_app_freeze', get label() { return tr('鸿蒙应用无响应'); }, severity: 'fatal',
+    pattern: '\\bAPP_FREEZE\\b', flags: 'i', keywords: ['APP_FREEZE'], enabled: true, builtIn: true
+  },
+  {
+    id: 'builtin-harmony-cpp-crash', type: 'harmony_cpp_crash', get label() { return tr('鸿蒙 C++ 崩溃'); }, severity: 'fatal',
+    pattern: '\\bCPP_CRASH\\b', flags: 'i', keywords: ['CPP_CRASH'], enabled: true, builtIn: true
+  },
   {
     id: 'builtin-crash',
     type: 'crash',
@@ -97,6 +109,7 @@ const AUTO_DIAGNOSE_BUILTIN_RULES = [
 const AUTO_DIAGNOSE_BUILTIN_IDS = new Set(AUTO_DIAGNOSE_BUILTIN_RULES.map(rule => rule.id));
 let diagnoseRuleStateCache = null;
 let compiledRuleCache = null;
+let compiledRuleLocale = '';
 
 // 自动诊断状态
 // - autoDiagnoseEnabled: 总开关（用户可在 UI 关闭）
@@ -164,7 +177,8 @@ function getEffectiveRules() {
 }
 
 function getCompiledRules() {
-  if (compiledRuleCache) return compiledRuleCache;
+  if (compiledRuleCache && compiledRuleLocale === getLocale()) return compiledRuleCache;
+  compiledRuleLocale = getLocale();
   compiledRuleCache = getEffectiveRules()
     .filter(rule => rule.enabled !== false)
     .map(rule => {
@@ -317,6 +331,7 @@ function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries
   const start = Math.max(0, lineIndex - AUTO_DIAGNOSE_CONTEXT_LINES);
   const end = Math.min(entries.length, lineIndex + AUTO_DIAGNOSE_CONTEXT_LINES + 1);
   const contextSnapshot = entries.slice(start, end).map(e => {
+    if (e.logFormat === 'hilog' && e.raw) return e.raw;
     const ts = e.ts ? new Date(e.ts).toLocaleString('zh-CN', { hour12: false }) : '';
     const lvl = e.level || 'V';
     const tag = e.tag || '';
@@ -500,7 +515,7 @@ function register(rawIpcMain) {
         return tr("### 问题 {0}：{1}（严重程度：{2}）\n\n```log\n{3}\n```", { 0: idx + 1, 1: issue.label, 2: issue.severity, 3: issue.context });
       }).join('\n\n---\n\n');
 
-      const autoPrompt = tr("请分析以下 Android logcat 日志中检测到的 {0} 个关键问题，逐一分析根因并给出修复建议：\n\n{1}\n\n请重点关注：\n1. 每个问题的根本原因\n2. 问题之间的关联性\n3. 优先级排序\n4. 具体的修复方向", { 0: issues.length, 1: issueBlocks });
+      const autoPrompt = tr('请分析以下设备日志中匹配到的 {0} 个问题线索：\n\n{1}\n\n根据实际平台区分 Android 崩溃/ANR 与鸿蒙 JS_CRASH、CPP_CRASH、APP_FREEZE。规则匹配不是根因证明；逐项说明日志事实、根因推测、优先级与建议验证。', { 0: issues.length, 1: issueBlocks });
 
       // 复用 AI 分析流程，但使用自动诊断的 prompt
       // 不传 filterContext，避免"自动诊断"字样误导 AI 的安全判断

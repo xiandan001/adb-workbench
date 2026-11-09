@@ -17,7 +17,7 @@ async function computeWorkspaceJob(command, args) {
   if (command === 'freeze') {
     const selection = normalizeSelection(args.selection);
     const entries = args.sources.map((raw, index) => {
-      const source = shapeDiagnosticSource({ ...raw, kind: ['adb', 'log', 'serial', 'ssh', 'text'].includes(raw.kind) ? raw.kind : 'text' });
+      const source = shapeDiagnosticSource({ ...raw, kind: ['adb', 'hdc', 'log', 'serial', 'ssh', 'text'].includes(raw.kind) ? raw.kind : 'text' });
       const entry = freezeEntry(source, index, args.now ?? Date.now(), selection);
       if (raw.provenance?.trust === 'renderer-view') entry.targetKey = null;
       if (raw.provenance) entry.provenance = copy(raw.provenance);
@@ -37,11 +37,11 @@ async function computeWorkspaceJob(command, args) {
     return args.entries.map((entry, index) => {
       const text = entry.numbered ? entry.text.replace(/^\[L\d+\] /gm, '') : entry.text;
       const next = freezeEntry({ kind: entry.source, label: entry.label, target: entry.target, text, capturedAt: entry.capturedAt,
-        timeBasis: entry.timeBasis, truncated: entry.truncated }, index, args.now, normalizeSelection(args.selection));
+        timeBasis: entry.timeBasis, platform: entry.platform, truncated: entry.truncated }, index, args.now, normalizeSelection(args.selection));
       if (entry.originalLineNumbers) next.originalLineNumbers = next.originalLineNumbers.map(line => entry.originalLineNumbers[line - 1]);
       else delete next.originalLineNumbers;
       return { ...next, evidenceKind: entry.evidenceKind, targetKey: entry.targetKey, originalLineCount: entry.originalLineCount ?? next.originalLineCount,
-        ...(entry.provenance ? { provenance: entry.provenance } : {}), ...(entry.diagnostic ? { diagnostic: entry.diagnostic } : {}),
+        ...(entry.provenance ? { provenance: entry.provenance } : {}), ...(entry.diagnostic ? { diagnostic: entry.diagnostic } : {}), ...(entry.unavailable ? { unavailable: true } : {}),
         ...(entry.selectionWarning ? { selectionWarning: entry.selectionWarning, windowInfo: entry.windowInfo } : {}) };
     });
   }

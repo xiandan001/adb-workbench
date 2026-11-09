@@ -18,6 +18,7 @@ function validateReport(report) {
     || !string(report.createdAt, 40) || !Number.isFinite(Date.parse(report.createdAt)) || !string(report.preview?.question, 4000)
     || !UUID.test(report.preview.id || '') || !Array.isArray(report.preview.entries) || !report.preview.entries.length || report.preview.entries.length > 32
     || (report.name !== undefined && !string(report.name, 80))
+    || (report.preview.platform !== undefined && !['android', 'harmony', 'mixed'].includes(report.preview.platform))
     || (report.turnId !== undefined && !UUID.test(report.turnId))
     || (report.preview.targetFingerprint != null && !/^[a-f\d]{24,64}$/.test(report.preview.targetFingerprint))
     || Buffer.byteLength(JSON.stringify(report)) > limits.reportBytes) throw fail();
@@ -39,7 +40,7 @@ function validateReport(report) {
   for (const entry of report.preview.entries) {
     if (!entry || typeof entry.id !== 'string' || !/^E[1-9]\d*$/.test(entry.id) || ids.has(entry.id)
       || typeof entry.text !== 'string' || Buffer.byteLength(entry.text) > limits.sourceBytes
-      || !['adb', 'log', 'serial', 'ssh', 'text'].includes(entry.source) || !string(entry.label, 2000) || !string(entry.target, 2000)
+      || !['adb', 'hdc', 'log', 'serial', 'ssh', 'text'].includes(entry.source) || !string(entry.label, 2000) || !string(entry.target, 2000)
       || !string(entry.timeBasis, 2000) || !string(entry.capturedAt, 40) || !Number.isFinite(Date.parse(entry.capturedAt))
       || typeof entry.truncated !== 'boolean' || !integer(entry.redactions)
       || (entry.numbered !== undefined && typeof entry.numbered !== 'boolean')
@@ -47,7 +48,10 @@ function validateReport(report) {
       || (entry.selectionWarning !== undefined && !string(entry.selectionWarning, 2000))
       || (entry.targetKey != null && !/^[a-f\d]{24,64}$/.test(entry.targetKey))
       || (entry.unavailable !== undefined && typeof entry.unavailable !== 'boolean')
-      || (entry.evidenceKind !== undefined && ![...CHECK_IDS.map(id => `adb:${id}`), 'log', 'serial', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
+      || (entry.platform !== undefined && !['android', 'harmony'].includes(entry.platform))
+      || (entry.evidenceKind !== undefined && ![...CHECK_IDS.flatMap(id => [`adb:${id}`, `hdc:${id}`]), 'log', 'serial', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
+    if (entry.source === 'hdc' && (!entry.target.startsWith('hdc:') || entry.platform !== 'harmony' || !entry.evidenceKind?.startsWith('hdc:'))
+      || entry.source === 'adb' && (entry.target.startsWith('hdc:') || entry.platform === 'harmony' || entry.evidenceKind?.startsWith('hdc:'))) throw fail();
     if (entry.diagnostic !== undefined) normalizeDiagnostic(entry.diagnostic);
     if (entry.provenance !== undefined && !provenance(entry.provenance)) throw fail();
     if (entry.provenance?.trust === 'renderer-view' && entry.targetKey != null) throw fail();
@@ -68,6 +72,8 @@ function validateReport(report) {
         || !['explicit-offset', 'source-local', 'device-local-year-unknown', 'host-receive', 'unknown'].includes(event.clockBasis)))) throw fail();
   }
   if (Buffer.byteLength(JSON.stringify(report.preview.entries)) > limits.evidenceBytes) throw fail();
+  if (report.preview.platform === 'harmony' && report.preview.entries.some(entry => entry.source === 'adb')
+    || report.preview.platform === 'android' && report.preview.entries.some(entry => entry.platform === 'harmony')) throw fail();
   const comparison = report.preview.comparison;
   if (comparison && (typeof comparison.comparable !== 'boolean' || !string(comparison.beforeName, 4000) || !string(comparison.afterName, 4000)
     || !Array.isArray(comparison.warnings) || comparison.warnings.length > 12 || comparison.warnings.some(item => !string(item, 1500))

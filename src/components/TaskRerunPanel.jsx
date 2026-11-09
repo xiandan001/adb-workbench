@@ -17,7 +17,7 @@ export default function TaskRerunPanel({ taskId, onStarted }) {
       if (!live.current) return;
       if (!result?.ok) throw new Error(result?.error || tr('复跑预览读取失败。'));
       setPreview(result.preview);
-      setSelected((result.preview.failedDeviceIds || []).filter(id => !(result.preview.offlineDeviceIds || []).includes(id)));
+      setSelected((result.preview.failedDeviceIds || []).filter(id => !(result.preview.offlineDeviceIds || []).includes(id) && !(result.preview.unverifiedDeviceIds || []).includes(id)));
     }).catch(failure => { if (live.current) setError(failure.message); }).finally(() => { if (live.current) setBusy(false); });
     return () => { live.current = false; };
   }, [taskId]);
@@ -42,7 +42,7 @@ export default function TaskRerunPanel({ taskId, onStarted }) {
       <p className="text-xs leading-5 opacity-70">{tr('使用原脚本快照，从第一步完整运行；不是从失败步骤继续。执行前还会再次确认。')}</p>
       <p>{preview.scriptName} · {tr('{0} 个步骤', { 0: preview.steps.length })}</p>
       <details className="rounded border border-current/10 p-3"><summary className="cursor-pointer font-medium">{tr('查看完整原脚本参数（仅本机）')}</summary><p className="mt-2 text-xs opacity-70">{tr('这里显示即将执行的完整参数，可能包含手工输入的敏感内容；不会作为 AI 证据或包含在导出的证据包中。')}</p><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all text-xs">{scriptText}</pre></details>
-      <div className="space-y-1">{preview.failedDeviceIds.map(id => <label key={id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selected.includes(id)} disabled={busy || started || preview.offlineDeviceIds.includes(id)} onChange={event => setSelected(ids => event.target.checked ? [...ids, id] : ids.filter(item => item !== id))} />{id}{preview.offlineDeviceIds.includes(id) && <span className="text-amber-500">{tr('已离线')}</span>}</label>)}</div>
+      <div className="space-y-1">{preview.failedDeviceIds.map(id => <label key={id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selected.includes(id)} disabled={busy || started || preview.offlineDeviceIds.includes(id) || preview.unverifiedDeviceIds?.includes(id)} onChange={event => setSelected(ids => event.target.checked ? [...ids, id] : ids.filter(item => item !== id))} />{id}{preview.offlineDeviceIds.includes(id) && <span className="text-amber-500">{tr('已离线')}</span>}{preview.unverifiedDeviceIds?.includes(id) && <span className="text-amber-500">{tr('缺少可靠设备身份')}</span>}</label>)}</div>
       {preview.inputs.map((input, index) => <div key={`${input.stepId}-${input.field}-${index}`} className="break-all rounded border border-current/10 p-2 text-xs"><span>{input.path}</span><p className={input.state !== 'available' || input.changed ? 'text-amber-500' : 'opacity-70'}>{input.state !== 'available' ? tr('文件缺失或不可读取') : input.changed ? tr('内容已变化') : tr('内容与原运行一致')}</p></div>)}
       {changed && <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={acceptChanges} disabled={busy || started} onChange={event => setAcceptChanges(event.target.checked)} />{tr('我已核对输入文件的变化，允许使用当前文件重新执行原脚本。')}</label>}
       <button type="button" onClick={run} disabled={busy || started || !selected.length || unavailable || (changed && !acceptChanges)} className="rounded-lg bg-emerald-600 px-3 py-2 text-white disabled:opacity-40">{started ? tr('新的运行已创建') : tr('确认所选设备并复跑')}</button>

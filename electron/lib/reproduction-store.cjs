@@ -3,7 +3,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { tr } = require('./localization.cjs');
 const UUID = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
-const FILES = new Set(['manifest.json', 'markers.json', 'performance.jsonl', 'serial-rs232.jsonl', 'serial-terminal.jsonl', 'device.log', 'video.mp4']);
+const FILES = new Set(['manifest.json', 'markers.json', 'performance.jsonl', 'serial-rs232.jsonl', 'serial-terminal.jsonl', 'device.log', 'video.mp4', 'video.webm']);
 const fileAllowed = name => FILES.has(name) || /^ssh-[a-f\d]{24}\.jsonl$/.test(name);
 const fail = () => new Error(tr('复现会话记录无效或不可读取，原文件已保留。'));
 function validateManifest(value) {
@@ -16,6 +16,7 @@ function validateManifest(value) {
   for (const file of value.files) if (!file || !fileAllowed(file.name) || typeof file.label !== 'string' || file.label.length > 240
     || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || typeof file.truncated !== 'boolean') throw fail();
   if (new Set(value.files.map(file => file.name)).size !== value.files.length) throw fail();
+  if (value.files.filter(file => /^video\.(?:mp4|webm)$/.test(file.name)).length > 1) throw fail();
   for (const marker of value.markers) if (!marker || !UUID.test(marker.id || '') || typeof marker.note !== 'string' || marker.note.length > 240
     || !Number.isFinite(marker.at) || !Number.isFinite(marker.offsetMs) || marker.offsetMs < 0
     || marker.videoOffsetMs !== null && (!Number.isFinite(marker.videoOffsetMs) || marker.videoOffsetMs < 0)) throw fail();

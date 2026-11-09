@@ -12,6 +12,9 @@ const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const { checkHarmonyDevice } = require('./harmony-quality-native.cjs');
+const { harmonyInspectionSteps, executeHarmonyInspectionStep, harmonyInspectionAnalysis, buildHarmonyInspectionReport } = require('./harmony-inspection.cjs');
 
 const STANDARD_TIMEOUT_MS = 15000;
 const LONG_TIMEOUT_MS = 45000;
@@ -139,7 +142,7 @@ async function runInspectionBody(task, options) {
   await fs.promises.mkdir(dirs.media, { recursive: true });
 
   const startedAt = new Date();
-  const steps = [
+  const steps = isHarmonyDevice(options.deviceId) ? harmonyInspectionSteps(options.includeBugreport) : [
     ...STANDARD_STEPS.map(step => ({ ...step, label: tr(step.label) })),
     ...(options.includeBugreport ? [{ id: 'bugreport', label: tr("生成 bugreport"), kind: 'bugreport', file: 'bugreport.zip', timeout: BUGREPORT_TIMEOUT_MS }] : [])
   ];
@@ -149,6 +152,7 @@ async function runInspectionBody(task, options) {
   const state = {
     taskId: task.id,
     deviceId: options.deviceId,
+    ...(isHarmonyDevice(options.deviceId) ? { platform: 'harmony' } : {}),
     outputDir,
     outputBaseDir: getOutputBaseDir(options.outputBaseDir),
     startedAt: startedAt.toISOString(),
@@ -160,8 +164,9 @@ async function runInspectionBody(task, options) {
   const statePath = path.join(outputDir, 'metadata.json');
   await writeJson(statePath, state);
 
-  const deviceState = await runAdb(task, ['-s', options.deviceId, 'get-state'], STANDARD_TIMEOUT_MS);
-  if (!deviceState.ok || !String(deviceState.stdout).trim().includes('device')) {
+  const deviceState = state.platform === 'harmony' ? await checkHarmonyDevice(options.deviceId, { deviceRef: task.deviceRef, signal: task.aiSummarySignal,
+    isCancelled: () => task.cancelled, onProcess: proc => { task.currentProc = proc; } }) : await runAdb(task, ['-s', options.deviceId, 'get-state'], STANDARD_TIMEOUT_MS);
+  if (!deviceState.ok || state.platform !== 'harmony' && !String(deviceState.stdout).trim().includes('device')) {
     return finishEarly(task, outputDir, state, errors, tr("设备 {0} 不在线或不可用", { 0: options.deviceId }));
   }
 
@@ -191,7 +196,7 @@ async function runInspectionBody(task, options) {
   const reportPath = path.join(outputDir, 'inspection-report.md');
   const errorsPath = path.join(outputDir, 'errors.json');
   const summaryPath = path.join(outputDir, 'summary.json');
-  const analysis = buildAnalysis(results, errors);
+  const analysis = buildAnalysis(results, errors, state.platform);
   const aiSummary = options.includeAiSummary ? await buildInspectionAiSummary(state, results, errors, analysis, task.aiSummarySignal) : { ok: false, skipped: true, summary: '' };
   if (task.cancelled && !cancelled) errors.push({ id: 'cancelled', label: tr('用户取消'), error: tr('AI 发送已取消。') });
   cancelled = task.cancelled;
@@ -225,7 +230,8 @@ async function runInspectionBody(task, options) {
   }
 
   const payload = {
-    ok: true,
+    ok: state.platform === 'harmony' ? !cancelled && errors.length === 0 : true,
+    ...(state.platform === 'harmony' && errors.length ? { error: tr('部分鸿蒙巡检项目未完成或未验证；已有证据已保存。') } : {}),
     cancelled,
     outputDir,
     reportPath,
@@ -242,7 +248,7 @@ async function runInspectionBody(task, options) {
 
 async function finishEarly(task, outputDir, state, errors, error) {
   errors.push({ id: 'preflight', label: tr("巡检预检查"), error });
-  const analysis = buildAnalysis([], errors);
+  const analysis = buildAnalysis([], errors, state.platform);
   const aiSummary = state.includeAiSummary ? await buildInspectionAiSummary(state, [], errors, analysis, task.aiSummarySignal) : { ok: false, skipped: true, summary: '' };
   const finalState = { ...state, endedAt: new Date().toISOString(), cancelled: task.cancelled === true, successCount: 0, failedCount: errors.length, analysis, aiSummary, steps: [] };
   const reportPath = path.join(outputDir, 'inspection-report.md');
@@ -257,6 +263,7 @@ async function finishEarly(task, outputDir, state, errors, error) {
 }
 
 async function executeStep(task, deviceId, step, dirs) {
+  if (step.kind === 'harmony') return executeHarmonyInspectionStep(task, deviceId, step, dirs);
   if (step.kind === 'adb') {
     const res = await runAdb(task, step.args, step.timeout);
     return saveTextResult(step, res, dirs.raw);
@@ -364,6 +371,7 @@ function getOutputBaseDir(outputBaseDir) {
 }
 
 function buildReport(state, results, errors, dirs) {
+  if (state.platform === 'harmony') return buildHarmonyInspectionReport(state, results, errors, dirs, formatAiAnalysisLines);
   const byId = Object.fromEntries(results.map(r => [r.id, r]));
   const raw = (id) => readFileSafe(byId[id]?.file);
   const getprop = raw('getprop');
@@ -458,6 +466,7 @@ function buildReport(state, results, errors, dirs) {
 
 function buildSummary(state, results, errors) {
   return {
+    ...(state.platform === 'harmony' ? { platform: 'harmony', unavailable: state.analysis?.unavailable || [] } : {}),
     appVersion: state.appVersion,
     deviceId: state.deviceId,
     startedAt: state.startedAt,
@@ -482,7 +491,8 @@ function formatAiAnalysisLines(aiSummary) {
   return lines.some(Boolean) ? lines : [tr("- AI 分析为空")];
 }
 
-function buildAnalysis(results, errors) {
+function buildAnalysis(results, errors, platform = 'android') {
+  if (platform === 'harmony') return harmonyInspectionAnalysis(results, errors);
   const byId = Object.fromEntries(results.map(r => [r.id, r]));
   const raw = (id) => readFileSafe(byId[id]?.file);
   const findings = [];
@@ -552,11 +562,11 @@ async function buildInspectionAiSummary(state, results, errors, analysis, signal
     tr("附件摘要:"),
     artifacts || tr("- 无"),
     '',
-    tr("请输出一段面向 Android 调试人员的巡检 AI 总结，包含：总体结论、优先关注项、下一步建议。不要编造未提供的证据。")
+    state.platform === 'harmony' ? tr('请输出面向 Harmony/OpenHarmony 调试的总结，区分风险与未验证项目，不要编造证据。') : tr("请输出一段面向 Android 调试人员的巡检 AI 总结，包含：总体结论、优先关注项、下一步建议。不要编造未提供的证据。")
   ].join('\n');
   return aiAnalyze.generateAiSummary({
     signal,
-    systemPrompt: tr("你是 Android 设备巡检报告助手，只根据给定巡检摘要输出简洁、可执行的中文结论。"),
+    systemPrompt: state.platform === 'harmony' ? tr('你是 Harmony/OpenHarmony 巡检助手，只依据给定证据，以当前界面语言总结；不可用能力必须标为未验证。') : tr("你是 Android 设备巡检报告助手，只根据给定巡检摘要输出简洁、可执行的中文结论。"),
     userContent: prompt,
     timeoutMs: 60000,
     temperature: 0.2

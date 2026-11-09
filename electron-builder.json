@@ -13,6 +13,11 @@
   ],
   "extraFiles": [
     {
+      "from": "hdc",
+      "to": "hdc",
+      "filter": ["hdc.exe", "libusb_shared.dll", "LICENSE*", "NOTICE*", "agent/**/*"]
+    },
+    {
       "from": "scrcpy-win64",
       "to": "scrcpy-win64",
       "filter": [
@@ -48,6 +53,17 @@
   "npmRebuild": false,
   "asar": true,
   "asarUnpack": [
+    "electron/lib/device-platform.cjs",
+    "electron/lib/device-registry.cjs",
+    "electron/lib/device-invocation.cjs",
+    "electron/lib/device-discovery.cjs",
+    "electron/lib/device-connection.cjs",
+    "electron/lib/adb-device-parser.cjs",
+    "electron/lib/adb-runtime.cjs",
+    "electron/lib/android-tool-cleanup.cjs",
+    "electron/lib/hdc-runtime.cjs",
+    "electron/lib/hdc-device-parser.cjs",
+    "electron/lib/harmony-*.cjs",
     "electron/lib/localization.cjs",
     "electron/lib/installer-language.cjs",
     "electron/locales/*.json",
@@ -55,6 +71,7 @@
     "electron/lib/task-center-worker.cjs",
     "electron/lib/task-run-manifest.cjs",
     "electron/lib/task-rerun.cjs",
+    "electron/lib/task-platform.cjs",
     "electron/lib/task-ai-summary-bridge.cjs",
     "electron/lib/ai-workspace-worker.cjs",
     "electron/lib/ai-workspace-compute.cjs",

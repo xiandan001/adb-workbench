@@ -1,13 +1,13 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp } from 'lucide-react';
+import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp, Power } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
-import { BUILTIN_SHORTCUTS, SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../shared/deviceNavigationShortcuts';
+import { BUILTIN_SHORTCUTS, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../shared/deviceNavigationShortcuts';
 import DeviceShortcutEditor from './DeviceShortcutEditor';
 import DeviceShortcutConfirm from './DeviceShortcutConfirm';
 import useDeviceShortcutCapabilities from '../shared/useDeviceShortcutCapabilities';
 
-const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell };
+const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell, power: Power };
 
 function deviceShortcutDisplayLabel(action) {
   const builtin = action.type === 'builtin' && BUILTIN_SHORTCUTS.find(item => item.id === action.action);
@@ -16,7 +16,7 @@ function deviceShortcutDisplayLabel(action) {
 
 export default function DeviceNavigationControls({ deviceId, isOnline, showToast, theme }) {
   useLocale();
-  const [saved, setSaved] = useState(() => readDeviceShortcuts());
+  const [saved, setSaved] = useState(() => readDeviceShortcuts(globalThis.localStorage, deviceId));
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
@@ -29,11 +29,11 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
   const unavailable = checks.filter(check => check.status === 'unsupported');
 
   useEffect(() => {
-    const refresh = event => { if (!event.key || event.key === SHORTCUTS_KEY) setSaved(readDeviceShortcuts()); };
+    const refresh = event => { if (!event.key || [SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY].includes(event.key)) setSaved(readDeviceShortcuts(globalThis.localStorage, deviceId)); };
     window.addEventListener(SHORTCUTS_CHANGED, refresh);
     window.addEventListener('storage', refresh);
     return () => { window.removeEventListener(SHORTCUTS_CHANGED, refresh); window.removeEventListener('storage', refresh); };
-  }, []);
+  }, [deviceId]);
 
   const confirmShell = details => new Promise(resolve => {
     setConfirmation({ ...details, resolve: value => { setConfirmation(null); resolve(value); } });
@@ -54,13 +54,13 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
     } finally { busyRef.current = false; setPending(''); }
   };
   const save = config => {
-    saveDeviceShortcuts(config);
+    saveDeviceShortcuts(config, globalThis.localStorage, undefined, deviceId);
     setEditing(false);
     setError('');
-    showToast?.(tr("已保存所有设备共用的快捷操作"));
+    showToast?.(deviceId.startsWith('hdc:') ? tr('已保存鸿蒙设备共用的快捷操作') : tr("已保存所有设备共用的快捷操作"));
   };
   const resetBroken = () => {
-    try { save(defaultDeviceShortcuts()); } catch (error) { setError(error.message); }
+    try { save(defaultDeviceShortcuts(deviceId)); } catch (error) { setError(error.message); }
   };
 
   return <>
@@ -68,12 +68,12 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
       <span className="opacity-60">{tr("快捷操作")}</span><button type="button" onClick={() => setEditing(true)} disabled={!saved.config || Boolean(pending)} className="flex items-center gap-1 rounded px-1 py-1 opacity-70 hover:opacity-100 disabled:opacity-30" aria-label={tr("编辑快捷操作")}><Pencil size={12} />{tr("编辑")}</button>
     </div>
     <div className="device-navigation-grid" role="group" aria-label={tr("设备快捷操作")}>
-      {(saved.config || defaultDeviceShortcuts()).slots.map(action => {
+      {(saved.config || defaultDeviceShortcuts(deviceId)).slots.map(action => {
         const Icon = action.type === 'app' ? AppWindow : action.type === 'shell' ? Terminal : icons[action.action];
         const check = checks.find(item => item.id === action.id);
         const unsupported = check?.status === 'unsupported';
         const displayLabel = deviceShortcutDisplayLabel(action);
-        const reason = !isOnline ? tr("设备离线，请先连接设备") : check?.reason ? tr(check.reason) : (action.type === 'shell' ? tr("自定义 ADB 命令，每次执行前均需确认") : tr("正在检查支持情况，操作时仍会校验"));
+        const reason = !isOnline ? tr("设备离线，请先连接设备") : check?.reason ? tr(check.reason) : (action.type === 'shell' ? deviceId.startsWith('hdc:') ? tr('自定义 HDC shell 命令，每次执行前均需确认') : tr("自定义 ADB 命令，每次执行前均需确认") : tr("正在检查支持情况，操作时仍会校验"));
         return <span key={action.id} className="min-w-0" title={`${displayLabel} · ${reason}`}>
           <button type="button" className="device-navigation-button h-full w-full" onClick={() => runAction(action)}
           disabled={!saved.config || !isOnline || Boolean(pending) || unsupported} aria-busy={pending === action.id} aria-label={displayLabel} aria-describedby={`${descriptionId}-${action.id}`}>

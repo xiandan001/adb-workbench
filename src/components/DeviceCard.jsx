@@ -19,10 +19,12 @@ import DangerConfirmModal from './DangerConfirmModal';
 import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
+import { isHarmonyDevice, platformLabel, displayDeviceId } from '../shared/devicePlatform';
 
 function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   useLocale();
   const isOnline = device.status === 'device';
+  const harmony = isHarmonyDevice(device);
   const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(deviceName || '');
@@ -101,7 +103,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       : suStrategy === 'su-c' ? `su -c '${escaped}'`
       : suStrategy === 'su-sh' ? `su 0 sh -c '${escaped}'`
       : rawCmd;
-    setTerminalOutput(prev => [...prev, { type: 'command', text: `${suMode ? '#' : '$'} adb -s ${device.id} shell "${finalCmd}"` }]);
+    setTerminalOutput(prev => [...prev, { type: 'command', text: `${suMode ? '#' : '$'} ${harmony ? `hdc -t ${displayDeviceId(device)}` : `adb -s ${device.id}`} shell "${finalCmd}"` }]);
     setTerminalCommand('');
     setHistoryIndex(-1);
     if (onSaveTerminalCommand) {
@@ -127,6 +129,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   //  'none'   = 不支持
   // 用户主动开启 SU，优先使用 su 包装；仅当 su 不可用时才回退 direct
   const checkSuSupported = async () => {
+    if (harmony) {
+      try {
+        const result = await window.electronAPI.adbShell(device.id, 'id');
+        return { supported: result?.success && /uid=0\b/.test(result.output || ''), strategy: 'direct' };
+      } catch { return { supported: false, strategy: 'none' }; }
+    }
     const MARK = '__SU_OK__';
     // 1. 标准 su -c（用单引号包裹命令，与实际执行一致）
     try {
@@ -326,7 +334,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             )}
             <div className="flex items-center space-x-2 mt-1">
               <span className={`w-2 h-2 rounded-full ${isOnline ? (t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-500' : t.primary === 'pink' ? 'bg-pink-500' : t.primary === 'green' ? 'bg-green-500' : t.primary === 'orange' ? 'bg-orange-500' : 'bg-emerald-500') : 'bg-slate-300'}`}></span>
-              <span className={`text-sm font-mono ${t.textMuted}`}>{device.id}</span>
+              <span className={`text-sm font-mono ${t.textMuted}`}>{displayDeviceId(device)}</span>
+              <span className={`text-xs ${t.textMuted}`}>{platformLabel(device)}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full ${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'} capitalize`}>
                 {deviceStatusLabel(device.status)}
               </span>
@@ -379,7 +388,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               icon={<Camera size={16} />}
               label={isLoading(`screenshot_${device.id}`) ? tr("截图中...") : tr("截图")}
               onClick={onScreenshot}
-              disabled={!isOnline || isLoading(`screenshot_${device.id}`)}
+              disabled={!isOnline || isLoading(`screenshot_${device.id}`) || harmony && device.capabilities?.screenshot === false}
+              title={harmony && device.capabilities?.screenshot === false ? tr('此设备未提供 UITest 截图能力。') : undefined}
               loading={isLoading(`screenshot_${device.id}`)}
               theme={t}
               isOnline={isOnline}
@@ -404,7 +414,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             />
             <ControlButton
               icon={<Package size={16} />}
-              label={tr("APK管理")}
+              label={harmony ? tr('应用管理') : tr("APK管理")}
               onClick={onApkManager}
               disabled={!isOnline}
               theme={t}
@@ -477,7 +487,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               icon={<Loader size={16} />}
               label={isLoading(`loader_${device.id}`) ? tr("Loader中...") : 'Loader'}
               onClick={onRebootLoader}
-              disabled={!isOnline || isLoading(`loader_${device.id}`)}
+              title={harmony ? tr('鸿蒙设备不使用 Android Loader / Fastboot 解锁流程。') : undefined}
+              disabled={harmony || !isOnline || isLoading(`loader_${device.id}`)}
               loading={isLoading(`loader_${device.id}`)}
               theme={t}
               isOnline={isOnline}
@@ -486,7 +497,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               icon={<Unlock size={16} />}
               label={isLoading(`unlock_${device.id}`) ? tr("Unlock中...") : 'Unlock'}
               onClick={onUnlock}
-              disabled={!isOnline || isLoading(`unlock_${device.id}`)}
+              title={harmony ? tr('鸿蒙设备不使用 Android Loader / Fastboot 解锁流程。') : undefined}
+              disabled={harmony || !isOnline || isLoading(`unlock_${device.id}`)}
               loading={isLoading(`unlock_${device.id}`)}
               theme={t}
               isOnline={isOnline}

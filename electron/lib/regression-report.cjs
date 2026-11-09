@@ -9,6 +9,9 @@ const packageManager = require('./package-manager.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice, devicePlatform } = require('./device-platform.cjs');
+const { checkHarmonyDevice, collectHarmonyQualitySnapshot } = require('./harmony-quality-native.cjs');
+const { harmonyMetricValues, compareHarmonyQuality } = require('./harmony-quality-data.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
@@ -92,6 +95,7 @@ async function captureBaseline(deviceId, options = {}) {
     name: String(options.name || '').trim() || tr("{0} 基线", { 0: snapshot.device.model || deviceId }),
     appVersion: getAppVersion(),
     deviceId,
+    ...(snapshot.platform === 'harmony' ? { platform: 'harmony' } : {}),
     capturedAt: new Date().toISOString(),
     snapshot
   };
@@ -105,6 +109,7 @@ async function runRegression(deviceId, baselinePath, options = {}) {
   await ensureDeviceOnline(deviceId);
   const baseline = readJson(baselinePath);
   if (!baseline?.snapshot) throw new Error('baseline_invalid');
+  if ((baseline.snapshot.platform || 'android') !== devicePlatform(deviceId)) throw new Error(tr('基线与当前设备平台不同，未生成跨平台回归结论。'));
   const current = await collectSnapshot(deviceId, options);
   const comparedAt = new Date();
   const outputDir = path.join(getReportBaseDir(), `regression-${formatStamp(comparedAt)}-${sanitizeName(deviceId)}`);
@@ -125,6 +130,7 @@ async function runRegression(deviceId, baselinePath, options = {}) {
       capturedAt: baseline.capturedAt || baseline.snapshot.capturedAt || ''
     },
     deviceId,
+    ...(current.platform === 'harmony' ? { platform: 'harmony' } : {}),
     comparedAt: comparedAt.toISOString(),
     outputDir,
     diff,
@@ -138,6 +144,7 @@ async function runRegression(deviceId, baselinePath, options = {}) {
 }
 
 async function collectSnapshot(deviceId, options = {}) {
+  if (isHarmonyDevice(deviceId)) return collectHarmonyQualitySnapshot(deviceId, options);
   const [propsResult, packagesResult, logResult, crashLogResult, performance] = await Promise.all([
     runAdb(['-s', deviceId, 'shell', 'getprop'], COMMAND_TIMEOUT_MS),
     packageManager.listPackages(deviceId).then(packages => ({ ok: true, packages })).catch(error => ({ ok: false, error: error.message, packages: [] })),
@@ -165,6 +172,8 @@ async function collectSnapshot(deviceId, options = {}) {
 }
 
 function compareSnapshots(baseline, current) {
+  if ((baseline.platform || 'android') !== (current.platform || 'android')) throw new Error(tr('基线与当前设备平台不同，未生成跨平台回归结论。'));
+  if (current.platform === 'harmony') return compareHarmonyQuality(baseline, current, comparePackages, metricDelta);
   const propDiffs = compareProps(baseline.props || {}, current.props || {});
   const packageDiff = comparePackages(baseline.packages || [], current.packages || []);
   const performanceDiff = comparePerformance(baseline.performance, current.performance);
@@ -301,6 +310,7 @@ function buildRegressionReport(result) {
     tr("- 低风险：{0}", { 0: diff.lowCount }),
     ''
   ];
+  if (current.platform === 'harmony') lines.push(tr('- 设备平台：Harmony/OpenHarmony'), tr('- 系统版本：{0}', { 0: current.device.systemVersion || '-' }), '');
 
   if (diff.findings.length === 0) {
     lines.push(tr("- 未发现差异或风险"), '');
@@ -356,7 +366,7 @@ function appendPackageRows(lines, title, rows) {
   }
   lines.push(tr("| 包名 | versionCode | 类型 | 路径 |"), '| --- | ---: | --- | --- |');
   rows.slice(0, 80).forEach(item => {
-    lines.push(`| ${escapeTable(item.packageName)} | ${escapeTable(item.versionCode || '-')} | ${item.system ? tr("系统") : tr("用户")} | ${escapeTable(item.path || '-')} |`);
+    lines.push(`| ${escapeTable(item.packageName)} | ${escapeTable(item.versionCode || '-')} | ${item.system === null ? tr('未验证') : item.system ? tr("系统") : tr("用户")} | ${escapeTable(item.path || '-')} |`);
   });
   if (rows.length > 80) lines.push(tr("| ... | 还有 {0} 项 | | |", { 0: rows.length - 80 }));
   lines.push('');
@@ -401,7 +411,8 @@ function toPublicBaseline(filePath, data) {
     path: filePath,
     deviceId: data.deviceId || data.snapshot?.deviceId || '',
     model: data.snapshot?.device?.model || '',
-    android: data.snapshot?.device?.android || '',
+    ...(data.snapshot?.platform === 'harmony' ? { platform: 'harmony', systemVersion: data.snapshot.device.systemVersion || '', apiVersion: data.snapshot.device.apiVersion ?? null }
+      : { android: data.snapshot?.device?.android || '' }),
     build: data.snapshot?.device?.build || '',
     packageCount: data.snapshot?.packages?.length || 0,
     capturedAt: data.capturedAt || data.snapshot?.capturedAt || ''
@@ -409,6 +420,11 @@ function toPublicBaseline(filePath, data) {
 }
 
 async function ensureDeviceOnline(deviceId) {
+  if (isHarmonyDevice(deviceId)) {
+    const result = await checkHarmonyDevice(deviceId);
+    if (!result.ok) throw new Error(result.error || tr('所选鸿蒙设备不在线或不可用。'));
+    return;
+  }
   const state = await runAdb(['-s', deviceId, 'get-state'], COMMAND_TIMEOUT_MS);
   if (!state.ok || !String(state.stdout || '').trim().includes('device')) {
     throw new Error(`device_offline:${deviceId}`);
@@ -445,11 +461,13 @@ function isCriticalProp(key) {
 }
 
 function getDataUsage(snapshot) {
+  if (snapshot?.platform === 'harmony') return harmonyMetricValues(snapshot).dataUsed;
   const disks = snapshot?.disk || [];
   return disks.find(item => item.mount === '/data')?.usage ?? null;
 }
 
 function getTemperature(snapshot) {
+  if (snapshot?.platform === 'harmony') return harmonyMetricValues(snapshot).batteryTemp;
   return snapshot?.battery?.temperature ?? snapshot?.thermal?.hottest ?? null;
 }
 

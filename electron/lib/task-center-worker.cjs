@@ -10,8 +10,15 @@ const path = require('path');
 const zlib = require('zlib');
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
 const { AI_BRIDGE_TOTAL_MS, normalizeSummary } = require('./task-ai-summary-bridge.cjs');
+const { isHarmonyDevice, deviceTarget } = require('./device-platform.cjs');
+const { resolveDeviceRef } = require('./device-registry.cjs');
+const { runHdc, runHdcHost } = require('./hdc-runtime.cjs');
+const { assertTaskPlatform, taskPlatform } = require('./task-platform.cjs');
+const { captureHarmonyLayout, normalizeHarmonyCoordinate, normalizeHarmonyDuration, normalizeHarmonyPoints } = require('./harmony-task-ui.cjs');
+const { evaluateHarmonyThresholds } = require('./harmony-quality-data.cjs');
+const { withHarmonyTask, findHarmonyNode, executeHarmonyCoreStep, readHarmonyIdentity, detectHarmonyCrashAnr } = require('./harmony-task-execution.cjs');
 
-let adbPath = workerData?.adbPath || 'adb';
+const defaultAdbPath = workerData?.adbPath || 'adb';
 const defaultArtifactBaseDir = workerData?.defaultArtifactBaseDir || '';
 const SCRIPTS_FILE = 'task-center-scripts.json';
 const HISTORY_FILE = 'task-center-history.json';
@@ -77,9 +84,9 @@ parentPort.on('message', (message) => {
 });
 
 async function handleWorkerMessage(message) {
-  if (message?.adbPath) adbPath = message.adbPath;
   if (message?.action === 'run') {
-    const task = prepareTaskForRun(message.task);
+    const task = prepareTaskForRun({ ...message.task, adbPath: message.task?.adbPath || message.adbPath || defaultAdbPath,
+      hdcPath: message.task?.hdcPath || message.hdcPath || '' });
     activeTasks.set(task.id, task);
     sendTaskUpdate(task, true);
     runTask(task).catch(async error => {
@@ -108,6 +115,7 @@ async function handleWorkerMessage(message) {
 
 function prepareTaskForRun(source) {
   const task = source && typeof source === 'object' ? source : {};
+  assertTaskPlatform(task.script, (task.deviceRuns || []).map(run => run.deviceId));
   task.comparison = createRunComparisonIdentity(task.script, task);
   task.cancelled = task.cancelled === true;
   task.currentProc = null;
@@ -426,6 +434,10 @@ async function executeStep(task, deviceId, step) {
     }
   }
   const type = step.type;
+  if (isHarmonyDevice(deviceId)) {
+    const native = await executeHarmonyCoreStep(task, deviceId, step, sleepWithCancel);
+    if (native) return native;
+  }
   if (type === 'shell') {
     const command = String(step.command || '').trim();
     if (!command) return { ok: false, error: 'shell_command_required' };
@@ -495,6 +507,10 @@ async function captureScreenshot(task, deviceId, step) {
     ? path.resolve(String(step.localPath))
     : path.join(artifactDir, `${sanitizeName(deviceId)}-${formatStamp(new Date())}.png`);
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  if (isHarmonyDevice(deviceId)) {
+    const result = await withHarmonyTask(task, deviceId, options => require('./harmony-media.cjs').captureScreenshot(deviceId, filePath, { ...options, timeoutMs: step.timeoutMs || DEFAULT_TIMEOUT_MS }));
+    return { ...result, output: result.ok ? filePath : result.error, artifact: result.ok ? filePath : '' };
+  }
   const cap = await runAdb(task, ['-s', deviceId, 'shell', 'screencap', '-p', DEVICE_TEMP_SCREEN], step.timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!cap.ok) return { ok: false, error: cap.error || cap.stderr || 'screencap_failed' };
   const pull = await runAdb(task, ['-s', deviceId, 'pull', DEVICE_TEMP_SCREEN, filePath], step.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -560,6 +576,7 @@ async function capturePerformance(task, deviceId, step) {
     `Memory: ${snapshot.memory?.usage ?? '-'}`,
     `Warnings: ${(snapshot.warnings || []).map(item => item.label).join(', ') || '-'}`
   ].join('\n');
+  if (snapshot.platform === 'harmony') return { ok: !snapshot.sampleError, error: snapshot.sampleError || '', output: [summary, ...(snapshot.unavailable || []).map(item => `${item.metric}: ${item.reason}`)].join('\n'), artifact: filePath, snapshot };
   return { ok: true, output: summary, artifact: filePath, snapshot };
 }
 
@@ -722,6 +739,10 @@ function createRecorderTask(sender) {
 }
 
 async function captureUiSnapshot(task, deviceId, timeoutMs) {
+  if (isHarmonyDevice(deviceId)) {
+    const snapshot = await withHarmonyTask(task, deviceId, options => captureHarmonyLayout(deviceId, { ...options, timeoutMs }));
+    return { nodes: snapshot.nodes.map(toPublicUiNode).slice(0, 300), rawLength: snapshot.rawLength };
+  }
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
   if (!res.ok) return { nodes: [], rawLength: 0, error: res.error || 'uiautomator_dump_failed' };
   const raw = res.stdout || res.output || '';
@@ -884,6 +905,7 @@ async function findUiPoint(task, deviceId, step, timeoutMs) {
 }
 
 async function findUiNode(task, deviceId, step, timeoutMs) {
+  if (isHarmonyDevice(deviceId)) return withHarmonyTask(task, deviceId, options => findHarmonyNode(deviceId, step, { ...options, timeoutMs }));
   const selector = normalizeSelector(step);
   if (!hasSelector(selector)) return null;
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'uiautomator dump /sdcard/window.xml >/dev/null 2>&1 && cat /sdcard/window.xml'], timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -1198,6 +1220,7 @@ function paethPredictor(left, up, upLeft) {
 
 async function resolveRunDeviceId(task, run, step = {}) {
   if (!isDeviceBoundStep(step)) return run.deviceId;
+  if (isHarmonyDevice(run.deviceId)) return resolveHarmonyRunDeviceId(task, run, step);
   run.originalDeviceId = run.originalDeviceId || run.deviceId;
   await ensureRunDeviceIdentity(task, run).catch(() => null);
 
@@ -1220,6 +1243,39 @@ async function resolveRunDeviceId(task, run, step = {}) {
   }
 
   throw new Error(buildDeviceRebindError(run, lastReason));
+}
+
+async function resolveHarmonyRunDeviceId(task, run, step) {
+  const deadline = Date.now() + getDeviceRebindTimeout(step);
+  task.deviceRefs ||= {};
+  while (!task.cancelled) {
+    const devices = (await require('./device-discovery.cjs').listDevices({
+      readAdb: (args, options) => runProcess(task, getAdbCommand(task), args, options.timeoutMs),
+      readHdcHost: (args, options) => runHdcHost(args, { ...options, command: task.hdcPath, isCancelled: () => task.cancelled }),
+      readHdc: (id, args, options) => runHdc(id, args, { ...options, command: task.hdcPath, isCancelled: () => task.cancelled })
+    })).filter(device => device.transport === 'hdc' && device.status === 'device');
+    const current = devices.find(device => device.id === run.deviceId);
+    if (current) {
+      task.deviceRefs[current.id] = resolveDeviceRef(current.id, { deviceRef: current });
+      const identity = await readHarmonyIdentity(task, current.id);
+      if (run.deviceIdentity?.harmonyUdid && run.deviceIdentity.harmonyUdid !== identity.harmonyUdid) throw new Error(tr('鸿蒙目标身份已变化或无法确认，未继续执行。'));
+      run.deviceIdentity = identity;
+      return run.deviceId;
+    }
+    if (run.deviceIdentity?.harmonyUdid) {
+      const matched = [];
+      for (const device of devices.filter(value => !isDeviceClaimedByAnotherRun(task, run, value.id))) {
+        task.deviceRefs[device.id] = resolveDeviceRef(device.id, { deviceRef: device });
+        const identity = await readHarmonyIdentity(task, device.id);
+        if (identity.harmonyUdid === run.deviceIdentity.harmonyUdid) matched.push(device);
+      }
+      if (matched.length === 1) { rebindRunDevice(task, run, matched[0].id, tr('鸿蒙设备 UDID 匹配')); return run.deviceId; }
+      if (matched.length > 1) throw new Error(tr('多个鸿蒙目标具有相同身份，未自动选择设备。'));
+    }
+    if (Date.now() >= deadline) break;
+    await sleepWithCancel(task, Math.min(DEVICE_REBIND_INTERVAL_MS, deadline - Date.now()));
+  }
+  throw new Error(tr('鸿蒙目标未连接，或缺少可靠 UDID 无法跨连接恢复；请重新选择原设备后运行。'));
 }
 
 function isDeviceBoundStep(step) {
@@ -1413,7 +1469,9 @@ function buildDeviceRebindError(run, reason) {
 }
 
 function runAdb(task, args, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  return runProcess(task, getAdbCommand(), args, timeoutMs);
+  const target = args[args.indexOf('-s') + 1];
+  if (args.includes('-s') && isHarmonyDevice(target)) return Promise.resolve({ ok: false, error: tr('此鸿蒙步骤未提供原生命令实现，未回退到 ADB。'), output: '' });
+  return runProcess(task, getAdbCommand(task), args, timeoutMs);
 }
 
 function runProcess(task, command, args, timeoutMs, cwd = undefined) {
@@ -1440,7 +1498,9 @@ function runProcess(task, command, args, timeoutMs, cwd = undefined) {
 async function runExternalScriptStep(task, deviceId, step) {
   const artifactDir = await ensureTaskArtifactDir(task, 'external-scripts');
   const context = {
-    adb: getAdbCommand(),
+    adb: getAdbCommand(task),
+    hdc: isHarmonyDevice(deviceId) ? task.hdcPath : '',
+    targetKey: deviceTarget(deviceId),
     artifactDir,
     deviceId,
     scriptPath: String(step.scriptPath || '').trim()
@@ -1542,7 +1602,9 @@ function replaceStepPlaceholders(value, context) {
     .replace(/\{deviceId\}/g, context.deviceId || '')
     .replace(/\{artifactDir\}/g, context.artifactDir || '')
     .replace(/\{scriptPath\}/g, context.scriptPath || '')
-    .replace(/\{adb\}/g, context.adb || '');
+    .replace(/\{adb\}/g, context.adb || '')
+    .replace(/\{hdc\}/g, context.hdc || '')
+    .replace(/\{targetKey\}/g, context.targetKey || '');
 }
 
 function createTask(script, deviceIds, sender, args) {
@@ -1668,7 +1730,8 @@ function createStepRun(step, index) {
 
 function normalizeScript(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const steps = Array.isArray(source.steps) ? source.steps.map(normalizeStep).filter(Boolean) : [];
+  const platform = taskPlatform(source);
+  const steps = Array.isArray(source.steps) ? source.steps.map((step, index) => normalizeStep(step, index, platform)).filter(Boolean) : [];
   if (steps.length === 0) throw new Error(tr("脚本至少需要一个步骤"));
   const mode = source.mode === 'stress' || source.type === 'stress' ? 'stress' : 'replay';
   return {
@@ -1676,6 +1739,7 @@ function normalizeScript(raw) {
     name: String(source.name || tr("未命名脚本")).trim().slice(0, 80),
     description: String(source.description || '').trim().slice(0, 500),
     mode,
+    ...(platform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     continueOnError: source.continueOnError !== false,
     loop: normalizeStressLoop(source.loop || source.stress || {}),
     acceptance: normalizeStressAcceptance(source.acceptance || {}),
@@ -1684,12 +1748,14 @@ function normalizeScript(raw) {
   };
 }
 
-function normalizeStep(raw, index) {
+function normalizeStep(raw, index, platform = 'android') {
   if (!raw || typeof raw !== 'object') return null;
   const type = String(raw.type || 'shell').trim();
+  const coordinate = platform === 'harmony' ? normalizeHarmonyCoordinate : nullableNumber;
   return {
     id: String(raw.id || `step-${Date.now()}-${index ?? 0}-${Math.random().toString(16).slice(2)}`),
     type,
+    ...(platform === 'harmony' && raw.longPressMode === 'native' ? { longPressMode: 'native' } : {}),
     label: String(raw.label || getStepTypeLabel(type)).trim().slice(0, 80),
     command: String(raw.command || ''),
     localPath: String(raw.localPath || ''),
@@ -1705,11 +1771,11 @@ function normalizeStep(raw, index) {
     xpath: String(raw.xpath || raw.path || ''),
     selector: normalizeStepSelector(raw.selector || {}),
     requireUnique: raw.requireUnique === true,
-    x: nullableNumber(raw.x),
-    y: nullableNumber(raw.y),
-    endX: nullableNumber(raw.endX),
-    endY: nullableNumber(raw.endY),
-    points: normalizeGesturePoints(raw.points || raw.curvePoints || raw.pathPoints),
+    x: coordinate(raw.x),
+    y: coordinate(raw.y),
+    endX: coordinate(raw.endX),
+    endY: coordinate(raw.endY),
+    points: platform === 'harmony' ? normalizeHarmonyPoints(raw.points || raw.curvePoints || raw.pathPoints) : normalizeGesturePoints(raw.points || raw.curvePoints || raw.pathPoints),
     keyCode: String(raw.keyCode || ''),
     baselinePath: String(raw.baselinePath || ''),
     threshold: clampNumber(raw.threshold, 0, 100, 98),
@@ -1723,7 +1789,7 @@ function normalizeStep(raw, index) {
     includeAiSummary: raw.includeAiSummary !== false,
     timeoutMs: clampNumber(raw.timeoutMs, 1000, 600000, DEFAULT_TIMEOUT_MS),
     intervalMs: clampNumber(raw.intervalMs, 500, 60000, 2000),
-    durationMs: clampNumber(raw.durationMs, 100, 600000, 1000),
+    durationMs: platform === 'harmony' ? normalizeHarmonyDuration(raw) : clampNumber(raw.durationMs, 100, 600000, 1000),
     continueOnError: raw.continueOnError === true
   };
 }
@@ -1813,6 +1879,7 @@ function shouldStopStressOnFailure(task, step) {
 
 function evaluatePerformanceSnapshot(snapshot, thresholds = {}) {
   if (!snapshot) return [];
+  if (snapshot.platform === 'harmony') return evaluateHarmonyThresholds(snapshot, thresholds);
   const warnings = [];
   const push = (type, label, value, limit) => {
     if (limit && Number.isFinite(value) && value > limit) {
@@ -1842,6 +1909,7 @@ function getSnapshotDataUsage(snapshot) {
 }
 
 async function detectCrashAnr(task, deviceId, acceptance) {
+  if (isHarmonyDevice(deviceId)) return detectHarmonyCrashAnr(task, deviceId, acceptance);
   const warnings = [];
   const res = await runAdb(task, ['-s', deviceId, 'shell', 'logcat -d -v time -t 300'], 10000);
   const text = res.output || res.stdout || '';
@@ -2051,6 +2119,7 @@ function importStressScript(filePath) {
 function toStressExportScript(script) {
   return {
     version: 1,
+    ...(script.targetPlatform === 'harmony' ? { targetPlatform: 'harmony' } : {}),
     name: script.name,
     description: script.description,
     mode: 'stress',
@@ -2244,8 +2313,8 @@ function getDataPath(fileName) {
   return path.join(defaultArtifactBaseDir || process.cwd(), fileName);
 }
 
-function getAdbCommand() {
-  return adbPath || 'adb';
+function getAdbCommand(task) {
+  return task?.adbPath || defaultAdbPath;
 }
 
 function killCurrentProcess(task) {

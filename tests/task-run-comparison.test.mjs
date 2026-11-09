@@ -98,6 +98,24 @@ test('duration handles missing or reversed timestamps without inventing zero tim
   assert.equal(runDuration({ startedAt: '2026-10-21T00:00:00Z', endedAt: '2026-10-21T00:00:00Z' }), 0);
 });
 
+test('Harmony run identity is separate while explicit Android retains the legacy script hash', () => {
+  const legacy = createRunComparisonIdentity(script);
+  assert.equal(createRunComparisonIdentity({ ...script, targetPlatform: 'android' }).scriptHash, legacy.scriptHash);
+  const harmonyScript = { ...script, targetPlatform: 'harmony' }, harmony = createRunComparisonIdentity(harmonyScript);
+  assert.notEqual(harmony.scriptHash, legacy.scriptHash);
+  const nativeIdentity = deviceComparisonIdentity({ transport: 'hdc', harmonyUdid: '23cade0c' });
+  assert.equal(nativeIdentity.transport, 'hdc'); assert.match(nativeIdentity.harmonyUdid, /^[a-f\d]{64}$/);
+  const before = { ...makeRun('h-old'), ...harmony };
+  before.deviceRuns[0].deviceId = 'hdc:original'; before.deviceRuns[0].comparisonIdentity = nativeIdentity;
+  const after = { ...makeRun('h-new', ['success', 'success']), ...harmony };
+  after.deviceRuns[0].deviceId = 'hdc:new-address'; after.deviceRuns[0].comparisonIdentity = nativeIdentity;
+  assert.equal(compareTaskRuns(before, after).recovered, 1);
+  assert.equal(compareTaskRuns(before, { ...after, targetPlatform: undefined }).comparable, false);
+  after.deviceRuns[0].comparisonIdentity = deviceComparisonIdentity({ roSerialno: '23cade0c' });
+  assert.equal(compareTaskRuns(before, after).comparable, false);
+  assert.deepEqual(deviceComparisonIdentity({ transport: 'hdc', harmonyUdid: '' }), { transport: 'hdc' });
+});
+
 test('a failed-device child compares only verified devices and marks untouched parent devices unobserved', () => {
   const before = makeRun('parent');
   const secondIdentity = deviceComparisonIdentity({ roSerialno: 'unique-device-b' });

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; media-src blob:; connect-src 'none'">
+  <title>Veylo</title>
+  <style>
+    :root { color-scheme: dark; font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; background: #000; color: #e6edef; }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
+    header, footer { background: #0b1011; padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    header { border-bottom: 1px solid #22302c; }
+    h1 { margin: 0; font-size: 14px; font-weight: 600; }
+    #device { color: #84968e; font: 12px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+    .brand { width: 26px; height: 26px; border-radius: 6px; object-fit: contain; }
+    .spacer { flex: 1; }
+    button, input { font: inherit; color: inherit; }
+    button { border: 1px solid #31433b; border-radius: 8px; padding: 8px 12px; background: #16201d; cursor: pointer; font-size: 12px; }
+    button:hover:not(:disabled) { background: #243a30; border-color: #20caa0; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #20caa0; outline-offset: 2px; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    #record { background: #13b88e; color: #001b13; border-color: #13b88e; font-weight: 600; }
+    #record[data-recording="true"] { background: #5b2528; color: #ffd4d5; border-color: #ab4f57; }
+    label { display: inline-flex; align-items: center; gap: 6px; color: #a4b7ad; font-size: 12px; }
+    input[type="checkbox"] { accent-color: #1bd3a8; }
+    main { min-height: 0; min-width: 0; overflow: hidden; position: relative; display: grid; place-items: center; background: #000; }
+    canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; aspect-ratio: auto; touch-action: none; }
+    canvas[data-control="true"] { cursor: crosshair; }
+    #notice { position: absolute; top: 18px; left: 18px; right: 18px; padding: 12px 16px; border: 1px solid #284335; border-radius: 10px; background: #0e1917ed; color: #a3d8c4; font-size: 13px; line-height: 1.5; }
+    #notice[hidden] { display: none; }
+    #notice[data-error="true"] { color: #ffb6b6; border-color: #603838; }
+    footer { border-top: 1px solid #22302c; gap: 10px; }
+    #status { font-size: 12px; color: #8ea89a; flex: 1 1 200px; }
+    #text { min-width: 120px; width: 220px; border: 1px solid #30443a; background: #000; padding: 7px 9px; border-radius: 7px; font-size: 12px; }
+    #privacy { margin: 0; width: 100%; color: #667e70; font-size: 11px; line-height: 1.5; }
+    @media (max-width: 620px) { header, footer { padding: 9px; gap: 7px; } #device { max-width: 140px; } #text { flex: 1; width: 120px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <img class="brand" src="../icon.png" alt=""><h1 id="title"></h1><span id="device"></span><span class="spacer"></span>
+    <label><input id="withLogs" type="checkbox"><span data-label="withLogs"></span></label>
+    <button id="record" data-label="record" disabled></button><button id="stop" data-label="stop"></button>
+  </header>
+  <main>
+    <canvas id="screen" width="640" height="360"></canvas>
+    <div id="notice" role="status" aria-live="polite"></div>
+  </main>
+  <footer>
+    <span id="status" role="status" aria-live="polite"></span>
+    <label><input id="control" type="checkbox"><span data-label="inputEnabled"></span></label>
+    <button id="home" data-label="home" disabled></button><button id="back" data-label="back" disabled></button>
+    <input id="text" type="text" maxlength="500" disabled><button id="send" data-label="sendText" disabled></button>
+    <p id="privacy"></p>
+  </footer>
+  <script type="module" src="./harmony-media-renderer.js"></script>
+</body>
+</html>

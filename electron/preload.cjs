@@ -224,8 +224,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearConnectionHistory: () => ipcRenderer.invoke('history:clear'),
   // 终端命令历史记录
   saveTerminalCommand: (command) => ipcRenderer.invoke('terminalHistory:save', command),
-  loadTerminalHistory: () => ipcRenderer.invoke('terminalHistory:load'),
-  clearTerminalHistory: () => ipcRenderer.invoke('terminalHistory:clear'),
+  loadTerminalHistory: (args) => ipcRenderer.invoke('terminalHistory:load', args),
+  clearTerminalHistory: (args) => ipcRenderer.invoke('terminalHistory:clear', args),
   // Android Log Analyzer 集成
   adbListDevices: () => ipcRenderer.invoke('adb:listDevices'),
   adbStartLog: (args) => ipcRenderer.invoke('adb:startLog', args),
@@ -233,6 +233,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logOpenFile: () => ipcRenderer.invoke('log:openFile'),
   logClear: (args) => ipcRenderer.invoke('log:clear', args),
   logGetState: () => ipcRenderer.invoke('log:getState'),
+  onLogCaptureState: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('log:capture-state', listener);
+    return () => ipcRenderer.off('log:capture-state', listener);
+  },
   logFilterInMain: (args) => ipcRenderer.invoke('log:filterInMain', args),
   logExportToFile: (args) => ipcRenderer.invoke('log:exportToFile', args),
   onLogReset: (callback) => {
@@ -267,7 +271,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadPushRemotePathHistory: () => ipcRenderer.invoke('settings:loadPushRemotePathHistory'),
   // AI 日志分析
   aiAnalyzeLog: (args) => ipcRenderer.invoke('ai:analyzeLog', args),
-  aiWorkspaceSources: () => ipcRenderer.invoke('ai-workspace:sources'),
+  aiWorkspaceSources: (args) => ipcRenderer.invoke('ai-workspace:sources', args),
   aiWorkspacePlan: args => ipcRenderer.invoke('ai-workspace:plan', args),
   aiWorkspaceCollect: args => ipcRenderer.invoke('ai-workspace:collect', args),
   aiWorkspaceAnalyze: args => ipcRenderer.invoke('ai-workspace:analyze', args),

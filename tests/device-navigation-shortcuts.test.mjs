@@ -1,9 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { SHORTCUTS_KEY, defaultDeviceShortcuts, normalizeDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../src/shared/deviceNavigationShortcuts.js';
+import { SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, defaultDeviceShortcuts, normalizeDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../src/shared/deviceNavigationShortcuts.js';
 import { collectMigrationPreferences, applyMigrationPreferences } from '../src/shared/dataMigrationStorage.js';
 const require = createRequire(import.meta.url);
+
+test('Harmony defaults and persistence do not overwrite Android vendor shortcuts', async () => {
+  const data = new Map(), storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  const native = defaultDeviceShortcuts('hdc:phone');
+  assert.deepEqual(native.slots.map(slot => slot.action), ['home', 'back', 'settings', 'power']);
+  saveDeviceShortcuts(native, storage, () => {}, 'hdc:phone');
+  assert.ok(data.has(HARMONY_SHORTCUTS_KEY));
+  assert.equal(data.has(SHORTCUTS_KEY), false);
+  assert.equal(readDeviceShortcuts(storage).config.slots[1].action, 'sidebar');
+  const calls = [], execute = createShortcutExecutor();
+  const api = { adbShell: async (...args) => { calls.push(args); return { success: true }; } };
+  await execute({ api, deviceId: 'hdc:phone', shortcut: native.slots[0] });
+  await execute({ api, deviceId: 'hdc:phone', shortcut: native.slots[3] });
+  assert.deepEqual(calls, [['hdc:phone', 'uitest uiInput keyEvent Home'], ['hdc:phone', 'uitest uiInput keyEvent Power']]);
+});
 const backend = require('../electron/lib/device-shortcuts-policy.cjs');
 const migration = require('../electron/lib/data-migration-policy.cjs');
 const config = change => { const value = defaultDeviceShortcuts(); if (change) change(value); return value; };

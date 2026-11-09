@@ -3,6 +3,7 @@ import { levelOrder } from './logTypes.js';
 function compileFilter(filter) {
   const pkg = filter.pkg?.toLowerCase();
   const tag = filter.tag?.toLowerCase();
+  const domain = filter.domain?.toLowerCase();
   const text = filter.text?.toLowerCase();
   const excludeText = filter.excludeText?.toLowerCase();
   let regex;
@@ -17,8 +18,9 @@ function compileFilter(filter) {
   return (entry) => {
     if (filter.minLevel && entry.level && levelOrder[entry.level] < levelOrder[filter.minLevel]) return false;
     if (typeof filter.pid === 'number' && entry.pid !== filter.pid) return false;
-    if (pkg && !(entry.pkg ?? '').toLowerCase().includes(pkg)) return false;
+    if (pkg && !(entry.pkg || entry.processName || '').toLowerCase().includes(pkg)) return false;
     if (tag && !(entry.tag ?? '').toLowerCase().includes(tag)) return false;
+    if (domain && !(entry.domain || '').toLowerCase().includes(domain)) return false;
     if (text || excludeText) {
       const hay = (entry.raw ?? '').toLowerCase();
       if (text && !hay.includes(text)) return false;
@@ -38,7 +40,7 @@ export function matchFilter(entry, filter) {
 }
 
 export function filterEntries(entries, filter) {
-  if (!filter || (!filter.minLevel && !filter.text && !filter.excludeText && !filter.tag && typeof filter.pid !== 'number' && !filter.pkg && !filter.regex)) {
+  if (!filter || (!filter.minLevel && !filter.text && !filter.excludeText && !filter.tag && !filter.domain && typeof filter.pid !== 'number' && !filter.pkg && !filter.regex)) {
     return entries;
   }
   return entries.filter(compileFilter(filter));

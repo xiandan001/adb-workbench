@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { PORTABLE_PREF_KEYS, collectMigrationPreferences, applyMigrationPreferences, readMigratedPreference } from '../src/shared/dataMigrationStorage.js';
 import { PINNED_DEVICES_KEY, readPinnedDevices } from '../src/shared/deviceDiscovery.js';
 import { SERIAL_PREFS_KEY, SERIAL_HISTORY_KEY, defaultSerialPreferences, readSerialPreferences } from '../src/shared/serialSettings.js';
+import { SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, defaultDeviceShortcuts, readDeviceShortcuts } from '../src/shared/deviceNavigationShortcuts.js';
 const require = createRequire(import.meta.url);
 const backend = require('../electron/lib/data-migration-policy.cjs');
 
@@ -15,6 +16,17 @@ function storage(initial = {}) {
 
 test('renderer and backend preference allowlists agree exactly', () => {
   assert.deepEqual(PORTABLE_PREF_KEYS, backend.PORTABLE_PREF_KEYS);
+});
+
+test('Harmony shortcuts migrate through the real renderer allowlist without changing Android controls', () => {
+  const native = defaultDeviceShortcuts('hdc:fixture'), android = defaultDeviceShortcuts();
+  const source = storage({ [HARMONY_SHORTCUTS_KEY]: JSON.stringify(native) });
+  const exported = collectMigrationPreferences(source);
+  assert.deepEqual(Object.keys(exported), [HARMONY_SHORTCUTS_KEY]);
+  const target = storage({ [SHORTCUTS_KEY]: JSON.stringify(android) });
+  applyMigrationPreferences(backend.normalizePreferences(exported), target);
+  assert.deepEqual(readDeviceShortcuts(target, 'hdc:fixture').config, native);
+  assert.deepEqual(readDeviceShortcuts(target).config, android);
 });
 
 test('serial preferences migrate but history, COM bindings and running state never migrate', () => {

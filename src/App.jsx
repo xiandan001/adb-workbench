@@ -37,6 +37,7 @@ import { searchDestinations } from './shared/workbenchSearch';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
 import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
+import { isHarmonyDevice, platformLabel, displayDeviceId, deviceRemoteRoot, applicationPackageExtensions } from './shared/devicePlatform';
 import { addRecentApk, readRecentApks, RECENT_APKS_KEY, saveShortcutList } from './shared/deviceShortcuts';
 import { connectWirelessDevice, historyConnectionAddress } from './shared/wirelessConnection';
 import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/deviceControlOptions';
@@ -285,6 +286,7 @@ function App() {
   const [connectionHistory, setConnectionHistory] = useState([]);
   // 终端命令历史记录（全局共享）
   const [terminalCommandHistory, setTerminalCommandHistory] = useState([]);
+  const [harmonyTerminalCommandHistory, setHarmonyTerminalCommandHistory] = useState([]);
   // VIP 会员状态
   const [vipStatus, setVipStatus] = useState({
     activated: false, scope: 'free', type: null,
@@ -610,6 +612,8 @@ function App() {
         if (result.success && result.data) {
           setTerminalCommandHistory(result.data);
         }
+        const harmony = await window.electronAPI.loadTerminalHistory({ deviceId: 'hdc:history' });
+        if (harmony.success && harmony.data) setHarmonyTerminalCommandHistory(harmony.data);
       }
     };
     loadTerminalCmdHistory();
@@ -866,6 +870,7 @@ function App() {
     try {
       if (window.electronAPI) {
         const res = await window.electronAPI.startScrcpy(deviceId, scrcpySettings);
+        if (res?.success === false || res?.ok === false) throw new Error(res.error || tr('原生投屏未能启动。'));
         showToast(res?.message || tr("开始投屏 {0}", { 0: deviceId }));
       } else {
         showToast(tr("开始投屏 {0}", { 0: deviceId }));
@@ -901,20 +906,21 @@ function App() {
   };
 
   // 保存终端命令到全局共享历史记录
-  const handleSaveTerminalCommand = async (command) => {
+  const handleSaveTerminalCommand = async (command, deviceId) => {
     const trimmedCmd = (command || '').trim();
     if (!trimmedCmd) return;
-    setTerminalCommandHistory(prev => {
+    const saveHistory = isHarmonyDevice(deviceId) ? setHarmonyTerminalCommandHistory : setTerminalCommandHistory;
+    saveHistory(prev => {
       const filtered = prev.filter(c => c !== trimmedCmd);
       return [trimmedCmd, ...filtered].slice(0, 100);
     });
     if (window.electronAPI) {
-      await window.electronAPI.saveTerminalCommand(trimmedCmd);
+      await window.electronAPI.saveTerminalCommand(isHarmonyDevice(deviceId) ? { command: trimmedCmd, deviceId } : trimmedCmd);
     }
   };
 
   // 清空终端命令历史记录
-  const handleClearTerminalHistory = async () => {
+  const handleClearTerminalHistory = async (deviceId) => {
     showConfirm({
       title: tr("清空终端命令历史"),
       message: tr("确定清空所有已保存的终端命令吗？"),
@@ -922,9 +928,9 @@ function App() {
       confirmLabel: tr("清空历史"),
       rememberKey: 'app.clearTerminalHistory',
       onConfirm: async () => {
-        setTerminalCommandHistory([]);
+        (isHarmonyDevice(deviceId) ? setHarmonyTerminalCommandHistory : setTerminalCommandHistory)([]);
         if (window.electronAPI) {
-          await window.electronAPI.clearTerminalHistory();
+          await window.electronAPI.clearTerminalHistory({ deviceId });
         }
         showToast(tr("终端命令历史已清除"));
       }
@@ -943,18 +949,13 @@ function App() {
           saveDir = `${baseDir}/screenshot`;
         }
         await window.electronAPI.ensureFolder(saveDir);
-        const localPath = `${saveDir}/screenshot-${timestamp}.png`;
-        const res = await window.electronAPI.adbShell(deviceId, 'screencap -p /sdcard/screen.png');
-        if (res.success) {
-          const pullRes = await window.electronAPI.adbScreenshot(deviceId, localPath);
-          if (pullRes.success) {
-            setLatestScreenshot({ path: pullRes.path || localPath, preview: pullRes.preview || '', deviceName: deviceNames[deviceId] || deviceId });
-            if (pullRes.historyWarning) showToast(pullRes.historyWarning);
-          } else {
-            showDeviceFailure(deviceId, tr("截图保存失败: {0}", { 0: pullRes.error }));
-          }
+        const localPath = `${saveDir}/screenshot-${timestamp}-${crypto.randomUUID().slice(0, 8)}.png`;
+        const pullRes = await window.electronAPI.adbScreenshot(deviceId, localPath);
+        if (pullRes.success) {
+          setLatestScreenshot({ path: pullRes.path || localPath, preview: pullRes.preview || '', deviceName: deviceNames[deviceId] || deviceId });
+          if (pullRes.historyWarning) showToast(pullRes.historyWarning);
         } else {
-          showDeviceFailure(deviceId, tr("截图命令失败: {0}", { 0: res.error }));
+          showDeviceFailure(deviceId, tr("截图保存失败: {0}", { 0: pullRes.error }));
         }
       } else {
         showToast(tr("截图功能需要 Electron 环境"));
@@ -1065,7 +1066,7 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbRoot(deviceId);
         if (res.success) {
-          showToast(tr("Root 成功！{0}", { 0: res.message }));
+          showToast(isHarmonyDevice(deviceId) ? res.message : tr("Root 成功！{0}", { 0: res.message }));
         } else {
           showDeviceFailure(deviceId, tr("Root 失败: {0}", { 0: res.error }));
         }
@@ -1085,7 +1086,7 @@ function App() {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbRemount(deviceId);
         if (res.success) {
-          showToast(tr("Remount 成功！{0}", { 0: res.message }));
+          showToast(isHarmonyDevice(deviceId) ? res.message : tr("Remount 成功！{0}", { 0: res.message }));
         } else {
           showDeviceFailure(deviceId, tr("Remount 失败: {0}", { 0: res.error }));
         }
@@ -1104,7 +1105,7 @@ function App() {
     setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
     const next = addRecentApk(recentApks, selectedPath);
     setRecentApks(next);
-    if (!saveShortcutList(RECENT_APKS_KEY, next)) showToast(tr("路径已选择，但最近 APK 记录未能保存"));
+    if (!saveShortcutList(RECENT_APKS_KEY, next)) showToast(isHarmonyDevice(deviceId) ? tr('路径已选择，但最近应用包记录未能保存') : tr("路径已选择，但最近 APK 记录未能保存"));
   };
 
   const handleSelectApkFile = async (deviceId, forWhat) => {
@@ -1115,7 +1116,7 @@ function App() {
         };
         // 安装仅限 APK，推送支持所有文件
         if (forWhat === 'install') {
-          dialogOptions.filters = [{ name: 'APK Files', extensions: ['apk'] }];
+          dialogOptions.filters = [{ name: isHarmonyDevice(deviceId) ? 'HAP / HSP' : 'APK', extensions: applicationPackageExtensions(deviceId) }];
         } else {
           dialogOptions.filters = [{ name: tr("所有文件"), extensions: ['*'] }];
         }
@@ -1146,8 +1147,9 @@ function App() {
   const handleInstallApk = async (deviceId) => {
     const apkPath = apkInstallPaths[deviceId];
     if (!apkPath) {
-      showToast(tr("请先选择一个 APK 文件"));
-      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("安装失败：请先选择一个 APK 文件") } }));
+      const message = isHarmonyDevice(deviceId) ? tr('请先选择一个 HAP/HSP 文件') : tr("请先选择一个 APK 文件");
+      showToast(message);
+      setApkInstallResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: isHarmonyDevice(deviceId) ? message : tr("安装失败：请先选择一个 APK 文件") } }));
       return;
     }
     setApkInstallResults(prev => ({ ...prev, [deviceId]: null }));
@@ -1176,7 +1178,7 @@ function App() {
 
   const handlePushApk = async (deviceId) => {
     const localPath = apkPushPaths[deviceId];
-    const remotePath = apkPushRemotePaths[deviceId] !== undefined ? apkPushRemotePaths[deviceId] : '/sdcard/';
+    const remotePath = apkPushRemotePaths[deviceId] !== undefined ? apkPushRemotePaths[deviceId] : deviceRemoteRoot(deviceId) + '/';
     if (!localPath) {
       showToast(tr("请先选择一个文件"));
       setApkPushResults(prev => ({ ...prev, [deviceId]: { status: 'error', message: tr("推送失败：请先选择一个文件") } }));
@@ -1282,23 +1284,24 @@ function App() {
 
   const connectDevice = async (address, historyEntry) => {
     const target = address.trim();
-    if (!target || connectingAddressesRef.current.has(target)) return false;
-    connectingAddressesRef.current.add(target);
-    setConnectionResults(prev => ({ ...prev, [target]: { status: 'loading', message: tr("正在连接…") } }));
+    const key = historyEntry?.deviceId || target;
+    if (!target || connectingAddressesRef.current.has(key)) return false;
+    connectingAddressesRef.current.add(key);
+    setConnectionResults(prev => ({ ...prev, [key]: { status: 'loading', message: tr("正在连接…") } }));
     try {
       const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
       if (result.history) setConnectionHistory(result.history);
-      setConnectionResults(prev => ({ ...prev, [target]: { status: result.success ? 'success' : 'error', message: result.message } }));
+      setConnectionResults(prev => ({ ...prev, [key]: { status: result.success ? 'success' : 'error', message: result.message } }));
       showToast(result.message);
       if (result.success) setDeviceQuery('');
       if (result.success && historyEntry) {
-        setActiveDeviceId(target);
+        setActiveDeviceId(result.deviceId || historyEntry.deviceId || target);
         setActiveTab('devices');
         setConnectionFormOpen(false);
       }
       return result.success;
     } finally {
-      connectingAddressesRef.current.delete(target);
+      connectingAddressesRef.current.delete(key);
     }
   };
 
@@ -1844,7 +1847,7 @@ function App() {
                   ...(!activeDevice ? [{ value: '', label: tr("尚未发现设备") }] : []),
                   ...devices.map(device => ({
                     value: device.id,
-                    label: `${deviceNames[device.id] || device.model || device.id} · ${device.id} · ${deviceStatusLabel(device.status)}`
+                    label: `${deviceNames[device.id] || device.model || displayDeviceId(device)} · ${displayDeviceId(device)} · ${platformLabel(device)} · ${deviceStatusLabel(device.status)}`
                   }))
                 ]}
               />
@@ -2007,17 +2010,17 @@ function App() {
                       apkPushPath={apkPushPaths[device.id] ?? ''}
                       apkInstallResult={apkInstallResults[device.id] ?? null}
                       apkPushResult={apkPushResults[device.id] ?? null}
-                      apkPushRemotePath={apkPushRemotePaths[device.id] !== undefined ? apkPushRemotePaths[device.id] : '/sdcard/'}
+                      apkPushRemotePath={apkPushRemotePaths[device.id] !== undefined ? apkPushRemotePaths[device.id] : deviceRemoteRoot(device) + '/'}
                       pushRemotePathHistory={pushRemotePathHistory}
-                      apkBrowserPath={apkBrowserPaths[device.id] ?? '/sdcard'}
+                      apkBrowserPath={apkBrowserPaths[device.id] ?? deviceRemoteRoot(device)}
                       apkBrowserItems={apkBrowserItemsMap[device.id] || []}
                       apkBrowserLoading={apkBrowserLoadingMap[device.id] || false}
                       operationLoading={operationLoading}
                       onExecuteCommand={handleExecuteCommand}
                       theme={theme}
-                      sharedCommandHistory={terminalCommandHistory}
-                      onSaveTerminalCommand={handleSaveTerminalCommand}
-                      onClearTerminalHistory={handleClearTerminalHistory}
+                      sharedCommandHistory={isHarmonyDevice(device) ? harmonyTerminalCommandHistory : terminalCommandHistory}
+                      onSaveTerminalCommand={command => handleSaveTerminalCommand(command, device.id)}
+                      onClearTerminalHistory={() => handleClearTerminalHistory(device.id)}
                       vipStatus={vipStatus}
                       inspectionPath={inspectionPath}
                       onInspectionPathChange={setInspectionPath}
@@ -2152,7 +2155,7 @@ function App() {
                         <>
                           {visibleHistory.map((item) => {
                             const address = historyConnectionAddress(item);
-                            const connectionResult = connectionResults[address];
+                            const connectionResult = connectionResults[item.deviceId || address];
                             return (
                       <div
                         key={item.id}
@@ -2171,6 +2174,7 @@ function App() {
                               <span className={`font-semibold truncate ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                                 {item.deviceName}
                               </span>
+                              <span className={`text-xs ${t.textMuted}`}>{platformLabel(item.deviceId)}</span>
                             </div>
                             {item.ip && (
                               <div className="flex items-center gap-2 mb-2">

@@ -16,7 +16,7 @@ export default function DeviceShortcutConfirm({ request, isDark }) {
   }, [request]);
   return <dialog ref={dialogRef} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); request.resolve(false); }}
     className={`m-auto w-[min(560px,calc(100vw-32px))] max-h-[85vh] overflow-y-auto rounded-xl border p-5 shadow-2xl backdrop:bg-black/60 ${isDark ? 'bg-[#2D2F33] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800'}`}>
-    <h2 id={titleId} className="font-semibold">{tr("确认执行 ADB 命令")}</h2>
+    <h2 id={titleId} className="font-semibold">{request.deviceId.startsWith('hdc:') ? tr('确认执行 HDC 命令') : tr("确认执行 ADB 命令")}</h2>
     <p className="mt-3 break-all text-sm">{tr("目标设备：")}<strong>{request.deviceId}</strong></p>
     <p className="mt-2 text-sm">{tr("命令可能改变设备或删除数据，请核对完整内容。按钮名称“{0}”不代表命令安全。", { 0: request.label })}</p>
     <pre className="my-4 whitespace-pre-wrap break-all rounded-lg bg-slate-400/10 p-3 text-xs">{request.command}</pre>

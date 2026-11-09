@@ -7,6 +7,8 @@ const path = require('path');
 
 const vip = require('./vip.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const harmonyApps = require('./harmony-apps.cjs');
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const LONG_TIMEOUT_MS = 60000;
@@ -18,7 +20,8 @@ function register(ipcMain) {
     if (!deviceId) return { ok: false, error: 'device_required' };
     try {
       const packages = await listPackages(deviceId);
-      return { ok: true, packages };
+      const capabilities = isHarmonyDevice(deviceId) ? await harmonyApps.getCapabilities(deviceId) : undefined;
+      return { ok: true, packages, ...(capabilities ? { capabilities } : {}) };
     } catch (error) {
       return { ok: false, error: error.message };
     }
@@ -49,6 +52,7 @@ function register(ipcMain) {
     const packageName = normalizePackageName(args?.packageName);
     const localPath = String(args?.localPath || '').trim();
     if (!deviceId || !packageName || !localPath) return { ok: false, error: 'device_package_or_path_required' };
+    if (isHarmonyDevice(deviceId)) return { ok: false, code: 'DEVICE_UNSUPPORTED', error: tr('不能将 APK 导出方式用于 HAP；此设备尚无已验证的应用包导出能力。') };
     const detail = await getPackageDetail(deviceId, packageName);
     const sourcePath = detail.apkPath || detail.path;
     if (!sourcePath) return { ok: false, error: 'apk_path_not_found' };
@@ -73,8 +77,7 @@ function register(ipcMain) {
     const deviceId = normalizeDeviceId(args?.deviceId);
     const packageName = normalizePackageName(args?.packageName);
     if (!deviceId || !packageName) return { ok: false, error: 'device_or_package_required' };
-    const res = await runAdb(['-s', deviceId, 'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1'], DEFAULT_TIMEOUT_MS);
-    return adbMutationResult(res);
+    return launchPackage(deviceId, packageName, { abilityName: args?.abilityName, moduleName: args?.moduleName });
   });
 
   ipcMain.handle('package:batch', async (event, args) => withVip(async () => {
@@ -84,7 +87,7 @@ function register(ipcMain) {
     if (!deviceId || !action || packageNames.length === 0) return { ok: false, error: 'device_action_or_packages_required' };
     const results = [];
     for (const packageName of packageNames) {
-      const res = await runPackageAction(deviceId, packageName, action, args || {});
+      const res = await runPackageAction(deviceId, packageName, action);
       results.push({ packageName, ...res });
     }
     const failed = results.filter(item => !item.ok);
@@ -95,21 +98,21 @@ function register(ipcMain) {
     const deviceId = normalizeDeviceId(args?.deviceId);
     const packageName = normalizePackageName(args?.packageName);
     if (!deviceId || !packageName) return { ok: false, error: 'device_or_package_required' };
-    return runPackageAction(deviceId, packageName, 'uninstall', args || {});
+    return runPackageAction(deviceId, packageName, 'uninstall');
   }));
 
   ipcMain.handle('package:clearData', async (event, args) => withVip(async () => {
     const deviceId = normalizeDeviceId(args?.deviceId);
     const packageName = normalizePackageName(args?.packageName);
     if (!deviceId || !packageName) return { ok: false, error: 'device_or_package_required' };
-    return runPackageAction(deviceId, packageName, 'clearData', args || {});
+    return runPackageAction(deviceId, packageName, 'clearData');
   }));
 
   ipcMain.handle('package:forceStop', async (event, args) => withVip(async () => {
     const deviceId = normalizeDeviceId(args?.deviceId);
     const packageName = normalizePackageName(args?.packageName);
     if (!deviceId || !packageName) return { ok: false, error: 'device_or_package_required' };
-    return runPackageAction(deviceId, packageName, 'forceStop', args || {});
+    return runPackageAction(deviceId, packageName, 'forceStop');
   }));
 
   ipcMain.handle('package:setEnabled', async (event, args) => withVip(async () => {
@@ -117,7 +120,7 @@ function register(ipcMain) {
     const packageName = normalizePackageName(args?.packageName);
     const enabled = args?.enabled === true;
     if (!deviceId || !packageName) return { ok: false, error: 'device_or_package_required' };
-    return runPackageAction(deviceId, packageName, enabled ? 'enable' : 'disable', args || {});
+    return runPackageAction(deviceId, packageName, enabled ? 'enable' : 'disable');
   }));
 }
 
@@ -133,7 +136,8 @@ async function withVip(action) {
   }
 }
 
-async function listPackages(deviceId) {
+async function listPackages(deviceId, options = {}) {
+  if (isHarmonyDevice(deviceId)) return harmonyApps.listPackages(deviceId, options);
   let res = await runAdb(['-s', deviceId, 'shell', 'cmd', 'package', 'list', 'packages', '-f', '-U', '--show-versioncode'], LONG_TIMEOUT_MS);
   if (!res.ok || !res.stdout.trim()) {
     res = await runAdb(['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-f'], LONG_TIMEOUT_MS);
@@ -146,7 +150,8 @@ async function listPackages(deviceId) {
     .sort((a, b) => a.packageName.localeCompare(b.packageName));
 }
 
-async function getPackageDetail(deviceId, packageName) {
+async function getPackageDetail(deviceId, packageName, options = {}) {
+  if (isHarmonyDevice(deviceId)) return harmonyApps.getPackageDetail(deviceId, packageName, options);
   const list = await listPackages(deviceId);
   const basic = list.find(item => item.packageName === packageName) || { packageName };
   const res = await runAdb(['-s', deviceId, 'shell', 'dumpsys', 'package', packageName], LONG_TIMEOUT_MS);
@@ -246,7 +251,18 @@ function adbMutationResult(res) {
   return { ok: false, error: res.error || res.stderr || res.stdout || 'adb_failed' };
 }
 
-async function runPackageAction(deviceId, packageName, action) {
+async function launchPackage(deviceId, packageName, options = {}) {
+  if (isHarmonyDevice(deviceId)) return harmonyApps.launchPackage(deviceId, packageName, options);
+  return adbMutationResult(await runAdb(['-s', deviceId, 'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1'], DEFAULT_TIMEOUT_MS));
+}
+
+async function installPackage(deviceId, localPath, options = {}) {
+  if (isHarmonyDevice(deviceId)) return harmonyApps.installPackage(deviceId, localPath, options);
+  return adbMutationResult(await runRuntimeAdb(['-s', deviceId, 'install', '-r', '-d', localPath], { timeoutMs: 120000, ...options }));
+}
+
+async function runPackageAction(deviceId, packageName, action, options = {}) {
+  if (isHarmonyDevice(deviceId)) return harmonyApps.runPackageAction(deviceId, packageName, action, options);
   if (action === 'forceStop') {
     return adbMutationResult(await runAdb(['-s', deviceId, 'shell', 'am', 'force-stop', packageName], DEFAULT_TIMEOUT_MS));
   }
@@ -323,4 +339,4 @@ function firstMatch(text, regex) {
   return match ? String(match[1] || '').trim() : '';
 }
 
-module.exports = { register, listPackages, getPackageDetail };
+module.exports = { register, listPackages, getPackageDetail, launchPackage, runPackageAction, installPackage };

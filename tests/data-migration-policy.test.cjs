@@ -50,6 +50,47 @@ test('scripts retain user file dependencies without running them, reject unsafe 
   assert.throws(() => sanitizeFile('task-center-scripts.json', { version: 1, scripts: [value, value] }));
 });
 
+test('Harmony task platform/native long press/launch fields survive migration without rewriting Android scripts', () => {
+  const { createRunComparisonIdentity } = require('../electron/lib/task-run-manifest.cjs');
+  const android = script();
+  const restoredAndroid = sanitizeFile('task-center-scripts.json', { version: 1, scripts: [android] }).scripts[0];
+  assert.deepEqual(restoredAndroid, android);
+  assert.equal(createRunComparisonIdentity(restoredAndroid).scriptHash, createRunComparisonIdentity(android).scriptHash);
+  const harmony = { ...script(), targetPlatform: 'harmony', steps: [
+    { id: 'native-long', type: 'longPress', longPressMode: 'native', durationMs: null, x: 1, y: 2 },
+    { id: 'launch', type: 'launchApp', packageName: 'com.example.app' }
+  ] };
+  assert.deepEqual(sanitizeFile('task-center-scripts.json', { version: 1, scripts: [harmony] }).scripts[0], harmony);
+  for (const bad of [{ ...harmony, targetPlatform: 'unknown' }, { ...harmony, targetPlatform: 'android' },
+    { ...harmony, steps: [{ ...harmony.steps[0], durationMs: 800 }] }]) {
+    assert.throws(() => sanitizeFile('task-center-scripts.json', { version: 1, scripts: [bad] }));
+  }
+});
+
+test('Harmony history keeps transport-separated identity while rejecting conflicting or malformed provenance', () => {
+  const identity = { transport: 'hdc', harmonyUdid: 'a'.repeat(64) };
+  const record = { id: 'h-run', scriptName: 'Harmony', status: 'failed', targetPlatform: 'harmony', artifactDir: '/not-transferred',
+    deviceRuns: [{ deviceId: 'hdc:target', comparisonIdentity: identity, steps: [] }] };
+  const read = value => sanitizeFile('task-center-history.json', { version: 1, history: [value] }).history[0];
+  assert.deepEqual(read(record).deviceRuns[0].comparisonIdentity, identity);
+  assert.equal(read(record).targetPlatform, 'harmony'); assert.equal(read(record).artifactDir, undefined);
+  assert.throws(() => read({ ...record, targetPlatform: undefined }));
+  assert.throws(() => read({ ...record, deviceRuns: [{ ...record.deviceRuns[0], deviceId: 'adb-raw-target' }] }));
+  assert.throws(() => read({ ...record, deviceRuns: [{ ...record.deviceRuns[0], comparisonIdentity: { ...identity, harmonyUdid: 'raw-udid' } }] }));
+  assert.throws(() => read({ ...record, deviceRuns: [{ ...record.deviceRuns[0], comparisonIdentity: { ...identity, androidId: 'b'.repeat(64) } }] }));
+});
+
+test('Harmony shortcut preferences migrate separately without changing Android default slots', () => {
+  const spec = require('../electron/lib/device-shortcuts-spec.json');
+  assert.deepEqual(spec.defaultActions, ['home', 'sidebar', 'settings', 'whiteboard']);
+  const value = { version: 1, slots: ['home', 'back', 'settings', 'power'].map((action, index) => ({ id: `slot-${index + 1}`, label: action, type: 'builtin', action })) };
+  const key = 'adb-workbench.harmony-device-shortcuts.v1';
+  assert.ok(PORTABLE_PREF_KEYS.includes(key));
+  const restored = normalizePreferences({ [key]: JSON.stringify(value) });
+  assert.deepEqual(JSON.parse(restored[key]), value);
+  assert.equal(restored[spec.storageKey], undefined);
+});
+
 test('run history keeps identity and results but strips every nontransferred clickable evidence link', () => {
   const run = { id: 'run-a', scriptName: '任务', status: 'failed', scriptHash: 'hash', stressSummary: null, artifactDir: 'C:/evidence', runResultPath: 'C:/evidence/run.json',
     stressReportPath: 'C:/report.md', stressResultPath: 'C:/result.json', deviceRuns: [{ deviceId: 'device-a', steps: [{ id: 'a', artifact: 'C:/screen.png', output: 'failure', error: 'original' }] }] };
@@ -83,6 +124,12 @@ test('diagnosis rules require valid regular expressions and performance threshol
   const thresholds = { cpu: 85, memory: 85, batteryTemp: 45, dataUsed: 90 };
   assert.deepEqual(sanitizeFile('performance-thresholds.json', thresholds), thresholds);
   assert.throws(() => sanitizeFile('performance-thresholds.json', { ...thresholds, cpu: 101 }));
+});
+
+test('Harmony built-in diagnostic rule switches round-trip without replacing Android switches', () => {
+  const value = { version: 1, builtinEnabled: { 'builtin-crash': false, 'builtin-harmony-js-crash': true,
+    'builtin-harmony-app-freeze': false, 'builtin-harmony-cpp-crash': true }, customRules: [] };
+  assert.deepEqual(sanitizeFile('auto-diagnose-rules.json', value), value);
 });
 
 test('preference allowlist excludes credentials, local paths and confirmation suppression', () => {

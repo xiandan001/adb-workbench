@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createRequire } = require('node:module');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { createLogCaptureBuffer } = require('../electron/lib/log-capture-buffer.cjs');
@@ -67,6 +68,7 @@ function captureHarness({ maxBytes } = {}) {
   };
   const module = { exports: {} };
   const filename = path.join(__dirname, '../electron/lib/log-analyzer.cjs');
+  const actualRequire = createRequire(filename);
   const clock = {
     setTimeout: (callback, delay) => { const id = nextTimer++; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
@@ -84,7 +86,7 @@ function captureHarness({ maxBytes } = {}) {
       if (name === './log-capture-buffer.cjs') return { createLogCaptureBuffer };
       if (name === './log-sessions.cjs') return { register() {} };
       if (name === './auto-diagnose.cjs') return { autoDiagnoseOnLine: (line, index) => diagnosed.push({ line, index }) };
-      return require(name);
+      return actualRequire(name);
     }
   }, { filename });
   const api = module.exports;

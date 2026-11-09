@@ -26,6 +26,28 @@ test('associated log uses independent device-scoped stream, never clears, and fl
   assert.deepEqual(h.commands, [['-s', 'device-a', 'logcat', '-v', 'threadtime', '-T', '1']]);
 });
 
+test('Harmony recording/reproduction logs use a separately owned HiLog stream and never start ADB', async t => {
+  const h = await fixture(t), calls = [];
+  const capture = await startRecordingLog({ deviceId: 'hdc:fixture', videoPath: h.videoPath }, {
+    spawnAdb: () => { throw Error('No ADB for Harmony'); }, spawnHiLog: (id, options) => { calls.push({ id, options }); return h.child; },
+  });
+  h.child.stdout.write(Buffer.from('11-09 12:00:00.000 1 2 I A03200/Tag: fixture\n'));
+  const result = await capture.stop(); assert.deepEqual(calls, [{ id: 'hdc:fixture', options: { maxLines: 1 } }]);
+  assert.match(await fs.readFile(result.path, 'utf8'), /A03200/); assert.equal(result.error, '');
+});
+
+test('WebM associated logs keep the same directory and stem without widening path or format input', async t => {
+  const h = await fixture(t), videoPath = h.videoPath.replace(/\.mp4$/, '.webm');
+  const capture = await startRecordingLog({ deviceId: 'hdc:fixture', videoPath }, { spawnHiLog: () => h.child });
+  h.child.stdout.write(Buffer.from('HiLog WebM fixture\n'));
+  const result = await capture.stop();
+  assert.equal(result.path, path.join(path.dirname(videoPath), 'record.log'));
+  assert.equal(await fs.readFile(result.path, 'utf8'), 'HiLog WebM fixture\n');
+  for (const invalid of ['relative.webm', videoPath + '.txt', path.join(path.dirname(videoPath), 'record.avi')]) {
+    await assert.rejects(startRecordingLog({ deviceId: 'hdc:fixture', videoPath: invalid }, { spawnHiLog: () => assert.fail('invalid format cannot launch a capture') }), /录屏日志参数无效/);
+  }
+});
+
 test('log cap is explicit without blocking video and early command failure is surfaced', async t => {
   const h = await fixture(t);
   const states = [];

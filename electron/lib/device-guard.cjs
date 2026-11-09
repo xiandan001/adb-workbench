@@ -9,6 +9,11 @@ const ctx = require('./app-context.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
+const { isHarmonyDevice } = require('./device-platform.cjs');
+const { collectHarmonySnapshot } = require('./harmony-metrics.cjs');
+const { readHiLogSnapshot } = require('./harmony-log.cjs');
+const { checkHarmonyDevice, taskReadOptions, analyzeHarmonyLogs } = require('./harmony-quality-native.cjs');
+const { harmonyMetricValues, measured, evaluateHarmonyThresholds } = require('./harmony-quality-data.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
@@ -63,6 +68,7 @@ function createGuard(deviceId, args) {
     id: `guard-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name: String(args?.name || '').trim() || tr("{0} 设备守护", { 0: deviceId }),
     deviceId,
+    ...(isHarmonyDevice(deviceId) ? { platform: 'harmony', nativeController: new AbortController() } : {}),
     startedAt: now.toISOString(),
     endedAt: '',
     status: 'running',
@@ -103,7 +109,8 @@ async function runGuardTick(guard) {
   guard.tickCount += 1;
   const at = new Date().toISOString();
   try {
-    const online = await checkDeviceOnline(guard.deviceId);
+    const online = await checkDeviceOnline(guard.deviceId, { signal: guard.nativeController?.signal });
+    if (guard.platform === 'harmony' && guard.status !== 'running') return;
     if (!online.ok) {
       addGuardEvent(guard, 'high', tr("设备离线"), online.error || `device_offline:${guard.deviceId}`);
       appendSample(guard, { at, online: false, error: online.error || 'device_offline' });
@@ -111,18 +118,22 @@ async function runGuardTick(guard) {
       return;
     }
 
+    const harmony = isHarmonyDevice(guard.deviceId);
+    const nativeOptions = harmony ? taskReadOptions(guard, guard.deviceId, { signal: guard.nativeController?.signal, timeoutMs: COMMAND_TIMEOUT_MS }) : null;
     const [snapshotResult, logResult] = await Promise.all([
-      performanceMonitor.collectSnapshot(guard.deviceId, false, { timeoutMs: COMMAND_TIMEOUT_MS, includeFps: true, fallbackToLegacy: true })
-        .then(snapshot => ({ ok: true, snapshot }))
+      (harmony ? collectHarmonySnapshot(guard.deviceId, nativeOptions) : performanceMonitor.collectSnapshot(guard.deviceId, false, { timeoutMs: COMMAND_TIMEOUT_MS, includeFps: true, fallbackToLegacy: true }))
+        .then(snapshot => ({ ok: !harmony || !snapshot.sampleError, snapshot, error: snapshot.sampleError || '' }))
         .catch(error => ({ ok: false, error: error.message })),
-      runAdb(['-s', guard.deviceId, 'shell', 'logcat -d -v threadtime -t 300'], COMMAND_TIMEOUT_MS)
+      harmony ? readHiLogSnapshot(guard.deviceId, { ...nativeOptions, maxLines: 300 }) : runAdb(['-s', guard.deviceId, 'shell', 'logcat -d -v threadtime -t 300'], COMMAND_TIMEOUT_MS)
     ]);
+    if (harmony && guard.status !== 'running') return;
 
     const sample = {
       at,
       online: true,
       snapshot: snapshotResult.ok ? summarizeSnapshot(snapshotResult.snapshot) : null,
-      error: snapshotResult.ok ? '' : snapshotResult.error || 'performance_snapshot_failed'
+      error: snapshotResult.ok ? '' : snapshotResult.error || 'performance_snapshot_failed',
+      ...(harmony ? { platform: 'harmony', unavailable: snapshotResult.snapshot?.unavailable || [], logError: logResult.ok ? '' : logResult.error || tr('鸿蒙日志采集失败。') } : {})
     };
     appendSample(guard, sample);
     if (snapshotResult.ok) {
@@ -131,7 +142,8 @@ async function runGuardTick(guard) {
     } else {
       addGuardEvent(guard, 'medium', tr("性能采样失败"), snapshotResult.error || 'performance_snapshot_failed');
     }
-    scanLogs(guard, logResult.output || logResult.stdout || '');
+    if (harmony && !logResult.ok) addGuardEvent(guard, 'medium', tr('鸿蒙日志采集失败。'), logResult.error || tr('日志项目未验证'));
+    else scanLogs(guard, logResult.output || logResult.stdout || '');
     broadcastState(guard);
   } finally {
     guard.busy = false;
@@ -140,6 +152,7 @@ async function runGuardTick(guard) {
 
 async function stopGuard(guard, reason) {
   guard.status = reason === 'cleanup' ? 'stopped' : 'finished';
+  if (guard.platform === 'harmony') { guard.cancelled = true; guard.nativeController?.abort(); }
   guard.endedAt = new Date().toISOString();
   if (guard.timer) {
     clearTimeout(guard.timer);
@@ -165,6 +178,7 @@ async function writeGuardArtifacts(guard) {
     id: guard.id,
     name: guard.name,
     deviceId: guard.deviceId,
+    ...(guard.platform === 'harmony' ? { platform: 'harmony' } : {}),
     status: guard.status,
     startedAt: guard.startedAt,
     endedAt: guard.endedAt,
@@ -182,6 +196,12 @@ async function writeGuardArtifacts(guard) {
 }
 
 function evaluateSnapshot(guard, snapshot) {
+  if (snapshot.platform === 'harmony') {
+    for (const item of evaluateHarmonyThresholds(snapshot, { cpu: guard.thresholds.cpuUsage, memory: guard.thresholds.memoryUsage, batteryTemp: guard.thresholds.temperature })) {
+      addGuardEvent(guard, item.unavailable ? 'medium' : item.type === 'batteryTemp' ? 'high' : 'medium', item.label, item.unavailable ? tr('该指标未验证') : `${item.value} > ${item.limit}`);
+    }
+    return;
+  }
   const sample = summarizeSnapshot(snapshot);
   const thresholds = guard.thresholds;
   if (Number.isFinite(sample.cpuUsage) && sample.cpuUsage >= thresholds.cpuUsage) {
@@ -196,6 +216,10 @@ function evaluateSnapshot(guard, snapshot) {
 }
 
 function scanLogs(guard, text) {
+  if (isHarmonyDevice(guard.deviceId)) {
+    for (const item of analyzeHarmonyLogs(text).issues) addGuardEvent(guard, item.severity, item.label, item.detail);
+    return;
+  }
   const lines = String(text || '').split(/\r?\n/).filter(Boolean);
   const checks = [
     { label: 'Java Crash', severity: 'high', regex: /FATAL EXCEPTION|AndroidRuntime.*FATAL|java\.lang\.\w+Exception|NullPointerException/i },
@@ -231,6 +255,7 @@ function appendSample(guard, sample) {
 
 function publicGuard(guard) {
   return {
+    ...(guard.platform === 'harmony' ? { platform: 'harmony' } : {}),
     id: guard.id,
     name: guard.name,
     deviceId: guard.deviceId,
@@ -272,7 +297,8 @@ function broadcastState(guard) {
   });
 }
 
-async function checkDeviceOnline(deviceId) {
+async function checkDeviceOnline(deviceId, options = {}) {
+  if (isHarmonyDevice(deviceId)) return checkHarmonyDevice(deviceId, options);
   const state = await runAdb(['-s', deviceId, 'get-state'], COMMAND_TIMEOUT_MS);
   const online = state.ok && String(state.stdout || state.output || '').trim() === 'device';
   return online ? { ok: true } : { ok: false, error: state.error || state.stderr || `device_offline:${deviceId}` };
@@ -286,6 +312,11 @@ function runAdb(args, timeoutMs = COMMAND_TIMEOUT_MS) {
 }
 
 function summarizeSnapshot(snapshot) {
+  if (snapshot?.platform === 'harmony') {
+    const values = harmonyMetricValues(snapshot);
+    return { platform: 'harmony', cpuUsage: values.cpu, memoryUsage: values.memory, temperature: values.batteryTemp,
+      dataUsage: values.dataUsed, foregroundPackage: snapshot.foreground?.packageName || '', foregroundFps: measured(snapshot.fps?.foreground?.fps), unavailable: snapshot.unavailable || [] };
+  }
   return {
     cpuUsage: numberOrNull(snapshot?.cpu?.usage),
     memoryUsage: numberOrNull(snapshot?.memory?.usage),
@@ -334,6 +365,7 @@ function buildGuardReport(result) {
     tr("## 最近事件"),
     ''
   ];
+  if (result.platform === 'harmony') lines.push(tr('- 设备平台：Harmony/OpenHarmony'), tr('- 不可用指标标为未验证，不作为零值或正常结论。'), '');
   const recentEvents = (result.events || []).slice(-60);
   if (recentEvents.length === 0) {
     lines.push(tr("- 未发现 Crash/ANR/OOM/Watchdog 或阈值告警"), '');
@@ -346,6 +378,10 @@ function buildGuardReport(result) {
   }
   lines.push(tr("## 最近采样"), '');
   const recentSamples = (result.samples || []).slice(-20);
+  if (result.platform === 'harmony') {
+    const unavailable = [...new Set(recentSamples.flatMap(sample => (sample.unavailable || []).map(item => `${item.metric}: ${item.reason}`)))];
+    if (unavailable.length) lines.push(tr('### 未验证项目'), ...unavailable.map(line => `- ${line}`), '');
+  }
   if (recentSamples.length === 0) {
     lines.push(tr("- 无采样记录"), '');
   } else {
@@ -423,6 +459,7 @@ function formatStamp(date) {
 }
 
 function formatMetric(value, suffix) {
+  if (value === null || value === undefined || value === '') return '-';
   return Number.isFinite(Number(value)) ? `${value}${suffix}` : '-';
 }
 

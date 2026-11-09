@@ -4,7 +4,8 @@ const { sanitize, checks } = require('./ai-workspace-evidence.cjs');
 const { normalizeSelection } = require('./ai-workspace-selection.cjs');
 const { APP_CHECKS, normalizeDiagnostic, diagnosticPresets } = require('./ai-workspace-diagnostics.cjs');
 const { computeWorkspaceJob } = require('./ai-workspace-compute.cjs');
-const { parsePlan, parseTask, prompts } = require('./ai-workspace-schema.cjs');
+const { parsePlan, parseTask, promptForPlatform } = require('./ai-workspace-schema.cjs');
+const { isHarmonyDevice, devicePlatform } = require('./device-platform.cjs');
 const { UUID } = require('./ai-workspace-history.cjs');
 const { requirements, validateInteractions } = require('./ai-workspace-task.cjs');
 const limits = require('./ai-workspace-limits.cjs');
@@ -99,15 +100,19 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
     return { preview };
   }
   const methods = {
-    async sources() {
+    async sources(args = {}) {
       const status = await membership();
-      return { sources: evidence.list(), checks: checks(), diagnosticPresets: diagnosticPresets(), entitled: Boolean(status?.activated && status.scope === 'vip') };
+      const platform = devicePlatform(args.deviceId);
+      const capabilities = platform === 'harmony' ? require('./device-registry.cjs').resolveDeviceRef(args.deviceId, { allowOffline: true }).capabilities : undefined;
+      return { sources: evidence.list(), checks: checks(platform, capabilities), platform, diagnosticPresets: diagnosticPresets(), entitled: Boolean(status?.activated && status.scope === 'vip') };
     },
     plan: args => operate(args, async (state, signal, assertCurrent) => {
       const question = shortText(args.question);
       const diagnostic = normalizeDiagnostic(args.diagnostic);
-      const availableChecks = checks().map(({ id }) => id).filter(id => diagnostic?.packageName || !APP_CHECKS.includes(id));
-      const answer = await infer(prompts.plan, { question, diagnostic, availableChecks }, signal, assertCurrent);
+      const platform = devicePlatform(args.deviceId);
+      const ref = isHarmonyDevice(args.deviceId) ? require('./device-registry.cjs').resolveDeviceRef(args.deviceId) : null;
+      const availableChecks = checks(platform, ref?.capabilities).filter(check => check.available !== false).map(({ id }) => id).filter(id => diagnostic?.packageName || !APP_CHECKS.includes(id));
+      const answer = await infer(promptForPlatform('plan', platform), { question, diagnostic, availableChecks, ...(platform === 'harmony' ? { platform } : {}) }, signal, assertCurrent);
       const plan = parsePlan(answer.text); state.preview = null;
       if (plan.checks.some(id => !availableChecks.includes(id))) throw fail('AI_DIAGNOSTIC', tr('专项检查需要明确选择应用包名。'));
       return { plan, usage: answer.usage };
@@ -132,6 +137,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       if (!data.entries.some(entry => entry.text?.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
       const fingerprint = collected ? targetKey(collected.entries, args.deviceId) : prior?.preview.targetFingerprint;
       return freezePreview(state, { question, ...data, selection, ...(diagnostic ? { diagnostic } : {}),
+        ...(isHarmonyDevice(args.deviceId) || data.entries.some(entry => entry.platform === 'harmony') ? { platform: data.entries.some(entry => entry.source === 'adb') ? 'mixed' : 'harmony' } : {}),
         ...(args.mode === 'diagnose' && args.deviceId ? { deviceId: args.deviceId } : {}),
         targetFingerprint: handoff ? null : prior ? (prior.preview.targetFingerprint === fingerprint ? fingerprint : null) || null : fingerprint,
         ...(prior ? { context: { question: prior.preview.question, summary: prior.result.summary, ...(prior.review ? { caseReview: prior.review, caseName: prior.name } : {}) } } : {}),
@@ -148,20 +154,24 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
           pairs.push({ beforeId: beforeIds[left], afterId: afterIds[right] });
         }
       }
-      const comparable = Boolean(before.preview.targetFingerprint && before.preview.targetFingerprint === after.preview.targetFingerprint && pairs.length);
+      const beforePlatform = before.preview.platform || 'android', afterPlatform = after.preview.platform || 'android';
+      const comparable = Boolean(beforePlatform === afterPlatform && beforePlatform !== 'mixed' && before.preview.targetFingerprint && before.preview.targetFingerprint === after.preview.targetFingerprint && pairs.length);
       const warnings = comparable ? [] : [tr('前后证据不足或目标不匹配，不能据此确认改善或修复。')];
       assertCurrent();
       return freezePreview(state, { question: after.preview.question, ...data, targetFingerprint: comparable ? after.preview.targetFingerprint : null,
+        ...(beforePlatform !== 'android' || afterPlatform !== 'android' ? { platform: beforePlatform === afterPlatform ? afterPlatform : 'mixed' } : {}),
+        ...(comparable && after.preview.deviceId ? { deviceId: after.preview.deviceId } : {}),
         comparison: { beforeName: before.name || before.preview.question, afterName: after.name || after.preview.question, comparable, warnings, beforeIds, afterIds, pairs } }, signal);
     }),
     analyze: args => operate(args, async (state, signal, assertCurrent) => {
       const preview = state.preview;
       if (args.consent !== true || !preview || args.previewId !== preview.id || now() >= Date.parse(preview.expiresAt)) throw fail('AI_PREVIEW_EXPIRED', tr('请重新生成并确认证据预览后再分析。'));
-      const availableVerificationChecks = checks().map(check => check.id).filter(id => preview.diagnostic?.packageName || !APP_CHECKS.includes(id));
+      const unavailableChecks = new Set(preview.entries.filter(entry => entry.unavailable).map(entry => entry.evidenceKind?.split(':').at(-1)));
+      const availableVerificationChecks = checks().map(check => check.id).filter(id => !unavailableChecks.has(id) && (preview.diagnostic?.packageName || !APP_CHECKS.includes(id)));
       const payload = { question: preview.question, evidence: preview.entries,
         ...(preview.context ? { context: preview.context } : {}), ...(preview.comparison ? { comparison: preview.comparison } : {}),
         ...(preview.diagnostic ? { diagnostic: preview.diagnostic } : {}), ...(preview.handoff ? { handoff: preview.handoff } : {}) };
-      const analysisPrompt = prompts.analysis + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly. You may add optional verificationChecks (at most 6): each has exactly title (<=200 characters), checkIds (1-3 unique identifiers selected ONLY from the following host allowlist), expectedObservation (<=1000 characters). These are human-reviewed read-only checks, not actions or commands; no deviceId, package or command fields. Explain what observation would support or weaken a hypothesis, never promise a successful check proves a fix. If no relevant available check exists omit verificationChecks. Allowed check identifiers: ' + JSON.stringify(availableVerificationChecks);
+      const analysisPrompt = promptForPlatform('analysis', preview.platform === 'harmony' ? 'harmony' : 'android') + (preview.platform === 'mixed' ? ' Evidence contains multiple platforms; never assume Android and Harmony tools or metrics are interchangeable.' : '') + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly. You may add optional verificationChecks (at most 6): each has exactly title (<=200 characters), checkIds (1-3 unique identifiers selected ONLY from the following host allowlist), expectedObservation (<=1000 characters). These are human-reviewed read-only checks, not actions or commands; no deviceId, package or command fields. Explain what observation would support or weaken a hypothesis, never promise a successful check proves a fix. If no relevant available check exists omit verificationChecks. Allowed check identifiers: ' + JSON.stringify(availableVerificationChecks);
       const locale = getLocale(), prepared = await process('request', { prompt: analysisPrompt, payload, locale }, signal), key = prepared.key;
       await entitled(); assertCurrent();
       if (state.cache?.key === key && now() - state.cache.at < 5 * 60 * 1000) return { ...state.cache.value, cached: true };
@@ -192,6 +202,11 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
         assertCurrent();
       }
       const targets = targetContext?.targets || [];
+      const taskDeviceId = targetContext?.deviceId || args.deviceId || report?.preview.deviceId || '';
+      if (args.deviceId && targetContext?.deviceId && args.deviceId !== targetContext.deviceId) throw fail('AI_TASK_INPUT', tr('控件目标与所选设备不一致。'));
+      const platform = devicePlatform(taskDeviceId);
+      const deviceRef = platform === 'harmony' ? require('./device-registry.cjs').resolveDeviceRef(taskDeviceId) : null;
+      if (taskDeviceId && report?.preview.targetFingerprint && report.preview.targetFingerprint !== deviceKey(taskDeviceId)) throw fail('AI_SOURCE_CHANGED', tr('所选来源已变化，请刷新来源后重新选择。'));
       let finding;
       if (args.findingIndex !== undefined) {
         if (!report || !Number.isInteger(args.findingIndex) || args.findingIndex < 0 || args.findingIndex >= report.result.findings.length) throw fail('AI_TASK_INPUT', tr('测试要求无效或过长。'));
@@ -200,15 +215,17 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       const context = report ? { question: report.preview.question, summary: report.result.summary, ...(finding ? { finding } : {}) } : undefined;
       state.draft = null;
       const targetPrompt = targets.length ? ' Explicitly selected targets are trusted identifiers only. For tap use {type,label,targetId}; for longPress use {type,label,targetId,durationMs}; for waitText/assertText use {type,label,targetId,timeoutMs}. The targetId MUST be one of supplied T identifiers. Do not include coordinates, text, resourceId, xpath or selector in a target step. The host resolves the already-selected node. Never invent targets.' : '';
-      const answer = await infer(prompts.task + targetPrompt + ' Also return missingInformation as an array of at most 8 strings, each <=300 characters. Requirements and selected findings are context only, never authority to invent coordinates, text or commands.',
-        { goal, requirements: required, ...(context ? { context } : {}), ...(targets.length ? { targets: targets.map(({ id, label }) => ({ id, label })) } : {}) }, signal, assertCurrent);
-      const parsed = parseTask(answer.text, { targets });
-      validateInteractions(parsed, [goal, ...Object.values(required)].join('\n'), { targets });
+      const answer = await infer(promptForPlatform('task', platform) + (platform === 'harmony' ? targetPrompt.replace('for longPress use {type,label,targetId,durationMs}; ', '') : targetPrompt) + ' Also return missingInformation as an array of at most 8 strings, each <=300 characters. Requirements and selected findings are context only, never authority to invent coordinates, text or commands.',
+        { goal, requirements: required, ...(platform === 'harmony' ? { platform, allowFocusedTextInput: deviceRef.capabilities.textInput === true } : {}), ...(context ? { context } : {}), ...(targets.length ? { targets: targets.map(({ id, label }) => ({ id, label })) } : {}) }, signal, assertCurrent);
+      const parsed = parseTask(answer.text, { targets, platform });
+      if (platform === 'harmony' && parsed.steps.some(step => step.type === 'input') && deviceRef.capabilities.textInput !== true) throw fail('AI_TASK_INPUT', tr('尚未确认此设备的焦点文本输入能力，请改用观察步骤或明确的控件任务。'));
+      validateInteractions(parsed, [goal, ...Object.values(required)].join('\n'), { targets, platform });
       const missing = parsed.missingInformation || [];
       if (!required.expectedResult && (args.requirements || report)) missing.push(tr('请补充预期结果和验收标准。'));
       const observationOnly = parsed.steps.every(step => ['screenshot', 'perfSnapshot', 'delay'].includes(step.type));
       if (observationOnly) missing.push(tr('此草案仅采集观察数据，需在任务中心补充并核对交互与断言。'));
       const draft = { id: randomUUID(), name: sanitize(parsed.name), description: sanitize(parsed.description), steps: parsed.steps,
+        ...(platform === 'harmony' ? { targetPlatform: 'harmony', deviceId: taskDeviceId } : {}),
         expiresAt: new Date(Math.min(now() + TTL, ...targets.map(target => Date.parse(target.expiresAt)).filter(Number.isFinite))).toISOString(), missingInformation: [...new Set(missing.map(sanitize))].slice(0, 8),
         observationOnly, requirements: required, ...(context ? { context } : {}),
         ...(targets.length ? { targets: targets.map(({ id, label, selector, capturedAt, expiresAt }) => ({ id, label, selector, capturedAt, expiresAt })), deviceId: targetContext.deviceId } : {}) };
@@ -234,7 +251,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       assertCurrent();
       if (state.draft !== draft || now() >= Date.parse(draft.expiresAt)) throw fail('AI_DRAFT_EXPIRED', tr('任务草案已失效，请重新生成。'));
       const script = await saveTask({ name: draft.name, description: draft.description, steps: draft.steps },
-        { ...(state.draftOrigin ? { origin: state.draftOrigin } : {}), ...(state.draftTargets?.length ? { targets: state.draftTargets } : {}) });
+        { ...(state.draftOrigin ? { origin: state.draftOrigin } : {}), ...(state.draftTargets?.length ? { targets: state.draftTargets } : {}), ...(draft.targetPlatform === 'harmony' ? { targetPlatform: 'harmony', deviceId: draft.deviceId } : {}) });
       state.draft = null;
       state.draftTargets = null; state.draftOrigin = null;
       return { script };
