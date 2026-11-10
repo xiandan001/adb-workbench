@@ -23,6 +23,14 @@ struct Config {
     std::string id, token, directory, version;
     CaptureOptions video{};
 };
+struct OwnedSocket {
+    int fd;
+    explicit OwnedSocket(int value) : fd(value) {}
+    ~OwnedSocket() { Close(); }
+    void Close() noexcept { if (fd >= 0) { close(fd); fd = -1; } }
+    OwnedSocket(const OwnedSocket &) = delete;
+    OwnedSocket &operator=(const OwnedSocket &) = delete;
+};
 Config config;
 volatile sig_atomic_t interrupted = 0;
 void Interrupt(int) { interrupted = 1; }
@@ -193,9 +201,10 @@ bool Flush(int peer, PacketQueue &queue)
 }
 }
 
-extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnInit(TestPort port, size_t argc, char **argv)
+static int32_t Initialize(TestPort port, size_t argc, char **argv)
 {
-    if (argc != 2 || std::string(argv[0]) != "--config" || !ReadConfig(argv[1]) || !port.version) return -1;
+    if (argc != 2 || !argv || !argv[0] || !argv[1] || std::string(argv[0]) != "--config"
+        || !ReadConfig(argv[1]) || !port.version) return -1;
     uint8_t version[256]{}; size_t size = 0;
     if (port.version(TestBuffer{version, sizeof(version), &size}) != 0 || size >= sizeof(version)) return -1;
     config.version.assign(reinterpret_cast<char *>(version), size);
@@ -203,11 +212,13 @@ extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnInit
     return 0;
 }
 
-extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnRun()
+static int32_t Run()
 {
     uint16_t port = 0; const int listener = Listen(port);
-    if (listener < 0 || !ReadyFile(port)) { if (listener >= 0) close(listener); return -1; }
-    int peer = Authenticate(listener); close(listener);
+    OwnedSocket listenerOwner(listener);
+    if (listener < 0 || !ReadyFile(port)) return -1;
+    int peer = Authenticate(listener); listenerOwner.Close();
+    OwnedSocket peerOwner(peer);
     if (peer < 0) return -1;
     PacketQueue queue;
     auto state = [&queue](const std::string &name, int code) {
@@ -220,7 +231,7 @@ extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnRun(
     }, state);
     std::string error;
     if (!capture.Start(config.video, error)) {
-        state(error, -1); Flush(peer, queue); close(peer); return -1;
+        state(error, -1); Flush(peer, queue); return -1;
     }
     std::string pending; auto lastActivity = ClockMs(); bool stopped = false;
     while (!interrupted && !stopped && !capture.Finished() && ClockMs() - lastActivity < 20000) {
@@ -240,7 +251,19 @@ extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnRun(
     capture.Stop();
     state(stopped ? "stopped" : "ended", 0);
     Flush(peer, queue);
-    shutdown(peer, SHUT_RDWR); close(peer);
+    shutdown(peer, SHUT_RDWR); peerOwner.Close();
     std::fill(config.token.begin(), config.token.end(), '0');
     return 0;
+}
+
+extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnInit(TestPort port, size_t argc, char **argv) noexcept
+{
+    try { return Initialize(port, argc, argv); }
+    catch (...) { return -1; }
+}
+
+extern "C" __attribute__((visibility("default"))) int32_t UiTestExtension_OnRun() noexcept
+{
+    try { return Run(); }
+    catch (...) { std::fill(config.token.begin(), config.token.end(), '0'); return -1; }
 }

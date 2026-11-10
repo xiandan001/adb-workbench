@@ -3,12 +3,13 @@
   "protocol": 1,
   "minimumApi": 12,
   "sdkVersion": "5.1.0.107",
-  "sourceSha256": "eb28a86a81eea7fb8bf947273ca2d750f0f09c5b54f4dcc86be80d1a907be000",
+  "sourceSha256": "2fb6d6ae5e1f34f2099da1d4eb1745c110e3f287ecae2d2141fe2826ef61b035",
   "sources": [
     "CMakeLists.txt",
     "agent.cpp",
     "av_capture.cpp",
     "av_capture.h",
+    "encoded_frame.h",
     "exports.map",
     "protocol.h",
     "uitest_extension_abi.h"
@@ -19,22 +20,22 @@
       "file": "arm64-v8a/awb-media-agent.so",
       "machine": 183,
       "elfClass": 2,
-      "bytes": 801192,
-      "sha256": "b58cd7e56b0a885892c2e3cb24d5b94de2f8be8ff13e3869752fe92392fe3e9a"
+      "bytes": 804536,
+      "sha256": "69a89b37550c5c3c9966cb72ccca6f49f50a4208ed4f7f1058794e46e9318a7d"
     },
     "x86_64": {
       "file": "x86_64/awb-media-agent.so",
       "machine": 62,
       "elfClass": 2,
-      "bytes": 818072,
-      "sha256": "6c6a6307a009e573cc768e6d373f4a6d27a405ba9441af08e481821362bcef2e"
+      "bytes": 821944,
+      "sha256": "876bd53e3ab0f531854c8aeadb284aa911154416746e1f0fdfdd72a73e8d469c"
     },
     "armeabi-v7a": {
       "file": "armeabi-v7a/awb-media-agent.so",
       "machine": 40,
       "elfClass": 1,
-      "bytes": 675748,
-      "sha256": "3de18142c65e59ff74708cd172f5f8c7de71c68c57f5876147bb7943f02894de"
+      "bytes": 678756,
+      "sha256": "5beb4fda040537e08df2c60508d9506e9fa53112e22406c9e63391e81f250af7"
     }
   },
   "notices": {

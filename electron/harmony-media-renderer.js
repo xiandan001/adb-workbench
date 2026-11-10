@@ -1,13 +1,13 @@
-import { setCodecMessages, h264Configuration, normalizeH264, hasVideoSlice, withConfiguration } from './harmony-media-codec.js';
+import { setCodecMessages } from './harmony-media-codec.js';
+import { createH264Decoder } from './harmony-media-decoder.js';
 import { createMediaRecorderController } from './harmony-media-recorder.js';
 
 const api = window.harmonyMedia;
 const element = id => document.getElementById(id);
 const canvas = element('screen'), context = canvas.getContext('2d', { alpha: false });
-let labels = {}, session = {}, recording = null, decoder = null, configuration = null;
-let firstTimestamp = null, lastTimestamp = -1, keyReceived = false, decoded = false;
-let queued = 0, decodeChain = Promise.resolve(), localError = '', pending = false, pointer = null;
-const sequences = new Map(), unsubscribe = [];
+let labels = {}, session = {}, recording = null, decoded = false;
+let localError = '', pending = false, pointer = null;
+const unsubscribe = [];
 function fitCanvas() {
   const area = canvas.parentElement;
   const scale = Math.min(area.clientWidth / canvas.width, area.clientHeight / canvas.height);
@@ -20,6 +20,7 @@ viewport.observe(canvas.parentElement);
 const liveRecording = () => ['starting', 'recording', 'stopping', 'saving'].includes(recording?.status);
 const controller = createMediaRecorderController({ api, canvas, getSession: () => ({ ...session, decoded }), getLabels: () => labels,
   onError: () => { localError = 'recordFailed'; render(); } });
+let video = createDecoder();
 
 function render() {
   document.documentElement.lang = labels.locale || 'en'; document.title = labels.title || 'Veylo';
@@ -51,66 +52,27 @@ function fail(key) {
   localError = key; render();
   const request = api?.stop?.(); request?.catch(() => {});
 }
-function acknowledge(packet, output = false) {
-  void api.ack({ sessionId: packet.sessionId, sequence: packet.sequence, ...(output ? { decoded: true } : {}) }).catch(() => {});
-}
-function resetDecoder() {
-  if (decoder && decoder.state !== 'closed') decoder.close();
-  decoder = null; configuration = null; keyReceived = false; decoded = false;
-  firstTimestamp = null; lastTimestamp = -1; sequences.clear();
-}
-function output(frame) {
-  try {
-    const packet = sequences.get(frame.timestamp); sequences.delete(frame.timestamp);
-    if (!packet || packet.sessionId !== session.id) return;
-    if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-      canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
-      fitCanvas();
+function createDecoder() {
+  return createH264Decoder({
+    acknowledge: value => { void api.ack(value).catch(() => {}); },
+    onError: () => fail('decoderError'),
+    onFrame: (frame, packet) => {
+      if (packet.sessionId !== session.id) throw new Error();
+      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+        canvas.width = frame.displayWidth; canvas.height = frame.displayHeight; fitCanvas();
+      }
+      context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      if (!decoded) { decoded = true; render(); }
     }
-    context.drawImage(frame, 0, 0, canvas.width, canvas.height);
-    if (!decoded) { decoded = true; acknowledge(packet, true); render(); }
-  } catch { fail('decoderError'); }
-  finally { frame.close(); }
-}
-async function configure(value, packet) {
-  if (!globalThis.VideoDecoder || !globalThis.EncodedVideoChunk || !context) throw new Error();
-  const options = { codec: value.codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware', codedWidth: packet.width, codedHeight: packet.height };
-  if (!(await VideoDecoder.isConfigSupported(options)).supported) throw new Error();
-  if (decoder && decoder.state !== 'closed') decoder.close();
-  decoder = new VideoDecoder({ output, error: () => fail('decoderError') });
-  decoder.configure(options); keyReceived = false;
-}
-async function decode(packet) {
-  if (session.id && session.id !== packet.sessionId) return;
-  if (!session.id) session = { ...session, id: packet.sessionId };
-  const value = h264Configuration(packet.data);
-  if (value) {
-    const changed = !configuration || configuration.codec !== value.codec;
-    configuration = value;
-    if (changed || !decoder || decoder.state === 'closed') await configure(value, packet);
-  }
-  if (value && packet.data[0] === 1) { acknowledge(packet); return; }
-  if (!configuration || !decoder || decoder.state !== 'configured') { acknowledge(packet); return; }
-  const bytes = normalizeH264(packet.data, configuration.lengthSize);
-  if (!hasVideoSlice(bytes)) { acknowledge(packet); return; }
-  const key = Boolean(packet.flags & 1);
-  if (!keyReceived && !key) { acknowledge(packet); return; }
-  if (decoder.decodeQueueSize >= 8) throw new Error();
-  firstTimestamp ??= packet.timestamp;
-  const timestamp = Math.max(lastTimestamp + 1, packet.timestamp - firstTimestamp); lastTimestamp = timestamp;
-  sequences.set(timestamp, { sessionId: packet.sessionId, sequence: packet.sequence });
-  if (sequences.size > 16) throw new Error();
-  decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp,
-    data: key ? withConfiguration(configuration.data, bytes) : bytes }));
-  keyReceived = true; acknowledge(packet);
+  });
 }
 function receive(packet) {
-  if (queued >= 8) { fail('decoderError'); return; }
-  queued++;
-  decodeChain = decodeChain.then(() => decode(packet)).catch(() => fail('decoderError')).finally(() => { queued--; });
+  if (session.id && session.id !== packet.sessionId) return;
+  if (!session.id) session = { ...session, id: packet.sessionId };
+  void video.push(packet);
 }
 function updateSession(value) {
-  if (session.id && value.id && session.id !== value.id) resetDecoder();
+  if (session.id && value.id && session.id !== value.id) { video.dispose(); video = createDecoder(); decoded = false; }
   session = value; render();
 }
 async function input(value) {
@@ -165,5 +127,5 @@ async function initialize() {
   session = initial.session || { deviceId: initial.deviceId, status: 'starting' }; render();
   if (!(await api.ready())?.success) throw new Error();
 }
-window.addEventListener('beforeunload', () => { viewport.disconnect(); controller.dispose(); resetDecoder(); for (const remove of unsubscribe) remove?.(); });
+window.addEventListener('beforeunload', () => { viewport.disconnect(); controller.dispose(); video.dispose(); for (const remove of unsubscribe) remove?.(); });
 void initialize().catch(() => fail('transportError'));

@@ -7,6 +7,7 @@ const { createHarmonyMediaSessions } = require('./harmony-media-session.cjs');
 const { createHarmonyRecordingService } = require('./harmony-recording.cjs');
 const { resolveDeviceRef } = require('./device-registry.cjs');
 const { performHarmonyInput } = require('./harmony-task-ui.cjs');
+const { normalizeDecoderDiagnostic, firstFrameFailure } = require('./harmony-media-diagnostics.cjs');
 
 const ACTIVE_RECORDINGS = new Set(['starting', 'recording', 'stopping', 'saving']);
 let singleton;
@@ -139,7 +140,7 @@ function getManager() {
         const result = await streams.start(deviceId);
         if (!result.success) throw new Error(result.error);
         view.sessionId = result.session.id;
-        await Promise.race([decoded, new Promise((_, reject) => { decodedTimer = setTimeout(() => reject(new Error(tr('主机未能解码首个视频帧，未将投屏标记为成功。'))), 15000); })]);
+        await Promise.race([decoded, new Promise((_, reject) => { decodedTimer = setTimeout(() => reject(new Error(firstFrameFailure(view.decoderDiagnostic))), 15000); })]);
         return { success: true, session: streams.get(view.sessionId) };
       } catch (error) {
         if (view.sessionId) await streams.stop(view.sessionId);
@@ -220,8 +221,13 @@ function register(ipcMain) {
   handle('ready', view => { view.rendererReady = true; view.readyResolve(); return { success: true }; });
   handle('ack', (view, args) => {
     if (args.sessionId !== view.sessionId || !Number.isInteger(args.sequence) || args.sequence < 0 || args.sequence >= view.sequence) return { success: false };
+    if (args.diagnostic !== undefined) {
+      const diagnostic = normalizeDecoderDiagnostic(args.diagnostic);
+      if (!view.decoderDiagnostic || diagnostic.received >= view.decoderDiagnostic.received) view.decoderDiagnostic = diagnostic;
+      if (diagnostic.stage === 'decoder-error' && !view.decoded) view.decodedReject(new Error(tr('当前主机无法解码此视频流。')));
+    }
     view.inFlight.delete(args.sequence);
-    if (args.decoded === true) view.decodedResolve();
+    if (args.decoded === true) { manager.streams.confirmDecoded?.(view.sessionId); view.decoded = true; view.decodedResolve(); }
     return { success: true };
   });
   handle('stop', async view => {

@@ -60,12 +60,12 @@ function fixture(t, options = {}) {
       socket.destroy = () => { if (!socket.destroyed) { socket.destroyed = true; queueMicrotask(() => socket.emit('close')); } };
       socket.write = value => {
         sent.push(value.startsWith('AUTH ') ? 'AUTH' : value);
-        if (value.startsWith('AUTH ')) queueMicrotask(() => socket.emit('data', packet(2, Buffer.from([0, 0, 0, 1, 0x65]), 1)));
+        if (value.startsWith('AUTH ')) queueMicrotask(() => socket.emit('data', packet(2, Buffer.from([0, 0, 0, 1, 0x65]), options.frameFlags ?? 1)));
         if (value === 'STOP\n') socket.destroy();
       };
       queueMicrotask(() => socket.emit('connect')); return socket;
     },
-    onFrame: () => {}, onState: state => states.push(state)
+    onFrame: options.onFrame || (() => {}), onState: state => states.push(state)
   });
   t.after(() => service.shutdownAll());
   return { service, calls, sent, states };
@@ -83,6 +83,27 @@ test('concurrent start waits for one owned stream and cleanup targets only its P
   assert.ok(!h.calls.some(call => call.args.join(' ').includes('killall') || call.args.join(' ').includes('/data/local/tmp/agent.so')));
   assert.ok(h.calls.every(call => call.id === 'hdc:A'));
   assert.match(ownedStopCommand({ ready: { pid: 321 }, paths: sessionPaths(ID) }), /owner_mismatch/);
+});
+
+test('a combined configuration/keyframe packet is not discarded as configuration-only transport', async t => {
+  const h = fixture(t, { frameFlags: 3 });
+  const result = await h.service.start('hdc:A');
+  assert.equal(result.success, true);
+});
+
+test('a genuinely decoded canvas frame can confirm readiness despite inaccurate configuration metadata', async t => {
+  let delivered;
+  const received = new Promise(resolve => { delivered = resolve; });
+  const h = fixture(t, { frameFlags: 2, onFrame: () => delivered() });
+  let completed = false;
+  const opening = h.service.start('hdc:A').then(result => { completed = true; return result; });
+  await received;
+  const id = h.service.list()[0].id;
+  assert.equal(completed, false, 'transport data alone must not bypass the actual first-frame gate');
+  assert.equal(h.service.confirmDecoded(id), true);
+  assert.equal((await opening).success, true);
+  await h.service.stop(id);
+  assert.equal(h.service.confirmDecoded(id), false);
 });
 test('old versions and generation changes never start an incompatible or replacement target agent', async t => {
   const old = fixture(t, { oldVersion: true });

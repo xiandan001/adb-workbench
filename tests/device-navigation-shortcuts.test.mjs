@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 test('Harmony defaults and persistence do not overwrite Android vendor shortcuts', async () => {
   const data = new Map(), storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
   const native = defaultDeviceShortcuts('hdc:phone');
-  assert.deepEqual(native.slots.map(slot => slot.action), ['home', 'back', 'settings', 'power']);
+  assert.deepEqual(native.slots.map(slot => slot.action), ['home', 'back', 'settings', 'apps']);
   saveDeviceShortcuts(native, storage, () => {}, 'hdc:phone');
   assert.ok(data.has(HARMONY_SHORTCUTS_KEY));
   assert.equal(data.has(SHORTCUTS_KEY), false);
@@ -16,8 +16,10 @@ test('Harmony defaults and persistence do not overwrite Android vendor shortcuts
   const calls = [], execute = createShortcutExecutor();
   const api = { adbShell: async (...args) => { calls.push(args); return { success: true }; } };
   await execute({ api, deviceId: 'hdc:phone', shortcut: native.slots[0] });
-  await execute({ api, deviceId: 'hdc:phone', shortcut: native.slots[3] });
-  assert.deepEqual(calls, [['hdc:phone', 'uitest uiInput keyEvent Home'], ['hdc:phone', 'uitest uiInput keyEvent Power']]);
+  let opened = 0;
+  assert.deepEqual(await execute({ api, deviceId: 'hdc:phone', shortcut: native.slots[3], onOpenApps: () => { opened++; } }), { ok: true, local: true });
+  assert.equal(opened, 1);
+  assert.deepEqual(calls, [['hdc:phone', 'uitest uiInput keyEvent Home']]);
 });
 const backend = require('../electron/lib/device-shortcuts-policy.cjs');
 const migration = require('../electron/lib/data-migration-policy.cjs');

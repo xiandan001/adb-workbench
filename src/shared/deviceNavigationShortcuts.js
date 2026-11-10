@@ -7,10 +7,20 @@ export const SHORTCUTS_CHANGED = 'device-shortcuts-changed';
 export const BUILTIN_SHORTCUTS = spec.actions;
 
 export function defaultDeviceShortcuts(deviceId = '') {
-  const actions = deviceId.startsWith('hdc:') ? ['home', 'back', 'settings', 'power'] : spec.defaultActions;
+  const actions = deviceId.startsWith('hdc:') ? ['home', 'back', 'settings', 'apps'] : spec.defaultActions;
   return { version: spec.version, slots: actions.map((action, index) => ({
     id: spec.slots[index], type: 'builtin', action, label: spec.actions.find(item => item.id === action).label
   })) };
+}
+
+export function getDeviceShortcutCheck(deviceId, action, checks = []) {
+  if (deviceId.startsWith('hdc:') && action.type === 'builtin' && action.action === 'power') {
+    return { id: action.id, status: 'unsupported', reason: tr('鸿蒙电源控制已停用，可能导致设备失联；请编辑替换此按钮。') };
+  }
+  if (action.type === 'builtin' && action.action === 'apps') {
+    return { id: action.id, status: 'supported', reason: tr('在当前设备卡片打开应用管理，不发送设备控制命令。') };
+  }
+  return checks.find(check => check.id === action.id);
 }
 
 // Keep validation identical to device-shortcuts-policy.cjs, including during data migration.
@@ -70,12 +80,19 @@ function validateAction(shortcut) {
 
 export function createShortcutExecutor() {
   let busy = false;
-  return async ({ api, deviceId, shortcut, confirmShell }) => {
+  return async ({ api, deviceId, shortcut, confirmShell, onOpenApps }) => {
     if (busy) return { skipped: true };
     if (typeof deviceId !== 'string' || !deviceId.trim()) throw new Error(tr("没有可操作的设备"));
     const action = validateAction(shortcut);
+    const check = getDeviceShortcutCheck(deviceId, action);
+    if (check?.status === 'unsupported') throw new Error(check.reason);
     busy = true;
     try {
+      if (action.type === 'builtin' && action.action === 'apps') {
+        if (typeof onOpenApps !== 'function') throw new Error(tr('应用管理入口不可用，请从设备卡片打开。'));
+        await onOpenApps();
+        return { ok: true, local: true };
+      }
       if (action.type === 'shell' && (!confirmShell || !await confirmShell({ deviceId, command: action.command, label: action.label }))) return { cancelled: true };
       if (action.type === 'app') {
         if (!api?.packageLaunch) throw new Error(tr("设备控制需要在桌面应用中使用"));
@@ -86,8 +103,8 @@ export function createShortcutExecutor() {
       if (!api?.adbShell) throw new Error(tr("设备控制需要在桌面应用中使用"));
       const builtin = action.type === 'builtin' ? BUILTIN_SHORTCUTS.find(item => item.id === action.action) : null;
       if (deviceId.startsWith('hdc:') && builtin) {
-        if (['home', 'back', 'power'].includes(action.action)) {
-          const nativeKey = { home: 'Home', back: 'Back', power: 'Power' }[action.action];
+        if (['home', 'back'].includes(action.action)) {
+          const nativeKey = { home: 'Home', back: 'Back' }[action.action];
           const result = await api.adbShell(deviceId, `uitest uiInput keyEvent ${nativeKey}`);
           if (!result?.success) throw new Error(result?.error || tr('设备未能执行指令'));
           return { ok: true };

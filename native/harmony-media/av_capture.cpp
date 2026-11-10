@@ -1,8 +1,10 @@
 #include "av_capture.h"
 #include "protocol.h"
+#include "encoded_frame.h"
 #include <atomic>
 #include <cstring>
 #include <dlfcn.h>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <multimedia/player_framework/native_avscreen_capture.h>
@@ -36,6 +38,9 @@ struct AvCapture::Impl {
     OH_AVCodec *encoder = nullptr;
     OHNativeWindow *surface = nullptr;
     std::vector<void *> libraries;
+    std::mutex outputMutex;
+    awb::EncodedFrameAssembler assembler;
+    const char *codecConfigKey = nullptr;
 #define API(name) decltype(&name) p_##name = nullptr
     API(OH_AVScreenCapture_Create); API(OH_AVScreenCapture_Init);
     API(OH_AVScreenCapture_SetStateCallback); API(OH_AVScreenCapture_SetErrorCallback);
@@ -47,6 +52,7 @@ struct AvCapture::Impl {
     API(OH_VideoEncoder_FreeOutputBuffer);
     API(OH_AVFormat_Create); API(OH_AVFormat_Destroy); API(OH_AVFormat_SetIntValue);
     API(OH_AVFormat_SetLongValue); API(OH_AVFormat_SetDoubleValue);
+    API(OH_AVFormat_GetBuffer);
     API(OH_AVBuffer_GetAddr); API(OH_AVBuffer_GetCapacity); API(OH_AVBuffer_GetBufferAttr);
     API(OH_NativeWindow_DestroyNativeWindow);
 #undef API
@@ -75,54 +81,91 @@ struct AvCapture::Impl {
         LOAD(encoderLib, OH_VideoEncoder_FreeOutputBuffer);
         LOAD(core, OH_AVFormat_Create); LOAD(core, OH_AVFormat_Destroy); LOAD(core, OH_AVFormat_SetIntValue);
         LOAD(core, OH_AVFormat_SetLongValue); LOAD(core, OH_AVFormat_SetDoubleValue);
+        LOAD(core, OH_AVFormat_GetBuffer);
         LOAD(core, OH_AVBuffer_GetAddr); LOAD(core, OH_AVBuffer_GetCapacity); LOAD(core, OH_AVBuffer_GetBufferAttr);
         LOAD(window, OH_NativeWindow_DestroyNativeWindow);
+        codecConfigKey = Key("OH_MD_KEY_CODEC_CONFIG");
+        if (!codecConfigKey) throw std::runtime_error("missing-codec-config-key");
 #undef LOAD
     }
-    static void EncoderError(OH_AVCodec *, int32_t code, void *user)
+    void Report(const char *name, int code) noexcept
     {
-        auto self = static_cast<Impl *>(user);
-        self->state("encoder-error", code); self->finished = true;
+        try { state(name, code); }
+        catch (...) { accepting = false; finished = true; }
     }
-    static void FormatChanged(OH_AVCodec *, OH_AVFormat *, void *) {}
-    static void NeedInput(OH_AVCodec *, uint32_t, OH_AVBuffer *, void *) {}
-    static void Encoded(OH_AVCodec *codec, uint32_t index, OH_AVBuffer *buffer, void *user)
+    void Fail(const char *name, int code = -1) noexcept
+    {
+        accepting = false;
+        if (!finished.exchange(true)) Report(name, code);
+    }
+    static void EncoderError(OH_AVCodec *, int32_t code, void *user) noexcept
     {
         auto self = static_cast<Impl *>(user);
-        OH_AVCodecBufferAttr attr{};
-        std::vector<uint8_t> bytes;
-        uint8_t flags = 0;
-        bool invalid = false;
-        if (self->accepting && self->p_OH_AVBuffer_GetBufferAttr(buffer, &attr) == AV_ERR_OK) {
-            auto address = self->p_OH_AVBuffer_GetAddr(buffer);
-            auto capacity = self->p_OH_AVBuffer_GetCapacity(buffer);
-            invalid = !address || attr.offset < 0 || attr.size < 0 || capacity < attr.offset
-                || attr.size > capacity - attr.offset || static_cast<size_t>(attr.size) > MAX_FRAME;
-            if (!invalid && attr.size) {
-                bytes.assign(address + attr.offset, address + attr.offset + attr.size);
-                if (attr.flags & AVCODEC_BUFFER_FLAGS_SYNC_FRAME) flags |= FLAG_KEY;
-                if (attr.flags & AVCODEC_BUFFER_FLAGS_CODEC_DATA) flags |= FLAG_CONFIG;
+        self->Fail("encoder-error", code);
+    }
+    static void FormatChanged(OH_AVCodec *, OH_AVFormat *format, void *user) noexcept
+    {
+        auto self = static_cast<Impl *>(user);
+        if (!format || self->finished) return;
+        try {
+            std::lock_guard<std::mutex> guard(self->outputMutex);
+            uint8_t *address = nullptr; size_t size = 0;
+            // OH_AVFormat owns this memory. Copy it before returning from its callback.
+            const bool present = self->p_OH_AVFormat_GetBuffer(format, self->codecConfigKey, &address, &size);
+            auto result = awb::CopyCodecConfiguration(present, address, size);
+            if (result.status == awb::AssemblyStatus::Error) self->Fail(result.error);
+            else if (result.status == awb::AssemblyStatus::Ready
+                && !self->video(std::move(result.frame.bytes), 0, FLAG_CONFIG)) self->Fail("stream-backpressure");
+        } catch (...) { self->Fail("encoder-config-error"); }
+    }
+    static void NeedInput(OH_AVCodec *, uint32_t, OH_AVBuffer *, void *) noexcept {}
+    static void Encoded(OH_AVCodec *codec, uint32_t index, OH_AVBuffer *buffer, void *user) noexcept
+    {
+        auto self = static_cast<Impl *>(user);
+        try {
+            std::lock_guard<std::mutex> guard(self->outputMutex);
+            if (self->accepting) {
+                OH_AVCodecBufferAttr attr{};
+                if (self->p_OH_AVBuffer_GetBufferAttr(buffer, &attr) != AV_ERR_OK) self->Fail("encoder-buffer-attributes");
+                else {
+                    auto address = self->p_OH_AVBuffer_GetAddr(buffer);
+                    auto capacity = self->p_OH_AVBuffer_GetCapacity(buffer);
+                    if (attr.offset < 0 || attr.size < 0 || capacity < attr.offset || attr.size > capacity - attr.offset
+                        || (attr.size && !address)) self->Fail("encoder-buffer-range");
+                    else {
+                        uint8_t flags = 0;
+                        if (attr.flags & AVCODEC_BUFFER_FLAGS_SYNC_FRAME) flags |= FLAG_KEY;
+                        if (attr.flags & AVCODEC_BUFFER_FLAGS_CODEC_DATA) flags |= FLAG_CONFIG;
+                        const bool eos = (attr.flags & AVCODEC_BUFFER_FLAGS_EOS) != 0;
+                        auto result = self->assembler.Push(address ? address + attr.offset : nullptr, attr.size, attr.pts, flags,
+                            (attr.flags & AVCODEC_BUFFER_FLAGS_INCOMPLETE_FRAME) != 0, eos);
+                        if (result.status == awb::AssemblyStatus::Error) self->Fail(result.error);
+                        else if (result.status == awb::AssemblyStatus::Ready
+                            && !self->video(std::move(result.frame.bytes), result.frame.timestamp, result.frame.flags)) {
+                            self->Fail("stream-backpressure");
+                        }
+                        if (eos) { self->accepting = false; self->finished = true; }
+                    }
+                }
             }
-            if (attr.flags & AVCODEC_BUFFER_FLAGS_EOS) self->finished = true;
-        }
-        self->p_OH_VideoEncoder_FreeOutputBuffer(codec, index);
-        if (invalid || (!bytes.empty() && !self->video(std::move(bytes), attr.pts, flags))) {
-            self->state("stream-backpressure", 0); self->finished = true;
-        }
+        } catch (...) { self->Fail("encoder-output-error"); }
+        // Always release the owned output index, including validation/allocation failures.
+        try { if (self->p_OH_VideoEncoder_FreeOutputBuffer(codec, index) != AV_ERR_OK) self->Fail("encoder-buffer-release"); }
+        catch (...) { self->Fail("encoder-release-error"); }
     }
-    static void CaptureState(OH_AVScreenCapture *, OH_AVScreenCaptureStateCode code, void *user)
+    static void CaptureState(OH_AVScreenCapture *, OH_AVScreenCaptureStateCode code, void *user) noexcept
     {
         auto self = static_cast<Impl *>(user);
-        self->state(code == OH_SCREEN_CAPTURE_STATE_STARTED ? "started" : "capture-state", static_cast<int>(code));
+        self->Report(code == OH_SCREEN_CAPTURE_STATE_STARTED ? "started" : "capture-state", static_cast<int>(code));
         if (code == OH_SCREEN_CAPTURE_STATE_CANCELED || code == OH_SCREEN_CAPTURE_STATE_STOPPED_BY_USER
             || code == OH_SCREEN_CAPTURE_STATE_INTERRUPTED_BY_OTHER || code == OH_SCREEN_CAPTURE_STATE_STOPPED_BY_CALL) {
             self->finished = true;
         }
     }
-    static void CaptureError(OH_AVScreenCapture *, int32_t code, void *user)
+    static void CaptureError(OH_AVScreenCapture *, int32_t code, void *user) noexcept
     {
         auto self = static_cast<Impl *>(user);
-        self->state("capture-error", code); self->finished = true;
+        self->Fail("capture-error", code);
     }
     bool Start(const CaptureOptions &options, std::string &error)
     {
@@ -172,7 +215,7 @@ struct AvCapture::Impl {
     }
     void Stop()
     {
-        accepting = false;
+        accepting = false; finished = true;
         if (capture) {
             p_OH_AVScreenCapture_StopScreenCapture(capture);
             p_OH_AVScreenCapture_Release(capture); capture = nullptr;

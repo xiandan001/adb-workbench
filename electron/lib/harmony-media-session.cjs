@@ -113,15 +113,23 @@ function createHarmonyMediaSessions({
     return new Promise((resolveFirst, rejectFirst) => {
       let settled = false;
       const failFirst = error => { if (!settled) { settled = true; clearTimeout(entry.firstTimer); rejectFirst(error); } };
+      const ready = () => {
+        if (!settled) { settled = true; clearTimeout(entry.firstTimer); entry.status = 'streaming'; publish(entry); resolveFirst(publicState(entry)); }
+      };
+      entry.confirmDecoded = () => {
+        if (entry.closing || !entry.forwardedPackets) return false;
+        entry.frames = Math.max(1, entry.frames); ready(); return true;
+      };
       entry.firstTimer = setTimeout(() => failFirst(failure('CAPTURE_TIMEOUT', tr('等待授权或首个视频帧超时，未将投屏标记为成功。'))), firstFrameTimeoutMs);
       const parser = createFrameParser(packet => {
         if (entry.closing) return;
         if (packet.kind === 'video') {
           if (!packet.data.length) return;
+          entry.forwardedPackets = (entry.forwardedPackets || 0) + 1;
           onFrame(entry.id, packet);
-          if (!(packet.flags & 2)) {
+          if (!(packet.flags & 2) || packet.flags & 1) {
             entry.frames++;
-            if (!settled) { settled = true; clearTimeout(entry.firstTimer); entry.status = 'streaming'; publish(entry); resolveFirst(publicState(entry)); }
+            ready();
           }
         } else if (packet.kind === 'error' || packet.state.includes('error') || packet.state === 'stream-backpressure'
           || packet.state === 'capture-state' && [1, 2, 3, 4].includes(packet.code) || packet.code === -1) {
@@ -242,6 +250,7 @@ function createHarmonyMediaSessions({
     return entry.stopPromise;
   }
   return { start, stop, list: () => [...entries.values()].map(publicState),
+    confirmDecoded: id => entries.get(id)?.confirmDecoded?.() || false,
     get: id => entries.has(id) ? publicState(entries.get(id)) : null,
     hasActiveStreams: () => [...entries.values()].some(entry => LIVE.has(entry.status)),
     async shutdownAll() { const results = await Promise.all([...entries.keys()].map(stop)); return { success: results.every(result => result.success), failed: results.filter(result => !result.success) }; } };

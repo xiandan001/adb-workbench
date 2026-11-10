@@ -5,9 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function fixture(t, { delayedLoad = false } = {}) {
+function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
   const windows = [], handlers = new Map(), states = new Map(), starts = [], stops = [], inputs = [];
   let generation = 1, callbacks, localeCallback, releaseLoad;
+  const timers = [];
   const load = delayedLoad ? new Promise(resolve => { releaseLoad = resolve; }) : Promise.resolve();
   class Window extends EventEmitter {
     constructor() {
@@ -44,6 +45,7 @@ function fixture(t, { delayedLoad = false } = {}) {
     electron: { app: { getPath: () => process.cwd() }, BrowserWindow: Window },
     './localization.cjs': { tr: value => value, onLocaleChanged: fn => { localeCallback = fn; return () => {}; } },
     './harmony-media-labels.cjs': { mediaLabels: () => ({ title: 'Media', locale: 'en' }) },
+    './harmony-media-diagnostics.cjs': require('../electron/lib/harmony-media-diagnostics.cjs'),
     './harmony-media-session.cjs': { createHarmonyMediaSessions: options => { callbacks = options; return streams; } },
     './harmony-recording.cjs': { createHarmonyRecordingService: () => recordings },
     './device-registry.cjs': { resolveDeviceRef: id => ({ id, transport: 'hdc', generation, targetKey: id.slice(4) }) },
@@ -51,7 +53,9 @@ function fixture(t, { delayedLoad = false } = {}) {
   };
   const filename = path.join(__dirname, '../electron/lib/harmony-media-window.cjs');
   const module = { exports: {} };
-  const context = vm.createContext({ module, exports: module.exports, Buffer, setTimeout, clearTimeout,
+  const context = vm.createContext({ module, exports: module.exports, Buffer,
+    setTimeout: fakeTimers ? (fn, ms) => { const timer = { fn, ms }; timers.push(timer); return timer; } : setTimeout,
+    clearTimeout: fakeTimers ? timer => { if (timer) timer.cleared = true; } : clearTimeout,
     __dirname: path.dirname(filename), require: name => overrides[name] || require(name) });
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
   const api = module.exports;
@@ -59,7 +63,7 @@ function fixture(t, { delayedLoad = false } = {}) {
   const invoke = (name, window, args, senderFrame = window.webContents.mainFrame) => handlers.get('harmony-media:' + name)(
     { sender: window.webContents, senderFrame }, args);
   t.after(() => api.shutdownAll());
-  return { api, windows, starts, stops, inputs, invoke, releaseLoad,
+  return { api, windows, starts, stops, inputs, invoke, releaseLoad, timers,
     replaceDevice: () => { generation++; }, locale: () => localeCallback() };
 }
 async function readyWindow(h) {
@@ -93,6 +97,19 @@ test('normal ACK followed by decoded ACK permits first-frame readiness without r
   assert.equal(h.starts.length, 1);
   assert.equal(window.sent.filter(item => item.channel === 'harmony-media:locale').length, 2);
   assert.equal((await h.invoke('ack', window, { sessionId: 'other', sequence: 0, decoded: true })).success, false);
+});
+
+test('first-frame timeout uses bounded decoder stage metadata instead of losing missing-parameter evidence', async t => {
+  const h = fixture(t, { fakeTimers: true });
+  const { opening, window } = await readyWindow(h);
+  const frame = window.sent.find(item => item.channel === 'harmony-media:frame').data;
+  const ack = { sessionId: frame.sessionId, sequence: frame.sequence,
+    diagnostic: { stage: 'waiting-configuration', received: 2, submitted: 0, keyframes: 1, sps: true, pps: false, codec: '' } };
+  assert.equal((await h.invoke('ack', window, { ...ack, diagnostic: { ...ack.diagnostic, data: 'private-screen' } })).success, false);
+  assert.equal((await h.invoke('ack', window, ack)).success, true);
+  h.timers.filter(timer => timer.ms === 15000 && !timer.cleared).at(-1).fn();
+  const result = await opening;
+  assert.equal(result.success, false); assert.match(result.error, /初始化参数/);
 });
 test('cached view cannot be reused for the next device generation or send input to it', async t => {
   const h = fixture(t);

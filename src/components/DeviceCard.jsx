@@ -20,6 +20,7 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
 import { isHarmonyDevice, platformLabel, displayDeviceId } from '../shared/devicePlatform';
+import { deviceTerminalCommands, deviceTerminalPresentation, createDeviceTerminalRequest } from '../shared/deviceTerminal';
 
 function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   useLocale();
@@ -54,6 +55,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   // 设备巡检弹窗状态
   const [showInspection, setShowInspection] = useState(false);
   const commandHistory = sharedCommandHistory || [];
+  const terminalCommands = deviceTerminalCommands(device);
+  const terminal = deviceTerminalPresentation(device, suMode);
   // 旧 APK 区块仅作为临时回退源码保留，默认不渲染。
   const showLegacyApkManager = Boolean(globalThis.__XBH_LEGACY_APK_MANAGER__);
 
@@ -91,19 +94,13 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
 
   const handleTerminalSubmit = async (e) => {
     e?.preventDefault();
-    if (!terminalCommand.trim() || isExecuting) return;
+    if (!terminalCommand.trim() || isExecuting || !isOnline) return;
 
     setIsExecuting(true);
     setShowHistory(false);
     const rawCmd = terminalCommand.trim();
-    // 根据当前提权策略包装命令（direct 策略下无需包装，shell 已是 root）
-    // 用单引号包裹内部命令，避免与 adb shell 外层传递时的双引号嵌套冲突
-    const escaped = rawCmd.replace(/'/g, "'\\''");
-    const finalCmd = !suMode ? rawCmd
-      : suStrategy === 'su-c' ? `su -c '${escaped}'`
-      : suStrategy === 'su-sh' ? `su 0 sh -c '${escaped}'`
-      : rawCmd;
-    setTerminalOutput(prev => [...prev, { type: 'command', text: `${suMode ? '#' : '$'} ${harmony ? `hdc -t ${displayDeviceId(device)}` : `adb -s ${device.id}`} shell "${finalCmd}"` }]);
+    const request = createDeviceTerminalRequest(device, rawCmd, { root: suMode, strategy: suStrategy });
+    setTerminalOutput(prev => [...prev, { type: 'command', prompt: request.prompt, text: request.text }]);
     setTerminalCommand('');
     setHistoryIndex(-1);
     if (onSaveTerminalCommand) {
@@ -112,7 +109,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
 
     try {
       if (onExecuteCommand) {
-        const result = await onExecuteCommand(device.id, finalCmd);
+        const result = await onExecuteCommand(request.deviceId, request.command);
         setTerminalOutput(prev => [...prev, { type: 'output', text: result }]);
       }
     } catch (err) {
@@ -379,7 +376,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             <button type="button" onClick={onEnvironmentCheck} className="mt-1 underline underline-offset-2">{tr("打开环境自检")}</button>
           </div>
         )}
-        <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} theme={t} />
+        <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} theme={t} onOpenApps={onApkManager} />
         <section className="device-control-section" aria-label={tr("常用工具")}>
           <h4 className={`device-control-heading ${t.textMuted}`}>{tr("常用工具")}</h4>
           <div className="device-tool-grid">
@@ -765,7 +762,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           <div className={`flex items-center justify-between mb-3 ${t.terminal.accent} ${terminalFullscreen ? 'pb-3 border-b border-[#3E4145]' : ''}`}>
             <div className="flex items-center gap-2">
               <Terminal size={16} />
-              <span className="text-sm font-medium">{tr("终端 - {0}", { 0: device.id })}</span>
+              <span className="text-sm font-medium">{terminal.title}</span>
               {terminalFullscreen && (
                 <span className="text-xs text-slate-500 ml-2">{tr("（放大模式 · 按 Esc 或点击还原返回 · Ctrl+滚轮缩放）")}</span>
               )}
@@ -870,7 +867,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                       <span className={`select-none shrink-0 text-[10px] mt-0.5 w-4 ${
                         isCmd ? 'text-cyan-400' : isErr ? 'text-red-400' : 'text-slate-500'
                       }`}>
-                        {isCmd ? '$' : isErr ? '!' : '›'}
+                        {isCmd ? line.prompt || '$' : isErr ? '!' : '›'}
                       </span>
                       {/* 内容 */}
                       <span className={`flex-1 break-all whitespace-pre-wrap ${
@@ -903,7 +900,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                 onFocus={handleTerminalFocus}
                 onBlur={handleTerminalBlur}
                 disabled={isExecuting || !isOnline}
-                placeholder={suMode ? tr("以 ROOT 身份执行命令...") : tr("输入 ADB Shell 命令...")}
+                placeholder={terminal.placeholder}
                 className={`w-full px-3 py-2 pr-16 border rounded-lg font-mono text-sm focus:outline-none focus:ring-2 ${suMode ? 'focus:ring-red-500 focus:border-red-500' : 'focus:ring-emerald-500 focus:border-emerald-500'} placeholder-slate-500 disabled:opacity-50 ${t.terminal.bg.replace('bg-', 'bg-').replace('gradient-to-br', 'bg-').includes('gradient') ? 'bg-[#2D2F33] border-[#3E4145] text-[#E8EAED]' : t.terminal.text.includes('300') ? 'bg-[#2D2F33] border-[#3E4145] text-[#E8EAED]' : 'bg-[#202124] border-[#3E4145] text-[#E8EAED]'}`}
               />
               {/* SU 模式开关：紧凑胶囊，内嵌输入框右侧，不额外占行 */}
@@ -911,7 +908,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                 type="button"
                 onClick={toggleSuMode}
                 disabled={!isOnline || isExecuting || suChecking}
-                title={suMode ? tr("已开启 ROOT 模式，点击关闭") : tr("开启 ROOT 模式")}
+                title={terminal.rootTitle}
                 className={`absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all disabled:opacity-40 ${
                   suMode
                     ? 'bg-red-500/20 text-red-400 border-red-500/40 shadow-[0_0_8px_-2px] shadow-red-500/40'
@@ -919,7 +916,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                 }`}
               >
                 {suChecking ? <Loader2 size={10} className="animate-spin" /> : <Shield size={10} />}
-                SU
+                {harmony ? 'ROOT' : 'SU'}
               </button>
               {showHistory && commandHistory.length > 0 && (
                 <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#2D2F33] border border-[#3E4145] rounded-lg overflow-hidden shadow-lg max-h-40 overflow-y-auto z-50">
@@ -964,13 +961,15 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           {/* Quick Commands */}
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="text-xs text-slate-500">{tr("快捷命令:")}</span>
-            {['pm list packages', 'getprop ro.build.version', 'dumpsys battery', 'cat /proc/meminfo', 'ls -la /data/'].map((cmd) => (
+            {terminalCommands.map((cmd) => (
               <button
                 key={cmd}
+                type="button"
+                disabled={isExecuting || !isOnline}
                 onClick={() => {
                   setTerminalCommand(cmd);
                 }}
-                className="px-2 py-1 text-xs bg-[#2D2F33] hover:bg-[#3E4145] text-[#9AA0A6] hover:text-[#E8EAED] rounded transition-colors font-mono"
+                className="px-2 py-1 text-xs bg-[#2D2F33] hover:bg-[#3E4145] text-[#9AA0A6] hover:text-[#E8EAED] rounded transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {cmd}
               </button>
@@ -994,14 +993,10 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       <DangerConfirmModal
         open={suUnsupportedOpen}
         theme={t}
-        title={tr("设备暂不支持 su 命令")}
-        message={tr("检测到当前设备无法以 root 身份执行命令，可能原因：")}
-        bullets={[
-          tr("设备未 Root 或未安装权限管理（如 Magisk）"),
-          tr("已 Root 但未给 ADB Shell 授权"),
-          tr("使用了受限用户版本的系统镜像")
-        ]}
-        detail={tr("请先完成 Root 并在设备端授权后，再开启 ROOT 模式。")}
+        title={terminal.rootWarning.title}
+        message={terminal.rootWarning.message}
+        bullets={terminal.rootWarning.bullets}
+        detail={terminal.rootWarning.detail}
         confirmLabel={tr("知道了")}
         cancelLabel={tr("关闭")}
         tone="warning"

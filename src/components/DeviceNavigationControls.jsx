@@ -2,19 +2,19 @@ import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp, Power } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
-import { BUILTIN_SHORTCUTS, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor } from '../shared/deviceNavigationShortcuts';
+import { BUILTIN_SHORTCUTS, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor, getDeviceShortcutCheck } from '../shared/deviceNavigationShortcuts';
 import DeviceShortcutEditor from './DeviceShortcutEditor';
 import DeviceShortcutConfirm from './DeviceShortcutConfirm';
 import useDeviceShortcutCapabilities from '../shared/useDeviceShortcutCapabilities';
 
-const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell, power: Power };
+const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell, power: Power, apps: AppWindow };
 
 function deviceShortcutDisplayLabel(action) {
   const builtin = action.type === 'builtin' && BUILTIN_SHORTCUTS.find(item => item.id === action.action);
   return builtin && action.label === builtin.label ? tr(builtin.label) : action.label;
 }
 
-export default function DeviceNavigationControls({ deviceId, isOnline, showToast, theme }) {
+export default function DeviceNavigationControls({ deviceId, isOnline, showToast, theme, onOpenApps }) {
   useLocale();
   const [saved, setSaved] = useState(() => readDeviceShortcuts(globalThis.localStorage, deviceId));
   const [pending, setPending] = useState('');
@@ -26,7 +26,8 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
   const isDark = isDarkTheme(theme);
   const descriptionId = useId();
   const checks = useDeviceShortcutCapabilities(deviceId, isOnline, saved.config);
-  const unavailable = checks.filter(check => check.status === 'unsupported');
+  const unavailable = (saved.config || defaultDeviceShortcuts(deviceId)).slots
+    .map(action => getDeviceShortcutCheck(deviceId, action, checks)).filter(check => check?.status === 'unsupported');
 
   useEffect(() => {
     const refresh = event => { if (!event.key || [SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY].includes(event.key)) setSaved(readDeviceShortcuts(globalThis.localStorage, deviceId)); };
@@ -44,8 +45,8 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
     setError('');
     setPending(action.id);
     try {
-      const result = await executor.current({ api: window.electronAPI, deviceId, shortcut: action, confirmShell });
-      if (result.ok) showToast?.(tr("已发送{0}指令（{1}）", { 0: deviceShortcutDisplayLabel(action), 1: deviceId }));
+      const result = await executor.current({ api: window.electronAPI, deviceId, shortcut: action, confirmShell, onOpenApps });
+      if (result.ok && !result.local) showToast?.(tr("已发送{0}指令（{1}）", { 0: deviceShortcutDisplayLabel(action), 1: deviceId }));
     } catch (error) {
       const message = tr("{0}失败：{1}", { 0: deviceShortcutDisplayLabel(action), 1: error.message });
       setError(message);
@@ -70,7 +71,7 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
     <div className="device-navigation-grid" role="group" aria-label={tr("设备快捷操作")}>
       {(saved.config || defaultDeviceShortcuts(deviceId)).slots.map(action => {
         const Icon = action.type === 'app' ? AppWindow : action.type === 'shell' ? Terminal : icons[action.action];
-        const check = checks.find(item => item.id === action.id);
+        const check = getDeviceShortcutCheck(deviceId, action, checks);
         const unsupported = check?.status === 'unsupported';
         const displayLabel = deviceShortcutDisplayLabel(action);
         const reason = !isOnline ? tr("设备离线，请先连接设备") : check?.reason ? tr(check.reason) : (action.type === 'shell' ? deviceId.startsWith('hdc:') ? tr('自定义 HDC shell 命令，每次执行前均需确认') : tr("自定义 ADB 命令，每次执行前均需确认") : tr("正在检查支持情况，操作时仍会校验"));

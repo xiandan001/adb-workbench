@@ -78,6 +78,10 @@ function createCapabilityService({ run = runAdb, now = Date.now, cacheMs = CACHE
     const packages = parsePackages(packageResult);
     const checks = [];
     for (const slot of config.slots) {
+      if (slot.type === 'builtin' && slot.action === 'apps') {
+        checks.push(status(slot.id, 'supported', tr('在当前设备卡片打开应用管理，不发送设备控制命令。')));
+        continue;
+      }
       if (slot.type === 'shell') {
         checks.push(status(slot.id, 'confirm', tr("自定义 ADB 命令无法预检，每次执行前均需确认")));
         continue;
@@ -138,9 +142,11 @@ async function inspectHarmony(deviceId, config) {
     try { packages = await require('./harmony-apps.cjs').listPackages(deviceId); } catch { packages = null; }
   }
   const checks = config.slots.map(slot => {
+    if (slot.type === 'builtin' && slot.action === 'power') return status(slot.id, 'unsupported', tr('鸿蒙电源控制已停用，可能导致设备失联；请编辑替换此按钮。'));
+    if (slot.type === 'builtin' && slot.action === 'apps') return status(slot.id, 'supported', tr('在当前设备卡片打开应用管理，不发送设备控制命令。'));
     if (slot.type === 'shell') return status(slot.id, 'confirm', tr('自定义 HDC shell 命令，每次执行前均需确认'));
     if (slot.type === 'app') return packages ? status(slot.id, packages.some(item => item.packageName === slot.packageName) ? 'supported' : 'unsupported', tr('将使用应用实际提供的 Ability 启动入口')) : status(slot.id, 'unknown', tr('暂时无法读取鸿蒙应用列表'));
-    if (['home', 'back', 'power'].includes(slot.action)) return status(slot.id, ref.capabilities?.ui === false ? 'unsupported' : 'supported', tr('原生 UITest 按键操作'));
+    if (['home', 'back'].includes(slot.action)) return status(slot.id, ref.capabilities?.ui === false ? 'unsupported' : 'supported', tr('原生 UITest 按键操作'));
     if (slot.action === 'settings' && packages?.some(item => ['com.ohos.settings', 'com.huawei.hmos.settings'].includes(item.packageName))) return status(slot.id, 'supported', tr('将使用设备实际提供的系统设置应用'));
     return status(slot.id, 'unsupported', tr('此操作适用于 Android，请编辑替换为鸿蒙设备上的应用或命令'));
   });

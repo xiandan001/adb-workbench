@@ -4,16 +4,19 @@ const { runHdcHost } = require('./hdc-runtime.cjs');
 const { discoverDevices } = require('./device-discovery.cjs');
 const { isHarmonyDevice, deviceTarget, hdcDeviceId } = require('./device-platform.cjs');
 const { resolveDeviceRef } = require('./device-registry.cjs');
+const { isIP } = require('node:net');
 
 function connectionAddress(value) {
   const raw = String(value || '').trim();
   const address = isHarmonyDevice(raw) ? deviceTarget(raw) : raw;
-  if (!/^(?:[A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:]+\]):\d{1,5}$/.test(address)
-    || Number(address.slice(address.lastIndexOf(':') + 1)) < 1
-    || Number(address.slice(address.lastIndexOf(':') + 1)) > 65535) {
+  const match = /^([A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:]+\])(?::(\d{1,5}))?$/.exec(address);
+  const host = match?.[1], port = match?.[2] || (isHarmonyDevice(raw) ? '' : '5555');
+  if (!host || !port || Number(port) < 1 || Number(port) > 65535
+    || host.startsWith('[') && isIP(host.slice(1, -1)) !== 6
+    || /^\d+\.\d+\.\d+\.\d+$/.test(host) && isIP(host) !== 4) {
     throw new Error(tr('请输入有效的设备 IP 地址和端口。'));
   }
-  return address;
+  return `${host}:${port}`;
 }
 async function connectDevice(value, options = {}) {
   const address = connectionAddress(value);

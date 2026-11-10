@@ -33,7 +33,22 @@ test('wireless fallback uses native connection only after Android fails and veri
   assert.equal((await connectDevice('hdc:192.168.1.2:5555', options)).deviceId, 'hdc:192.168.1.2:5555');
   assert.equal(calls.filter(args => args[0] === 'connect').length, 1);
   assert.equal(connectionAddress('[::1]:1234'), '[::1]:1234');
-  for (const address of ['bad', '-t:5555', 'host:0', 'host:99999', 'host:5555 shell false']) assert.throws(() => connectionAddress(address));
+  for (const address of ['bad host', '-t:5555', 'host:0', 'host:99999', 'host:5555 shell false']) assert.throws(() => connectionAddress(address));
+});
+
+test('Android bare IP and legacy history addresses retain the ADB default port without trying HDC', async () => {
+  assert.equal(connectionAddress('172.20.74.121'), '172.20.74.121:5555');
+  assert.equal(connectionAddress('localhost'), 'localhost:5555');
+  assert.equal(connectionAddress('[::1]'), '[::1]:5555');
+  assert.equal(connectionAddress('172.20.74.121:6666'), '172.20.74.121:6666');
+  const calls = [];
+  const result = await connectDevice('172.20.74.121', {
+    runAdb: async args => { calls.push(args); return ok('connected to 172.20.74.121:5555'); },
+    runHdcHost: async () => assert.fail('Successful Android connect must not switch transport')
+  });
+  assert.equal(result.success, true); assert.equal(result.deviceId, '172.20.74.121:5555');
+  assert.deepEqual(calls, [['connect', '172.20.74.121:5555']]);
+  for (const address of ['999.20.74.121', '172.20.74.121:0', '[not:ipv6]', 'hdc:172.20.74.121']) assert.throws(() => connectionAddress(address));
 });
 
 test('disconnect never kills shared HDC services or disconnects unrelated transports', async () => {
