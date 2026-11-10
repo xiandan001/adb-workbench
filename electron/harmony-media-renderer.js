@@ -7,6 +7,9 @@ const element = id => document.getElementById(id);
 const canvas = element('screen'), context = canvas.getContext('2d', { alpha: false });
 let labels = {}, session = {}, recording = null, decoded = false;
 let localError = '', pending = false, pointer = null;
+let controlError = null, controlGeneration = 0, controlSequence = 0, controlAlive = true;
+const controlRequests = new Set();
+const controlBusyFor = new Set();
 const unsubscribe = [];
 function fitCanvas() {
   const area = canvas.parentElement;
@@ -40,8 +43,14 @@ function render() {
   element('record').disabled = pending || !ready || ['stopping', 'saving'].includes(recording?.status);
   element('withLogs').disabled = pending || liveRecording();
   const controlled = ready && element('control').checked;
-  for (const id of ['home', 'back', 'text', 'send']) element(id).disabled = !controlled;
+  for (const id of ['home', 'back', 'text', 'send']) element(id).disabled = !controlled || controlRequests.size > 0;
   canvas.dataset.control = String(controlled);
+  const controlBusy = controlRequests.size > 0;
+  const controlNotice = controlBusy ? controlBusyFor.size ? labels.controlErrors?.INPUT_BUSY || labels.controlSending : labels.controlSending
+    : controlError ? labels.controlErrors?.[controlError.key] || labels.controlFailed : '';
+  element('control-status').hidden = !controlNotice;
+  element('control-status').textContent = controlNotice || '';
+  element('control-status').dataset.error = String(Boolean(controlError && !controlBusy));
   const error = localError ? labels[localError] : session.error;
   const notice = error || (!ready ? labels[statusKey] : '');
   element('notice').hidden = !notice;
@@ -73,16 +82,40 @@ function receive(packet) {
   void video.push(packet);
 }
 function updateSession(value) {
-  if (session.id && value.id && session.id !== value.id) { video.dispose(); video = createDecoder(); decoded = false; }
+  if (session.id && value.id && session.id !== value.id) {
+    video.dispose(); video = createDecoder(); decoded = false;
+    controlGeneration++; controlRequests.clear(); controlBusyFor.clear(); controlError = null; pointer = null;
+  }
   session = value; render();
 }
+function controlFailure(result) {
+  const known = labels.controlErrors || {};
+  const key = typeof result?.code === 'string' && Object.hasOwn(known, result.code) ? result.code
+    : typeof result?.error === 'string' ? Object.keys(known).find(name => known[name] === result.error) : null;
+  return { key: key || 'INPUT_UNKNOWN' };
+}
 async function input(value) {
-  if (!element('control').checked || !decoded || session.status !== 'streaming') return false;
+  if (!controlAlive || !element('control').checked || !decoded || session.status !== 'streaming') return false;
+  const generation = controlGeneration, sessionId = session.id, request = ++controlSequence;
+  const current = () => controlAlive && generation === controlGeneration && session.id === sessionId && session.status === 'streaming';
+  // Canvas repeats still reach the trusted single-flight gate, where the rejection is logged.
+  for (const earlier of controlRequests) controlBusyFor.add(earlier);
+  controlRequests.add(request); render();
   try {
     const result = await api.input(value);
-    if (!result?.success) { element('notice').textContent = result?.error || labels.unsupported; element('notice').hidden = false; return false; }
+    if (!current()) return false;
+    if (!result?.success) {
+      const failure = controlFailure(result);
+      if (failure.key === 'INPUT_BUSY') {
+        // A late refusal describes an earlier operation, not this completed reply.
+        for (const earlier of controlRequests) if (earlier < request) controlBusyFor.add(earlier);
+      } else controlError = failure;
+      return false;
+    }
+    controlError = null;
     return true;
-  } catch { return false; }
+  } catch { if (current()) controlError = { key: 'INPUT_UNKNOWN' }; return false; }
+  finally { controlRequests.delete(request); controlBusyFor.delete(request); if (controlAlive) render(); }
 }
 const point = event => {
   const bounds = canvas.getBoundingClientRect();
@@ -99,7 +132,7 @@ canvas.addEventListener('pointerup', event => {
   const end = point(event), distance = Math.hypot(end.x - start.x, end.y - start.y);
   void input(distance < .01 ? { type: 'tap', x: end.x, y: end.y } : { type: 'swipe', x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs: Math.max(100, Math.min(5000, Math.round(performance.now() - start.time))) });
 });
-element('control').addEventListener('change', render);
+element('control').addEventListener('change', () => { controlGeneration++; controlBusyFor.clear(); controlError = null; pointer = null; render(); });
 for (const key of ['home', 'back']) element(key).addEventListener('click', () => { void input({ type: 'keyevent', key }); });
 const sendText = async () => { const text = element('text').value; if (text && await input({ type: 'input', text })) element('text').value = ''; };
 element('send').addEventListener('click', () => { void sendText(); });
@@ -128,5 +161,8 @@ async function initialize() {
   session = initial.session || { deviceId: initial.deviceId, status: 'starting' }; render();
   if (!(await api.ready())?.success) throw new Error();
 }
-window.addEventListener('beforeunload', () => { viewport.disconnect(); controller.dispose(); video.dispose(); for (const remove of unsubscribe) remove?.(); });
+window.addEventListener('beforeunload', () => {
+  controlAlive = false; controlGeneration++; controlRequests.clear(); controlBusyFor.clear();
+  viewport.disconnect(); controller.dispose(); video.dispose(); for (const remove of unsubscribe) remove?.();
+});
 void initialize().catch(() => fail('transportError'));

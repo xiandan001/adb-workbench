@@ -32,6 +32,9 @@
     #notice[data-error="true"] { color: #ffb6b6; border-color: #603838; }
     footer { border-top: 1px solid #22302c; gap: 10px; }
     #status { font-size: 12px; color: #8ea89a; flex: 1 1 200px; }
+    #control-status { margin: 0; width: 100%; font-size: 12px; line-height: 1.5; color: #a3d8c4; overflow-wrap: anywhere; }
+    #control-status[hidden] { display: none; }
+    #control-status[data-error="true"] { color: #ffb6b6; }
     #text { min-width: 120px; width: 220px; border: 1px solid #30443a; background: #000; padding: 7px 9px; border-radius: 7px; font-size: 12px; }
     #privacy { margin: 0; width: 100%; color: #667e70; font-size: 11px; line-height: 1.5; }
     @media (max-width: 620px) { header, footer { padding: 9px; gap: 7px; } #device { max-width: 140px; } #text { flex: 1; width: 120px; } }
@@ -52,6 +55,7 @@
     <label><input id="control" type="checkbox"><span data-label="inputEnabled"></span></label>
     <button id="home" data-label="home" disabled></button><button id="back" data-label="back" disabled></button>
     <input id="text" type="text" maxlength="500" disabled><button id="send" data-label="sendText" disabled></button>
+    <p id="control-status" role="status" aria-live="polite" hidden></p>
     <p id="privacy"></p>
   </footer>
   <script type="module" src="./harmony-media-renderer.js"></script>

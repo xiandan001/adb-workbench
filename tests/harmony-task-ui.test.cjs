@@ -36,8 +36,8 @@ test('native input maps logical keys and converts milliseconds to speed without 
   assert.equal(buildHarmonyInput({ type: 'keyevent', keyCode: 'Power' }, null, {}).at(-1), 'Power');
   assert.equal(buildHarmonyInput({ type: 'keyevent', keyCode: 'native:2072' }, null, {}).at(-1), '2072');
   assert.throws(() => buildHarmonyInput({ type: 'keyevent', keyCode: '3' }, null, {}), /Android/);
-  assert.equal(buildHarmonyInput({ type: 'swipe', endX: 400, endY: 0, durationMs: 400 }, { x: 0, y: 0 }, {}).at(-1), '1000');
-  assert.throws(() => buildHarmonyInput({ type: 'swipe', endX: 1, endY: 0, durationMs: 1000 }, { x: 0, y: 0 }, {}), /200/);
+  assert.equal(buildHarmonyInput({ type: 'swipe', endX: 401, endY: 1, durationMs: 400 }, { x: 1, y: 1 }, {}).at(-1), '1000');
+  assert.throws(() => buildHarmonyInput({ type: 'swipe', endX: 2, endY: 1, durationMs: 1000 }, { x: 1, y: 1 }, {}), /200/);
   assert.throws(() => buildHarmonyInput({ type: 'swipe', points: [{}, {}, {}] }, { x: 0, y: 0 }, {}), /曲线/);
   assert.throws(() => buildHarmonyInput({ type: 'longPress', durationMs: 800 }, { x: 1, y: 2 }, {}), /毫秒/);
   assert.equal(buildHarmonyInput({ type: 'longPress', longPressMode: 'native', durationMs: null }, { x: 1, y: 2 }, {})[3], 'longClick');
@@ -86,6 +86,7 @@ test('Harmony coordinates and durations retain explicit values rather than silen
   assert.throws(() => normalizeHarmonyDuration({ durationMs: -1 }), /时长/);
   assert.throws(() => normalizeHarmonyCoordinate('invalid'), /坐标/);
   assert.throws(() => normalizeHarmonyCoordinate(1.2), /坐标/);
+  assert.throws(() => normalizeHarmonyCoordinate(0), /大于 0/);
   assert.equal(normalizeHarmonyCoordinate(''), null);
 });
 
@@ -108,4 +109,12 @@ test('a later unsupported focus-input step is preflighted before any install or 
   task.cancelled = true; calls.length = 0;
   await assert.rejects(preflightHarmonyInputs(task, 'hdc:QA', undefined, read), { code: 'CANCELLED' });
   assert.equal(calls.length, 0);
+});
+
+test('explicit input target preflight requires advertised inputText but never reads the focus-text API version', async () => {
+  const task = { hdcPath: path.resolve('fixture-hdc.exe'), deviceRefs: { 'hdc:QA': { id: 'hdc:QA', transport: 'hdc', targetKey: 'QA', status: 'device' } },
+    script: { targetPlatform: 'harmony', steps: [{ type: 'input', text: 'fixture', selector: { resourceId: 'field' } }] } };
+  const calls = [];
+  await preflightHarmonyInputs(task, 'hdc:QA', undefined, async (_id, args) => { calls.push(args); return { ok: true, stdout: 'uiInput\n  inputText <x> <y> <text>\n' }; });
+  assert.deepEqual(calls, [['shell', 'uitest', 'help']]); assert.equal(task.uitestCapabilities['hdc:QA'].apiVersion, null);
 });

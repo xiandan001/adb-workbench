@@ -64,6 +64,19 @@ test('zero client exit cannot turn an HDC transport error or failed remote shell
   const result = normalizeHdcResult(null, 'data\nMARKER:0\nclient trailing diagnostic', '', 'MARKER', false);
   assert.equal(result.ok, true); assert.equal(result.stdout, 'data');
 });
+test('HDC result keeps bounded host/remote completion metadata separate without replacing exit checks', () => {
+  const help = normalizeHdcResult(null, 'usage: uitest\nMARKER:1\n', '', 'MARKER', false);
+  assert.equal(help.ok, false); assert.equal(help.hostCode, 0); assert.equal(help.remoteCode, 1);
+  assert.equal(help.completion, 'confirmed'); assert.equal(help.transportFailure, false);
+  const missing = normalizeHdcResult(null, 'no completion', '', 'MARKER', false);
+  assert.equal(missing.ok, false); assert.equal(missing.remoteCode, null); assert.equal(missing.completion, 'missing');
+  const transport = normalizeHdcResult(null, '[Fail] PRIVATE_DEVICE not connected\nMARKER:0\n', '', 'MARKER', false);
+  assert.equal(transport.ok, false); assert.equal(transport.transportFailure, true);
+  const host = normalizeHdcResult(Object.assign(Error('private error'), { code: 7 }), '', '', null, false);
+  assert.equal(host.hostCode, 7); assert.equal(host.remoteCode, null); assert.equal(host.completion, 'not-requested'); assert.equal(host.transportFailure, true);
+  const spawn = normalizeHdcResult(Object.assign(Error('private path'), { code: 'ENOENT' }), '', '', 'MARKER', false);
+  assert.equal(spawn.ok, false); assert.equal(spawn.completion, 'missing'); assert.equal(spawn.transportFailure, true); assert.equal(spawn.hostCode, null);
+});
 
 test('queued cancellation does not start a child; active cancellation only kills its owned process', async () => {
   const f = fixture(), abort = new AbortController();

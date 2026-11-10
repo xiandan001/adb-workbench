@@ -34,8 +34,11 @@ function normalizeHdcResult(error, stdout, stderr, marker, cancelled) {
   const output = match ? text.slice(0, match.index) : text;
   const failure = hdcFailure(text, stderr);
   const code = match ? Number(match[1]) : error ? (error.code ?? 1) : marker ? 1 : 0;
+  const remoteCode = match && Number.isSafeInteger(Number(match[1])) && Number(match[1]) <= 255 ? Number(match[1]) : null;
   return { ok: !cancelled && !error && code === 0 && !failure, stdout: buffer ? Buffer.from(output) : output,
     stderr: stderr || (buffer ? Buffer.alloc(0) : ''), code, cancelled: Boolean(cancelled),
+    hostCode: error ? Number.isSafeInteger(error.code) ? error.code : null : 0, remoteCode,
+    completion: marker ? remoteCode === null ? 'missing' : 'confirmed' : 'not-requested', transportFailure: Boolean(error || failure),
     ...(error || failure || code !== 0 || cancelled ? { error: cancelled ? tr('用户取消') : failure || String(stderr || '') || error?.message || tr('鸿蒙命令未成功完成。'),
       timedOut: Boolean(error?.killed && !cancelled) } : {}) };
 }

@@ -23,14 +23,16 @@ async function preflightHarmonyInputs(task, deviceId, signal, run = runHdc) {
   const inputs = (task.script.steps || []).filter(step => ['tap', 'longPress', 'swipe', 'input', 'keyevent'].includes(step.type));
   if (!inputs.length) return;
   await withHarmonyTask(task, deviceId, async options => {
-    const capabilities = await probeHarmonyUi(deviceId, { ...options, signal, timeoutMs: 8000 }, run);
+    const hasExplicitInputTarget = step => step.type === 'input' && (Object.keys(selectorOf({ ...step, text: step.selector?.text || '', textContains: step.selector?.textContains || '' })).length
+      || step.x != null && step.y != null);
+    const requireFocusText = inputs.some(step => step.type === 'input' && !hasExplicitInputTarget(step));
+    const capabilities = await probeHarmonyUi(deviceId, { ...options, signal, timeoutMs: 8000, requireFocusText }, run);
     const operations = { tap: 'click', longPress: 'longClick', swipe: 'swipe', keyevent: 'keyEvent' };
     for (const step of inputs) {
-      const explicitInputTarget = step.type === 'input' && (Object.keys(selectorOf({ ...step, text: step.selector?.text || '', textContains: step.selector?.textContains || '' })).length
-        || step.x != null && step.y != null);
+      const explicitInputTarget = hasExplicitInputTarget(step);
       const operation = step.type === 'input' ? (explicitInputTarget ? 'inputText' : 'text') : operations[step.type];
-      if (step.type === 'input') buildHarmonyInput(step, explicitInputTarget ? { x: 0, y: 0 } : null, capabilities);
-      if (!new RegExp(`\\b${operation}\\b`).test(capabilities.help)) throw new Error(tr('所选设备 UITest 不支持此输入操作，未执行。'));
+      if (step.type === 'input') buildHarmonyInput(step, explicitInputTarget ? { x: 1, y: 1 } : null, capabilities);
+      if (!capabilities.actions.includes(operation)) throw new Error(tr('所选设备 UITest 不支持此输入操作，未执行。'));
     }
     task.uitestCapabilities ||= {};
     task.uitestCapabilities[deviceId] = { ...capabilities, generation: options.deviceRef.generation };

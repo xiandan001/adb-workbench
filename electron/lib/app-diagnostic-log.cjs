@@ -10,7 +10,8 @@ const CHANNELS = new Set(['adb:getDevices', 'adb:listDevices', 'adb:shell', 'adb
   'serial:connect', 'serial:disconnect', 'serial:list', 'serial:snapshot', 'serial:send', 'serial:terminal-write', 'serial:terminal-read',
   'ssh:connect', 'ssh:disconnect', 'ssh:terminal-write', 'ssh:terminal-read', 'ssh:open-terminal', 'ssh:list', 'ssh:upload', 'ssh:download',
   'ai-tools:request', 'env-check:run', 'migration:bootstrap', 'startup-settings:get', 'startup-settings:set',
-  'feedback:diagnostics', 'feedback:preview', 'feedback:submit', 'log:exportToFile', 'logSession:save']);
+  'feedback:diagnostics', 'feedback:preview', 'feedback:submit', 'log:exportToFile', 'logSession:save',
+  ...['init', 'ready', 'diagnostic', 'ack', 'stop', 'close', 'input', 'record-start', 'record-stop', 'record-chunk', 'record-end', 'record-response'].map(name => 'harmony-media:' + name)]);
 const safeChannel = value => CHANNELS.has(value) ? value : 'other';
 const safeVersion = value => typeof value === 'string' && /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-(?:alpha|beta|rc|dev)(?:\.\d{1,5})?)?$/.test(value) ? value : 'unknown';
 

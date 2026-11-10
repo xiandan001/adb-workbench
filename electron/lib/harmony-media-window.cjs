@@ -7,6 +7,7 @@ const { createHarmonyMediaSessions } = require('./harmony-media-session.cjs');
 const { createHarmonyRecordingService } = require('./harmony-recording.cjs');
 const { resolveDeviceRef } = require('./device-registry.cjs');
 const { performHarmonyInput } = require('./harmony-task-ui.cjs');
+const { createHarmonyMediaInput } = require('./harmony-media-input.cjs');
 const { normalizeDecoderDiagnostic, normalizeDecoderEvent, firstFrameFailure } = require('./harmony-media-diagnostics.cjs');
 const applicationLog = require('./application-log.cjs');
 const { classifyApplicationError } = require('./application-log-policy.cjs');
@@ -17,6 +18,7 @@ function getManager() {
   if (singleton) return singleton;
   const { app, BrowserWindow } = require('electron');
   const views = new Map(), recordingListeners = new Set();
+  let viewCounter = 0;
   const recordRequests = new Map();
   const currentRecordings = () => recordings.list().map(item => ({ ...item,
     error: item.error ? tr(item.error) : '', logError: item.logError ? tr(item.logError) : '' }));
@@ -96,7 +98,7 @@ function getManager() {
       title: mediaLabels().title, backgroundColor: '#15191e', autoHideMenuBar: true,
       webPreferences: { preload: path.join(__dirname, '../harmony-media-preload.cjs'), nodeIntegration: false,
         contextIsolation: true, sandbox: true, backgroundThrottling: false } });
-    const view = { deviceId, ref, window, sessionId: '', rendererReady: false, sequence: 0, inFlight: new Set(), inputBusy: false, allowClose: false };
+    const view = { deviceId, ref, window, ordinal: ++viewCounter, sessionId: '', rendererReady: false, sequence: 0, inFlight: new Set(), inputBusy: false, allowClose: false };
     let readyResolve;
     const ready = new Promise(resolve => { readyResolve = resolve; });
     view.readyResolve = readyResolve;
@@ -169,34 +171,8 @@ function getManager() {
     if (!record || record.deviceId !== view.deviceId || record.streamId !== view.sessionId) throw new Error(tr('录像不属于当前投屏窗口。'));
     return record;
   }
-  async function input(view, args = {}) {
-    const state = streams.get(view.sessionId);
-    const current = resolveDeviceRef(view.deviceId);
-    if (view.inputBusy || state?.status !== 'streaming' || current.generation !== view.ref.generation || current.targetKey !== view.ref.targetKey) throw new Error(tr('当前画面或设备连接已变化，未发送控制指令。'));
-    const point = (x, y) => {
-      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) throw new Error(tr('画面控制坐标无效。'));
-      return { x: Math.min(state.sourceWidth - 1, Math.round(x * state.sourceWidth)), y: Math.min(state.sourceHeight - 1, Math.round(y * state.sourceHeight)) };
-    };
-    let step, location;
-    if (args.type === 'tap') {
-      location = point(args.x, args.y); step = { type: 'tap', x: location.x, y: location.y };
-    } else if (args.type === 'swipe') {
-      const start = point(args.x, args.y), end = point(args.endX, args.endY);
-      location = start;
-      step = { type: 'swipe', x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs: Math.max(100, Math.min(1000, Number(args.durationMs) || 300)) };
-    } else if (args.type === 'keyevent' && ['home', 'back'].includes(args.key)) {
-      step = { type: 'keyevent', keyCode: args.key === 'home' ? 'Home' : 'Back' };
-    } else if (args.type === 'input' && typeof args.text === 'string' && args.text.length > 0 && args.text.length <= 2000) {
-      step = { type: 'input', text: args.text }; location = view.lastPoint;
-    } else throw new Error(tr('不支持此投屏控制操作。'));
-    view.inputBusy = true;
-    try {
-      const result = await performHarmonyInput(view.deviceId, step, location, { deviceRef: view.ref,
-        assertCurrent: () => { if (resolveDeviceRef(view.deviceId).generation !== view.ref.generation) throw new Error(tr('设备连接已变化，控制已取消。')); } });
-      if (result.ok && args.type === 'tap') view.lastPoint = location;
-      return { success: result.ok, error: result.ok ? '' : result.error || tr('设备未完成控制指令。') };
-    } finally { view.inputBusy = false; }
-  }
+  const input = createHarmonyMediaInput({ getStream: id => streams.get(id), resolveDevice: resolveDeviceRef,
+    performInput: performHarmonyInput, record: event => applicationLog.record(event) });
   const localeOff = onLocaleChanged(() => {
     const labels = mediaLabels();
     for (const view of views.values()) {

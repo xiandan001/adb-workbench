@@ -51,7 +51,8 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
     './harmony-media-session.cjs': { createHarmonyMediaSessions: options => { callbacks = options; return streams; } },
     './harmony-recording.cjs': { createHarmonyRecordingService: () => recordings },
     './device-registry.cjs': { resolveDeviceRef: id => ({ id, transport: 'hdc', generation, targetKey: id.slice(4) }) },
-    './harmony-task-ui.cjs': { performHarmonyInput: async (...args) => { inputs.push(args); return { ok: true }; } }
+    './harmony-task-ui.cjs': { performHarmonyInput: async (...args) => { inputs.push(args); return { ok: true }; } },
+    './harmony-media-input.cjs': require('../electron/lib/harmony-media-input.cjs')
   };
   const filename = path.join(__dirname, '../electron/lib/harmony-media-window.cjs');
   const module = { exports: {} };
