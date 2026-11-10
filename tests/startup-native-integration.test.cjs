@@ -42,7 +42,7 @@ function harness() {
   const cleanupModule = label => ({ cleanup: () => calls.push(label) });
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
     localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
-    feedback: { record() {}, cleanup() {} }, setTimeout, clearTimeout,
+    feedback: { record() {}, cleanup() {} }, applicationLog: { cleanup: async () => {} }, setTimeout, clearTimeout,
     require(name) { assert.equal(name, './lib/harmony-media-window.cjs'); return { shutdownAll: async () => { calls.push('harmony-media'); } }; },
     startupPresentation: null, startupPresented: false, ipcMain: {},
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1.25 }) },
@@ -170,6 +170,7 @@ test('quit awaits owned Harmony media cleanup before clearing runtime resources 
 test('a stalled optional diagnostic flush cannot block starting device cleanup or hold exit forever', async () => {
   const h = harness(); h.create(); let deadline; const cleaned = [];
   Object.assign(h.context, { feedback: { record() {}, cleanup: () => new Promise(() => {}) }, appMessageDialog: { cleanup() {} },
+    applicationLog: { cleanup: () => new Promise(() => {}) },
     aiTools: { cleanup: async () => cleaned.push('ai') }, serial: { cleanup: async () => cleaned.push('serial') }, ssh: { cleanup: async () => cleaned.push('ssh') },
     cleanupRuntimeResources: h.cleanup, cleanupAndroidToolProcesses: async () => cleaned.push('android'),
     setTimeout: (fn, ms) => { assert.equal(ms, 1000); deadline = fn; return 1; }, clearTimeout() {},

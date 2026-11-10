@@ -76,20 +76,21 @@ test('a rerun step whose input changed after final confirmation fails before iss
   assert.equal(result.ok, false); assert.equal(calls, 0);
 });
 
-test('cancelling optional AI summary preserves actual local task results and writes a skipped-analysis report', async t => {
+test('cancelling optional AI summary preserves actual local task results and writes a skipped-analysis report', { timeout: 10000 }, async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'awb-task-summary-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir())); assert.ok(path.basename(directory).startsWith('awb-task-summary-')); fs.rmSync(directory, { recursive: true, force: true }); });
   const model = workerModel(); model.ensureTaskRootDir = async () => directory;
-  let answer;
+  let answer, markReady;
+  const ready = new Promise(resolve => { markReady = resolve; });
   model.requestMain = async (action, payload, timeoutMs) => {
     assert.equal(action, 'aiSummary'); assert.equal(payload.taskId, 'summary-fixture'); assert.ok(timeoutMs > 70000);
-    return new Promise(resolve => { answer = resolve; });
+    return new Promise(resolve => { answer = resolve; markReady(); });
   };
   const task = { id: 'summary-fixture', scriptName: 'fixture', status: 'success', logs: [],
     script: { loop: {}, acceptance: {}, report: { includeAiSummary: true } },
     deviceRuns: [{ deviceId: 'fixture-A', status: 'success', completedRounds: 1, stressRounds: [] }] };
   const writing = model.writeStressArtifacts(task, { passed: true, completedRounds: 1, failedRounds: 0, totalSteps: 1 });
-  for (let i = 0; !answer && i < 100; i++) await new Promise(resolve => setImmediate(resolve));
+  await ready;
   assert.equal(typeof answer, 'function');
   const filename = path.join(directory, 'stress-result.json'), before = fs.readFileSync(filename);
   assert.equal(JSON.parse(before).status, 'success');

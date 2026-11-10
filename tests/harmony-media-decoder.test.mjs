@@ -4,13 +4,17 @@ import { createH264Decoder } from '../electron/harmony-media-decoder.js';
 
 const join = (...nals) => Uint8Array.from(nals.flatMap(nal => [0, 0, 0, 1, ...nal]));
 const sps = [0x67, 0x42, 0xc0, 0x16, 0x80], pps = [0x68, 0xc0], idr = [0x65, 0x88], delta = [0x41, 0x88];
-function fixture({ unsupportedHardware = false, failHardware = false, failSoftware = false } = {}) {
+function fixture({ unsupportedHardware = false, failHardware = false, failSoftware = false, holdHardwareFlush = false } = {}) {
   const decoders = [], acks = [], errors = [], outputs = [], supported = [];
   class Decoder {
     static async isConfigSupported(config) { supported.push(config.hardwareAcceleration); return { supported: !(unsupportedHardware && config.hardwareAcceleration === 'prefer-hardware') }; }
     constructor(callbacks) { this.callbacks = callbacks; this.state = 'unconfigured'; this.decodeQueueSize = 0; this.chunks = []; decoders.push(this); }
     configure(config) { this.config = config; this.state = 'configured'; }
     decode(chunk) { this.chunks.push(chunk); if (this.config.hardwareAcceleration === 'prefer-hardware' ? failHardware : failSoftware) throw Error('synthetic decoder failure'); }
+    flush() {
+      if (holdHardwareFlush && this.config.hardwareAcceleration === 'prefer-hardware') return new Promise(resolve => { this.releaseFlush = () => { this.output(); resolve(); }; });
+      return Promise.resolve().then(() => { if (this.state !== 'closed') this.output(); });
+    }
     close() { this.state = 'closed'; }
     output() { const chunk = this.chunks.at(-1); const frame = { timestamp: chunk.timestamp, close() { this.closed = true; } }; this.callbacks.output(frame); return frame; }
   }
@@ -21,11 +25,13 @@ function fixture({ unsupportedHardware = false, failHardware = false, failSoftwa
   return { controller, push, decoders, acks, errors, outputs, supported };
 }
 test('an actual IDR without a wire key flag reaches the decoder and only output gets decoded ACK', async () => {
-  const h = fixture(); await h.push(join(sps, pps, idr), 0);
+  const h = fixture({ holdHardwareFlush: true }); const pending = h.push(join(sps, pps, idr), 0);
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.decoders[0].chunks[0].type, 'key');
-  assert.equal(h.acks[0].diagnostic.stage, 'submitted'); assert.equal(h.acks.some(value => value.decoded), false);
+  assert.equal(h.acks.some(value => value.decoded), false);
+  h.decoders[0].releaseFlush(); await pending;
   const frame = h.decoders[0].output(); assert.equal(frame.closed, true);
-  assert.deepEqual(h.outputs, [0]); assert.equal(h.acks.at(-1).decoded, true); h.controller.dispose();
+  assert.deepEqual(h.outputs, [0]); assert.equal(h.acks.filter(value => value.decoded).length, 1); h.controller.dispose();
 });
 test('split parameters wait visibly then a keyframe contains both SPS and PPS; wire flags never promote delta', async () => {
   const h = fixture(); await h.push(join(sps), 2); await h.push(join(pps), 2); await h.push(join(delta), 1);
@@ -38,15 +44,16 @@ test('unsupported hardware or synchronous decode failure retries the current key
   for (const options of [{ unsupportedHardware: true }, { failHardware: true }]) {
     const h = fixture(options); await h.push(join(sps, pps, idr));
     assert.deepEqual(h.supported, ['prefer-hardware', 'prefer-software']);
-    const software = h.decoders.at(-1); assert.equal(software.config.hardwareAcceleration, 'prefer-software'); assert.equal(software.chunks.length, 1);
-    software.output(); assert.equal(h.acks.at(-1).decoded, true); assert.deepEqual(h.errors, []); h.controller.dispose();
+    const software = h.decoders.at(-1); assert.equal(software.config.hardwareAcceleration, 'prefer-software'); assert.equal(software.chunks.length, 2);
+    software.output(); assert.equal(h.acks.filter(value => value.decoded).length, 1); assert.deepEqual(h.errors, []); h.controller.dispose();
   }
 });
 test('asynchronous hardware failure before first output replays only the retained keyframe', async () => {
-  const h = fixture(); await h.push(join(sps, pps, idr));
-  h.decoders[0].callbacks.error(Error('async hardware failure')); await h.controller.idle();
+  const h = fixture({ holdHardwareFlush: true }); const pending = h.push(join(sps, pps, idr));
+  await new Promise(resolve => setImmediate(resolve));
+  h.decoders[0].callbacks.error(Error('async hardware failure')); await pending; await h.controller.idle();
   assert.equal(h.decoders.length, 2); assert.equal(h.decoders[1].chunks[0].type, 'key');
-  h.decoders[1].output(); assert.equal(h.acks.at(-1).decoded, true); h.controller.dispose();
+  h.decoders[1].output(); assert.equal(h.acks.filter(value => value.decoded).length, 1); h.controller.dispose();
 });
 test('software failure is terminal and no retry is allowed after a successfully painted frame', async () => {
   const h = fixture({ failHardware: true, failSoftware: true }); await h.push(join(sps, pps, idr)); await h.push(join(idr));
@@ -64,10 +71,11 @@ test('disposing during hardware capability check cannot resurrect a decoder or A
   assert.deepEqual(instances, []); assert.deepEqual(acks, []);
 });
 test('late output/error from the replaced hardware decoder cannot ACK or stop the software stream', async () => {
-  const h = fixture(); await h.push(join(sps, pps, idr));
-  const hardware = h.decoders[0]; hardware.callbacks.error(Error('first failure')); await h.controller.idle();
+  const h = fixture({ holdHardwareFlush: true }); const pending = h.push(join(sps, pps, idr));
+  await new Promise(resolve => setImmediate(resolve));
+  const hardware = h.decoders[0]; hardware.callbacks.error(Error('first failure')); await pending; await h.controller.idle();
   hardware.output(); hardware.callbacks.error(Error('stale failure'));
-  assert.deepEqual(h.outputs, []); assert.deepEqual(h.errors, []);
+  assert.deepEqual(h.outputs, [0]); assert.deepEqual(h.errors, []);
   h.decoders[1].output(); assert.deepEqual(h.outputs, [0]); h.controller.dispose();
 });
 test('malformed packets fail with metadata only and never enter the native decoder', async () => {

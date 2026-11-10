@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
 function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
-  const windows = [], handlers = new Map(), states = new Map(), starts = [], stops = [], inputs = [];
+  const windows = [], handlers = new Map(), states = new Map(), starts = [], stops = [], inputs = [], logs = [];
   let generation = 1, callbacks, localeCallback, releaseLoad;
   const timers = [];
   const load = delayedLoad ? new Promise(resolve => { releaseLoad = resolve; }) : Promise.resolve();
@@ -46,6 +46,8 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
     './localization.cjs': { tr: value => value, onLocaleChanged: fn => { localeCallback = fn; return () => {}; } },
     './harmony-media-labels.cjs': { mediaLabels: () => ({ title: 'Media', locale: 'en' }) },
     './harmony-media-diagnostics.cjs': require('../electron/lib/harmony-media-diagnostics.cjs'),
+    './application-log.cjs': { record: event => logs.push(event) },
+    './application-log-policy.cjs': require('../electron/lib/application-log-policy.cjs'),
     './harmony-media-session.cjs': { createHarmonyMediaSessions: options => { callbacks = options; return streams; } },
     './harmony-recording.cjs': { createHarmonyRecordingService: () => recordings },
     './device-registry.cjs': { resolveDeviceRef: id => ({ id, transport: 'hdc', generation, targetKey: id.slice(4) }) },
@@ -63,7 +65,7 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
   const invoke = (name, window, args, senderFrame = window.webContents.mainFrame) => handlers.get('harmony-media:' + name)(
     { sender: window.webContents, senderFrame }, args);
   t.after(() => api.shutdownAll());
-  return { api, windows, starts, stops, inputs, invoke, releaseLoad, timers,
+  return { api, windows, starts, stops, inputs, logs, invoke, releaseLoad, timers,
     replaceDevice: () => { generation++; }, locale: () => localeCallback() };
 }
 async function readyWindow(h) {
@@ -132,4 +134,16 @@ test('renderer actions require the owning main frame and native input receives r
   assert.equal(h.inputs[0][2].x, 640); assert.equal(h.inputs[0][2].y, 360);
   assert.equal((await h.invoke('input', window, { type: 'keyevent', key: 'home' })).success, true);
   assert.equal(h.inputs[1][1].keyCode, 'Home');
+});
+test('media diagnostic IPC accepts only owned metadata and never logs device data or arbitrary text', async t => {
+  const h = fixture(t), { opening, window } = await readyWindow(h);
+  const count = h.logs.length;
+  assert.equal((await h.invoke('diagnostic', window, { event: 'configure', message: 'SECRET' })).success, false);
+  assert.equal((await h.invoke('diagnostic', window, { event: 'configure' }, {})).success, false);
+  assert.equal((await h.invoke('diagnostic', window, { event: 'configure' }, null)).success, false);
+  assert.equal(h.logs.length, count);
+  assert.equal((await h.invoke('diagnostic', window, { event: 'configured', mode: 'software', codec: 'avc1.640028', width: 640, height: 360, supported: true })).success, true);
+  assert.equal(h.logs.at(-1).source, 'media'); assert.equal(h.logs.at(-1).mode, 'software');
+  assert.doesNotMatch(JSON.stringify(h.logs), /hdc:|SECRET|deviceId|stream-/);
+  await ackDecoded(h, window); assert.equal((await opening).success, true);
 });

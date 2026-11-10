@@ -6,6 +6,7 @@ const { createFeedbackGithub } = require('./feedback-github.cjs');
 const { createAppDiagnostics } = require('./app-diagnostics.cjs');
 const { createAppDiagnosticLog } = require('./app-diagnostic-log.cjs');
 const { createDiagnosticIpc } = require('./app-diagnostic-observer.cjs');
+const applicationLog = require('./application-log.cjs');
 
 function createFeedbackController({ service, auth, logger, getOwner }) {
   let disposed = false; let errorListener; let channelHost;
@@ -55,7 +56,14 @@ function register(ipcMain) {
   const { app, screen, safeStorage, shell } = require('electron');
   const { createFeedbackAuth } = require('./feedback-auth.cjs');
   const { clientId } = require('../feedback-config.json');
-  logger = createAppDiagnosticLog({ directory: path.join(app.getPath('userData'), 'diagnostics'), version: app.getVersion() });
+  const baseLogger = createAppDiagnosticLog({ directory: path.join(app.getPath('userData'), 'diagnostics'), version: app.getVersion() });
+  logger = { ...baseLogger, record(event) {
+    const accepted = baseLogger.record(event);
+    applicationLog.record({ source: event.module === 'ipc' ? 'ipc' : 'app',
+      event: event.module === 'ipc' ? 'failure' : ['startup', 'ready', 'shutdown', 'renderer-error'].includes(event.operation) ? event.operation : 'failure',
+      component: event.module, level: event.level, channel: event.channel, errorCode: event.errorCode, durationMs: event.durationMs });
+    return accepted;
+  } };
   const github = createFeedbackGithub();
   const auth = createFeedbackAuth({ clientId, directory: path.join(app.getPath('userData'), 'feedback'), github,
     canEncrypt: () => safeStorage.isEncryptionAvailable() && (!safeStorage.getSelectedStorageBackend || safeStorage.getSelectedStorageBackend() !== 'basic_text'),

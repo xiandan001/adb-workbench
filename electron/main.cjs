@@ -48,6 +48,7 @@ const aiTools = require('./lib/ai-tools.cjs');
 const appMessageDialog = require('./lib/app-message-dialog.cjs');
 const startupSettings = require('./lib/startup-settings.cjs');
 const feedback = require('./lib/feedback.cjs');
+const applicationLog = require('./lib/application-log.cjs');
 const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
 const { attachWindowRenderContinuity } = require('./lib/window-render-continuity.cjs');
 const { getMainWindowBounds } = require('./lib/main-window-bounds.cjs');
@@ -194,6 +195,7 @@ app.whenReady().then(async () => {
   // 注册所有领域模块的 IPC handlers
   // 顺序无依赖（每个模块独立注册自己的 ipcMain.handle/on）
   feedback.register(ipcMain);
+  applicationLog.register(localization.scopeIpc(ipcMain));
   const diagnosticIpc = localization.scopeIpc(feedback.observedIpc(ipcMain));
   feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
   version.register(diagnosticIpc);
@@ -292,11 +294,12 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   await ssh.cleanup().catch(() => console.warn('[SSH] quit cleanup failed'));
   await aiCleanup;
   await require('./lib/harmony-media-window.cjs').shutdownAll().catch(() => console.warn('[HDC] media cleanup failed'));
+  const applicationLogCleanup = applicationLog.cleanup().catch(() => {});
   cleanupRuntimeResources();
   // Flush optional diagnostic records without delaying device cleanup or waiting indefinitely on disk IO.
   await new Promise(resolve => {
     const timer = setTimeout(resolve, 1000);
-    feedbackCleanup.then(() => { clearTimeout(timer); resolve(); });
+    Promise.all([feedbackCleanup, applicationLogCleanup]).then(() => { clearTimeout(timer); resolve(); });
   });
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();

@@ -55,6 +55,7 @@ function fail(key) {
 function createDecoder() {
   return createH264Decoder({
     acknowledge: value => { void api.ack(value).catch(() => {}); },
+    onDiagnostic: value => { void api.diagnostic?.(value)?.catch(() => {}); },
     onError: () => fail('decoderError'),
     onFrame: (frame, packet) => {
       if (packet.sessionId !== session.id) throw new Error();

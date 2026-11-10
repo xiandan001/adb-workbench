@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.14': {
+    title: 'v4.7.14',
+    date: '2026-11-10',
+    items: [
+      { type: 'feature', get text() { return tr('新增全局应用日志，支持开始记录、停止并导出，单次上限 20 MiB'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.13': {
     title: 'v4.7.13',
     date: '2026-11-10',

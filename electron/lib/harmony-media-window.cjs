@@ -7,7 +7,9 @@ const { createHarmonyMediaSessions } = require('./harmony-media-session.cjs');
 const { createHarmonyRecordingService } = require('./harmony-recording.cjs');
 const { resolveDeviceRef } = require('./device-registry.cjs');
 const { performHarmonyInput } = require('./harmony-task-ui.cjs');
-const { normalizeDecoderDiagnostic, firstFrameFailure } = require('./harmony-media-diagnostics.cjs');
+const { normalizeDecoderDiagnostic, normalizeDecoderEvent, firstFrameFailure } = require('./harmony-media-diagnostics.cjs');
+const applicationLog = require('./application-log.cjs');
+const { classifyApplicationError } = require('./application-log-policy.cjs');
 
 const ACTIVE_RECORDINGS = new Set(['starting', 'recording', 'stopping', 'saving']);
 let singleton;
@@ -34,6 +36,8 @@ function getManager() {
         data: frame.data, width: session.width, height: session.height });
     },
     onState: state => {
+      applicationLog.record({ source: 'media', event: 'state', stage: state.status,
+        ...(state.error ? classifyApplicationError(state.error) : {}) });
       const view = views.get(state.deviceId);
       if (!view || view.sessionId && view.sessionId !== state.id) return;
       if (!view.sessionId && state.status !== 'starting') return;
@@ -74,6 +78,7 @@ function getManager() {
     }
   });
   async function openWindow(deviceId) {
+    applicationLog.record({ source: 'media', event: 'opening' });
     let ref;
     try { ref = resolveDeviceRef(deviceId); if (ref.transport !== 'hdc') throw new Error(); }
     catch { return { success: false, error: tr('请选择已连接且获授权的鸿蒙设备。') }; }
@@ -140,9 +145,13 @@ function getManager() {
         const result = await streams.start(deviceId);
         if (!result.success) throw new Error(result.error);
         view.sessionId = result.session.id;
-        await Promise.race([decoded, new Promise((_, reject) => { decodedTimer = setTimeout(() => reject(new Error(firstFrameFailure(view.decoderDiagnostic))), 15000); })]);
+        await Promise.race([decoded, new Promise((_, reject) => { decodedTimer = setTimeout(() => {
+          applicationLog.record({ ...view.decoderDiagnostic, source: 'media', event: 'first-frame-timeout', errorCode: 'TIMEOUT' });
+          reject(new Error(firstFrameFailure(view.decoderDiagnostic)));
+        }, 15000); })]);
         return { success: true, session: streams.get(view.sessionId) };
       } catch (error) {
+        applicationLog.record({ source: 'media', event: 'transport-error', ...classifyApplicationError(error) });
         if (view.sessionId) await streams.stop(view.sessionId);
         send(view, 'state', { id: view.sessionId, deviceId, status: 'failed', error: error.message || tr('原生投屏未能启动。') });
         return { success: false, error: error.message || tr('原生投屏未能启动。') };
@@ -152,7 +161,7 @@ function getManager() {
   }
   function authorized(event) {
     const view = [...views.values()].find(item => !item.window.isDestroyed() && item.window.webContents === event.sender);
-    if (!view || event.senderFrame && event.senderFrame !== event.sender.mainFrame) throw new Error(tr('请在所属投屏窗口执行此操作。'));
+    if (!view || !event.senderFrame || !event.sender.mainFrame || event.senderFrame !== event.sender.mainFrame) throw new Error(tr('请在所属投屏窗口执行此操作。'));
     return view;
   }
   function ownRecording(view, id) {
@@ -219,11 +228,20 @@ function register(ipcMain) {
   });
   handle('init', view => ({ success: true, labels: mediaLabels(), deviceId: view.deviceId, session: manager.streams.get(view.sessionId) }));
   handle('ready', view => { view.rendererReady = true; view.readyResolve(); return { success: true }; });
+  handle('diagnostic', (view, args) => {
+    if (!view.rendererReady || !view.sessionId) return { success: false };
+    applicationLog.record({ ...normalizeDecoderEvent(args), source: 'media' });
+    return { success: true };
+  });
   handle('ack', (view, args) => {
     if (args.sessionId !== view.sessionId || !Number.isInteger(args.sequence) || args.sequence < 0 || args.sequence >= view.sequence) return { success: false };
     if (args.diagnostic !== undefined) {
       const diagnostic = normalizeDecoderDiagnostic(args.diagnostic);
       if (!view.decoderDiagnostic || diagnostic.received >= view.decoderDiagnostic.received) view.decoderDiagnostic = diagnostic;
+      if (diagnostic.stage !== view.lastLogStage) {
+        view.lastLogStage = diagnostic.stage;
+        applicationLog.record({ ...diagnostic, source: 'media', event: 'decode-summary' });
+      }
       if (diagnostic.stage === 'decoder-error' && !view.decoded) view.decodedReject(new Error(tr('当前主机无法解码此视频流。')));
     }
     view.inFlight.delete(args.sequence);

@@ -8,6 +8,7 @@ const listen = (name, callback) => {
 };
 contextBridge.exposeInMainWorld('harmonyMedia', {
   init: () => invoke('init'), ready: () => invoke('ready'), ack: args => invoke('ack', args),
+  diagnostic: args => invoke('diagnostic', args),
   stop: () => invoke('stop'), close: () => invoke('close'), input: args => invoke('input', args),
   recordStart: args => invoke('record-start', args), recordStop: () => invoke('record-stop'),
   recordChunk: args => invoke('record-chunk', args), recordEnd: args => invoke('record-end', args),

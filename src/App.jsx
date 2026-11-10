@@ -29,6 +29,7 @@ import LanguagePreferences from './components/LanguagePreferences';
 import InitialLanguageDialog from './components/InitialLanguageDialog';
 import { tr, useLocale, getLocale, useLanguageSelectionPending } from './shared/i18n.js';
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
+import ApplicationLogSection from './components/ApplicationLogSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { observeUpdaterState } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
@@ -2749,6 +2750,7 @@ function App() {
 
               <section id="settings-update" className={settingsSectionClass}>
                 <FeedbackSection theme={t} onOpen={() => setFeedbackOpen(true)} />
+                <ApplicationLogSection theme={t} />
                 {/* 关于与更新 */}
                 <div className="py-3">
                   <div className="flex items-center gap-2 mb-3">
