@@ -6,34 +6,58 @@ import { runInNewContext } from 'node:vm';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default, postcss = require('postcss');
 const read = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
-function declaration(selector, property) {
+function declaration(selector, property, media = '') {
   let result;
   postcss.parse(read('src/styles/workbenchLayout.css')).walkRules(selector, rule => {
+    if ((rule.parent.type === 'atrule' ? rule.parent.params : '') !== media) return;
     rule.walkDecls(property, node => { result = node.value; });
   });
   return result;
 }
-test('device and history grids size against their content area instead of viewport column jumps', () => {
+test('device and history grids retain the original desktop column counts without sacrificing shrinking boundaries', () => {
   const app = read('src/App.jsx');
   assert.match(app, /import '\.\/styles\/workbenchLayout\.css'/);
   assert.match(app, /className="workbench-device-list"/);
   assert.match(app, /className="workbench-history-grid"/);
-  assert.equal(declaration('.workbench-device-list', 'grid-template-columns'), 'repeat(auto-fit, minmax(min(100%, 35rem), 1fr))');
-  assert.equal(declaration('.workbench-device-list', 'align-items'), 'start');
-  assert.equal(declaration('.workbench-history-grid', 'grid-template-columns'), 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))');
+  for (const selector of ['.workbench-device-list', '.workbench-history-grid']) {
+    assert.equal(declaration(selector, 'grid-template-columns'), 'minmax(0, 1fr)');
+  }
+  assert.equal(declaration('.workbench-device-list', 'grid-template-columns', '(min-width: 1280px)'), 'repeat(2, minmax(0, 1fr))');
+  assert.equal(declaration('.workbench-history-grid', 'grid-template-columns', '(min-width: 640px)'), 'repeat(2, minmax(0, 1fr))');
+  assert.equal(declaration('.workbench-history-grid', 'grid-template-columns', '(min-width: 1024px)'), 'repeat(3, minmax(0, 1fr))');
+  assert.equal(declaration('.workbench-device-list', 'gap'), '1.5rem');
+  assert.equal(declaration('.workbench-history-grid', 'gap'), '1rem');
+  assert.equal(declaration('.workbench-device-list > *', 'min-width'), '0');
+  assert.equal(declaration('.workbench-history-card', 'min-width'), '0');
 });
-test('sidebar translations wrap normally with fixed icons rather than a Japanese-only width exception', () => {
+test('sidebar retains original widths and centered icons while all translations may wrap', () => {
   const app = read('src/App.jsx');
-  assert.doesNotMatch(app, /locale === 'ja-JP' \? 'w-72'/);
+  assert.match(app, /className="workbench-sidebar[^"]*" data-locale=\{locale\}/);
+  assert.equal(declaration('.workbench-sidebar', 'width'), '14rem');
+  assert.equal(declaration('.workbench-sidebar', 'width', '(min-width: 1024px)'), '15rem');
+  assert.equal(declaration('.workbench-sidebar[data-locale="ja-JP"]', 'width'), '18rem');
+  assert.equal(declaration('.workbench-sidebar-nav > button', 'align-items'), 'center');
   assert.equal(declaration('.workbench-sidebar-nav > button > span', 'white-space'), 'normal');
   assert.equal(declaration('.workbench-sidebar-nav > button > span', 'min-width'), '0');
   assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'flex-shrink'), '0');
+  assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'margin-top'), undefined);
+});
+test('header selector and wireless fields keep original content proportions with safe localized wrapping', () => {
+  const app = read('src/App.jsx');
+  assert.doesNotMatch(app, /className="workbench-header-actions"/);
+  assert.equal(declaration('.workbench-header-title', 'flex'), '1');
+  assert.equal(declaration('.workbench-active-device', 'flex'), '1');
+  assert.equal(declaration('.workbench-active-device', 'min-width'), '0');
+  assert.equal(declaration('.workbench-wireless-form > input', 'flex'), '1');
+  assert.equal(declaration('.workbench-wireless-form', 'width', '(min-width: 1280px)'), 'auto');
+  assert.equal(declaration('.workbench-wireless-form', 'flex', '(min-width: 1280px)'), undefined);
+  assert.match(app, /className=\{`min-w-0 flex-1 xl:w-64 /);
+  assert.equal(declaration('.workbench-wireless-form', 'flex-wrap'), 'wrap');
 });
 test('long identifiers and translated toolbar content have shrink and wrapping boundaries', () => {
   assert.equal(declaration('.workbench-wrap-anywhere', 'overflow-wrap'), 'anywhere');
   assert.equal(declaration('.workbench-history-address code', 'overflow-wrap'), 'anywhere');
   assert.equal(declaration('.workbench-history-address code', 'user-select'), 'all');
-  assert.equal(declaration('.workbench-header-actions', 'flex-wrap'), 'wrap');
   assert.equal(declaration('.workbench-toolbar-actions', 'flex-wrap'), 'wrap');
   assert.match(read('src/App.jsx'), /navigator\.clipboard\.writeText\(item\.ip\)/);
 });

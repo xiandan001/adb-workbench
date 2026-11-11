@@ -201,7 +201,7 @@ test('all five locales keep navigation labels readable by wrapping while changel
     return value;
   };
   assert.match(app, /import '\.\/styles\/workbenchLayout\.css'/);
-  assert.doesNotMatch(app, /locale === 'ja-JP' \? 'w-72'/);
+  assert.match(app, /className="workbench-sidebar[^"]*" data-locale=\{locale\}/);
   const navigation = /<nav className="workbench-sidebar-nav[^]*?<\/nav>/.exec(app)?.[0];
   assert.ok(navigation);
   assert.doesNotMatch(navigation, /whitespace-nowrap|truncate|line-clamp/);

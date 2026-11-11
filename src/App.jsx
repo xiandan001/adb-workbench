@@ -1643,7 +1643,7 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className="workbench-sidebar shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]">
+      <div className="workbench-sidebar shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]" data-locale={locale}>
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <img src={brandIcon} width={32} height={32} alt="" aria-hidden="true" className="shrink-0" />
           <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">{tr('卓控台')}</h1>
@@ -1808,8 +1808,7 @@ function App() {
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>
 
-          <div className="workbench-header-actions">
-          <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
 
           {activeTab === 'devices' && (
             <div className="workbench-toolbar-actions">
@@ -1831,7 +1830,6 @@ function App() {
               </button>
             </div>
           )}
-          </div>
         </header>
 
         {/* Content Area */}

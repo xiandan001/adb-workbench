@@ -32,7 +32,7 @@ async function render(extra = {}) {
     theme, isOnline: true, isActive: true, isPinned: true, scrcpyLoading: false, isEditing: false, editName: '', ...callbacks, ...extra };
   return { tree: (await component())(props), props };
 }
-test('real header render separates identity, chips and actions while preserving complete long identifiers and aliases', async () => {
+test('compact original header keeps metadata within identity and preserves complete long identifiers and aliases', async () => {
   for (const length of [32, 64, 128]) {
     const id = 'hdc:' + 'f'.repeat(length), alias = 'Very long alias ' + 'Unbroken'.repeat(30);
     const { tree } = await render({ device: { id, status: 'device' }, deviceName: alias });
@@ -42,7 +42,9 @@ test('real header render separates identity, chips and actions while preserving 
     for (const name of ['device-card-identity', 'device-card-chips', 'device-card-header-actions']) assert.equal(walk(tree, node => cssClass(node, name)).length, 1);
     const actions = walk(tree, node => cssClass(node, 'device-card-header-actions'))[0];
     assert.equal(walk(actions, node => cssClass(node, 'device-card-id')).length, 0);
-    assert.equal(walk(tree, node => cssClass(node, 'device-card-chips'))[0].children.some(child => typeof child === 'object' && cssClass(child, 'device-card-id')), false);
+    const identity = walk(tree, node => cssClass(node, 'device-card-identity'))[0];
+    assert.equal(walk(identity, node => cssClass(node, 'device-card-chips')).length, 1);
+    assert.equal(walk(identity, node => cssClass(node, 'device-card-id')).length, 1);
   }
 });
 test('header keeps original action callbacks and only offline/loading disable the primary action', async () => {
@@ -81,16 +83,43 @@ test('card CSS bounds identifiers, preserves nonbreaking badges and offers visib
   for (const selector of ['device-card-identity', 'device-card-identity-content', 'device-card-name-row', 'device-card-id', 'device-card-header-actions']) assert.ok(css.includes('.' + selector));
   const rule = name => new RegExp('\\.' + name + '(?![\\w-])[^{}]*\\{([^}]+)\\}').exec(css)?.[1] || '';
   assert.match(rule('device-card-id'), /text-overflow:\s*ellipsis/); assert.match(rule('device-card-id'), /user-select:\s*text/);
-  assert.match(rule('device-card-name'), /-webkit-line-clamp:\s*2/);
+  assert.match(rule('device-card-name'), /text-overflow:\s*ellipsis/);
   assert.match(rule('device-card-state'), /white-space:\s*nowrap/);
-  assert.match(css, /@container\s*\(max-width:\s*480px\)[\s\S]*device-card-primary[^{]*\{[^}]*flex-basis:\s*100%/);
   assert.match(css, /repeat\(3,\s*minmax\(0,\s*1fr\)\)/); assert.match(css, /repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(rule('device-card-header-actions'), /flex-wrap:\s*wrap/);
-  assert.match(css, /@container\s*\(min-width:\s*720px\)[\s\S]*?\.device-card-header-actions\s*\{[^}]*flex-wrap:\s*nowrap/);
+  assert.doesNotMatch(css, /\.device-card-primary\s*\{[^}]*flex-basis:\s*100%/);
   assert.doesNotMatch(read('DeviceNavigationControls.jsx'), /className="block truncate"/);
   assert.match(read('ControlButton.jsx'), /device-control-label/);
   assert.match(rule('device-terminal-name'), /min-width:\s*0/);
   assert.match(rule('device-terminal-name'), /overflow-wrap:\s*anywhere/);
+});
+
+test('original visual tokens retain circle48, plain platform, adjacent icons and a compact content-sized primary', async () => {
+  const { tree } = await render({ deviceName: 'Clevertouch_Unify' });
+  const avatar = walk(tree, node => cssClass(node, 'device-card-avatar'))[0];
+  assert.match(avatar.props.className, /bg-emerald-100 text-emerald-600/);
+  const primary = walk(tree, node => cssClass(node, 'device-card-primary'))[0];
+  assert.match(primary.props.className, /px-5/);
+  const platform = walk(tree, node => cssClass(node, 'device-card-platform'))[0];
+  assert.doesNotMatch(platform.props.className, /border|rounded/);
+  const state = walk(tree, node => cssClass(node, 'device-card-state'))[0];
+  assert.match(state.props.className, /bg-slate-100 text-slate-600/);
+  const css = require('postcss').parse(read('DeviceCard.css'));
+  const property = (selector, name) => { let value; css.walkRules(selector, rule => {
+    if (rule.parent.type !== 'atrule') rule.walkDecls(name, declaration => { value = declaration.value; });
+  }); return value; };
+  assert.equal(property('.device-card-header', 'display'), 'flex');
+  assert.equal(property('.device-card-avatar', 'width'), '48px');
+  assert.equal(property('.device-card-avatar', 'height'), '48px');
+  assert.equal(property('.device-card-avatar', 'border-radius'), '50%');
+  assert.equal(property('.device-card-name', 'flex'), '0 1 auto');
+  assert.equal(property('.device-card-id', 'flex'), '0 1 auto');
+  assert.equal(property('.device-card-primary', 'flex'), '0 0 auto');
+  assert.equal(property('.device-card-primary', 'min-width'), '120px');
+  assert.equal(property('.device-tool-grid > button', 'min-height'), '40px');
+  assert.equal(property('.device-record-options-note', 'flex-basis'), undefined);
+  assert.equal(property('.device-navigation-grid', 'grid-template-columns'), 'repeat(4, minmax(0, 1fr))');
+  assert.equal(property('.device-tool-grid', 'grid-template-columns'), 'repeat(4, minmax(0, 1fr))');
 });
 test('fullscreen surface portals only the existing terminal element and keeps inline rendering untouched', () => {
   const source = read('DeviceCard.jsx'); let boundary;
