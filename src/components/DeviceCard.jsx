@@ -1,7 +1,9 @@
 import { tr, useLocale } from '../shared/i18n';
-import { useState, useEffect, useRef } from 'react';
-import { Smartphone, Unplug, Play, Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Pencil, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, Star } from 'lucide-react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
+import DeviceCardHeader from './DeviceCardHeader';
 import ControlButton from './ControlButton';
 import SelectMenu from './SelectMenu';
 import DeviceNavigationControls from './DeviceNavigationControls';
@@ -17,10 +19,15 @@ import PackageManagerPanel from './PackageManagerPanel';
 // 通用危险确认弹窗（用于 su 不支持等提醒）
 import DangerConfirmModal from './DangerConfirmModal';
 import { isDarkTheme } from '../shared/theme';
-import { deviceConnectionHint, deviceStatusLabel } from '../shared/deviceWorkflow';
+import { deviceConnectionHint } from '../shared/deviceWorkflow';
 import { recordingButtonState } from '../shared/recordingWorkspace';
-import { isHarmonyDevice, platformLabel, displayDeviceId } from '../shared/devicePlatform';
+import { isHarmonyDevice } from '../shared/devicePlatform';
 import { deviceTerminalCommands, deviceTerminalPresentation, createDeviceTerminalRequest } from '../shared/deviceTerminal';
+import { trapAppMessageFocus } from '../shared/appMessageDialog';
+
+function DeviceTerminalSurface({ fullscreen, children }) {
+  return fullscreen && typeof document !== 'undefined' ? createPortal(children, document.body) : children;
+}
 
 function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
   useLocale();
@@ -35,6 +42,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   // 终端字体大小（Ctrl+滚轮缩放，范围 10-28px）
   const [terminalFontSize, setTerminalFontSize] = useState(12);
   const terminalOutputRef = useRef(null);
+  const terminalScrollRestoreRef = useRef(null);
+  const terminalInputRef = useRef(null);
+  const terminalRootRef = useRef(null);
+  const terminalExpandRef = useRef(null);
+  const terminalPanelRef = useRef(null);
+  const terminalWasFullscreen = useRef(false);
   const [terminalCommand, setTerminalCommand] = useState('');
   const [terminalOutput, setTerminalOutput] = useState([]);
   const [panelOrder, setPanelOrder] = useState([]);
@@ -77,6 +90,24 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     const index = panelOrder.indexOf(panel);
     return index === -1 ? 20 : 10 + index;
   };
+
+  const changeTerminalFullscreen = value => {
+    const output = terminalOutputRef.current;
+    terminalScrollRestoreRef.current = output ? { top: output.scrollTop,
+      atBottom: output.scrollHeight - output.clientHeight - output.scrollTop <= 2 } : null;
+    setTerminalFullscreen(value);
+  };
+
+  useEffect(() => {
+    const wasFullscreen = terminalWasFullscreen.current;
+    terminalWasFullscreen.current = terminalFullscreen;
+    if (!showTerminal || (!terminalFullscreen && !wasFullscreen)) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const target = terminalFullscreen ? (terminalInputRef.current?.disabled ? terminalPanelRef.current : terminalInputRef.current) : terminalExpandRef.current;
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showTerminal, terminalFullscreen]);
 
   const handleNameSubmit = () => {
     onNameChange(device.id, editName.trim());
@@ -181,6 +212,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     }
   };
 
+  const closeSuWarning = () => {
+    setSuUnsupportedOpen(false);
+    requestAnimationFrame(() => {
+      const trigger = terminalRootRef.current;
+      if (trigger?.isConnected && !trigger.disabled) trigger.focus({ preventScroll: true });
+    });
+  };
+
   // 中断当前正在执行的命令（如 su 等交互式命令挂起时可手动停止）
   const handleCancelExecute = async () => {
     try {
@@ -196,7 +235,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     // 放大模式下按 Esc 退出
     if (e.key === 'Escape' && terminalFullscreen) {
       e.preventDefault();
-      setTerminalFullscreen(false);
+      changeTerminalFullscreen(false);
       return;
     }
     // Ctrl+= / Ctrl+- 调整字号
@@ -254,10 +293,16 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   }, [terminalFullscreen]);
 
   // 终端有新输出时自动滚动到底部
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = terminalOutputRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [terminalOutput, isExecuting]);
+    const restore = terminalScrollRestoreRef.current;
+    terminalScrollRestoreRef.current = null;
+    if (!el) return;
+    if (restore) {
+      const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTop = restore.atBottom ? maximum : Math.min(Math.max(0, restore.top), maximum);
+    } else el.scrollTop = el.scrollHeight;
+  }, [terminalOutput, isExecuting, terminalFullscreen]);
 
   const clearTerminal = () => {
     setTerminalOutput([]);
@@ -282,85 +327,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     <div data-accent={t.primary} data-dark={isDarkTheme(t)} onClickCapture={event => {
       if (!event.target.closest('[data-device-pin]')) onSelectDevice?.();
     }} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
-      <div className={`device-card-header p-5 border-b flex justify-between items-start ${t.header.replace('border-b', 'border-b')}`}>
-        <div className="flex items-center space-x-4">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isOnline ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}` : 'bg-slate-100 text-slate-400'}`}>
-            <Smartphone size={24} />
-          </div>
-          <div>
-            {isEditing ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={handleNameKeyDown}
-                  onBlur={handleNameSubmit}
-                  autoFocus
-                  className="px-2 py-1 text-sm border border-emerald-400 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32"
-                  placeholder={tr("输入设备名称")}
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h3 className={`text-lg font-bold ${t.text.replace('text-slate-700', 'text-slate-800').replace('text-pink-700', 'text-pink-800').replace('text-[#E8EAED]', 'text-[#E8EAED]')}`}>
-                  {deviceName || device.model || tr("未知设备")}
-                </h3>
-                <button
-                  onClick={() => {
-                    setEditName(deviceName || '');
-                    setIsEditing(true);
-                  }}
-                  className="p-1 text-slate-400 hover:text-emerald-500 transition-colors"
-                  title={tr("编辑名称")}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  data-device-pin
-                  aria-label={isPinned ? tr("取消置顶") : tr("设为常用")}
-                  aria-pressed={Boolean(isPinned)}
-                  title={isPinned ? tr("取消置顶") : tr("设为常用，优先显示")}
-                  onClick={onTogglePin}
-                  className={`rounded p-1 transition-colors ${isPinned ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
-                >
-                  <Star size={15} fill={isPinned ? 'currentColor' : 'none'} />
-                </button>
-              </div>
-            )}
-            <div className="flex items-center space-x-2 mt-1">
-              <span className={`w-2 h-2 rounded-full ${isOnline ? (t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-500' : t.primary === 'pink' ? 'bg-pink-500' : t.primary === 'green' ? 'bg-green-500' : t.primary === 'orange' ? 'bg-orange-500' : 'bg-emerald-500') : 'bg-slate-300'}`}></span>
-              <span className={`text-sm font-mono ${t.textMuted}`}>{displayDeviceId(device)}</span>
-              <span className={`text-xs ${t.textMuted}`}>{platformLabel(device)}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-blue-100 text-blue-600' : t.primary === 'pink' ? 'bg-pink-100 text-pink-600' : t.primary === 'green' ? 'bg-green-100 text-green-600' : t.primary === 'orange' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-600'} capitalize`}>
-                {deviceStatusLabel(device.status)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={onSelectDevice} aria-pressed={isActive} className={`px-2 py-1 text-xs rounded border ${isActive ? 'text-emerald-500 border-emerald-500/40' : t.button.secondary}`}>
-            {isActive ? tr("当前设备") : tr("选用")}
-          </button>
-          <button
-            onClick={onDisconnect}
-            title={tr("断开设备")}
-            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-          >
-            <Unplug size={20} />
-          </button>
-          <button
-            onClick={onStart}
-            disabled={!isOnline || scrcpyLoading}
-            className={`${t.button.primary} disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] px-5 py-2.5 rounded-lg font-medium flex items-center justify-center space-x-2 transition-colors`}
-          >
-            {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-            <span>{scrcpyLoading ? tr("启动中...") : tr("开始投屏")}</span>
-          </button>
-        </div>
-      </div>
+      <DeviceCardHeader device={device} deviceName={deviceName} theme={t} isOnline={isOnline}
+        isActive={isActive} isPinned={isPinned} scrcpyLoading={scrcpyLoading}
+        isEditing={isEditing} editName={editName} onEditNameChange={setEditName}
+        onEditNameKeyDown={handleNameKeyDown} onNameSubmit={handleNameSubmit}
+        onBeginRename={() => { setEditName(deviceName || ''); setIsEditing(true); }}
+        onSelectDevice={onSelectDevice} onTogglePin={onTogglePin} onDisconnect={onDisconnect} onStart={onStart} />
 
       <div className={`device-card-actions ${t.text}`}>
         {operationError && (
@@ -444,8 +416,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               isOnline={isOnline}
             />
           </div>
-          <label className={`mt-2 inline-flex items-center gap-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
-            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" />{tr("录屏同时抓取日志")}<span className="text-[11px] opacity-75">{tr("不调用 AI · 上限 100 MB")}</span>
+          <label className={`device-record-options mt-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
+            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" /><span className="device-record-options-label">{tr("录屏同时抓取日志")}</span><span className="device-record-options-note text-[11px] opacity-75">{tr("不调用 AI · 上限 100 MB")}</span>
           </label>
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
@@ -758,16 +730,25 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       {/* Terminal Section */}
       {showTerminal && (
         // 放大模式：fixed 全屏覆盖；普通模式：原位置 border-t
-        <div style={{ order: getPanelOrder('terminal') }} className={`${terminalFullscreen ? 'fixed inset-0 z-50 p-6 flex flex-col' : `border-t p-4`} ${t.terminal.bg}`}>
-          <div className={`flex items-center justify-between mb-3 ${t.terminal.accent} ${terminalFullscreen ? 'pb-3 border-b border-[#3E4145]' : ''}`}>
-            <div className="flex items-center gap-2">
+        <DeviceTerminalSurface fullscreen={terminalFullscreen}>
+        <div ref={terminalPanelRef} style={{ order: getPanelOrder('terminal') }}
+          role={terminalFullscreen ? 'dialog' : undefined} aria-modal={terminalFullscreen || undefined} aria-label={terminalFullscreen ? terminal.title : undefined}
+          tabIndex={terminalFullscreen ? -1 : undefined}
+          onKeyDown={event => {
+            if (!terminalFullscreen || event.defaultPrevented) return;
+            if (event.key === 'Escape') { event.preventDefault(); changeTerminalFullscreen(false); }
+            else trapAppMessageFocus(event);
+          }}
+          className={`device-terminal-panel ${terminalFullscreen ? 'device-terminal-fullscreen' : 'border-t p-4'} ${t.terminal.bg}`}>
+          <div className={`device-terminal-header mb-3 ${t.terminal.accent} ${terminalFullscreen ? 'pb-3 border-b border-[#3E4145]' : ''}`}>
+            <div className="device-terminal-title">
               <Terminal size={16} />
-              <span className="text-sm font-medium">{terminal.title}</span>
+              <span className="device-terminal-name text-sm font-medium" title={terminal.title}>{terminal.title}</span>
               {terminalFullscreen && (
                 <span className="text-xs text-slate-500 ml-2">{tr("（放大模式 · 按 Esc 或点击还原返回 · Ctrl+滚轮缩放）")}</span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="device-terminal-actions">
               {/* 放大模式下显示字号控制 */}
               {terminalFullscreen && (
                 <div className="flex items-center gap-1 px-2 py-1 text-xs bg-[#3E4145] rounded">
@@ -814,13 +795,16 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               )}
               {/* 放大 / 还原按钮 */}
               <button
-                onClick={() => setTerminalFullscreen((v) => !v)}
+                ref={terminalExpandRef}
+                onClick={() => changeTerminalFullscreen(!terminalFullscreen)}
                 className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-[#3E4145] rounded transition-colors"
                 title={terminalFullscreen ? tr("还原") : tr("放大")}
+                aria-label={terminalFullscreen ? tr("还原") : tr("放大")}
               >
                 {terminalFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
               <button
+                aria-label={tr("关闭")}
                 onClick={() => {
                   setShowTerminal(false);
                   setTerminalFullscreen(false);
@@ -840,7 +824,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           <div
             ref={terminalOutputRef}
             style={{ fontSize: `${terminalFontSize}px` }}
-            className={`${t.terminal.output} rounded-lg p-3 mb-3 overflow-y-auto font-mono select-text border border-[#3E4145] ${terminalFullscreen ? 'flex-1' : 'h-56'}`}
+            className={`device-terminal-output ${t.terminal.output} rounded-lg p-3 mb-3 overflow-y-auto font-mono select-text border border-[#3E4145] ${terminalFullscreen ? 'flex-1' : 'h-56'}`}
           >
             {terminalOutput.length === 0 ? (
               <div className="flex items-center gap-2 text-slate-500 select-text py-2">
@@ -889,10 +873,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           </div>
 
           {/* Terminal Input */}
-          <form onSubmit={handleTerminalSubmit} className="flex items-center gap-2">
+          <form onSubmit={handleTerminalSubmit} className="device-terminal-input">
             <span className={`font-mono text-sm transition-colors ${suMode ? 'text-red-400' : 'text-emerald-400'}`} title={suMode ? tr("ROOT 模式") : tr("普通模式")}>{suMode ? '#' : '$'}</span>
-            <div className="flex-1 relative">
+            <div className="device-terminal-input-field relative">
               <input
+                ref={terminalInputRef}
                 type="text"
                 value={terminalCommand}
                 onChange={(e) => setTerminalCommand(e.target.value)}
@@ -906,6 +891,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               {/* SU 模式开关：紧凑胶囊，内嵌输入框右侧，不额外占行 */}
               <button
                 type="button"
+                ref={terminalRootRef}
                 onClick={toggleSuMode}
                 disabled={!isOnline || isExecuting || suChecking}
                 title={terminal.rootTitle}
@@ -959,7 +945,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           </form>
 
           {/* Quick Commands */}
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="device-terminal-quick-commands mt-3 flex flex-wrap gap-2">
             <span className="text-xs text-slate-500">{tr("快捷命令:")}</span>
             {terminalCommands.map((cmd) => (
               <button
@@ -976,6 +962,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             ))}
           </div>
         </div>
+        </DeviceTerminalSurface>
       )}
       {/* 设备巡检报告与证据包导出面板 */}
       <InspectionPanel
@@ -1000,8 +987,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
         confirmLabel={tr("知道了")}
         cancelLabel={tr("关闭")}
         tone="warning"
-        onCancel={() => setSuUnsupportedOpen(false)}
-        onConfirm={() => setSuUnsupportedOpen(false)}
+        onCancel={closeSuWarning}
+        onConfirm={closeSuWarning}
       />
     </div>
   );

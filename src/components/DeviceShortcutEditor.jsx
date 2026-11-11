@@ -90,18 +90,18 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
   return <dialog ref={dialogRef} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!pending) onClose(); }}
     className={`m-auto w-[min(700px,calc(100vw-32px))] max-h-[85vh] overflow-y-auto rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${isDark ? 'bg-[#2D2F33] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800'}`}>
     <div className="flex items-start justify-between gap-4 border-b border-slate-400/20 px-5 py-4">
-      <div><h2 id={titleId} className="font-semibold">{tr("编辑快捷操作")}</h2><p className={`mt-1 text-xs ${muted}`}>{tr("四个按钮由所有设备共用；保存不会执行操作。")}</p></div>
-      <button type="button" onClick={onClose} disabled={Boolean(pending)} aria-label={tr("关闭快捷操作编辑")} className="rounded p-1 disabled:opacity-40"><X size={18} /></button>
+      <div className="workbench-dialog-heading"><h2 id={titleId} className="font-semibold">{tr("编辑快捷操作")}</h2><p className={`mt-1 text-xs ${muted}`}>{tr("四个按钮由所有设备共用；保存不会执行操作。")}</p></div>
+      <button type="button" onClick={onClose} disabled={Boolean(pending)} aria-label={tr("关闭快捷操作编辑")} className="workbench-dialog-close rounded p-1 disabled:opacity-40"><X size={18} /></button>
     </div>
     <div className="space-y-4 p-5">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label={tr("选择要编辑的按钮")}>
         {draft.slots.map((item, index) => <button type="button" key={item.id} onClick={() => { setSelected(index); setQuery(''); setError(''); }} disabled={Boolean(pending)}
           aria-pressed={selected === index} className={`min-w-0 rounded-lg border p-2 text-left text-sm disabled:opacity-40 ${selected === index ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-400/25'}`}>
-          <span className={`block text-xs ${muted}`}>{tr("位置 {0}", { 0: index + 1 })}</span><span className="block truncate" title={deviceShortcutDisplayLabel(item)}>{deviceShortcutDisplayLabel(item) || tr("未命名")}</span>
+          <span className={`block text-xs ${muted}`}>{tr("位置 {0}", { 0: index + 1 })}</span><span className="workbench-shortcut-label block" title={deviceShortcutDisplayLabel(item)}>{deviceShortcutDisplayLabel(item) || tr("未命名")}</span>
         </button>)}
       </div>
       <fieldset disabled={Boolean(pending)} className="space-y-4 disabled:opacity-60">
-        <div className="flex items-center justify-between gap-2"><p className={`text-xs ${muted}`}>{tr("编辑位置 {0}", { 0: selected + 1 })}</p><div className="flex gap-2">
+        <div className="workbench-shortcut-toolbar"><p className={`text-xs ${muted}`}>{tr("编辑位置 {0}", { 0: selected + 1 })}</p><div className="workbench-dialog-actions">
           <button type="button" onClick={() => move(-1)} disabled={selected === 0 || Boolean(pending)} className={`${button} flex items-center gap-1`} aria-label={tr("按钮前移")}><ArrowUp size={13} />{tr("前移")}</button>
           <button type="button" onClick={() => move(1)} disabled={selected === 3 || Boolean(pending)} className={`${button} flex items-center gap-1`} aria-label={tr("按钮后移")}><ArrowDown size={13} />{tr("后移")}</button>
         </div></div>
@@ -126,7 +126,7 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
         {!advanced && <button type="button" onClick={() => setAdvanced(true)} className={`text-xs underline underline-offset-4 ${muted}`}>{harmony ? tr('显示高级 HDC 命令') : tr("显示高级 ADB 命令")}</button>}
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-400/10 p-3">
-        <p className={`min-w-0 break-all text-xs ${muted}`}>{tr("测试目标：")}{deviceId}{!isOnline ? tr("（离线）") : ''}</p>
+        <p className={`min-w-0 break-all select-text text-xs ${muted}`}>{tr("测试目标：")}{deviceId}{!isOnline ? tr("（离线）") : ''}</p>
         <button type="button" disabled={!isOnline || Boolean(pending) || !validDraft || selectedCheck?.status === 'unsupported'} onClick={test} className={`${button} flex items-center gap-1.5`}>{pending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}{tr("测试此按钮")}</button>
         {selectedCheck && <p className={`w-full break-words text-xs ${selectedCheck.status === 'supported' ? muted : 'text-amber-600'}`}>{tr(selectedCheck.reason)}</p>}
       </div>
@@ -134,7 +134,7 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-400/20 px-5 py-4">
       <button type="button" disabled={Boolean(pending)} onClick={() => { setDraft(defaultDeviceShortcuts(deviceId)); setSelected(0); setError(''); }} className={`${button} flex items-center gap-1.5`}><RotateCcw size={14} />{tr("恢复默认")}</button>
-      <div className="flex gap-2"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={submit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{harmony ? tr('保存到鸿蒙设备') : tr("保存到所有设备")}</button></div>
+      <div className="workbench-dialog-actions"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={submit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{harmony ? tr('保存到鸿蒙设备') : tr("保存到所有设备")}</button></div>
     </div>
   </dialog>;
 }

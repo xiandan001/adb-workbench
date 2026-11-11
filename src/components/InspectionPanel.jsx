@@ -3,6 +3,7 @@ import { isDarkTheme } from '../shared/theme';
 // 设备巡检报告与证据包导出 UI：只负责交互和进度展示，采集逻辑在 main 进程
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, Archive, CheckCircle2, ClipboardCheck, FolderOpen, Loader2, Lock, X } from 'lucide-react';
 
 export default function InspectionPanel({ open, device, theme, vipStatus, inspectionPath, onInspectionPathChange, onClose, onOpenMemberCenter, showToast }) {
@@ -134,22 +135,22 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
   const progressPercent = progress?.total ? Math.round((progress.index / progress.total) * 100) : 0;
   const defaultInspectionPath = tr("默认: %APPDATA%/adb-workbench/inspection/");
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4" onClick={closePanel}>
       <div className={`w-full max-w-2xl max-h-[86vh] rounded-xl border shadow-2xl overflow-hidden flex flex-col ${panelClass}`} onClick={(e) => e.stopPropagation()}>
-        <div className={`shrink-0 px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-          <div className="flex items-center gap-3">
+        <div className={`workbench-inspection-header shrink-0 px-5 py-4 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
+          <div className="workbench-inspection-identity flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-emerald-500/15 flex items-center justify-center">
               <ClipboardCheck size={22} className="text-emerald-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-lg font-semibold">{tr("设备巡检")}</h3>
-              <p className={`text-xs mt-0.5 ${muted}`}>{device?.model || device?.id} · {device?.id}</p>
+              <p className={`workbench-wrap-anywhere select-text text-xs mt-0.5 ${muted}`}>{[device?.model, device?.id].filter(Boolean).join(' · ')}</p>
             </div>
           </div>
           <button
             onClick={closePanel}
-            className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-400 hover:bg-slate-100'}`}
+            className={`workbench-dialog-close p-1.5 rounded-lg transition-colors ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-400 hover:bg-slate-100'}`}
             title={tr("关闭")}
           >
             <X size={20} />
@@ -174,10 +175,10 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
               <div className="w-11 h-11 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
                 <Lock size={22} className="text-amber-400" />
               </div>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <h4 className="font-semibold">{tr("会员专属功能")}</h4>
                 <p className={`text-sm mt-1 ${muted}`}>{tr("设备巡检会自动采集系统信息、日志、截图并导出证据包，当前基础版暂不可使用。")}</p>
-                <div className="flex justify-end gap-2 mt-5">
+                <div className="workbench-dialog-actions mt-5">
                   <button onClick={closePanel} className={`px-4 py-2 text-sm rounded-lg border ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>{tr("知道了")}</button>
                   <button
                     onClick={() => {
@@ -193,12 +194,12 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto p-5 space-y-5">
             <div className={`p-4 rounded-xl border ${soft}`}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="min-w-0 flex-1">
                   <div className="font-medium">{tr("标准证据")}</div>
                   <p className={`text-xs mt-1 ${muted}`}>{tr("采集系统属性、运行状态、日志、截图和关键 dumpsys 输出。")}</p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">{tr("默认开启")}</span>
+                <span className="shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">{tr("默认开启")}</span>
               </div>
               <div className="mt-4">
                 <div className="font-medium mb-2">{tr("保存路径")}</div>
@@ -230,7 +231,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
                   checked={includeBugreport}
                   onChange={(e) => setIncludeBugreport(e.target.checked)}
                   disabled={running}
-                  className="w-5 h-5 accent-emerald-500"
+                  className="w-5 h-5 shrink-0 accent-emerald-500"
                 />
               </label>
               <label className="mt-4 flex items-center justify-between gap-4 cursor-pointer">
@@ -243,7 +244,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
                   checked={includeAiSummary}
                   onChange={(e) => setIncludeAiSummary(e.target.checked)}
                   disabled={running}
-                  className="w-5 h-5 accent-emerald-500"
+                  className="w-5 h-5 shrink-0 accent-emerald-500"
                 />
               </label>
             </div>
@@ -266,7 +267,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
             {error && (
               <div className="p-3 rounded-lg border border-red-500/20 bg-red-500/10 text-sm text-red-400 flex items-start gap-2">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{tr(error)}</span>
+                <span className="workbench-wrap-anywhere">{tr(error)}</span>
               </div>
             )}
 
@@ -285,7 +286,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
                     ))}
                   </div>
                 )}
-                <div className={`text-xs space-y-1 ${muted}`}>
+                <div className={`workbench-wrap-anywhere text-xs space-y-1 ${muted}`}>
                   <div>{tr("报告：")}<span className="font-mono select-all">{result.reportPath}</span></div>
                   {result.aiSummary && !result.aiSummary.skipped && (
                     <div>{tr("AI 分析：")}<span>
@@ -299,7 +300,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
               </div>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="workbench-dialog-actions">
               {result?.outputDir && (
                 <button onClick={openFolder} className={`px-4 py-2 text-sm rounded-lg border flex items-center gap-2 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>
                   <FolderOpen size={15} />{tr("打开目录")}</button>
@@ -314,6 +315,6 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
           </div>
         )}
       </div>
-    </div>
+    </div>, document.body
   );
 }

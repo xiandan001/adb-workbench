@@ -1,4 +1,7 @@
 import { tr, useLocale } from '../shared/i18n';
+import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { trapAppMessageFocus } from '../shared/appMessageDialog';
 import { isDarkTheme } from '../shared/theme';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 
@@ -20,6 +23,26 @@ function DangerConfirmModal({
   onConfirm
 }) {
   useLocale();
+  const dialogRef = useRef(null);
+  const cancelRef = useRef(null);
+  const titleId = useId();
+  useEffect(() => {
+    if (!open) return undefined;
+    const previous = document.activeElement;
+    const frame = requestAnimationFrame(() => {
+      const target = cancelRef.current?.disabled ? dialogRef.current : cancelRef.current;
+      target?.focus({ preventScroll: true });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    if (loading) dialogRef.current?.focus({ preventScroll: true });
+    else if (document.activeElement === dialogRef.current) cancelRef.current?.focus({ preventScroll: true });
+  }, [open, loading]);
   if (!open) return null;
   const isDark = isDarkTheme(theme);
   const panel = isDark ? 'bg-[#202124] border-[#3E4145] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800';
@@ -28,22 +51,27 @@ function DangerConfirmModal({
   const iconTone = tone === 'warning' ? 'text-amber-400 bg-amber-500/10' : 'text-red-400 bg-red-500/10';
   const confirmTone = tone === 'warning' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-red-500 hover:bg-red-600';
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={loading ? undefined : onCancel}>
-      <div className={`w-full max-w-md rounded-xl border shadow-2xl ${panel}`} onClick={(event) => event.stopPropagation()}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!loading) onCancel(); }
+          else trapAppMessageFocus(event);
+        }}
+        className={`workbench-device-dialog w-full max-w-md rounded-xl border shadow-2xl ${panel}`} onClick={(event) => event.stopPropagation()}>
         <div className={`flex items-start gap-3 border-b px-5 py-4 ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
           <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${iconTone}`}>
             <AlertTriangle size={20} />
           </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-base font-semibold">{title}</h3>
-            {message && <p className={`mt-1 text-sm leading-relaxed ${muted}`}>{message}</p>}
+          <div className="workbench-dialog-heading">
+            <h3 id={titleId} className="workbench-wrap-anywhere text-base font-semibold">{title}</h3>
+            {message && <p className={`workbench-wrap-anywhere select-text mt-1 text-sm leading-relaxed ${muted}`}>{message}</p>}
           </div>
           <button
             type="button"
             onClick={onCancel}
             disabled={loading}
-            className={`rounded-lg p-2 transition-colors disabled:opacity-50 ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
+            className={`workbench-dialog-close rounded-lg p-2 transition-colors disabled:opacity-50 ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145]' : 'text-slate-500 hover:bg-slate-100'}`}
             title={tr("关闭")}
           >
             <X size={18} />
@@ -53,13 +81,13 @@ function DangerConfirmModal({
         {(detail || bullets.length > 0) && (
           <div className="px-5 py-4">
             <div className={`rounded-lg border px-3 py-3 text-sm leading-relaxed ${soft}`}>
-              {detail && <p className={muted}>{detail}</p>}
+              {detail && <p className={`workbench-wrap-anywhere select-text ${muted}`}>{detail}</p>}
               {bullets.length > 0 && (
                 <ul className={`space-y-1 ${detail ? 'mt-2' : ''} ${muted}`}>
                   {bullets.map((item, index) => (
                     <li key={`${item}-${index}`} className="flex gap-2">
                       <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-current" />
-                      <span>{item}</span>
+                      <span className="workbench-wrap-anywhere">{item}</span>
                     </li>
                   ))}
                 </ul>
@@ -81,8 +109,9 @@ function DangerConfirmModal({
               <span>{rememberLabel}</span>
             </label>
           ) : <span />}
-          <div className="flex items-center justify-end gap-2">
+          <div className="workbench-dialog-actions">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
             disabled={loading}
@@ -102,7 +131,7 @@ function DangerConfirmModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>, document.body
   );
 }
 

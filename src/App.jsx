@@ -1,6 +1,7 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
 import './index.css';
+import './styles/workbenchLayout.css';
 import brandIcon from '../assets/brand/icon-128.png';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -1455,7 +1456,7 @@ function App() {
   }, [activeTab, settingsSections]);
 
   return (
-    <div className={`flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`workbench-shell flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
       <AiOutboundPreviewHost isDark={isDark} />
       {reproductionTarget && <ReproductionDialog key={`${reproductionTarget.deviceId}:${reproductionTarget.sessionId || ''}`} theme={t} devices={devices}
@@ -1642,14 +1643,14 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className={`${locale === 'ja-JP' ? 'w-72' : 'w-56 lg:w-60'} shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]`}>
+      <div className="workbench-sidebar shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]">
         <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
           <img src={brandIcon} width={32} height={32} alt="" aria-hidden="true" className="shrink-0" />
           <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">{tr('卓控台')}</h1>
           <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button]:py-2.5 [&>button>span]:whitespace-nowrap [&>button>svg]:shrink-0">
+        <nav className="workbench-sidebar-nav flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button]:py-2.5">
           <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">{tr("设备与诊断")}</div>
           <button
             onClick={() => setActiveTab('devices')}
@@ -1793,10 +1794,10 @@ function App() {
       </div>
 
       {/* Main Content */}
-      <div className="min-w-0 flex-1 flex flex-col pt-5 h-screen overflow-hidden">
+      <div className="workbench-main flex-1 flex flex-col pt-5 h-screen overflow-hidden">
         {/* Header */}
         <header className={`px-4 lg:px-6 xl:px-8 pb-3 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${isDark ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-          <div className="min-w-0 flex-1">
+          <div className="workbench-header-title">
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
@@ -1807,10 +1808,11 @@ function App() {
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>
 
+          <div className="workbench-header-actions">
           <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
 
           {activeTab === 'devices' && (
-            <div className="flex items-center gap-2">
+            <div className="workbench-toolbar-actions">
               <button
                 type="button"
                 onClick={() => setEnvironmentCheckModalOpen(true)}
@@ -1829,6 +1831,7 @@ function App() {
               </button>
             </div>
           )}
+          </div>
         </header>
 
         {/* Content Area */}
@@ -1843,19 +1846,19 @@ function App() {
                 isDark={isDark}
                 placeholder={tr("尚未发现设备")}
                 emptyText={tr("尚未发现设备")}
-                className="min-w-0 max-w-full flex-1"
+                className="workbench-active-device"
                 options={[
                   ...(!activeDevice ? [{ value: '', label: tr("尚未发现设备") }] : []),
                   ...devices.map(device => ({
                     value: device.id,
-                    label: `${deviceNames[device.id] || device.model || displayDeviceId(device)} · ${displayDeviceId(device)} · ${platformLabel(device)} · ${deviceStatusLabel(device.status)}`
+                    label: [deviceNames[device.id] || device.model, displayDeviceId(device), platformLabel(device), deviceStatusLabel(device.status)].filter(Boolean).join(' · ')
                   }))
                 ]}
               />
               {activeDevice && activeDevice.status !== 'device' && (
                 <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
                   <AlertCircle size={14} />
-                  <span className="flex-1">{tr("当前设备")}{deviceStatusLabel(activeDevice.status)}{tr("，正在等待可用的在线设备；发现后会自动选用并刷新。")}{deviceConnectionHint(activeDevice.status)}</span>
+                  <span className="workbench-wrap-anywhere flex-1">{tr("当前设备")}{deviceStatusLabel(activeDevice.status)}{tr("，正在等待可用的在线设备；发现后会自动选用并刷新。")}{deviceConnectionHint(activeDevice.status)}</span>
                   <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">{tr("环境自检")}</button>
                 </div>
               )}
@@ -1879,7 +1882,7 @@ function App() {
                     </h3>
                     {!showConnectionForm && <span className={`text-xs ${t.textMuted}`}>{devices.filter(device => device.status === 'device').length}{tr(" 台在线")}</span>}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="workbench-toolbar-actions">
                     <button
                       type="button"
                       onClick={() => setActiveTab('history')}
@@ -1902,8 +1905,8 @@ function App() {
                   </div>
                 </div>
                 {showConnectionForm && <div id="wireless-connection-form" className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center">
-                <p className={`flex-1 text-xs leading-relaxed ${t.textMuted}`}>{hasOnlineDevice ? tr("通过 Wi-Fi 连接另一台设备。") : tr("USB：连接设备并开启 USB 调试；Wi-Fi：输入设备的 IP 地址和端口。")}<span className="block">{tr("地址示例：192.168.1.100:5555")}</span></p>
-                <form onSubmit={handleWifiConnect} className="flex w-full xl:w-auto gap-2">
+                <p className={`min-w-0 flex-1 text-xs leading-relaxed ${t.textMuted}`}>{hasOnlineDevice ? tr("通过 Wi-Fi 连接另一台设备。") : tr("USB：连接设备并开启 USB 调试；Wi-Fi：输入设备的 IP 地址和端口。")}<span className="block">{tr("地址示例：192.168.1.100:5555")}</span></p>
+                <form onSubmit={handleWifiConnect} className="workbench-wireless-form">
                   <input
                     type="text"
                     value={wifiIp}
@@ -1939,7 +1942,7 @@ function App() {
                 </div>
                 <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />{tr("常用设备优先 · ")}{visibleDevices.length} / {eligibleDevices.length}{tr(" 台")}</span>
               </div>}
-              <div className="grid gap-6 grid-cols-1 xl:grid-cols-2">
+              <div className="workbench-device-list">
                 {devices.length === 0 && !loading && !error ? (
                   <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
                     <Smartphone size={48} className={`mb-4 opacity-50 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
@@ -2146,7 +2149,7 @@ function App() {
                     <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-slate-600' : 'text-[#9AA0A6]'}`}>{tr("通过 Wi-Fi 连接设备后会显示在这里")}</p>
                   </div>
                 ) : (
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="workbench-history-grid">
                     {(() => {
                       const FREE_HISTORY_LIMIT = 5;
                       const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
@@ -2160,25 +2163,25 @@ function App() {
                             return (
                       <div
                         key={item.id}
-                        className={`p-4 rounded-xl border transition-all hover:shadow-md group ${isDarkTheme(t) ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
+                        className={`workbench-history-card p-4 rounded-xl border transition-all hover:shadow-md group ${isDarkTheme(t) ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDarkTheme(t) ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${isDarkTheme(t) ? 'bg-slate-600' : 'bg-slate-200'}`}>
                                 {item.type === 'wifi' ? (
                                   <Wifi size={16} className="text-emerald-500" />
                                 ) : (
                                   <Smartphone size={16} className="text-slate-500" />
                                 )}
                               </div>
-                              <span className={`font-semibold truncate ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                              <span title={item.deviceName} className={`workbench-history-name font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                                 {item.deviceName}
                               </span>
-                              <span className={`text-xs ${t.textMuted}`}>{platformLabel(item.deviceId)}</span>
+                              <span className={`workbench-history-platform text-xs ${t.textMuted}`}>{platformLabel(item.deviceId)}</span>
                             </div>
                             {item.ip && (
-                              <div className="flex items-center gap-2 mb-2">
+                              <div className="workbench-history-address flex items-center gap-2 mb-2">
                                 <code className={`text-sm px-2 py-1 rounded ${isDarkTheme(t) ? 'bg-slate-600 text-[#E8EAED]' : 'bg-slate-200 text-slate-600'}`}>{item.ip}</code>
                                 <button
                                   onClick={() => {

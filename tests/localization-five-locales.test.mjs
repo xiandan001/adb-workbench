@@ -192,10 +192,29 @@ test('current and historical release notes, including an already-open version di
   } finally { await setLanguage(previous); }
 });
 
-test('long localized navigation and changelog controls keep readable single-line labels', () => {
+test('all five locales keep navigation labels readable by wrapping while changelog controls stay single-line', () => {
   const app = source('src/App.jsx');
-  assert.match(app, /locale === 'ja-JP' \? 'w-72' : 'w-56 lg:w-60'/);
-  assert.ok(app.includes('[&>button>span]:whitespace-nowrap'));
+  const css = require('postcss').parse(source('src/styles/workbenchLayout.css'));
+  const declaration = (selector, property) => {
+    let value;
+    css.walkRules(selector, rule => rule.walkDecls(property, node => { value = node.value; }));
+    return value;
+  };
+  assert.match(app, /import '\.\/styles\/workbenchLayout\.css'/);
+  assert.doesNotMatch(app, /locale === 'ja-JP' \? 'w-72'/);
+  const navigation = /<nav className="workbench-sidebar-nav[^]*?<\/nav>/.exec(app)?.[0];
+  assert.ok(navigation);
+  assert.doesNotMatch(navigation, /whitespace-nowrap|truncate|line-clamp/);
+  assert.equal(declaration('.workbench-sidebar-nav > button', 'min-width'), '0');
+  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'min-width'), '0');
+  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'white-space'), 'normal');
+  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'overflow-wrap'), 'anywhere');
+  assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'flex-shrink'), '0');
+  const labels = [...navigation.matchAll(/<span className="font-medium">\{tr\(['"]([^'"]+)['"]\)\}<\/span>/g)].map(match => match[1]);
+  assert.equal(labels.length, 13);
+  for (const locale of locales) for (const label of labels) {
+    assert.ok(rendererMessage(label, {}, locale).trim(), `${locale}: ${label}`);
+  }
   const end = app.indexOf('>{tr("知道了")}</button>'); assert.ok(end >= 0);
   const button = app.slice(app.lastIndexOf('<button', end), end);
   assert.ok(button.includes('shrink-0 whitespace-nowrap'));

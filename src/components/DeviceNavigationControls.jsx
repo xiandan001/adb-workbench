@@ -79,13 +79,13 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
           <button type="button" className="device-navigation-button h-full w-full" onClick={() => runAction(action)}
           disabled={!saved.config || !isOnline || Boolean(pending) || unsupported} aria-busy={pending === action.id} aria-label={displayLabel} aria-describedby={`${descriptionId}-${action.id}`}>
           <span className="device-navigation-icon" aria-hidden="true">{pending === action.id ? <Loader2 size={19} className="animate-spin" /> : <Icon size={19} />}</span>
-          <span className="min-w-0"><span className="block truncate">{pending === action.id ? tr("执行中…") : displayLabel}</span>{unsupported && <span className="line-clamp-2 break-words text-[10px] font-normal leading-3">{reason}</span>}</span>
+          <span className="device-navigation-label"><span className="device-navigation-label-text">{pending === action.id ? tr("执行中…") : displayLabel}</span>{unsupported && <span className="line-clamp-2 break-words text-[10px] font-normal leading-3">{reason}</span>}</span>
           {check?.status === 'unknown' && <CircleHelp size={12} className="shrink-0 text-amber-500" aria-hidden="true" />}
           </button><span id={`${descriptionId}-${action.id}`} className="sr-only">{reason}</span>
         </span>;
       })}
     </div>
-    {unavailable.length > 0 && <p className="mt-1.5 flex items-center justify-between gap-2 text-xs text-amber-600"><span>{tr("{0} 个按钮在此设备不可用", { 0: unavailable.length })}</span><button type="button" onClick={() => setEditing(true)} disabled={Boolean(pending)} className="underline underline-offset-2 disabled:opacity-40">{tr("编辑替换")}</button></p>}
+    {unavailable.length > 0 && <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-600"><span className="min-w-0">{tr("{0} 个按钮在此设备不可用", { 0: unavailable.length })}</span><button type="button" onClick={() => setEditing(true)} disabled={Boolean(pending)} className="shrink-0 underline underline-offset-2 disabled:opacity-40">{tr("编辑替换")}</button></p>}
     {saved.error && <div role="alert" className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">{tr(saved.error)}<button type="button" onClick={resetBroken} className="ml-2 underline">{tr("重置为默认配置")}</button></div>}
     {error && <div role="alert" className="mt-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">{tr(error)}</div>}
     {editing && saved.config && <DeviceShortcutEditor config={saved.config} deviceId={deviceId} isOnline={isOnline} isDark={isDark} pending={pending} onTest={runAction} onSave={save} onClose={() => setEditing(false)} />}
