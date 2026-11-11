@@ -2278,5 +2278,22 @@
   "新增 AI 排障助手：根据问题推荐只读检查，预览证据后生成分析结论": "New AI Troubleshooter: recommends read-only checks and analyzes evidence after you preview it",
   "新增 AI 多源联合分析：关联设备日志、串口和 SSH 终端证据": "New AI Multi-source Analysis: correlates evidence from device logs, serial ports and SSH terminals",
   "新增 AI 生成测试任务：将测试目标生成可审阅步骤，保存到任务中心后执行": "New AI Test Task Generator: turns test goals into reviewable steps to save and run from Task Center",
-  "新增 AI 功能沿用内置 AI 和会员权益，支持脱敏预览、独立取消与五种语言": "New AI features use the built-in service and existing membership, with redacted previews, independent cancellation and five languages"
+  "新增 AI 功能沿用内置 AI 和会员权益，支持脱敏预览、独立取消与五种语言": "New AI features use the built-in service and existing membership, with redacted previews, independent cancellation and five languages",
+  "保存到当前设备": "Save to this device",
+  "保存为共用配置": "Save as shared configuration",
+  "恢复共用配置": "Restore shared configuration",
+  "当前使用设备独立配置，优先于同平台共用配置。": "Using this device's independent configuration, which takes priority over shared settings for the same platform.",
+  "当前使用同平台共用配置。": "Using the shared configuration for devices on the same platform.",
+  "当前使用出厂默认配置。": "Using the factory default configuration.",
+  "共用配置仅适用于同平台设备；保存不会执行操作。": "Shared settings apply only to devices on the same platform. Saving does not run any action.",
+  "已保存当前设备的快捷操作": "Saved shortcuts for this device",
+  "已保存同平台共用的快捷操作": "Saved shared shortcuts for this platform",
+  "已保存共用配置，当前设备仍使用独立配置": "Shared configuration saved; this device still uses its independent configuration",
+  "已恢复当前设备的共用配置": "Restored the shared configuration for this device",
+  "重置当前平台共用配置": "Reset shared configuration for this platform",
+  "设备独立快捷配置无效，请检查配置或恢复备份": "Invalid independent device shortcut configuration. Check the configuration or restore a backup.",
+  "设备独立快捷配置超过存储上限": "Independent device shortcut configurations exceed the storage limit",
+  "设备快捷配置标识无效": "Invalid device shortcut configuration identifier",
+  "快捷操作支持仅保存当前设备、恢复共用配置，并随备份持久保存。": "Shortcuts can be saved for the current device only, restored to shared settings, and preserved in backups.",
+  "独立配置": "Device-specific"
 }

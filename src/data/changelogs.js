@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.19': {
+    title: 'v4.7.19',
+    date: '2026-11-11',
+    items: [
+      { type: 'feature', get text() { return tr('快捷操作支持仅保存当前设备、恢复共用配置，并随备份持久保存。'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.18': {
     title: 'v4.7.18',
     date: '2026-11-11',

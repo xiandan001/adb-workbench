@@ -1,6 +1,9 @@
 {
   "version": 1,
   "storageKey": "adb-workbench.device-shortcuts.v1",
+  "deviceStorageKey": "adb-workbench.device-shortcut-overrides.v1",
+  "maxDeviceOverrides": 1000,
+  "maxDeviceOverrideBytes": 2097152,
   "slots": ["slot-1", "slot-2", "slot-3", "slot-4"],
   "defaultActions": ["home", "sidebar", "settings", "childLockUnlock"],
   "actions": [

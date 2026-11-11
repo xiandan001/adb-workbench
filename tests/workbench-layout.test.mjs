@@ -91,5 +91,7 @@ test('native shortcut dialogs retain top-layer menu hosting, full targets and co
   assert.match(read('src/components/DeviceShortcutConfirm.jsx'), /\{request\.deviceId\}/);
   assert.match(read('src/components/DeviceShortcutConfirm.jsx'), /\{request\.command\}/);
   assert.match(read('src/components/DeviceShortcutConfirm.jsx'), /request\.resolve\(true\)/);
-  assert.match(read('src/components/DeviceShortcutEditor.jsx'), /onSave\(normalizeDeviceShortcuts\(draft\)\)/);
+  assert.match(read('src/components/DeviceShortcutEditor.jsx'), /save\(normalizeDeviceShortcuts\(draft\)\)/);
+  assert.match(read('src/components/DeviceShortcutEditor.jsx'), /submit\(onSave\)/);
+  assert.match(read('src/components/DeviceShortcutEditor.jsx'), /submit\(onSaveShared\)/);
 });

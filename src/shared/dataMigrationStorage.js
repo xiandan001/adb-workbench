@@ -1,5 +1,5 @@
 import { tr } from './i18n.js';
-import { normalizeDeviceShortcuts, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY } from './deviceNavigationShortcuts.js';
+import { normalizeDeviceShortcuts, parseDeviceShortcutOverrides, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY, SHORTCUTS_CHANGED } from './deviceNavigationShortcuts.js';
 import { normalizePinnedDevices, PINNED_DEVICES_KEY } from './deviceDiscovery.js';
 import { normalizePreferences as normalizeSerialPreferences, SERIAL_PREFS_KEY } from './serialSettings.js';
 import { normalizeSerialTerminalStyle, SERIAL_TERMINAL_STYLE_KEY } from './serialTerminalStyle.js';
@@ -9,7 +9,7 @@ import { normalizeUiMotionPreferences, UI_MOTION_PREFS_KEY } from './uiMotionPre
 export const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY
 ]);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -29,6 +29,7 @@ function parsePreference(key, raw) {
   }
   if (key === SERIAL_TERMINAL_STYLE_KEY && raw.length > 64) throw new Error(tr("串口终端样式数据过长"));
   if (key === UI_MOTION_PREFS_KEY && raw.length > 256) throw new Error(tr("启动与动效偏好数据过长"));
+  if (key === DEVICE_SHORTCUTS_KEY) return parseDeviceShortcutOverrides(raw);
   const value = JSON.parse(raw);
   assertSafeValue(value);
   if (key === SHORTCUTS_KEY || key === HARMONY_SHORTCUTS_KEY) return normalizeDeviceShortcuts(value);
@@ -91,6 +92,8 @@ export function applyMigrationPreferences(preferences, storage = globalThis.loca
     if (rollbackErrors.length) throw new Error(tr("导入偏好失败，部分原偏好恢复失败：{0}。原错误：{1}", { 0: rollbackErrors.join('；'), 1: error.message }));
     throw error;
   }
+  if (touched.some(key => [SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY].includes(key))
+    && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(SHORTCUTS_CHANGED));
 }
 
 export function readMigratedPreference(key, fallback, storage = globalThis.localStorage) {

@@ -10,7 +10,7 @@ function deviceShortcutDisplayLabel(action) {
   return builtin && action.label === builtin.label ? tr(builtin.label) : action.label;
 }
 
-export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDark, pending, onTest, onSave, onClose }) {
+export default function DeviceShortcutEditor({ config, deviceId, sourceDescription, hasOverride, isOnline, isDark, pending, onTest, onSave, onSaveShared, onRestoreShared, onClose }) {
   useLocale();
   const harmony = deviceId.startsWith('hdc:');
   const dialogRef = useRef(null);
@@ -76,8 +76,11 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
     });
     setSelected(target);
   };
-  const submit = () => {
-    try { onSave(normalizeDeviceShortcuts(draft)); } catch (error) { setError(error.message); }
+  const submit = save => {
+    try { save(normalizeDeviceShortcuts(draft)); } catch (error) { setError(error.message); }
+  };
+  const restoreShared = () => {
+    try { onRestoreShared(); } catch (error) { setError(error.message); }
   };
   const test = async () => {
     setError('');
@@ -90,7 +93,7 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
   return <dialog ref={dialogRef} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!pending) onClose(); }}
     className={`m-auto w-[min(700px,calc(100vw-32px))] max-h-[85vh] overflow-y-auto rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${isDark ? 'bg-[#2D2F33] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-200 text-slate-800'}`}>
     <div className="flex items-start justify-between gap-4 border-b border-slate-400/20 px-5 py-4">
-      <div className="workbench-dialog-heading"><h2 id={titleId} className="font-semibold">{tr("编辑快捷操作")}</h2><p className={`mt-1 text-xs ${muted}`}>{tr("四个按钮由所有设备共用；保存不会执行操作。")}</p></div>
+      <div className="workbench-dialog-heading"><h2 id={titleId} className="font-semibold">{tr("编辑快捷操作")}</h2>{sourceDescription && <p className={`mt-1 break-words text-xs ${muted}`}>{sourceDescription}</p>}<p className={`mt-1 text-xs ${muted}`}>{tr('共用配置仅适用于同平台设备；保存不会执行操作。')}</p></div>
       <button type="button" onClick={onClose} disabled={Boolean(pending)} aria-label={tr("关闭快捷操作编辑")} className="workbench-dialog-close rounded p-1 disabled:opacity-40"><X size={18} /></button>
     </div>
     <div className="space-y-4 p-5">
@@ -133,8 +136,11 @@ export default function DeviceShortcutEditor({ config, deviceId, isOnline, isDar
       {error && <p role="alert" className="break-words text-xs text-red-500">{tr(error)}</p>}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-400/20 px-5 py-4">
-      <button type="button" disabled={Boolean(pending)} onClick={() => { setDraft(defaultDeviceShortcuts(deviceId)); setSelected(0); setError(''); }} className={`${button} flex items-center gap-1.5`}><RotateCcw size={14} />{tr("恢复默认")}</button>
-      <div className="workbench-dialog-actions"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={submit} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{harmony ? tr('保存到鸿蒙设备') : tr("保存到所有设备")}</button></div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <button type="button" disabled={Boolean(pending)} onClick={() => { setDraft(defaultDeviceShortcuts(deviceId)); setSelected(0); setError(''); }} className={`${button} flex items-center gap-1.5`}><RotateCcw size={14} />{tr("恢复默认")}</button>
+        {hasOverride && <button type="button" disabled={Boolean(pending)} onClick={restoreShared} className={button}>{tr('恢复共用配置')}</button>}
+      </div>
+      <div className="workbench-dialog-actions"><button type="button" disabled={Boolean(pending)} onClick={onClose} className={button}>{tr("取消")}</button><button type="button" disabled={Boolean(pending)} onClick={() => submit(onSaveShared)} className={button}>{tr('保存为共用配置')}</button><button type="button" disabled={Boolean(pending)} onClick={() => submit(onSave)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40">{tr('保存到当前设备')}</button></div>
     </div>
   </dialog>;
 }

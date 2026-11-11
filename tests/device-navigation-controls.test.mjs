@@ -33,7 +33,7 @@ async function compile(name) {
 
 async function fixture(name = 'DeviceNavigationControls', { config, isOnline = true, execute = async () => ({ ok: true }) } = {}) {
   const cells = [], calls = [], toasts = []; let cursor = 0;
-  const storage = { getItem: () => config ? JSON.stringify(config) : null, setItem: () => assert.fail('Rendering must not rewrite shortcuts') };
+  const storage = { getItem: key => key === shortcuts.SHORTCUTS_KEY && config ? JSON.stringify(config) : null, setItem: () => assert.fail('Rendering must not rewrite shortcuts') };
   const sandbox = { ...shortcuts, ...lucide, tr, structuredClone, useLocale() {}, useEffect() {}, useId: () => 'fixture', useMemo: callback => callback(),
     useState(initial) { const index = cursor++; if (!(index in cells)) cells[index] = typeof initial === 'function' ? initial() : initial; return [cells[index], value => { cells[index] = typeof value === 'function' ? value(cells[index]) : value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in cells)) cells[index] = { current: initial }; return cells[index]; },

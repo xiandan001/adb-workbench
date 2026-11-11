@@ -102,5 +102,8 @@ test('Harmony shortcut editor offers native examples and platform-scoped saving 
   assert.match(source, /uitest uiInput keyEvent Back/);
   assert.match(source, /例如 input keyevent KEYCODE_BACK/);
   assert.match(source, /HDC shell 命令/); assert.match(source, /ADB shell 命令/);
-  assert.match(source, /保存到鸿蒙设备/);
+  assert.match(source, /保存到当前设备/);
+  assert.match(source, /保存为共用配置/);
+  assert.match(source, /submit\(onSaveShared\)/);
+  assert.match(source, /sourceDescription/);
 });

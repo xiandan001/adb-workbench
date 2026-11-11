@@ -24,7 +24,7 @@ test('Harmony built-in Power rejects before any API access, while explicit Andro
 });
 test('saved Power labels and semantics are retained without a silent migration or storage write', () => {
   const saved = shortcuts.defaultDeviceShortcuts('hdc:A'); saved.slots[3] = power;
-  const raw = JSON.stringify(saved), storage = { getItem: () => raw, setItem: () => assert.fail('No automatic rewrite') };
+  const raw = JSON.stringify(saved), storage = { getItem: key => key === shortcuts.HARMONY_SHORTCUTS_KEY ? raw : null, setItem: () => assert.fail('No automatic rewrite') };
   const loaded = shortcuts.readDeviceShortcuts(storage, 'hdc:A');
   assert.deepEqual(loaded.config.slots[3], power);
   assert.equal(shortcuts.defaultDeviceShortcuts('hdc:A').slots[3].action, 'apps');

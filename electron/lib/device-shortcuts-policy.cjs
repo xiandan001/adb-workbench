@@ -35,4 +35,27 @@ function normalizeDeviceShortcuts(value) {
   return { version: spec.version, slots };
 }
 
-module.exports = { normalizeDeviceShortcuts };
+function normalizeDeviceShortcutOverrides(value) {
+  const fail = () => { throw new Error(tr('设备独立快捷配置无效，请检查配置或恢复备份')); };
+  const exact = (item, keys) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || ![Object.prototype, null].includes(Object.getPrototypeOf(item))
+      || Object.keys(item).length !== keys.length || keys.some(key => !Object.hasOwn(item, key))) fail();
+  };
+  exact(value, ['version', 'devices']);
+  if (value.version !== 1 || !Array.isArray(value.devices)) fail();
+  if (value.devices.length > spec.maxDeviceOverrides) throw new Error(tr('设备独立快捷配置超过存储上限'));
+  const ids = new Set();
+  const devices = value.devices.map(item => {
+    exact(item, ['deviceId', 'config']);
+    if (typeof item.deviceId !== 'string' || !item.deviceId || item.deviceId.length > 300 || /\s/u.test(item.deviceId)
+      || [...item.deviceId].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error(tr('设备快捷配置标识无效'));
+    if (ids.has(item.deviceId)) fail(); ids.add(item.deviceId);
+    return { deviceId: item.deviceId, config: normalizeDeviceShortcuts(item.config) };
+  });
+  if (ids.size !== value.devices.length) fail();
+  const result = { version: 1, devices };
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') > spec.maxDeviceOverrideBytes) throw new Error(tr('设备独立快捷配置超过存储上限'));
+  return result;
+}
+
+module.exports = { normalizeDeviceShortcuts, normalizeDeviceShortcutOverrides };

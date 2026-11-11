@@ -2,14 +2,14 @@ const { tr } = require('./localization.cjs');
 const { supportedLocales } = require('../locales/locale-config.json');
 const { normalizeSession } = require('./log-sessions.cjs');
 const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs');
-const { normalizeDeviceShortcuts } = require('./device-shortcuts-policy.cjs');
-const { storageKey: SHORTCUTS_KEY } = require('./device-shortcuts-spec.json');
+const { normalizeDeviceShortcuts, normalizeDeviceShortcutOverrides } = require('./device-shortcuts-policy.cjs');
+const { storageKey: SHORTCUTS_KEY, deviceStorageKey: DEVICE_SHORTCUTS_KEY, maxDeviceOverrideBytes } = require('./device-shortcuts-spec.json');
 const { normalizePreferences: normalizeSerialPreferences } = require('./serial-policy.cjs');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', 'adb-workbench.pinned-devices.v1',
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', DEVICE_SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
   'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1'
 ]);
 const FILES = new Set([
@@ -162,6 +162,7 @@ function normalizeDraft(value) {
 }
 function normalizePreference(key, raw) {
   text(raw, 16 * 1024 * 1024, tr("偏好 {0}", { 0: key }));
+  if (key === DEVICE_SHORTCUTS_KEY && Buffer.byteLength(raw, 'utf8') > maxDeviceOverrideBytes) invalid(tr('设备独立快捷配置超过存储上限'));
   if (key === 'adb-workbench.serial-terminal-style.v1' && raw.length > 64) invalid(tr("串口终端样式数据过长"));
   if (key === 'adb-workbench.ui-motion.v1' && raw.length > 256) invalid(tr("启动与动效偏好数据过长"));
   if (key === 'currentTheme') {
@@ -172,6 +173,7 @@ function normalizePreference(key, raw) {
   try { value = JSON.parse(raw); } catch { invalid(tr("偏好 {0} JSON", { 0: key })); }
   assertSafeJson(value);
   if (key === SHORTCUTS_KEY || key === 'adb-workbench.harmony-device-shortcuts.v1') value = normalizeDeviceShortcuts(value);
+  if (key === DEVICE_SHORTCUTS_KEY) value = normalizeDeviceShortcutOverrides(value);
   if (key === 'adb-workbench.serial-preferences.v1') value = normalizeSerialPreferences(value);
   if (key === 'adb-workbench.serial-terminal-style.v1' && !['current', 'classic'].includes(value)) invalid(tr("串口终端样式"));
   if (key === 'adb-workbench.ui-motion.v1' && (!value || typeof value !== 'object' || Array.isArray(value)

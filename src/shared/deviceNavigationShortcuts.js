@@ -2,6 +2,7 @@ import { tr } from './i18n.js';
 import spec from '../../electron/lib/device-shortcuts-spec.json' with { type: 'json' };
 
 export const SHORTCUTS_KEY = spec.storageKey;
+export const DEVICE_SHORTCUTS_KEY = spec.deviceStorageKey;
 export const HARMONY_SHORTCUTS_KEY = 'adb-workbench.harmony-device-shortcuts.v1';
 export const SHORTCUTS_CHANGED = 'device-shortcuts-changed';
 export const BUILTIN_SHORTCUTS = spec.actions;
@@ -57,11 +58,57 @@ export function normalizeDeviceShortcuts(value) {
   return { version: spec.version, slots };
 }
 
+function validateShortcutDeviceId(deviceId) {
+  if (typeof deviceId !== 'string' || !deviceId || deviceId.length > 300 || /\s/u.test(deviceId)
+    || [...deviceId].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) throw new Error(tr('设备快捷配置标识无效'));
+}
+
+export function normalizeDeviceShortcutOverrides(value) {
+  const fail = () => { throw new Error(tr('设备独立快捷配置无效，请检查配置或恢复备份')); };
+  const exact = (item, keys) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || ![Object.prototype, null].includes(Object.getPrototypeOf(item))
+      || Object.keys(item).length !== keys.length || keys.some(key => !Object.hasOwn(item, key))) fail();
+  };
+  exact(value, ['version', 'devices']);
+  if (value.version !== 1 || !Array.isArray(value.devices)) fail();
+  if (value.devices.length > spec.maxDeviceOverrides) throw new Error(tr('设备独立快捷配置超过存储上限'));
+  const ids = new Set();
+  const devices = value.devices.map(item => {
+    exact(item, ['deviceId', 'config']); validateShortcutDeviceId(item.deviceId);
+    if (ids.has(item.deviceId)) fail(); ids.add(item.deviceId);
+    return { deviceId: item.deviceId, config: normalizeDeviceShortcuts(item.config) };
+  });
+  if (ids.size !== value.devices.length) fail();
+  const result = { version: 1, devices };
+  if (new TextEncoder().encode(JSON.stringify(result)).length > spec.maxDeviceOverrideBytes) throw new Error(tr('设备独立快捷配置超过存储上限'));
+  return result;
+}
+
+export function parseDeviceShortcutOverrides(raw) {
+  if (typeof raw !== 'string') throw new Error(tr('设备独立快捷配置无效，请检查配置或恢复备份'));
+  if (new TextEncoder().encode(raw).length > spec.maxDeviceOverrideBytes) throw new Error(tr('设备独立快捷配置超过存储上限'));
+  return normalizeDeviceShortcutOverrides(JSON.parse(raw));
+}
+
+function readShortcutOverrides(storage) {
+  const raw = storage.getItem(DEVICE_SHORTCUTS_KEY);
+  return raw === null || raw === undefined ? { version: 1, devices: [] } : parseDeviceShortcutOverrides(raw);
+}
+
 export function readDeviceShortcuts(storage = globalThis.localStorage, deviceId = '') {
+  let errorSource = deviceId ? 'overrides' : 'shared';
   try {
+    if (deviceId) {
+      validateShortcutDeviceId(deviceId);
+      const entry = readShortcutOverrides(storage).devices.find(item => item.deviceId === deviceId);
+      if (entry) return { config: entry.config, error: '', source: 'device', hasOverride: true, errorSource: null, deviceId };
+    }
+    errorSource = 'shared';
     const raw = storage.getItem(deviceId.startsWith('hdc:') ? HARMONY_SHORTCUTS_KEY : SHORTCUTS_KEY);
-    return { config: raw === null ? defaultDeviceShortcuts(deviceId) : normalizeDeviceShortcuts(JSON.parse(raw)), error: '' };
-  } catch (error) { return { config: null, error: tr("快捷操作读取失败，原配置未改动：{0}", { 0: error.message }) }; }
+    const missing = raw === null || raw === undefined;
+    return { config: missing ? defaultDeviceShortcuts(deviceId) : normalizeDeviceShortcuts(JSON.parse(raw)), error: '',
+      source: missing ? 'default' : 'shared', hasOverride: false, errorSource: null, deviceId };
+  } catch (error) { return { config: null, error: tr("快捷操作读取失败，原配置未改动：{0}", { 0: error.message }), source: null, hasOverride: false, errorSource, deviceId }; }
 }
 
 export function saveDeviceShortcuts(config, storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED)), deviceId = '') {
@@ -69,6 +116,25 @@ export function saveDeviceShortcuts(config, storage = globalThis.localStorage, n
   storage.setItem(deviceId.startsWith('hdc:') ? HARMONY_SHORTCUTS_KEY : SHORTCUTS_KEY, JSON.stringify(normalized));
   notify();
   return normalized;
+}
+
+export function saveDeviceShortcutsForDevice(config, storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED)), deviceId = '') {
+  validateShortcutDeviceId(deviceId);
+  const normalized = normalizeDeviceShortcuts(config), stored = readShortcutOverrides(storage);
+  const devices = stored.devices.filter(item => item.deviceId !== deviceId);
+  devices.push({ deviceId, config: normalized });
+  const next = normalizeDeviceShortcutOverrides({ version: 1, devices });
+  storage.setItem(DEVICE_SHORTCUTS_KEY, JSON.stringify(next));
+  notify(); return normalized;
+}
+
+export function restoreSharedDeviceShortcuts(storage = globalThis.localStorage, notify = () => window.dispatchEvent(new Event(SHORTCUTS_CHANGED)), deviceId = '') {
+  validateShortcutDeviceId(deviceId);
+  const stored = readShortcutOverrides(storage), devices = stored.devices.filter(item => item.deviceId !== deviceId);
+  if (devices.length === stored.devices.length) return false;
+  if (devices.length) storage.setItem(DEVICE_SHORTCUTS_KEY, JSON.stringify({ version: 1, devices }));
+  else storage.removeItem(DEVICE_SHORTCUTS_KEY);
+  notify(); return true;
 }
 
 function validateAction(shortcut) {
