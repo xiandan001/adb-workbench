@@ -6,7 +6,12 @@ import { createCapabilityLoader, CAPABILITY_REFRESH_MS } from '../src/shared/dev
 const require = createRequire(import.meta.url);
 const { createCapabilityService } = require('../electron/lib/device-shortcut-capabilities.cjs');
 const ok = stdout => ({ ok: true, stdout });
-const config = defaultDeviceShortcuts;
+// Explicit vendor-app fixture keeps whiteboard preflight coverage after it leaves the factory layout.
+const config = () => {
+  const value = defaultDeviceShortcuts();
+  value.slots[3] = { id: 'slot-4', type: 'builtin', action: 'whiteboard', label: '打开白板' };
+  return value;
+};
 const request = (deviceId = 'device-A', value = config()) => ({ deviceId, config: value });
 const allPackages = 'package:android\npackage:com.android.settings\npackage:com.xbh.navisetting\npackage:com.xbh.jyjsetting\npackage:com.xbh.whiteboard';
 const settle = () => new Promise(resolve => setImmediate(resolve));

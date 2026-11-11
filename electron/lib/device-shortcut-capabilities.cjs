@@ -82,6 +82,10 @@ function createCapabilityService({ run = runAdb, now = Date.now, cacheMs = CACHE
         checks.push(status(slot.id, 'supported', tr('在当前设备卡片打开应用管理，不发送设备控制命令。')));
         continue;
       }
+      if (slot.type === 'builtin' && slot.action === 'childLockUnlock') {
+        checks.push(status(slot.id, 'unknown', tr('设备需支持音量组合键解锁；点击仅发送按键，请确认触摸是否恢复。')));
+        continue;
+      }
       if (slot.type === 'shell') {
         checks.push(status(slot.id, 'confirm', tr("自定义 ADB 命令无法预检，每次执行前均需确认")));
         continue;

@@ -28,7 +28,7 @@ test('saved Power labels and semantics are retained without a silent migration o
   const loaded = shortcuts.readDeviceShortcuts(storage, 'hdc:A');
   assert.deepEqual(loaded.config.slots[3], power);
   assert.equal(shortcuts.defaultDeviceShortcuts('hdc:A').slots[3].action, 'apps');
-  assert.deepEqual(shortcuts.defaultDeviceShortcuts().slots.map(item => item.action), ['home', 'sidebar', 'settings', 'whiteboard']);
+  assert.deepEqual(shortcuts.defaultDeviceShortcuts().slots.map(item => item.action), ['home', 'sidebar', 'settings', 'childLockUnlock']);
 });
 test('Power is disabled synchronously in the real rendering path before asynchronous capability results', () => {
   for (const checks of [[], [{ id: power.id, status: 'supported', reason: 'stale prior probe' }]]) {

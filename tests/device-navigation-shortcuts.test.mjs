@@ -30,7 +30,7 @@ const shell = { id: 'slot-3', label: '回到桌面', type: 'shell', command: 'rm
 
 test('four global slots retain default actions and accept reordered builtins apps and advanced shell', () => {
   const defaults = defaultDeviceShortcuts();
-  assert.deepEqual(defaults.slots.map(slot => slot.action), ['home', 'sidebar', 'settings', 'whiteboard']);
+  assert.deepEqual(defaults.slots.map(slot => slot.action), ['home', 'sidebar', 'settings', 'childLockUnlock']);
   const custom = config(value => { value.slots[1] = app; value.slots[2] = shell; value.slots.reverse(); });
   assert.deepEqual(normalizeDeviceShortcuts(custom), custom);
   assert.deepEqual(backend.normalizeDeviceShortcuts(custom), custom);

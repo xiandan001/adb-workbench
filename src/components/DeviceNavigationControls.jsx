@@ -1,13 +1,13 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Home, PanelRightOpen, Settings, Presentation, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp, Power } from 'lucide-react';
+import { Home, PanelRightOpen, Settings, Presentation, Unlock, Volume2, Volume1, Loader2, ArrowLeft, PanelsTopLeft, Bell, AppWindow, Terminal, Pencil, CircleHelp, Power } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import { BUILTIN_SHORTCUTS, SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, SHORTCUTS_CHANGED, defaultDeviceShortcuts, readDeviceShortcuts, saveDeviceShortcuts, createShortcutExecutor, getDeviceShortcutCheck } from '../shared/deviceNavigationShortcuts';
 import DeviceShortcutEditor from './DeviceShortcutEditor';
 import DeviceShortcutConfirm from './DeviceShortcutConfirm';
 import useDeviceShortcutCapabilities from '../shared/useDeviceShortcutCapabilities';
 
-const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell, power: Power, apps: AppWindow };
+const icons = { home: Home, sidebar: PanelRightOpen, settings: Settings, childLockUnlock: Unlock, volumeUp: Volume2, volumeDown: Volume1, whiteboard: Presentation, back: ArrowLeft, recents: PanelsTopLeft, notifications: Bell, power: Power, apps: AppWindow };
 
 function deviceShortcutDisplayLabel(action) {
   const builtin = action.type === 'builtin' && BUILTIN_SHORTCUTS.find(item => item.id === action.action);
@@ -46,7 +46,9 @@ export default function DeviceNavigationControls({ deviceId, isOnline, showToast
     setPending(action.id);
     try {
       const result = await executor.current({ api: window.electronAPI, deviceId, shortcut: action, confirmShell, onOpenApps });
-      if (result.ok && !result.local) showToast?.(tr("已发送{0}指令（{1}）", { 0: deviceShortcutDisplayLabel(action), 1: deviceId }));
+      if (result.ok && !result.local) showToast?.(action.type === 'builtin' && action.action === 'childLockUnlock'
+        ? tr('已发送童锁解锁按键，请确认触摸是否恢复。')
+        : tr("已发送{0}指令（{1}）", { 0: deviceShortcutDisplayLabel(action), 1: deviceId }));
     } catch (error) {
       const message = tr("{0}失败：{1}", { 0: deviceShortcutDisplayLabel(action), 1: error.message });
       setError(message);

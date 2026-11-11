@@ -80,9 +80,9 @@ test('Harmony history keeps transport-separated identity while rejecting conflic
   assert.throws(() => read({ ...record, deviceRuns: [{ ...record.deviceRuns[0], comparisonIdentity: { ...identity, androidId: 'b'.repeat(64) } }] }));
 });
 
-test('Harmony shortcut preferences migrate separately without changing Android default slots', () => {
+test('Harmony shortcut preferences migrate separately from the Android child-lock factory layout', () => {
   const spec = require('../electron/lib/device-shortcuts-spec.json');
-  assert.deepEqual(spec.defaultActions, ['home', 'sidebar', 'settings', 'whiteboard']);
+  assert.deepEqual(spec.defaultActions, ['home', 'sidebar', 'settings', 'childLockUnlock']);
   const value = { version: 1, slots: ['home', 'back', 'settings', 'power'].map((action, index) => ({ id: `slot-${index + 1}`, label: action, type: 'builtin', action })) };
   const key = 'adb-workbench.harmony-device-shortcuts.v1';
   assert.ok(PORTABLE_PREF_KEYS.includes(key));
