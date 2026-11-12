@@ -50,7 +50,7 @@ async function readDeviceChannels(options) {
       const parsed = transport === 'adb' ? parseAdbDeviceRows(response.value.stdout).map(({ id, status, detail }) => ({
         id, status, model: detail.match(/model:([^\s]+)/)?.[1] || '', transport: 'adb', platform: 'android' })) : parseHdcDeviceRows(response.value.stdout);
       const rows = parsed.filter(device => {
-        if (transport === 'hdc' && device.connectionType === 'uart' && /^Ready$/i.test(device.rawStatus)) { unconnectedTargets.push(device); return false; }
+        if (transport === 'hdc' && !['device', 'unauthorized'].includes(device.status)) { unconnectedTargets.push(device); return false; }
         return true;
       });
       devices.push(...registerDiscoveredDevices(transport, rows));

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { discoverDevices } = require('../electron/lib/device-discovery.cjs');
 const { connectDevice, disconnectDevice, connectionAddress } = require('../electron/lib/device-connection.cjs');
-const { registerDiscoveredDevices } = require('../electron/lib/device-registry.cjs');
+const { registerDiscoveredDevices, resolveDeviceRef } = require('../electron/lib/device-registry.cjs');
 const { collectHarmonySnapshot, parseHarmonyMemory, parseHarmonyDisk, parseHarmonyProcesses, parseHarmonyBattery, parseHarmonyThermal } = require('../electron/lib/harmony-metrics.cjs');
 const { listHarmonyDirectory, parseDirectory } = require('../electron/lib/harmony-files.cjs');
 
@@ -22,6 +22,61 @@ test('independent discovery retains both same-serial devices and excludes UART R
   const partial = await discoverDevices({ readAdb: async () => { throw new Error('no adb'); }, readHdcHost: async () => ok('[Empty]') });
   assert.equal(partial.available, true);
   assert.match(partial.errors.adb, /no adb/);
+});
+
+test('unconnected HDC targets never become Harmony cards alongside real Android devices', async () => {
+  const probes = [];
+  const options = {
+    readAdb: async () => ok('List of devices attached\n0123456789ABCDEF device model:IFPD_G520\n172.20.73.156:5555 device model:Clevertouch_Unify\n172.20.74.111:5555 device model:IFPD_G520\n'),
+    readHdcHost: async () => ok('172.20.74.121:5555 TCP Offline hdc\n192.0.2.10:5555 TCP Ready hdc\n192.0.2.11:5555 TCP Unknown hdc\nCOM4 UART Ready hdc\n0123456789ABCDEF USB Connected Native_Board hdc\nNATIVE-AUTH USB Unauthorized Native_Board hdc\n'),
+    readHdc: async id => {
+      probes.push(id);
+      assert.equal(id, 'hdc:0123456789ABCDEF');
+      return ok('__AWB_MODEL__Native Board\n__AWB_API__18\n');
+    }
+  };
+  const first = await discoverDevices(options);
+  assert.deepEqual(first.devices.map(({ id, platform, status }) => ({ id, platform, status })), [
+    { id: '0123456789ABCDEF', platform: 'android', status: 'device' },
+    { id: '172.20.73.156:5555', platform: 'android', status: 'device' },
+    { id: '172.20.74.111:5555', platform: 'android', status: 'device' },
+    { id: 'hdc:0123456789ABCDEF', platform: 'harmony', status: 'device' },
+    { id: 'hdc:NATIVE-AUTH', platform: 'harmony', status: 'unauthorized' }
+  ]);
+  assert.deepEqual(first.unconnectedTargets.map(({ targetKey }) => targetKey), [
+    '172.20.74.121:5555', '192.0.2.10:5555', '192.0.2.11:5555', 'COM4'
+  ]);
+  assert.deepEqual(probes, ['hdc:0123456789ABCDEF']);
+  const repeated = await discoverDevices(options);
+  assert.deepEqual(repeated, first);
+  assert.deepEqual(probes, ['hdc:0123456789ABCDEF'], 'pending targets and cached native metadata need no extra probe');
+});
+
+test('an HDC target disappearing into Offline is removed and can reconnect without changing its Android namesake', async () => {
+  const target = '192.0.2.19:5555', id = `hdc:${target}`;
+  let nativeStatus = 'Connected', probes = 0;
+  const options = {
+    readAdb: async () => ok(`List of devices attached\n${target} device model:Android_Board\n`),
+    readHdcHost: async () => ok(`${target} TCP ${nativeStatus} Native_Board hdc\n`),
+    readHdc: async deviceId => { assert.equal(deviceId, id); probes++; return ok('__AWB_MODEL__Native Board\n'); }
+  };
+  const connected = await discoverDevices(options);
+  assert.deepEqual(connected.devices.map(device => device.id), [target, id]);
+  const generation = resolveDeviceRef(id).generation;
+  nativeStatus = 'Offline';
+  const offline = await discoverDevices(options);
+  assert.deepEqual(offline.devices.map(device => device.id), [target]);
+  assert.equal(offline.unconnectedTargets[0].id, id);
+  assert.throws(() => resolveDeviceRef(id), { code: 'DEVICE_OFFLINE' });
+  assert.equal(resolveDeviceRef(target).platform, 'android');
+  assert.equal(probes, 1, 'offline targets must not receive device commands');
+  assert.deepEqual((await discoverDevices(options)).devices, offline.devices);
+  nativeStatus = 'Connected';
+  const reconnected = await discoverDevices(options);
+  assert.deepEqual(reconnected.devices.map(device => device.id), [target, id]);
+  assert.ok(resolveDeviceRef(id).generation > generation);
+  assert.equal(probes, 2, 'a fresh native connection must refresh its own metadata');
+  assert.equal(resolveDeviceRef(target).platform, 'android');
 });
 
 test('wireless fallback uses native connection only after Android fails and verifies the exact authorized target', async () => {
