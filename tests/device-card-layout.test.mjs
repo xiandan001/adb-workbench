@@ -9,6 +9,7 @@ import { displayDeviceId, platformLabel, isHarmonyDevice } from '../src/shared/d
 import { deviceStatusLabel } from '../src/shared/deviceWorkflow.js';
 import { deviceTerminalCommands, deviceTerminalPresentation, createDeviceTerminalRequest } from '../src/shared/deviceTerminal.js';
 import { recordingButtonState } from '../src/shared/recordingWorkspace.js';
+import { createDeviceWorkingStore, DEVICE_WORKING_LIMITS, visibleDeviceTerminalOutput, deviceWorkingErrorMessage } from '../src/shared/deviceWorkingState.js';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default;
 const read = file => fs.readFileSync(new URL('../src/components/' + file, import.meta.url), 'utf8');
@@ -184,7 +185,11 @@ test('real terminal layout transitions preserve draft, output, font size and a r
   const source = original.replace(/^import .*;\r?\n/gm, '').replace('export default DeviceCard;', 'globalThis.card = DeviceCard;');
   const compiled = await transformWithOxc(source, 'DeviceCard.jsx', { jsx: { runtime: 'classic' } });
   const cells = [], calls = [], body = {}; let cursor = 0, release;
-  const sandbox = { tr, useLocale() {}, useEffect() {}, useLayoutEffect() {},
+  const store = createDeviceWorkingStore({ storage: { getItem: () => null }, schedule: () => 1, cancel() {} });
+  const sandbox = { tr, useLocale() {}, useEffect() {}, useLayoutEffect() {}, useCallback: callback => callback, DEVICE_WORKING_LIMITS, visibleDeviceTerminalOutput, deviceWorkingErrorMessage,
+    useDeviceWorkingState(deviceId) { return { state: store.getSnapshot(deviceId),
+      set(key, value, options) { return store.update(deviceId, current => ({ [key]: structuredClone(typeof value === 'function' ? value(current[key]) : value) }), options); },
+      beginExecution: () => store.beginExecution(deviceId), retrySave: () => store.flush() }; },
     useState(initial) { const index = cursor++; if (!(index in cells)) cells[index] = typeof initial === 'function' ? initial() : initial; return [cells[index], value => { cells[index] = typeof value === 'function' ? value(cells[index]) : value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in cells)) cells[index] = { current: initial }; return cells[index]; },
     localStorage: { getItem: () => null }, document: { body }, themes: { default: theme },
@@ -208,7 +213,9 @@ test('real terminal layout transitions preserve draft, output, font size and a r
   const find = (tree, predicate) => { const result = walk(tree, predicate)[0]; assert.ok(result); return result; };
   let tree = draw(); find(tree, node => node.props.label === tr('终端')).props.onClick(); tree = draw();
   find(tree, node => node.type === 'input' && node.props.placeholder === tr('输入 HDC Shell 命令...')).props.onChange({ target: { value: 'echo fixture' } }); tree = draw();
-  const executing = find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); tree = draw();
+  const submit = find(tree, node => node.type === 'form').props.onSubmit;
+  const executing = submit({ preventDefault() {} });
+  await submit({ preventDefault() {} }); assert.equal(calls.length, 1, 'a stale same-turn form callback shares the runtime dispatch lock'); tree = draw();
   find(tree, node => node.props.title === tr('放大')).props.onClick(); tree = draw();
   assert.equal(find(tree, node => node.type === 'PORTAL').props.host, body);
   const heading = find(tree, node => cssClass(node, 'device-terminal-name'));
@@ -225,4 +232,29 @@ test('real terminal layout transitions preserve draft, output, font size and a r
   assert.match(text(tree), /completed synthetic output/);
   assert.equal(find(tree, node => cssClass(node, 'device-terminal-output')).props.style.fontSize, '13px');
   assert.equal(calls.length, 1);
+  const pending = find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+  cells.length = 0; tree = draw();
+  assert.ok(find(tree, node => node.props.title === tr('中断当前命令')));
+  assert.equal(walk(tree, node => node.type === 'PORTAL').length, 0, 'fullscreen is never restored after a page unmount');
+  await find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(calls.length, 2, 'remount cannot dispatch a duplicate while the previous request is live');
+  release('settled after unmount'); await pending; tree = draw();
+  assert.match(text(tree), /settled after unmount/); assert.equal(calls.length, 2);
+  find(tree, node => node.type === 'input' && node.props['data-terminal-command']).props.onChange({ target: { value: 'retained when closed' } });
+  find(tree, node => node.type === 'button' && node.props['aria-label'] === tr('关闭')).props.onClick(); tree = draw();
+  assert.equal(walk(tree, node => node.type === 'form').length, 0);
+  find(tree, node => node.props.label === tr('终端')).props.onClick(); tree = draw();
+  assert.equal(find(tree, node => node.type === 'input' && node.props['data-terminal-command']).props.value, 'retained when closed');
+  assert.match(text(tree), /settled after unmount/);
+  props.deviceCardDensity = 'compact'; tree = draw();
+  assert.equal(tree.props['data-density'], 'compact');
+  assert.deepEqual(walk(tree, node => node.type === sandbox.ControlButton).map(node => node.props.label), ['截图', '录屏', '应用管理', '终端'].map(label => tr(label)));
+  const shortcutProps = find(tree, node => node.type === sandbox.DeviceNavigationControls).props;
+  assert.equal(shortcutProps.deviceId, id); assert.equal(shortcutProps.isOnline, true);
+  find(tree, node => node.type === 'button' && text(node) === tr('更多工具')).props.onClick(); tree = draw();
+  assert.ok(find(tree, node => node.props.label === tr('设备日志'))); assert.ok(find(tree, node => node.props.label === tr('巡检')));
+  assert.ok(find(tree, node => node.type === 'button' && text(node).includes(tr('设备维护'))));
+  props.deviceCardDensity = 'full'; tree = draw();
+  assert.equal(walk(tree, node => node.type === 'button' && text(node) === tr('更多工具')).length, 0);
+  assert.ok(find(tree, node => node.props.label === tr('设备日志')));
 });

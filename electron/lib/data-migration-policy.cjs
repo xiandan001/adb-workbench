@@ -5,16 +5,19 @@ const { normalizeOnboardingState } = require('./task-center-onboarding-state.cjs
 const { normalizeDeviceShortcuts, normalizeDeviceShortcutOverrides } = require('./device-shortcuts-policy.cjs');
 const { storageKey: SHORTCUTS_KEY, deviceStorageKey: DEVICE_SHORTCUTS_KEY, maxDeviceOverrideBytes } = require('./device-shortcuts-spec.json');
 const { normalizePreferences: normalizeSerialPreferences } = require('./serial-policy.cjs');
+const { UI_WORKSPACE_KEY, normalizeUiWorkspace } = require('./workbench-worksets-policy.cjs');
+const { SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, normalizeSshConnectionMemory, normalizeReproductionConfig } = require('./connection-preferences-policy.cjs');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
   'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', DEVICE_SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
-  'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1'
+  'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1',
+  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json', 'hdc_terminal_command_history.json',
-  'task-center-scripts.json', 'task-center-history.json', 'auto-diagnose-rules.json', 'performance-thresholds.json'
+  'task-center-scripts.json', 'task-center-history.json', 'auto-diagnose-rules.json', 'performance-thresholds.json', 'workbench-worksets.json'
 ]);
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const SESSION_FILE = new RegExp(`^log-analysis-sessions/(${UUID})\\.json$`);
@@ -165,6 +168,8 @@ function normalizePreference(key, raw) {
   if (key === DEVICE_SHORTCUTS_KEY && Buffer.byteLength(raw, 'utf8') > maxDeviceOverrideBytes) invalid(tr('设备独立快捷配置超过存储上限'));
   if (key === 'adb-workbench.serial-terminal-style.v1' && raw.length > 64) invalid(tr("串口终端样式数据过长"));
   if (key === 'adb-workbench.ui-motion.v1' && raw.length > 256) invalid(tr("启动与动效偏好数据过长"));
+  if ([SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY].includes(key) && Buffer.byteLength(raw, 'utf8') > 16384) invalid(tr('连接与采证偏好数据异常，原内容已保留。'));
+  if (key === UI_WORKSPACE_KEY && Buffer.byteLength(raw, 'utf8') > 128 * 1024) invalid(tr('界面现场设置无效，原数据已保留。'));
   if (key === 'currentTheme') {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(raw)) invalid(tr("主题名称"));
     return raw;
@@ -175,6 +180,9 @@ function normalizePreference(key, raw) {
   if (key === SHORTCUTS_KEY || key === 'adb-workbench.harmony-device-shortcuts.v1') value = normalizeDeviceShortcuts(value);
   if (key === DEVICE_SHORTCUTS_KEY) value = normalizeDeviceShortcutOverrides(value);
   if (key === 'adb-workbench.serial-preferences.v1') value = normalizeSerialPreferences(value);
+  if (key === UI_WORKSPACE_KEY) value = normalizeUiWorkspace(value);
+  if (key === SSH_CONNECTION_MEMORY_KEY) value = normalizeSshConnectionMemory(value);
+  if (key === REPRODUCTION_CONFIG_KEY) value = normalizeReproductionConfig(value);
   if (key === 'adb-workbench.serial-terminal-style.v1' && !['current', 'classic'].includes(value)) invalid(tr("串口终端样式"));
   if (key === 'adb-workbench.ui-motion.v1' && (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).sort().join(',') !== 'reducedMotion,startupAnimation,version' || value.version !== 1
@@ -346,6 +354,7 @@ function isAllowedFile(name) { return typeof name === 'string' && (FILES.has(nam
 function sanitizeFile(name, data) {
   if (!isAllowedFile(name)) invalid(tr("不允许迁移的文件"));
   assertSafeJson(data);
+  if (name === 'workbench-worksets.json') return require('./workbench-worksets-policy.cjs').normalizeStore(data);
   const session = name.match(SESSION_FILE);
   if (session) {
     object(data, tr("日志会话"));

@@ -6,10 +6,17 @@ export const workspaceCaseReview = () => ({ status: 'unverified', rootCause: '',
 
 export function createWorkspaceCase(mode, deviceId, caseId) {
   return { mode, caseId, revision: 0, pristine: true, preparing: true, question: '', deviceId: deviceId || '', checks: mode === 'diagnose' ? ['device_info', 'logcat_snapshot'] : [], sourceIds: [], text: '',
-    plan: null, planUsage: null, preview: null, result: null, draft: null, usage: null, cached: false, error: '', busy: '',
+    plan: null, planUsage: null, preview: null, result: null, draft: null, draftEdits: null, usage: null, cached: false, error: '', busy: '',
     selection: workspaceSelection(), selectionChanged: false, requirements: workspaceRequirements(), turns: [], reportView: null,
     contextRef: null, context: null, findingIndex: null, baseline: '', diagnostic: { packageName: '', symptom: '' },
-    handoffId: '', handoff: null, targetSelection: { tokens: [] }, targets: [] };
+    handoffId: '', handoff: null, basketRevision: null, basketItems: [], targetSelection: { tokens: [] }, targets: [] };
+}
+
+export function appendWorkspaceBasket(current, basket, metadata) {
+  if (current.busy || current.basketRevision !== null && basket.revision <= current.basketRevision) return current;
+  return { ...current, basketRevision: basket.revision, basketItems: basket.items,
+    question: current.question.trim() ? current.question : metadata?.question || metadata?.title || '',
+    pristine: false, preparing: true, revision: current.revision + 1, preview: null, cached: false, error: '' };
 }
 
 export function completeWorkspaceTurn(current, response) {
@@ -69,7 +76,7 @@ export function workspaceLinePage(total, requested, size = 80) {
 export function editWorkspaceCase(current, changes) {
   if (current.busy) return current;
   const changedDevice = Object.hasOwn(changes, 'deviceId') && changes.deviceId !== current.deviceId;
-  return { ...current, ...changes, pristine: false, preparing: true, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, usage: null,
+  return { ...current, ...changes, pristine: false, preparing: true, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, draftEdits: null, usage: null,
     cached: false, error: '', ...(Object.hasOwn(changes, 'selection') ? { selectionChanged: changes.selectionChanged ?? true } : {}),
     ...(Object.hasOwn(changes, 'question') || Object.hasOwn(changes, 'deviceId') ? { plan: null, planUsage: null } : {}) };
 }

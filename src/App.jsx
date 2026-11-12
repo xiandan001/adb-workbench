@@ -19,7 +19,9 @@ import ReproductionDialog from './components/ReproductionDialog';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import useWorkbenchSearch from './components/useWorkbenchSearch';
-import SidebarConnectionStatus from './components/SidebarConnectionStatus';
+import WorkbenchWorksets from './components/WorkbenchWorksets';
+import useWorkbenchUiWorkspace from './shared/useWorkbenchUiWorkspace';
+import { recentWirelessEntries } from './shared/workbenchUiState';
 import DangerConfirmModal from './components/DangerConfirmModal';
 import AppMessageDialogHost from './components/AppMessageDialogHost';
 import SelectMenu from './components/SelectMenu';
@@ -68,7 +70,6 @@ function App() {
   const languageSelectionPending = useLanguageSelectionPending();
   useEffect(() => { document.title = tr('卓控台'); }, [locale]);
   const [devices, setDevices] = useState([]);
-  const [deviceQuery, setDeviceQuery] = useState('');
   const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
   const [activeDeviceId, setActiveDeviceId] = useState(() => localStorage.getItem('activeDeviceId') || '');
   const previousActiveDeviceIdRef = useRef(activeDeviceId);
@@ -78,6 +79,11 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false, aiVisited: false });
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const { deviceQuery, setDeviceQuery, density: deviceCardDensity, setDensity: setDeviceCardDensity,
+    expandedDeviceIds, setExpandedDeviceIds, mainRef, saveError: workspaceSaveError, retrySave: retryWorkspaceSave } = useWorkbenchUiWorkspace(activeTab);
+  const [worksetRequest, setWorksetRequest] = useState(null);
+  const [worksetNotice, setWorksetNotice] = useState('');
+  const worksetTargetRef = useRef('');
   const [aiTaskId, setAiTaskId] = useState('');
   const [activityTaskId, setActivityTaskId] = useState('');
   const [activityTaskRequest, setActivityTaskRequest] = useState(0);
@@ -192,7 +198,6 @@ function App() {
   const [backgroundTasks, setBackgroundTasks] = useState({ inspection: null, performanceReport: null });
   const backgroundTaskHideTimersRef = useRef({});
   const [deviceNames, setDeviceNames] = useState(() => readMigratedPreference('deviceNames', {}));
-  const [expandedDeviceIds, setExpandedDeviceIds] = useState(new Set());
   const [apkInstallPaths, setApkInstallPaths] = useState({});
   const [recentApks, setRecentApks] = useState(readRecentApks);
   const [apkPushPaths, setApkPushPaths] = useState({});
@@ -397,7 +402,12 @@ function App() {
         ? await window.electronAPI.getDevices()
         : [];
       setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
-      setActiveDeviceId(previous => resolveActiveDeviceId(previous, nextDevices));
+      setActiveDeviceId(previous => {
+        const target = worksetTargetRef.current;
+        if (!target) return resolveActiveDeviceId(previous, nextDevices);
+        if (nextDevices.some(device => device.id === target && device.status === 'device')) { worksetTargetRef.current = ''; return target; }
+        return '';
+      });
       setError('');
     } catch (err) {
       setError(tr("设备状态刷新失败：{0}。已保留设备选择，请运行环境自检。", { 0: err.message || tr("请检查 ADB 环境") }));
@@ -447,16 +457,48 @@ function App() {
     };
   }, [fetchDevices]);
 
+  const rememberWorksetContext = useCallback(async value => {
+    if (!window.electronAPI?.worksetRemember) return;
+    try {
+      const result = await window.electronAPI.worksetRemember(value);
+      if (!result?.ok) throw new Error(result?.error || tr('工作集上下文未能保存，已有配置保持不变。'));
+    } catch (failure) { setWorksetNotice(failure.message); }
+  }, []);
+  const chooseDevice = deviceId => { worksetTargetRef.current = ''; setActiveDeviceId(deviceId); };
+  const restoreWorkset = async item => {
+    if ((item.deviceId || item.logs) && window.electronAPI?.logAnalyzerApplyContext) {
+      const result = await window.electronAPI.logAnalyzerApplyContext({ deviceId: item.deviceId, packageName: item.packageName, ...(item.logs ? { worksetLogs: item.logs } : {}) });
+      if (!result?.ok) throw new Error(result?.error || tr('日志过滤配置恢复失败，请重试。'));
+    }
+    const online = !item.deviceId || devices.some(device => device.id === item.deviceId && device.status === 'device');
+    worksetTargetRef.current = online ? '' : item.deviceId;
+    if (item.deviceId) setDeviceQuery('');
+    setActiveDeviceId(online ? item.deviceId : '');
+    setNavigationContext({ deviceId: item.deviceId, packageName: item.packageName, requestId: crypto.randomUUID() });
+    setWorksetRequest({ ...item, requestId: crypto.randomUUID() });
+    const needsDevice = ['troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace'].includes(item.page);
+    setActiveTab(!online && needsDevice ? 'devices' : item.page);
+    setWorksetNotice(online ? tr('已带入工作集配置，请核对目标；未连接、未执行或调用 AI。')
+      : tr('工作集原设备 {0} 尚未连接，不会自动改用其他设备；其他配置可继续恢复。', { 0: item.deviceId }));
+    void rememberWorksetContext({ part: 'application', value: { deviceId: item.deviceId, packageName: item.packageName } });
+  };
   const inspectApplication = ({ deviceId, packageName }) => {
+    worksetTargetRef.current = '';
+    void rememberWorksetContext({ part: 'application', value: { deviceId, packageName } });
     setActiveDeviceId(deviceId);
     setNavigationContext({ deviceId, packageName, requestId: crypto.randomUUID() });
     setActiveTab('troubleshoot');
   };
 
   const viewApplicationLogs = async ({ deviceId, packageName } = {}) => {
-    if (deviceId) setActiveDeviceId(deviceId);
+    if (deviceId) chooseDevice(deviceId);
+    const rememberedPackage = navigationContext?.deviceId === (deviceId || activeDeviceId) ? navigationContext.packageName : '';
+    const selectedPackage = packageName ?? rememberedPackage;
+    if (deviceId || activeDeviceId) void rememberWorksetContext({ part: 'application', value: { deviceId: deviceId || activeDeviceId, packageName: selectedPackage || '' } });
     try {
-      const result = await window.electronAPI?.logAnalyzerOpen?.({ deviceId: deviceId || activeDeviceId, packageName });
+      const selectedId = deviceId || activeDeviceId;
+      const savedLogs = worksetRequest?.logs?.deviceId === selectedId ? worksetRequest.logs : null;
+      const result = await window.electronAPI?.logAnalyzerOpen?.({ deviceId: selectedId, packageName: selectedPackage, ...(savedLogs ? { worksetLogs: savedLogs } : {}) });
       if (result?.success === false || result?.ok === false) throw new Error(result.error || tr("日志窗口打开失败"));
     } catch (err) {
       showToast(tr("日志窗口打开失败：{0}", { 0: err.message }));
@@ -888,22 +930,13 @@ function App() {
     try {
       if (window.electronAPI) {
         const res = await window.electronAPI.adbShell(deviceId, command);
-        if (res.success) {
-          return res.output || tr("命令执行成功");
-        }
-        if (res.cancelled) {
-          return res.output ? tr("（已中断）\n{0}", { 0: res.output }) : tr("命令已中断");
-        }
-        // 失败/超时但已有部分输出时一并展示，便于查看交互式命令的回显
-        if (res.output) {
-          return `${res.error}\n${res.output}`;
-        }
-        return tr("命令执行失败: {0}", { 0: res.error });
+        return { success: res.success === true, output: res.output || '', error: res.error || '',
+          cancelled: res.cancelled === true, timedOut: res.timedOut === true };
       } else {
-        return tr("终端功能需要 Electron 环境");
+        return { success: false, output: '', error: tr("终端功能需要 Electron 环境") };
       }
     } catch (err) {
-      return tr("命令执行错误: {0}", { 0: err.message });
+      return { success: false, output: '', error: err.message || tr('未知错误') };
     }
   };
 
@@ -1297,7 +1330,7 @@ function App() {
       showToast(result.message);
       if (result.success) setDeviceQuery('');
       if (result.success && historyEntry) {
-        setActiveDeviceId(result.deviceId || historyEntry.deviceId || target);
+        chooseDevice(result.deviceId || historyEntry.deviceId || target);
         setActiveTab('devices');
         setConnectionFormOpen(false);
       }
@@ -1633,7 +1666,7 @@ function App() {
               <EnvironmentCheckWizard
                 devices={devices}
                 activeDeviceId={activeDeviceId}
-                onActiveDeviceChange={setActiveDeviceId}
+                onActiveDeviceChange={chooseDevice}
                 theme={theme}
                 showToast={showToast}
                 onRefreshDevices={fetchDevices}
@@ -1757,17 +1790,16 @@ function App() {
           </button>
         </nav>
 
-        <SidebarConnectionStatus onNavigate={setActiveTab} />
-
         <BackgroundTaskStack
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
           showToast={showToast}
+          onNavigateConnection={setActiveTab}
           onOpen={(tab, deviceId, id) => {
             if (tab === 'reproduction') { setReproductionTarget({ deviceId: deviceId || '', sessionId: id || '' }); return; }
             if (tab === 'logs') { void window.electronAPI?.logAnalyzerOpen?.({ deviceId }).catch(error => showToast(error.message)); return; }
-            if (tab === 'tasks') { if (deviceId) setActiveDeviceId(deviceId); openTaskRun(id || ''); return; }
+            if (tab === 'tasks') { if (deviceId) chooseDevice(deviceId); openTaskRun(id || ''); return; }
             if (tab === 'quality') setIncomingGuardId(id ? { id, requestId: crypto.randomUUID() } : null);
-            if (deviceId && !(tab === 'quality' && id)) setActiveDeviceId(deviceId);
+            if (deviceId && !(tab === 'quality' && id)) chooseDevice(deviceId);
             setActiveTab(tab);
           }}
         />
@@ -1797,7 +1829,7 @@ function App() {
       <div className="workbench-main flex-1 flex flex-col pt-5 h-screen overflow-hidden">
         {/* Header */}
         <header className={`px-4 lg:px-6 xl:px-8 pb-3 border-b flex flex-wrap justify-between items-center gap-3 sticky top-0 z-10 ${isDark ? 'bg-[#202124]/90 border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-          <div className="workbench-header-title">
+          <div className="workbench-header-title" style={{ flex: '1 1 18rem', minWidth: 'min(100%, 18rem)' }}>
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
               {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
@@ -1808,7 +1840,10 @@ function App() {
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>
 
-          <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkbenchWorksets theme={t} devices={devices} deviceId={activeDeviceId} packageName={navigationContext?.deviceId === activeDeviceId ? navigationContext.packageName : ''} page={activeTab} onRestore={restoreWorkset} />
+            <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
+          </div>
 
           {activeTab === 'devices' && (
             <div className="workbench-toolbar-actions">
@@ -1833,20 +1868,22 @@ function App() {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
+          {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
+          {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance'].includes(activeTab) && (
             <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}>
               <label htmlFor="active-device" className="text-xs font-medium">{tr("当前设备")}</label>
               <SelectMenu
                 id="active-device"
                 value={activeDevice?.id || ''}
-                onChange={setActiveDeviceId}
+                onChange={chooseDevice}
                 isDark={isDark}
                 placeholder={tr("尚未发现设备")}
                 emptyText={tr("尚未发现设备")}
                 className="workbench-active-device"
                 options={[
-                  ...(!activeDevice ? [{ value: '', label: tr("尚未发现设备") }] : []),
+                  ...(!activeDevice ? [{ value: '', label: devices.length ? tr('请选择设备') : tr("尚未发现设备") }] : []),
                   ...devices.map(device => ({
                     value: device.id,
                     label: [deviceNames[device.id] || device.model, displayDeviceId(device), platformLabel(device), deviceStatusLabel(device.status)].filter(Boolean).join(' · ')
@@ -1922,6 +1959,19 @@ function App() {
                   </button>
                 </form>
                 </div>}
+                {showConnectionForm && recentWirelessEntries(connectionHistory).length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className={`text-xs ${t.textMuted}`}>{tr('最近连接')}</span>
+                  {recentWirelessEntries(connectionHistory).map(entry => {
+                    const address = historyConnectionAddress(entry), state = connectionResults[entry.deviceId];
+                    return <button type="button" key={entry.deviceId} disabled={state?.status === 'loading'}
+                      onClick={() => { setWifiIp(address); void connectDevice(address, entry); }}
+                      title={`${entry.deviceName || address} · ${platformLabel(entry.deviceId)} · ${entry.deviceId}`}
+                      className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${t.button.secondary}`}>
+                      {state?.status === 'loading' ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}<span className="truncate">{address}</span><span className={t.textMuted}>{platformLabel(entry.deviceId)}</span>
+                    </button>;
+                  })}
+                  {recentWirelessEntries(connectionHistory).some(entry => connectionResults[entry.deviceId]?.status === 'error') && <p role="alert" className="w-full break-words text-xs text-red-500">{recentWirelessEntries(connectionHistory).filter(entry => connectionResults[entry.deviceId]?.status === 'error').map(entry => connectionResults[entry.deviceId].message).join(' · ')}</p>}
+                </div>}
               </div>
 
               {(devices.length > 0 || deviceQuery) && <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -1939,6 +1989,9 @@ function App() {
                   {deviceQuery && <button type="button" aria-label={tr("清空设备搜索")} title={tr("清空搜索")} onClick={() => setDeviceQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${t.textMuted}`}><X size={15} /></button>}
                 </div>
                 <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />{tr("常用设备优先 · ")}{visibleDevices.length} / {eligibleDevices.length}{tr(" 台")}</span>
+                <div role="group" aria-label={tr('设备卡片视图')} className={`inline-flex shrink-0 rounded-lg border p-1 ${t.card}`}>
+                  {[['full', tr('完整视图')], ['compact', tr('紧凑视图')]].map(([value, label]) => <button type="button" key={value} aria-pressed={deviceCardDensity === value} onClick={() => setDeviceCardDensity(value)} className={`rounded-md px-2.5 py-1.5 text-xs ${deviceCardDensity === value ? t.button.primary : t.textMuted}`}>{label}</button>)}
+                </div>
               </div>}
               <div className="workbench-device-list">
                 {devices.length === 0 && !loading && !error ? (
@@ -1957,15 +2010,16 @@ function App() {
                     </div>}
                     {visibleDevices.map(device => (
                     <DeviceCard
+                      deviceCardDensity={deviceCardDensity}
                       onOpenReproduction={id => setReproductionTarget({ deviceId: id, sessionId: '' })}
                       key={device.id}
                       device={device}
                       isActive={device.id === activeDeviceId}
                       isPinned={pinnedDeviceIds.includes(device.id)}
                       onTogglePin={() => handleToggleDevicePin(device.id)}
-                      onSelectDevice={() => setActiveDeviceId(device.id)}
+                      onSelectDevice={() => chooseDevice(device.id)}
                       onEnvironmentCheck={() => {
-                        setActiveDeviceId(device.id);
+                        chooseDevice(device.id);
                         setEnvironmentCheckModalOpen(true);
                       }}
                       onInspectApplication={inspectApplication}
@@ -2041,7 +2095,7 @@ function App() {
             </>
           )}
 
-          {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} />}
+          {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
               <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} incomingHandoffId={incomingHandoffId}
@@ -2053,7 +2107,7 @@ function App() {
           </div>}
           {sshVisited && <div hidden={activeTab !== 'ssh'}>
             <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 SSH 工作区…")}</div>}>
-              <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} />
+              <SshWorkspace active={activeTab === 'ssh'} theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} />
             </Suspense>
           </div>}
           {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
@@ -2065,7 +2119,7 @@ function App() {
             <TroubleshootingWizard
               devices={devices}
               activeDeviceId={activeDeviceId}
-              onActiveDeviceChange={setActiveDeviceId}
+              onActiveDeviceChange={chooseDevice}
               navigationContext={navigationContext}
               theme={theme}
               vipStatus={vipStatus}
@@ -2093,7 +2147,7 @@ function App() {
               incomingGuardId={incomingGuardId}
               devices={devices}
               activeDeviceId={activeDeviceId}
-              onActiveDeviceChange={setActiveDeviceId}
+              onActiveDeviceChange={chooseDevice}
               deviceLoading={loading}
               onRefreshDevices={fetchDevices}
               theme={theme}
@@ -2236,7 +2290,7 @@ function App() {
               incomingTaskRequestId={activityTaskRequest}
               devices={devices}
               activeDeviceId={activeDeviceId}
-              onActiveDeviceChange={setActiveDeviceId}
+              onActiveDeviceChange={chooseDevice}
               theme={theme}
               taskCenterPath={taskCenterPath}
               showToast={showToast}
@@ -2249,7 +2303,7 @@ function App() {
             <PerformanceDashboard
               devices={devices}
               activeDeviceId={activeDeviceId}
-              onActiveDeviceChange={setActiveDeviceId}
+              onActiveDeviceChange={chooseDevice}
               theme={theme}
               vipStatus={vipStatus}
               performancePath={performancePath}
@@ -3091,8 +3145,8 @@ function App() {
   );
 }
 
-function BackgroundTaskStack({ tasks, onOpen, showToast }) {
-  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} />;
+function BackgroundTaskStack({ tasks, onOpen, showToast, onNavigateConnection }) {
+  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} onNavigateConnection={onNavigateConnection} />;
 }
 
 function buildSidebarBackgroundTasks(backgroundTasks) {

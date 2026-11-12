@@ -1,10 +1,11 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText, FolderOpen, Square, X, Sparkles, RotateCcw } from 'lucide-react';
+import { Download, FileText, FolderOpen, Square, X, Sparkles, RotateCcw } from 'lucide-react';
 import TaskRerunPanel from './TaskRerunPanel';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
+import { exportTaskResult } from '../shared/taskResultDelivery.js';
 
 export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel, onOpenPath, onRerun, onCompareParent, onOpenAnalysis }) {
   useLocale();
@@ -12,6 +13,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
   const [rerunOpen, setRerunOpen] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState('');
+  const [exporting, setExporting] = useState(false), [delivery, setDelivery] = useState(null);
   const isDark = isDarkTheme(theme);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -39,6 +41,17 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
     } catch (failure) { setHandoffError(failure.message); }
     finally { setHandoffBusy(false); }
   }
+  async function exportRun() {
+    if (exporting) return;
+    setExporting(true); setDelivery(null);
+    try {
+      const result = await exportTaskResult(task.id, window.electronAPI);
+      if (result?.cancelled) return;
+      if (!result?.ok) throw new Error(result?.error || tr('证据包导出失败'));
+      setDelivery({ path: result.path, message: tr('本次运行证据包已导出，原始文件保持不变。') });
+    } catch (failure) { setDelivery({ error: failure.message }); }
+    finally { setExporting(false); }
+  }
   return createPortal(
     <dialog
       ref={dialogRef}
@@ -58,6 +71,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {task.analysisOrigin && <details className="rounded-lg border border-current/10 p-3 text-sm"><summary className="cursor-pointer font-medium">{tr('原分析上下文（不是已验证结论）：')}</summary><p className="mt-2 whitespace-pre-wrap break-words">{task.analysisOrigin.question}</p><p className="mt-2 whitespace-pre-wrap break-words opacity-70">{task.analysisOrigin.finding?.detail || task.analysisOrigin.summary}</p></details>}
           {rerunOpen && <TaskRerunPanel key={task.id} taskId={task.id} onStarted={onRerun} />}
           {handoffError && <p role="alert" className="text-sm text-red-500">{handoffError}</p>}
+          {delivery && <div role={delivery.error ? 'alert' : 'status'} className={`rounded-lg border border-current/10 p-3 text-sm ${delivery.error ? 'text-red-500' : 'text-emerald-500'}`}><p>{delivery.error || delivery.message}</p>{delivery.path && <button type="button" onClick={() => onOpenPath(delivery.path)} className="mt-2 hover:underline">{tr('打开已导出的证据包')}</button>}{delivery.error && <button type="button" disabled={exporting} onClick={exportRun} className="mt-2 hover:underline disabled:opacity-40">{tr('重试导出')}</button>}</div>}
           {task.error && <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500 whitespace-pre-wrap break-words">{tr(task.error)}</div>}
           {task.stressSummary?.reason && task.stressSummary.reason !== task.error && <p className="text-sm text-amber-500">{task.stressSummary.reason}</p>}
           <section>
@@ -90,6 +104,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {task.artifactDir && <p className={`text-xs font-mono break-all ${muted}`}>{task.artifactDir}</p>}
         </div>
         <footer className="flex flex-wrap gap-2 border-t border-current/10 p-4">
+          {!running && <button type="button" disabled={exporting} onClick={exportRun} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Download size={15} />{exporting ? tr('正在导出…') : tr('导出本次证据包')}</button>}
           {canOpenOrigin && onOpenAnalysis && <button type="button" onClick={() => onOpenAnalysis(origin)} className={`rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>{tr('查看原分析')}</button>}
           {!running && task.mode === 'replay' && task.parentTaskId && onCompareParent && <button type="button" onClick={() => onCompareParent(task)} className={`rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>{tr('与原失败运行比较')}</button>}
           <button type="button" disabled={handoffBusy} onClick={analyzeRun} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Sparkles size={15} />{tr('分析本次运行')}</button>

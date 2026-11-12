@@ -1183,5 +1183,11 @@
   "自动压缩阈值（%）需要 {0}–{1} 的整数": "Auto-compaction threshold (%) requires an integer from {0} to {1}",
   "自动压缩 Token 阈值需要 {0}–{1} 的整数": "Auto-compaction token threshold requires an integer from {0} to {1}",
   "数值需要 {0}–{1} 的整数": "The value requires an integer from {0} to {1}",
-  "此处的供应商与模型配置仅用于外部 AI 工具，不影响卓控台内置 AI。": "Provider and model settings here apply only to external AI tools, not to Veylo’s built-in AI."
+  "此处的供应商与模型配置仅用于外部 AI 工具，不影响卓控台内置 AI。": "Provider and model settings here apply only to external AI tools, not to Veylo’s built-in AI.",
+  "SSH 正在连接，完成后仅恢复配置选择，不会另建连接。": "SSH is connecting. Only the profile selection will be restored afterward; no additional connection will be created.",
+  "工作集中的 SSH 配置已不存在，请重新选择配置；未连接其他主机。": "The workset's SSH profile no longer exists. Select a profile again; no other host was connected.",
+  "已选中工作集的 SSH 配置，未自动连接。": "The workset's SSH profile is selected. No automatic connection was made.",
+  "搜索 SSH 名称或主机": "Search SSH name or host",
+  "最近": "Recent",
+  "没有匹配的 SSH 连接": "No matching SSH connections"
 }

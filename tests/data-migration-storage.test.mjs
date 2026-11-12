@@ -5,6 +5,8 @@ import { PORTABLE_PREF_KEYS, collectMigrationPreferences, applyMigrationPreferen
 import { PINNED_DEVICES_KEY, readPinnedDevices } from '../src/shared/deviceDiscovery.js';
 import { SERIAL_PREFS_KEY, SERIAL_HISTORY_KEY, defaultSerialPreferences, readSerialPreferences } from '../src/shared/serialSettings.js';
 import { SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, defaultDeviceShortcuts, readDeviceShortcuts } from '../src/shared/deviceNavigationShortcuts.js';
+import { UI_WORKSPACE_KEY, defaultUiWorkspace } from '../src/shared/workbenchUiState.js';
+import { SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, defaultSshConnectionMemory, defaultReproductionConfig, revalidateReproductionConfig } from '../src/shared/connectionPreferences.js';
 const require = createRequire(import.meta.url);
 const backend = require('../electron/lib/data-migration-policy.cjs');
 
@@ -16,6 +18,21 @@ function storage(initial = {}) {
 
 test('renderer and backend preference allowlists agree exactly', () => {
   assert.deepEqual(PORTABLE_PREF_KEYS, backend.PORTABLE_PREF_KEYS);
+});
+
+test('4.7.21 portable metadata restores config only and never exports private terminal drafts or AI basket content', () => {
+  const ui = { ...defaultUiWorkspace(), density: 'compact', expandedDeviceIds: ['USB-Exact'] };
+  const ssh = { ...defaultSshConnectionMemory(), profileId: '10000000-0000-4000-8000-000000000001' };
+  const reproduction = { ...defaultReproductionConfig(), deviceId: 'USB-Exact', selection: { video: false, logs: true, performance: false, serial: [{ workspace: 'terminal', sessionId: 'expired-serial' }], ssh: [] } };
+  const source = storage({ [UI_WORKSPACE_KEY]: JSON.stringify(ui), [SSH_CONNECTION_MEMORY_KEY]: JSON.stringify(ssh), [REPRODUCTION_CONFIG_KEY]: JSON.stringify(reproduction),
+    'adb-workbench.device-working-state.v1': '{private-draft}', activeDeviceId: 'do-not-migrate' });
+  const transferred = collectMigrationPreferences(source), target = storage();
+  assert.deepEqual(Object.keys(transferred).sort(), [UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY].sort());
+  applyMigrationPreferences(backend.normalizePreferences(transferred), target);
+  assert.deepEqual(JSON.parse(target.getItem(UI_WORKSPACE_KEY)), ui); assert.deepEqual(JSON.parse(target.getItem(SSH_CONNECTION_MEMORY_KEY)), ssh);
+  assert.deepEqual(revalidateReproductionConfig(JSON.parse(target.getItem(REPRODUCTION_CONFIG_KEY)), [], { serial: [], ssh: [] }).selection.serial, []);
+  assert.equal(target.getItem('activeDeviceId'), null); assert.equal(target.getItem('adb-workbench.device-working-state.v1'), null);
+  assert.equal(backend.isAllowedFile('ai-workspace-evidence-basket.json'), false);
 });
 
 test('Harmony shortcuts migrate through the real renderer allowlist without changing Android controls', () => {

@@ -2895,5 +2895,6 @@
   "设备拒绝了控制权限，请检查设备调试授权。": "The device denied control permission. Check its debugging authorization.",
   "设备 UITest 未能完成此操作，请查看应用日志。": "The device's UITest could not complete this action. Check the application logs.",
   "鸿蒙输入参数无效，未发送控制命令。": "Invalid Harmony input parameters. No control command was sent.",
-  "应用日志支持记录投屏控制阶段、结果与失败原因": "Application logs now include mirroring control stages, results, and failure reasons"
+  "应用日志支持记录投屏控制阶段、结果与失败原因": "Application logs now include mirroring control stages, results, and failure reasons",
+  "生成草案仅含观察步骤，需补充并核对交互与断言。": "The generated draft contains only observation steps. Add and review interactions and assertions."
 }

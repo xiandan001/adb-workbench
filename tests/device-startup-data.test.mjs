@@ -27,7 +27,7 @@ traverse(ast, {
   },
 });
 
-async function fetchState(api, previous = [], active = '') {
+async function fetchState(api, previous = [], active = '', worksetTarget = '') {
   assert.ok(fetchCallback);
   const state = { devices: previous, active, error: '', loading: false };
   const callback = runInNewContext(`(${source.slice(fetchCallback.start, fetchCallback.end)})`, {
@@ -37,6 +37,7 @@ async function fetchState(api, previous = [], active = '') {
     setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); },
     resolveActiveDeviceId,
+    worksetTargetRef: { current: worksetTarget },
     setError: value => { state.error = value; },
   });
   await callback();
@@ -82,6 +83,16 @@ test('actual App refresh preserves manual online choice and clears when all devi
   assert.equal(disconnected.active, '');
   assert.equal(disconnected.devices.length, 0);
   assert.equal(disconnected.error, '');
+});
+
+test('explicit workset restore never silently replaces its offline target with another online device', async () => {
+  const online = [{ id: 'other-android', status: 'device' }];
+  const waiting = await fetchState({ getDevices: async () => online }, [], '', 'hdc:workset-original');
+  assert.equal(waiting.active, ''); assert.deepEqual(waiting.devices, online);
+  const returned = await fetchState({ getDevices: async () => [...online, { id: 'hdc:workset-original', status: 'device' }] }, online, '', 'hdc:workset-original');
+  assert.equal(returned.active, 'hdc:workset-original');
+  assert.doesNotMatch(source, /onActiveDeviceChange=\{setActiveDeviceId\}/);
+  assert.match(source, /onActiveDeviceChange=\{chooseDevice\}/);
 });
 
 test('startup clears an absent remembered selection after successful discovery and selects a later connection', async () => {

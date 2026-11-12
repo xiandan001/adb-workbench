@@ -233,3 +233,28 @@ test('restore default changes the draft only; restoring shared removes current o
   assert.equal(walk(c.draw(), node => node.type === c.sandbox.DeviceShortcutEditor).length, 0);
   assert.ok(walk(c.draw(), node => node.props.role === 'alert').length); assert.deepEqual(c.toasts, []); assert.deepEqual(corrupt.commands, []); c.unmount();
 });
+
+test('installed-app loading retries inline and preserves the shortcut draft, selected slot and application query', async () => {
+  const env = environment(); let calls = 0;
+  env.browser.electronAPI = { packageList: async ({ deviceId }) => {
+    assert.equal(deviceId, 'USB-A'); calls++;
+    return calls === 1 ? { ok: false, error: 'fixture app list unavailable' }
+      : { ok: true, packages: [{ packageName: 'fixture.camera', label: 'Camera fixture' }] };
+  } };
+  const h = await controls('USB-A', env), e = await harness('DeviceShortcutEditor', { ...open(h).props, isOnline: true }, env);
+  let tree = e.draw(); walk(tree, node => node.type === 'dialog')[0].props.ref.current = { showModal() {}, close() {} };
+  walk(tree, node => node.type === e.sandbox.SelectMenu && node.props.id.endsWith('-type'))[0].props.onChange('app');
+  tree = e.draw();
+  walk(tree, node => node.type === 'input' && node.props.maxLength === 16)[0].props.onChange({ target: { value: 'Keep app draft' } });
+  walk(tree, node => node.type === 'input' && node.props.placeholder === tr('输入应用名称或包名'))[0].props.onChange({ target: { value: 'Camera' } });
+  await e.effects(); for (let index = 0; index < 5; index++) await Promise.resolve();
+  tree = e.draw(); assert.match(text(tree), /fixture app list unavailable/); assert.equal(calls, 1);
+  const retry = button(tree, '重试读取应用'); assert.equal(retry.props.disabled, false); retry.props.onClick();
+  e.draw(); await e.effects(); for (let index = 0; index < 5; index++) await Promise.resolve();
+  tree = e.draw(); assert.equal(calls, 2); assert.doesNotMatch(text(tree), /fixture app list unavailable/);
+  assert.equal(walk(tree, node => node.type === 'input' && node.props.maxLength === 16)[0].props.value, 'Keep app draft');
+  assert.equal(walk(tree, node => node.type === 'input' && node.props.placeholder === tr('输入应用名称或包名'))[0].props.value, 'Camera');
+  assert.equal(walk(tree, node => node.type === e.sandbox.SelectMenu && node.props.id.endsWith('-app'))[0].props.options[0].value, 'fixture.camera');
+  assert.equal(walk(tree, node => node.type === 'button' && node.props['aria-pressed'] === true).length, 1);
+  assert.deepEqual(env.writes, []); assert.deepEqual(env.commands, []); e.unmount(); h.unmount();
+});

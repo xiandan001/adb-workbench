@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { defaultSerialPreferences, normalizePreferences, readSerialPreferences, saveSerialPreferences } from '../src/shared/serialSettings.js';
-import { addSerialScheme, applySerialScheme, removeSerialScheme } from '../src/shared/serialSchemes.js';
+import { addSerialScheme, applySerialScheme, removeSerialScheme, updateSerialScheme } from '../src/shared/serialSchemes.js';
 import { resolveSshReconnectProfile } from '../src/shared/sshReconnect.js';
 import { subscribeConnectionStatus } from '../src/shared/connectionStatus.js';
 import { collectMigrationPreferences, applyMigrationPreferences } from '../src/shared/dataMigrationStorage.js';
@@ -52,6 +52,16 @@ test('serial scheme application changes only the selected workspace and never bi
   assert.throws(() => applySerialScheme(preferences, 'rs', 'rs232', { status: 'disconnected', pending: true }), /先断开/);
   assert.equal(removeSerialScheme(preferences, 'rs', 'rs232').schemes.length, 1);
   assert.deepEqual(removeSerialScheme(preferences, 'rs', 'terminal').schemes, preferences.schemes);
+});
+
+test('explicit serial scheme update replaces parameters under the same ID without touching another scheme or current settings', () => {
+  const preferences = savedSchemes(); const before = structuredClone(preferences);
+  const next = updateSerialScheme(preferences, { id: 'rs', workspace: 'rs232', config: { ...preferences.config, baudRate: 57600 }, terminalEnter: 'crlf' });
+  assert.equal(next.schemes.length, 2); assert.equal(next.schemes[0].id, 'rs'); assert.equal(next.schemes[0].name, '板卡 A');
+  assert.equal(next.schemes[0].config.baudRate, 57600); assert.deepEqual(next.schemes[1], before.schemes[1]);
+  assert.deepEqual(next.config, before.config); assert.deepEqual(next.terminalConfig, before.terminalConfig); assert.deepEqual(preferences, before);
+  assert.throws(() => updateSerialScheme(preferences, { id: 'rs', workspace: 'terminal', config: preferences.config }), /另一工作区/);
+  assert.throws(() => updateSerialScheme(preferences, { id: 'missing', workspace: 'rs232', config: preferences.config }), /另一工作区/);
 });
 
 test('both serial schemas reject excessive, ambiguous, executable and malformed scheme data without truncation', () => {

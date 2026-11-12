@@ -206,7 +206,8 @@ test('logger context changes never start capture or AI; session restore uses loc
   };
   const module = { exports: {} };
   const sourcePath = path.join(__dirname, '../electron/lib/log-analyzer.cjs');
-  vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8'), {
+  let worksetPolicy;
+  const sandbox = vm.createContext({
     module, exports: module.exports, __dirname: path.dirname(sourcePath), console, Buffer, setTimeout, clearTimeout,
     require: name => {
       if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
@@ -216,9 +217,18 @@ test('logger context changes never start capture or AI; session restore uses loc
       if (name === './ai-analyze.cjs') return { hasActiveAiRequest: () => false, clearAiConversation: () => { aiClears += 1; } };
       if (name === './log-sessions.cjs') return require('../electron/lib/log-sessions.cjs');
       if (name === './log-capture-buffer.cjs') return require('../electron/lib/log-capture-buffer.cjs');
+      if (name === './workbench-worksets-policy.cjs') {
+        if (!worksetPolicy) {
+          const filename = path.join(path.dirname(sourcePath), 'workbench-worksets-policy.cjs'), localModule = { exports: {} };
+          vm.compileFunction(fs.readFileSync(filename, 'utf8'), ['module', 'exports', 'require'], { parsingContext: sandbox, filename })(localModule, localModule.exports, createRequire(filename));
+          worksetPolicy = localModule.exports;
+        }
+        return worksetPolicy;
+      }
       return createRequire(sourcePath)(name);
     }
-  }, { filename: sourcePath });
+  });
+  vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), sandbox, { filename: sourcePath });
   module.exports.register({ handle: (channel, action) => handlers.set(channel, action) });
   await handlers.get('logAnalyzer:open')({}, { deviceId: 'device-1', packageName: 'com.example' });
   const context = await handlers.get('logAnalyzer:getContext')();

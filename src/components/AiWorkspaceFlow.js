@@ -29,7 +29,7 @@ export function workspacePrimaryBlock(current, { devices = [], sources = [], loa
     if (current.checks.some(id => id.startsWith('app_')) && !current.diagnostic.packageName.trim()) return 'package';
   } else {
     if (current.sourceIds.some(id => !sources.some(source => source.id === id))) return 'stale';
-    if (!current.sourceIds.length && !current.text.trim() && !current.contextRef && !current.handoffId) return 'source';
+    if (!current.sourceIds.length && !current.text.trim() && !current.contextRef && !current.handoffId && !current.basketItems?.length) return 'source';
   }
   return '';
 }

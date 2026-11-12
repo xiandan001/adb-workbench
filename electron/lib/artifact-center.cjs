@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { exportArtifact } = require('./artifact-export.cjs');
 const { artifactDetails, previewArtifact } = require('./artifact-preview.cjs');
+const { prepareTaskComparison, exportTaskComparison } = require('./artifact-comparison.cjs');
 
 const SETTINGS_FILE = 'settings.json';
 const QUALITY_CENTER_DIR = 'quality-center';
@@ -61,6 +62,23 @@ function register(ipcMain) {
     } catch (error) {
       return { ok: false, error: error.message || tr("证据包导出失败") };
     }
+  });
+
+  ipcMain.handle('artifacts:exportComparison', async (event, args) => {
+    try {
+      const context = require('./app-context.cjs'), owner = context.getMainWindow();
+      const owns = () => owner && !owner.isDestroyed() && owner.webContents.mainFrame && context.getMainWindow() === owner && event?.sender === owner.webContents && event.senderFrame === owner.webContents.mainFrame;
+      if (!owns()) return { ok: false, code: 'ARTIFACT_EXPORT_OWNER', error: tr('仅允许在应用主窗口导出对比证据。') };
+      if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 2 || !Object.hasOwn(args, 'beforeId') || !Object.hasOwn(args, 'afterId') || typeof args.beforeId !== 'string' || typeof args.afterId !== 'string') throw new Error(tr('请选择两份不同的任务运行产物。'));
+      const items = await listArtifacts();
+      const before = items.find(item => item.id === args.beforeId), after = items.find(item => item.id === args.afterId);
+      await prepareTaskComparison(before, after);
+      const options = { title: tr('导出对比证据'), defaultPath: path.join(app.getPath('downloads'), 'task-comparison-evidence.zip'), filters: [{ name: tr('ZIP 证据包'), extensions: ['zip'] }] };
+      const result = await dialog.showSaveDialog(owner, options);
+      if (result.canceled || !result.filePath) return { ok: true, cancelled: true };
+      if (!owns()) return { ok: false, code: 'ARTIFACT_EXPORT_OWNER', error: tr('仅允许在应用主窗口导出对比证据。') };
+      return { ok: true, ...await exportTaskComparison(await prepareTaskComparison(before, after), result.filePath) };
+    } catch (error) { return { ok: false, error: error.message || tr('证据包导出失败') }; }
   });
 }
 

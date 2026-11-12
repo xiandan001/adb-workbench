@@ -27,6 +27,7 @@ const aiWorkspace = require('./lib/ai-workspace.cjs');
 const aiHandoff = require('./lib/ai-analysis-handoff.cjs');
 const aiOutbound = require('./lib/ai-outbound-transport.cjs');
 const workbenchActivity = require('./lib/workbench-activity.cjs');
+const workbenchWorksets = require('./lib/workbench-worksets.cjs');
 const reproduction = require('./lib/reproduction.cjs');
 const smartSearch = require('./lib/smart-search.cjs');
 const vip = require('./lib/vip.cjs');
@@ -230,6 +231,7 @@ app.whenReady().then(async () => {
   aiHandoff.register(diagnosticIpc);
   aiOutbound.register(diagnosticIpc);
   workbenchActivity.register(diagnosticIpc);
+  workbenchWorksets.register(diagnosticIpc);
   reproduction.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
   regressionReport.register(diagnosticIpc);

@@ -21,6 +21,7 @@ export default function DeviceShortcutEditor({ config, deviceId, sourceDescripti
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [packageError, setPackageError] = useState('');
+  const [packageRetry, setPackageRetry] = useState(0);
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [advanced, setAdvanced] = useState(config.slots.some(slot => slot.type === 'shell'));
@@ -53,7 +54,7 @@ export default function DeviceShortcutEditor({ config, deviceId, sourceDescripti
       if (alive) setPackages(result.packages || []);
     }).catch(error => { if (alive) setPackageError(error.message); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [deviceId, isOnline]);
+  }, [deviceId, isOnline, packageRetry]);
 
   const update = changes => {
     setError('');
@@ -122,7 +123,9 @@ export default function DeviceShortcutEditor({ config, deviceId, sourceDescripti
             onChange={packageName => update({ packageName, label: (appName(packages.find(item => item.packageName === packageName)) || packageName.split('.').at(-1)).slice(0, 16) })} />
           {slot.packageName && <p className={`break-all ${muted}`}>{tr("已选：{0}", { 0: slot.packageName })}</p>}
           {!isOnline && <p className="text-amber-500">{tr("请先连接当前设备再选择应用。")}</p>}
-          {packageError && <p role="alert" className="text-red-500">{tr("{0}。关闭后重试。", { 0: packageError })}</p>}
+          {packageError && <div role="alert" className="flex flex-wrap items-center gap-2 text-red-500"><p>{packageError}</p>
+            <button type="button" onClick={() => setPackageRetry(current => current + 1)} disabled={!isOnline || loading || Boolean(pending)}
+              className="underline underline-offset-2 disabled:opacity-40">{tr('重试读取应用')}</button></div>}
         </div>}
         {slot.type === 'shell' && <label className="block space-y-2 text-xs">{harmony ? tr('HDC shell 命令') : tr("ADB shell 命令")}<input value={slot.command} maxLength={2000} onChange={event => update({ command: event.target.value })} placeholder={harmony ? tr('例如 {0}', { 0: 'uitest uiInput keyEvent Back' }) : tr("例如 input keyevent KEYCODE_BACK")} className={`${field} font-mono`} />
           <span className={`block leading-5 ${muted}`}>{harmony ? tr('无需填写 hdc shell。仅一条命令，不支持管道、重定向或命令拼接。每次点击和测试均需确认完整命令，名称不能代替风险判断。') : tr("无需填写 adb shell。仅一条命令，不支持管道、重定向或命令拼接。每次点击和测试均需确认完整命令，名称不能代替风险判断。")}</span></label>}

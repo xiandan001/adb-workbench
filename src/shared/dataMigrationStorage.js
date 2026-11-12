@@ -4,12 +4,15 @@ import { normalizePinnedDevices, PINNED_DEVICES_KEY } from './deviceDiscovery.js
 import { normalizePreferences as normalizeSerialPreferences, SERIAL_PREFS_KEY } from './serialSettings.js';
 import { normalizeSerialTerminalStyle, SERIAL_TERMINAL_STYLE_KEY } from './serialTerminalStyle.js';
 import { normalizeUiMotionPreferences, UI_MOTION_PREFS_KEY } from './uiMotionPreferences.js';
+import { normalizeUiWorkspace, UI_WORKSPACE_KEY } from './workbenchUiState.js';
+import { normalizeSshConnectionMemory, normalizeReproductionConfig, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY } from './connectionPreferences.js';
 
 // Keep this list in sync with the main-process migration policy (covered by a contract test).
 export const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
-  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY
+  'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY,
+  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY
 ]);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -29,6 +32,8 @@ function parsePreference(key, raw) {
   }
   if (key === SERIAL_TERMINAL_STYLE_KEY && raw.length > 64) throw new Error(tr("串口终端样式数据过长"));
   if (key === UI_MOTION_PREFS_KEY && raw.length > 256) throw new Error(tr("启动与动效偏好数据过长"));
+  if ([SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY].includes(key) && new TextEncoder().encode(raw).byteLength > 16384) throw new Error(tr('连接与采证偏好数据异常，原内容已保留。'));
+  if (key === UI_WORKSPACE_KEY && new TextEncoder().encode(raw).byteLength > 128 * 1024) throw new Error(tr('界面现场设置无效，原数据已保留。'));
   if (key === DEVICE_SHORTCUTS_KEY) return parseDeviceShortcutOverrides(raw);
   const value = JSON.parse(raw);
   assertSafeValue(value);
@@ -37,6 +42,9 @@ function parsePreference(key, raw) {
   if (key === SERIAL_PREFS_KEY) return normalizeSerialPreferences(value);
   if (key === SERIAL_TERMINAL_STYLE_KEY) return normalizeSerialTerminalStyle(value);
   if (key === UI_MOTION_PREFS_KEY) return normalizeUiMotionPreferences(value);
+  if (key === UI_WORKSPACE_KEY) return normalizeUiWorkspace(value);
+  if (key === SSH_CONNECTION_MEMORY_KEY) return normalizeSshConnectionMemory(value);
+  if (key === REPRODUCTION_CONFIG_KEY) return normalizeReproductionConfig(value);
   if (['autoUpdateEnabled', 'packageSearchVisible'].includes(key)) {
     if (typeof value !== 'boolean') throw new Error(tr("偏好开关无效"));
   } else if (['adb-workbench.favorite-packages.v1', 'logFilterPresets.v1'].includes(key)) {

@@ -4,6 +4,8 @@ import { formatDateTime, tr, useLocale } from '../shared/i18n';
 import AiWorkspaceEvidence, { AiWorkspaceUsage } from './AiWorkspaceEvidence';
 import { workspaceCitation, workspacePreviewFresh } from './AiWorkspaceState';
 import AiWorkspaceHandoff from './AiWorkspaceHandoff';
+import AiWorkspaceTaskEditor from './AiWorkspaceTaskEditor';
+import { editableTask } from './AiWorkspaceTaskEditing';
 
 function ResultList({ title, items, theme }) {
   if (!items?.length) return null;
@@ -54,25 +56,10 @@ export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onC
   </section>;
 }
 
-function stepDetails(step) {
-  if (step.targetId) return tr('已选控件：{0}', { 0: step.targetId });
-  switch (step.type) {
-    case 'tap': return tr('坐标：{0}, {1}', { 0: step.x, 1: step.y });
-    case 'longPress': return tr('坐标：{0}, {1} · 时长 {2} ms', { 0: step.x, 1: step.y, 2: step.durationMs });
-    case 'swipe': return tr('从 {0}, {1} 滑到 {2}, {3} · {4} ms', { 0: step.x, 1: step.y, 2: step.endX, 3: step.endY, 4: step.durationMs });
-    case 'input': return tr('输入：{0}', { 0: step.text });
-    case 'keyevent': return tr('按键：{0}', { 0: step.keyCode });
-    case 'waitText': case 'assertText': return tr('文本：{0} · 超时 {1} ms', { 0: step.text, 1: step.timeoutMs });
-    case 'delay': return tr('等待 {0} ms', { 0: step.durationMs });
-    case 'screenshot': return tr('保存当前设备画面');
-    case 'perfSnapshot': return tr('采集一次性能快照');
-    default: return '';
-  }
-}
-
-export function AiWorkspaceTask({ draft, busy, onSave, usage, theme }) {
+export function AiWorkspaceTask({ draft, editedDraft, onEditDraft, busy, onSave, usage, theme }) {
   useLocale();
   const [expiredId, setExpiredId] = useState('');
+  const edited = editedDraft || editableTask(draft);
   useEffect(() => {
     const expiresAt = typeof draft.expiresAt === 'string' ? Date.parse(draft.expiresAt) : draft.expiresAt;
     if (!Number.isFinite(expiresAt)) return;
@@ -80,22 +67,19 @@ export function AiWorkspaceTask({ draft, busy, onSave, usage, theme }) {
     return () => clearTimeout(timer);
   }, [draft.id, draft.expiresAt]);
   const fresh = expiredId !== draft.id && workspacePreviewFresh(draft);
-  const observationOnly = draft.steps.every(step => ['screenshot', 'perfSnapshot', 'delay'].includes(step.type));
+  const observationOnly = edited.steps.every(step => ['screenshot', 'perfSnapshot', 'delay'].includes(step.type));
+  const locallyEdited = JSON.stringify(edited) !== JSON.stringify(editableTask(draft));
   return <section aria-label={tr('测试任务草案')} className={`space-y-4 rounded-xl border p-4 ${theme.card}`}>
     <div className="flex items-center gap-2"><FileCheck2 size={19} className="text-emerald-500" /><h3 className="text-sm font-semibold">{tr('测试任务草案')}</h3></div>
-    <div><h4 className="text-base font-semibold">{draft.name}</h4><p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-6 ${theme.textMuted}`}>{draft.description}</p></div>
     {draft.targetPlatform === 'harmony' && <p className="rounded-lg border border-cyan-500/30 p-3 text-xs">{tr('鸿蒙原生任务 · 目标设备：{0}', { 0: draft.deviceId })}</p>}
     {draft.targets?.length > 0 && <><AiWorkspaceHandoff targets={draft.targets} theme={theme} /><div className="space-y-1">{draft.targets.map(target => <p key={target.id} className={`break-all text-[11px] leading-5 ${theme.textMuted}`}>{target.id}: {Object.entries(target.selector || {}).map(([key, value]) => `${key}=${value}`).join(', ')}</p>)}</div></>}
     <p className={`text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600 dark:text-amber-400'}`}>{fresh ? tr('草案有效至 {0}', { 0: formatDateTime(draft.expiresAt) }) : tr('草案已过期，不能保存；请保留目标并手动重新生成。')}</p>
     {(observationOnly || draft.missingInformation?.length > 0) && <div className="space-y-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5">
-      {observationOnly && <p>{tr('此草案仅包含观察步骤，尚不能证明交互目标通过。可保存后在任务中心补充。')}</p>}
-      <ResultList title={tr('仍需补充的信息')} items={draft.missingInformation} theme={theme} />
+      {observationOnly && <p>{tr('此草案仅包含观察步骤，尚不能证明交互目标通过。可在下方补充交互与断言。')}</p>}
+      <ResultList title={locallyEdited ? tr('生成时的补充提示（请按当前编辑结果重新核对）') : tr('仍需补充的信息')} items={draft.missingInformation} theme={theme} />
     </div>}
-    <ol className="space-y-2">{draft.steps.map((step, index) => <li key={index} className={`flex items-start gap-3 rounded-lg border p-3 ${theme.input}`}>
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-xs font-semibold text-emerald-500">{index + 1}</span>
-      <div className="min-w-0"><p className="text-sm font-medium">{step.label}</p><p className={`mt-1 whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{stepDetails(step)}</p></div>
-    </li>)}</ol>
-    <p className={`rounded-lg bg-amber-500/5 p-3 text-xs leading-5 ${theme.textMuted}`}>{tr('请核对坐标、输入内容和验证条件。保存后可在任务中心编辑，并明确选择设备执行；不会自动运行。')}</p>
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-400/15 pt-3"><AiWorkspaceUsage usage={usage} theme={theme} /><button type="button" onClick={onSave} disabled={Boolean(busy) || !fresh} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Save size={15} />{tr('保存到任务中心')}</button></div>
+    <AiWorkspaceTaskEditor value={edited} onChange={onEditDraft} targets={draft.targets} platform={draft.targetPlatform} disabled={Boolean(busy) || !fresh} theme={theme} />
+    <p className={`rounded-lg bg-amber-500/5 p-3 text-xs leading-5 ${theme.textMuted}`}>{tr('请核对坐标、输入内容和验证条件；保存后仍需选择设备并明确执行，不会自动运行。')}</p>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-400/15 pt-3"><AiWorkspaceUsage usage={usage} theme={theme} /><button type="button" onClick={() => onSave(edited)} disabled={Boolean(busy) || !fresh} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Save size={15} />{tr('保存到任务中心')}</button></div>
   </section>;
 }

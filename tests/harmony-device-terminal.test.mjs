@@ -12,6 +12,17 @@ const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
 const native = ['bm dump -a', 'param get const.ohos.fullname', 'hidumper -s 3302 -a -i', 'cat /proc/meminfo', 'ls -la /data/'];
 const android = ['pm list packages', 'getprop ro.build.version', 'dumpsys battery', 'cat /proc/meminfo', 'ls -la /data/'];
 const model = () => import('../src/shared/deviceTerminal.js');
+let appExecuteExpression;
+function actualAppExecute(api) {
+  if (!appExecuteExpression) {
+    const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'); let target;
+    traverse(parse(appSource, { sourceType: 'module', plugins: ['jsx'] }), {
+      VariableDeclarator({ node }) { if (node.id.name === 'handleExecuteCommand') target = node.init; }
+    });
+    assert.ok(target, 'actual App terminal handler'); appExecuteExpression = appSource.slice(target.start, target.end);
+  }
+  return runInNewContext(`(${appExecuteExpression})`, { tr, window: { electronAPI: api } });
+}
 function expression(name, context) {
   let target;
   traverse(ast, { VariableDeclarator({ node }) { if (node.id.name === name) target = node.init; } });
@@ -31,8 +42,9 @@ async function fixture(deviceId = 'hdc:fixture') {
   const state = { rows: [], calls: [], history: [], text: '' };
   const context = { ...helpers, tr, displayDeviceId, device: { id: deviceId }, harmony: deviceId.startsWith('hdc:'), isOnline: true,
     terminalCommand: '', isExecuting: false, suMode: false, suStrategy: 'none',
-    setIsExecuting() {}, setShowHistory() {}, setHistoryIndex() {},
-    setTerminalCommand: value => { state.text = value; context.terminalCommand = value; },
+    setIsExecuting(value) { context.isExecuting = value; }, setShowHistory() {}, setHistoryIndex() {},
+    working: { beginExecution() { if (context.isExecuting) return false; context.isExecuting = true; return true; } },
+    setTerminalCommand: value => { state.text = typeof value === 'function' ? value(context.terminalCommand) : value; context.terminalCommand = state.text; },
     setTerminalOutput: update => { state.rows = update(state.rows); },
     onSaveTerminalCommand: value => state.history.push(value),
     onExecuteCommand: async (deviceId, command) => { state.calls.push({ deviceId, command }); return 'synthetic output'; }
@@ -125,4 +137,47 @@ test('all five locales change terminal copy without changing commands or hiding 
     }
     assert.equal(new Set(seen).size, 5);
   } finally { await setLanguage('zh-CN'); }
+});
+
+test('failed terminal requests restore the failed draft without replaying or replacing a newer draft', async () => {
+  for (const newerDraft of ['', 'a different unsent draft']) {
+    const h = await fixture('android'); h.context.terminalCommand = 'echo failed fixture';
+    h.context.onExecuteCommand = async () => { h.context.terminalCommand = newerDraft; throw new Error('fixture command failed'); };
+    await h.submit(); assert.equal(h.state.text, newerDraft || 'echo failed fixture');
+    assert.equal(h.context.isExecuting, false); assert.equal(h.state.rows.at(-1).type, 'error'); assert.match(h.state.rows.at(-1).text, /fixture command failed/);
+    assert.equal(h.state.history.length, 1, 'the request is never automatically retried');
+  }
+});
+
+test('actual App and Card handlers preserve failed, timed-out, rejected and cancelled requests without automatic replay', async () => {
+  const scenarios = [
+    { name: 'resolved failure', result: { success: false, error: 'fixture offline' }, error: 'fixture offline' },
+    { name: 'timeout with partial output', result: { success: false, timedOut: true, error: 'fixture timeout', output: 'fixture timeout partial output' }, error: 'fixture timeout' },
+    { name: 'IPC rejection', rejection: new Error('fixture transport rejected'), error: 'fixture transport rejected' },
+    { name: 'cancel with partial output', result: { success: false, cancelled: true, output: 'fixture cancelled partial output' }, cancelled: true }
+  ];
+  for (const deviceId of ['android', 'hdc:fixture']) for (const scenario of scenarios) for (const newerDraft of ['', 'newer unsent fixture draft']) {
+    const h = await fixture(deviceId), calls = []; let resolveShell, rejectShell;
+    const shell = new Promise((resolve, reject) => { resolveShell = resolve; rejectShell = reject; });
+    h.context.onExecuteCommand = actualAppExecute({ adbShell: (id, command) => { calls.push({ id, command }); return shell; } });
+    const command = 'echo preserved fixture'; h.context.setTerminalCommand(command);
+    const pending = h.submit();
+    assert.equal(h.context.isExecuting, true, scenario.name); assert.equal(h.state.text, '');
+    assert.deepEqual(calls, [{ id: deviceId, command }]);
+    h.context.setTerminalCommand(newerDraft); await h.submit();
+    assert.equal(calls.length, 1, 'a live request cannot be dispatched twice');
+    if (scenario.rejection) rejectShell(scenario.rejection); else resolveShell(scenario.result);
+    await pending; await Promise.resolve();
+    assert.equal(h.state.text, newerDraft || command, `${deviceId}: ${scenario.name}`);
+    assert.equal(h.context.isExecuting, false); assert.equal(calls.length, 1, 'failure does not automatically replay the command');
+    assert.deepEqual(h.state.history, [command]); assert.equal(h.state.rows.filter(row => row.type === 'command').length, 1);
+    if (scenario.result?.output) assert.ok(h.state.rows.some(row => row.type === 'output' && row.text === scenario.result.output), 'partial output remains visible');
+    if (scenario.cancelled) {
+      assert.equal(h.state.rows.filter(row => row.type === 'error').length, 0);
+      assert.equal(h.state.rows.at(-1).text, tr('命令已中断'));
+    } else {
+      assert.equal(h.state.rows.at(-1).type, 'error');
+      assert.equal(h.state.rows.at(-1).text, tr('命令执行失败: {0}', { 0: scenario.error }));
+    }
+  }
 });

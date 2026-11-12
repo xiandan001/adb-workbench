@@ -1,13 +1,13 @@
 import { useId, useState } from 'react';
 import { Save, Trash2, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
-import { addSerialScheme, applySerialScheme, removeSerialScheme } from '../shared/serialSchemes.js';
+import { addSerialScheme, applySerialScheme, removeSerialScheme, updateSerialScheme } from '../shared/serialSchemes.js';
+import { confirmAppMessage } from '../shared/appMessageDialog.js';
 import SelectMenu from './SelectMenu';
 
-export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, theme, isDark }) {
+export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, selected = '', onSelect, theme, isDark }) {
   useLocale();
   const id = useId();
-  const [selected, setSelected] = useState('');
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -15,7 +15,8 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
   const messages = {
     applied: tr('已套用方案，未连接、未发送；当前 COM 不变'),
     removed: tr('连接方案已删除，当前参数不变'),
-    saved: tr('连接方案已保存，仅保存在本机')
+    saved: tr('连接方案已保存，仅保存在本机'),
+    updated: tr('所选方案已更新，当前 COM 和连接保持不变')
   };
   const schemes = (preferences.schemes || []).filter(item => item.workspace === workspace);
   const locked = pending || !['disconnected', 'error'].includes(status);
@@ -37,17 +38,22 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
     <div className="mt-2 space-y-2">
     <div className="flex flex-wrap items-center gap-2">
       <label htmlFor={id} className="sr-only">{tr('连接方案')}</label>
-      <SelectMenu id={id} value={selected} options={schemes.map(item => ({ value: item.id, label: item.name }))} onChange={setSelected} isDark={isDark} compact placeholder={tr('选择当前工作区的方案')} emptyText={tr('保存当前参数，下次直接套用')} className="min-w-40 flex-1" />
+      <SelectMenu id={id} value={selected} options={schemes.map(item => ({ value: item.id, label: item.name }))} onChange={onSelect} isDark={isDark} compact placeholder={tr('选择当前工作区的方案')} emptyText={tr('保存当前参数，下次直接套用')} className="min-w-40 flex-1" />
       <button type="button" disabled={!selected || locked} onClick={() => run(() => applySerialScheme(preferences, selected, workspace, { status, pending }), 'applied')} className={button}>{tr('套用')}</button>
       <button type="button" onClick={() => { setName((selectedPath || tr('串口')) + ' · ' + config.baudRate); setSaving(true); setStatusMessage(''); setError(''); }} className={button}><Save size={13} />{tr('保存当前参数')}</button>
+      <button type="button" disabled={!selected || pending} className={button} onClick={async () => {
+        const scheme = schemes.find(item => item.id === selected);
+        if (!scheme || !await confirmAppMessage({ type: 'warning', title: tr('更新所选方案'), message: tr('用当前参数替换「{0}」？', { 0: scheme.name }), detail: tr('保留方案名称和 ID；不会连接、发送或改变当前 COM。'), confirmLabel: tr('更新方案') })) return;
+        run(() => updateSerialScheme(preferences, { id: scheme.id, workspace, config, terminalEnter }), 'updated');
+      }}>{tr('更新所选方案')}</button>
       <button type="button" aria-label={tr('删除所选连接方案')} title={tr('仅删除方案，不断开连接、不删除记录')} disabled={!selected} onClick={() => {
-        if (run(() => removeSerialScheme(preferences, selected, workspace), 'removed')) setSelected('');
+        if (run(() => removeSerialScheme(preferences, selected, workspace), 'removed')) onSelect?.('');
       }} className={button}><Trash2 size={13} /></button>
     </div>
     {saving && <form className="flex items-center gap-2" onSubmit={event => {
       event.preventDefault();
       const schemeId = crypto.randomUUID();
-      if (run(() => addSerialScheme(preferences, { id: schemeId, name, workspace, config, terminalEnter }), 'saved')) { setSelected(schemeId); setSaving(false); }
+      if (run(() => addSerialScheme(preferences, { id: schemeId, name, workspace, config, terminalEnter }), 'saved')) { onSelect?.(schemeId); setSaving(false); }
     }}>
       <input autoFocus aria-label={tr('连接方案名称')} value={name} maxLength={80} onChange={event => setName(event.target.value)} className={'min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 text-xs ' + theme.input} />
       <button type="submit" className={button}>{tr('保存')}</button>

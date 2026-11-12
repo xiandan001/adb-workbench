@@ -22,6 +22,7 @@ function register(ipcMain) {
     history: createWorkerReportStore({ directory: path.join(app.getPath('userData'), 'ai-workspace-reports') }),
     casebook: createWorkerReportStore({ directory: path.join(app.getPath('userData'), 'ai-workspace-casebook'), casebook: true }),
     resolveHandoff: id => require('./ai-analysis-handoff.cjs').resolveForWorkspace(id),
+    resolveBasket: revision => require('./ai-analysis-handoff.cjs').resolveBasket(revision),
     resolveTaskTargets: tokens => require('./task-center.cjs').resolveAiTaskTargets(tokens, sender.id),
     activity: require('./workbench-activity.cjs'),
     confirmDelete: async report => {

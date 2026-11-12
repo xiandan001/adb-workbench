@@ -12,6 +12,8 @@ import LogMarkers from './LogMarkers';
 import AiContextButton from './AiContextButton';
 import AiOutboundPreviewHost from './AiOutboundPreviewHost';
 import LogFilterHandoff from './LogFilterHandoff';
+import { prepareLogHandoffContext } from '../shared/logHandoffContext';
+import useLogWorksetMemory from '../shared/useLogWorksetMemory';
 import { captureLogMarker, logEntryIdentity, MAX_LOG_MARKERS } from '../shared/logMarkers';
 import { appendLogWindow, createLogBatchBuffer, LOG_VIEW_LIMIT } from '../shared/logStream';
 // 日志诊断规则库面板
@@ -116,6 +118,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [aiHistoryReadOnly, setAiHistoryReadOnly] = useState(false);
   const [restoredSessionName, setRestoredSessionName] = useState('');
   const [filter, setFilter] = useState(emptyFilter);
+  const [pendingLogContext, setPendingLogContext] = useState(null);
   const [note, setNote] = useState(undefined);
   const [noteType, setNoteType] = useState('info');
   const [mcpRunning, setMcpRunning] = useState(false);
@@ -207,6 +210,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     { id: 'kernel', label: tr("内核日志"), desc: tr("Linux kernel 日志") }
   ];
   const [buffers, setBuffers] = useState(['main']);
+  const worksetMemory = useLogWorksetMemory({ deviceId, filter, buffers });
   const compatibleBuffers = buffers.filter(id => LOG_BUFFERS.some(buffer => buffer.id === id));
   const selectedBuffers = compatibleBuffers.length || isHarmonyTarget ? compatibleBuffers : ['main'];
   const [bufferDropdownOpen, setBufferDropdownOpen] = useState(false);
@@ -226,23 +230,27 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setBuffers(normalizeLogBuffers(preset.buffers));
   };
 
-  useEffect(() => {
-    const applyContext = (context) => {
-      if (!context?.deviceId) return;
+  const applyContext = useCallback((context) => {
+      if (!context?.deviceId && !context?.worksetLogs) return;
       if (runningRef.current || aiAnalyzingRef.current) {
+        setPendingLogContext(context);
         setNote(tr("日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后重新打开设备日志"));
         return;
       }
       clearTimeout(filterDebounceRef.current);
-      setDeviceId(context.deviceId);
-      setFilter(context.packageName ? { pkg: context.packageName } : {});
-      setFilterTextInput('');
+      if (context.deviceId) setDeviceId(context.deviceId);
+      const restoredFilter = context.worksetLogs ? normalizeLogFilter(context.worksetLogs.filter) : context.packageName ? { pkg: context.packageName } : {};
+      setFilter(restoredFilter);
+      setFilterTextInput(restoredFilter.text || '');
+      if (context.worksetLogs) setBuffers(normalizeLogBuffers(context.worksetLogs.buffers));
+      setPendingLogContext(null);
       setNote(tr("已选择 {0}{1}，未自动抓取；现有日志保持不变", { 0: context.deviceId, 1: context.packageName ? ` / ${context.packageName}` : '' }));
-    };
+  }, []);
+  useEffect(() => {
     const unsubscribe = window.electronAPI?.onLogAnalyzerContext?.(applyContext);
     window.electronAPI?.logAnalyzerGetContext?.().then(applyContext).catch(() => {});
     return () => unsubscribe?.();
-  }, []);
+  }, [applyContext]);
 
   const restoreSession = (session) => {
     logBatchBufferRef.current?.reset();
@@ -1562,7 +1570,6 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             onMessage={setNote}
           />
           <LogMarkers markers={markers} onChange={setMarkers} draft={markerDraft} onDismissDraft={() => setMarkerDraft(null)} isDark={isDark} onLocate={locateMarker} />
-          <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={truncated} isDark={isDark} />
           <div className="flex-1" />
 
           <div className={`text-xs px-2 py-1 rounded-full ${isDark ? 'bg-[#3E4145] text-[#E8EAED]' : 'bg-slate-100 text-slate-600'}`}>{tr("{0} 条", { 0: filtered.length.toLocaleString(getLocale()) })}</div>
@@ -1639,6 +1646,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           )}
 
           {/* AI 分析按钮 */}
+          <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={truncated} isDark={isDark} compact />
           <button
             onClick={() => {
               if (!isVip) { showVipBlock(tr("AI 深度分析")); return; }
@@ -1650,9 +1658,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               setAiPanelOpen(!aiPanelOpen);
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${aiPanelOpen ? 'bg-purple-500/20 border-purple-500/30 text-purple-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-cyan-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-emerald-600 active:scale-95 shadow-sm'}`}
-            title={tr("使用 AI 分析当前过滤后的日志")}
+            title={tr('日志对话')}
           >
-            <Sparkles size={14} />{tr("AI 分析")}</button>
+            <Sparkles size={14} />{tr('日志对话')}</button>
 
           {/* AI 自动诊断开关 */}
           <button
@@ -1724,6 +1732,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       </div>
 
       {/* Main Content */}
+      {worksetMemory.error && <div role="alert" className={`flex flex-wrap items-center gap-3 border-b px-4 py-2 text-xs ${isDark ? 'border-red-500/25 bg-red-500/10 text-red-300' : 'border-red-200 bg-red-50 text-red-700'}`}><span className="min-w-0 flex-1 break-words">{tr(worksetMemory.error)}</span><button type="button" disabled={worksetMemory.saving} onClick={worksetMemory.retry} className="inline-flex items-center gap-2 rounded border border-current px-2 py-1 disabled:opacity-40">{worksetMemory.saving && <Loader2 size={12} className="animate-spin" />}{tr('重试保存日志配置')}</button></div>}
+      {pendingLogContext && <div className={`flex flex-wrap items-center gap-3 border-b px-4 py-2 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}><span className="flex-1">{tr('工作集配置等待应用；不会切换正在采集的设备。')}</span><button type="button" disabled={running || aiAnalyzing} onClick={() => applyContext(pendingLogContext)} className="rounded border border-current px-2 py-1 disabled:opacity-40">{tr('应用待恢复配置')}</button><button type="button" onClick={() => setPendingLogContext(null)} className="rounded px-2 py-1">{tr('取消')}</button></div>}
       {restoredSessionName && <div className={`border-b px-4 py-2 text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border-[#3E4145]' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{tr("已恢复：")}{restoredSessionName} · {entries.length.toLocaleString(getLocale())}{tr(" 条原始日志 · ")}{sourceLabel || tr("已保存来源")} · {aiHistoryReadOnly ? tr("历史 AI 对话只读，未自动采集或请求 AI") : tr("当前可手动开始新分析")}
       </div>}
       <div className="flex-1 flex overflow-hidden">
@@ -2083,8 +2093,11 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   </div>
                 )}
                 <div className="flex items-center gap-2 mt-3">
-                  {hasIssues && <AiContextButton context={() => ({ view: { origin: 'log-diagnostic', title: tr('日志规则异常上下文'), question: tr('请核对这些规则命中的异常并给出验证方向。'),
-                    deviceId: captureDeviceId || '', text: autoDiagnoseAlert.issues.map(issue => `${issue.label}\n${issue.context}`).join('\n\n') } })} />}
+                  {hasIssues && <AiContextButton label={tr('AI 分析')} context={() => {
+                    const snapshot = prepareLogHandoffContext(autoDiagnoseAlert.issues.map(issue => ({ raw: `${issue.label}\n${issue.context}` })));
+                    return { view: { origin: 'log-diagnostic', title: tr('日志规则异常上下文'), question: tr('请核对这些规则命中的异常并给出验证方向。'),
+                      deviceId: captureDeviceId || '', text: snapshot.text, truncated: snapshot.truncated } };
+                  }} />}
                   {hasIssues && (
                     <button
                       onClick={() => {
@@ -2095,7 +2108,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg text-white transition-colors font-medium ${aiAnalyzing ? 'bg-amber-500/40 cursor-not-allowed' : 'bg-amber-500 hover:bg-amber-600'}`}
                     >
                       {aiAnalyzing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                      {aiAnalyzing ? tr("分析中…") : tr("AI 分析")}
+                      {aiAnalyzing ? tr("分析中…") : tr('日志对话')}
                     </button>
                   )}
                   <button
@@ -2144,7 +2157,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             <div className={`flex items-center justify-between px-4 py-2 border-b ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
               <div className="flex items-center gap-2 min-w-0">
                 <Sparkles size={16} className={`shrink-0 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
-                <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("AI 日志助手")}</span>
+                <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr('日志对话')}</span>
                 {aiAnalyzing && (
                   <span className="flex items-center gap-1 text-xs text-purple-400 shrink-0">
                     <Loader2 size={12} className="animate-spin" />

@@ -103,6 +103,56 @@ test('generated task is strictly validated, confirmed and saved once without any
   assert.equal((await h.service.call('saveTask', { caseId, draftId: generated.draft.id })).ok, false);
 });
 
+test('manual task edits are validated locally, confirmed exactly and saved without a second model call', async () => {
+  const confirmed = [];
+  const h = harness({ client: async args => { h.calls.push(args); return { ok: true, text: JSON.stringify(task) }; }, confirmSave: async draft => { confirmed.push(draft); return true; } });
+  const caseId = randomUUID(), generated = await h.service.call('generateTask', { caseId, goal: 'fixture' });
+  const editedDraft = { name: 'Edited task', description: 'Manual parameters', steps: [{ type: 'tap', label: 'Manual tap', x: 24, y: 86 }, { type: 'delay', label: 'Wait', durationMs: 300 }] };
+  const result = await h.service.call('saveTask', { caseId, draftId: generated.draft.id, editedDraft });
+  assert.equal(result.ok, true); assert.equal(h.calls.length, 1);
+  assert.deepEqual(h.saved, [editedDraft]); assert.deepEqual(confirmed[0].steps, editedDraft.steps);
+  assert.equal(confirmed[0].name, editedDraft.name);
+});
+
+test('forged task edits cannot promote authority or save and leave the original draft retryable', async () => {
+  let confirmations = 0;
+  const h = harness({ client: async () => ({ ok: true, text: JSON.stringify(task) }), confirmSave: async () => { confirmations++; return true; } });
+  const caseId = randomUUID(), generated = await h.service.call('generateTask', { caseId, goal: 'fixture' });
+  for (const editedDraft of [{ ...task, id: 'overwrite' }, { ...task, targetPlatform: 'harmony' },
+    { ...task, steps: [{ type: 'shell', label: 'No', command: 'never' }] },
+    { ...task, steps: [{ type: 'tap', label: 'Forged', targetId: 'T1' }] },
+    { ...task, steps: [{ type: 'tap', label: 'Invalid', x: '2', y: 1 }] }]) {
+    const answer = await h.service.call('saveTask', { caseId, draftId: generated.draft.id, editedDraft });
+    assert.equal(answer.ok, false); assert.equal(h.saved.length, 0); assert.equal(confirmations, 0);
+  }
+  assert.equal((await h.service.call('saveTask', { caseId, draftId: generated.draft.id, editedDraft: task })).ok, true);
+});
+
+test('basket collection reuses frozen sources only and changed revisions revoke old analysis previews', async () => {
+  let revision = 4, sourceReads = 0;
+  const h = harness({ evidence: { list: () => [], collect: async () => { sourceReads++; throw new Error('must not recollect'); } },
+    resolveBasket: async requested => {
+      if (requested !== revision) throw Object.assign(new Error('changed'), { code: 'AI_BASKET_CHANGED', safe: true });
+      return { revision, entries: [{ id: 'E1', text: 'Frozen fixture', targetKey: null }] };
+    } });
+  const caseId = randomUUID();
+  const collected = await h.service.call('collect', { caseId, mode: 'analysis', question: 'fixture', basketRevision: revision });
+  assert.equal(collected.ok, true); assert.equal(sourceReads, 0); assert.equal(h.calls.length, 0);
+  revision++;
+  const stale = await h.service.call('analyze', { caseId, previewId: collected.preview.id, consent: true });
+  assert.equal(stale.code, 'AI_BASKET_CHANGED'); assert.equal(h.calls.length, 0);
+});
+
+test('follow-up includes each frozen basket snapshot once rather than duplicating report evidence', async () => {
+  const entries = [{ id: 'E1', text: 'Frozen fixture', targetKey: null }];
+  const h = harness({ resolveBasket: async revision => ({ revision, entries }) });
+  const caseId = randomUUID(), first = await h.service.call('collect', { caseId, mode: 'analysis', question: 'fixture', basketRevision: 1 });
+  const analyzed = await h.service.call('analyze', { caseId, previewId: first.preview.id, consent: true });
+  assert.equal(analyzed.ok, true);
+  const followup = await h.service.call('collect', { caseId, mode: 'analysis', question: 'follow-up', basketRevision: 1, contextRef: { caseId, turnId: analyzed.turn.id } });
+  assert.equal(followup.ok, true); assert.equal(followup.preview.entries.length, 1); assert.equal(h.calls.length, 1);
+});
+
 test('closing a case while save confirmation is open prevents a late write', async () => {
   let confirm;
   const h = harness({ client: async () => ({ ok: true, text: JSON.stringify(task) }), confirmSave: () => new Promise(resolve => { confirm = resolve; }) });

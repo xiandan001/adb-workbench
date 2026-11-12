@@ -1,5 +1,5 @@
 import { tr, useLocale } from '../shared/i18n';
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
 import themes from '../data/themes';
@@ -24,34 +24,44 @@ import { recordingButtonState } from '../shared/recordingWorkspace';
 import { isHarmonyDevice } from '../shared/devicePlatform';
 import { deviceTerminalCommands, deviceTerminalPresentation, createDeviceTerminalRequest } from '../shared/deviceTerminal';
 import { trapAppMessageFocus } from '../shared/appMessageDialog';
+import useDeviceWorkingState from '../shared/useDeviceWorkingState';
+import { DEVICE_WORKING_LIMITS, visibleDeviceTerminalOutput, deviceWorkingErrorMessage } from '../shared/deviceWorkingState';
 
 function DeviceTerminalSurface({ fullscreen, children }) {
   return fullscreen && typeof document !== 'undefined' ? createPortal(children, document.body) : children;
 }
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full' }) {
   useLocale();
   const isOnline = device.status === 'device';
   const harmony = isHarmonyDevice(device);
-  const [maintenanceOpen, setMaintenanceOpen] = useState(() => localStorage.getItem(`deviceMaintenance:${device.id}`) === 'true');
+  const working = useDeviceWorkingState(device.id);
+  const setWorkingField = working.set;
+  const { maintenanceOpen, showTerminal, terminalFontSize, terminalCommand, terminalOutput, panelOrder, isExecuting,
+    recordWithLogs, moreToolsOpen } = working.state;
+  const setMaintenanceOpen = value => working.set('maintenanceOpen', value);
+  const setShowTerminal = value => working.set('showTerminal', value);
+  const setTerminalFontSize = useCallback(value => setWorkingField('terminalFontSize', value), [setWorkingField]);
+  const setTerminalCommand = value => working.set('terminalCommand', value);
+  const setTerminalOutput = value => working.set('terminalOutput', value);
+  const setPanelOrder = useCallback(value => setWorkingField('panelOrder', value), [setWorkingField]);
+  const setIsExecuting = value => working.set('isExecuting', value);
+  const setRecordWithLogs = value => working.set('recordWithLogs', value);
+  const compact = deviceCardDensity === 'compact';
+  const showSecondaryTools = !compact || moreToolsOpen;
+  const visibleOutput = visibleDeviceTerminalOutput(terminalOutput);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(deviceName || '');
-  const [showTerminal, setShowTerminal] = useState(false);
   // 终端放大模式：脱离原位置，全屏覆盖
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   // 终端字体大小（Ctrl+滚轮缩放，范围 10-28px）
-  const [terminalFontSize, setTerminalFontSize] = useState(12);
   const terminalOutputRef = useRef(null);
-  const terminalScrollRestoreRef = useRef(null);
+  const terminalScrollRestoreRef = useRef(working.state.terminalScroll);
   const terminalInputRef = useRef(null);
   const terminalRootRef = useRef(null);
   const terminalExpandRef = useRef(null);
   const terminalPanelRef = useRef(null);
   const terminalWasFullscreen = useRef(false);
-  const [terminalCommand, setTerminalCommand] = useState('');
-  const [terminalOutput, setTerminalOutput] = useState([]);
-  const [panelOrder, setPanelOrder] = useState([]);
-  const [isExecuting, setIsExecuting] = useState(false);
   // SU 提权模式：开启后命令以 root 身份执行
   const [suMode, setSuMode] = useState(false);
   // 提权策略：'direct'=adb root 已生效（命令本身是 root）；'su'=需 su -c 包装
@@ -63,7 +73,6 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   const [showHistory, setShowHistory] = useState(false);
   const recording = useDeviceRecording(device.id, onScreenRecordStart, onScreenRecordStop);
   const recordButton = recordingButtonState(recording.session, { loaded: recording.loaded, pending: recording.pending, isOnline });
-  const [recordWithLogs, setRecordWithLogs] = useState(false);
   const recordingActive = ['starting', 'recording', 'stopping', 'saving'].includes(recording.session?.status);
   // 设备巡检弹窗状态
   const [showInspection, setShowInspection] = useState(false);
@@ -84,7 +93,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       if (showTerminal && !next.includes('terminal')) next.push('terminal');
       return next.length === prev.length && next.every((panel, index) => panel === prev[index]) ? prev : next;
     });
-  }, [showApkManager, showTerminal]);
+  }, [showApkManager, showTerminal, setPanelOrder]);
 
   const getPanelOrder = (panel) => {
     const index = panelOrder.indexOf(panel);
@@ -127,24 +136,32 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     e?.preventDefault();
     if (!terminalCommand.trim() || isExecuting || !isOnline) return;
 
-    setIsExecuting(true);
+    if (!working.beginExecution()) return;
     setShowHistory(false);
     const rawCmd = terminalCommand.trim();
     const request = createDeviceTerminalRequest(device, rawCmd, { root: suMode, strategy: suStrategy });
     setTerminalOutput(prev => [...prev, { type: 'command', prompt: request.prompt, text: request.text }]);
     setTerminalCommand('');
     setHistoryIndex(-1);
-    if (onSaveTerminalCommand) {
-      onSaveTerminalCommand(rawCmd);
-    }
-
     try {
+      onSaveTerminalCommand?.(rawCmd);
       if (onExecuteCommand) {
         const result = await onExecuteCommand(request.deviceId, request.command);
-        setTerminalOutput(prev => [...prev, { type: 'output', text: result }]);
+        if (typeof result === 'string') setTerminalOutput(prev => [...prev, { type: 'output', text: result }]);
+        else {
+          if (result?.output) setTerminalOutput(prev => [...prev, { type: 'output', text: result.output }]);
+          if (result?.success) {
+            if (!result.output) setTerminalOutput(prev => [...prev, { type: 'output', text: tr('命令执行成功') }]);
+          } else {
+            const message = result?.cancelled ? tr('命令已中断') : tr('命令执行失败: {0}', { 0: result?.error || tr('未知错误') });
+            setTerminalOutput(prev => [...prev, { type: result?.cancelled ? 'output' : 'error', text: message }]);
+            setTerminalCommand(current => current || rawCmd);
+          }
+        }
       }
     } catch (err) {
       setTerminalOutput(prev => [...prev, { type: 'error', text: `Error: ${err.message}` }]);
+      setTerminalCommand(current => current || rawCmd);
     } finally {
       setIsExecuting(false);
     }
@@ -290,7 +307,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [terminalFullscreen]);
+  }, [terminalFullscreen, setTerminalFontSize]);
 
   // 终端有新输出时自动滚动到底部
   useLayoutEffect(() => {
@@ -302,10 +319,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       const maximum = Math.max(0, el.scrollHeight - el.clientHeight);
       el.scrollTop = restore.atBottom ? maximum : Math.min(Math.max(0, restore.top), maximum);
     } else el.scrollTop = el.scrollHeight;
-  }, [terminalOutput, isExecuting, terminalFullscreen]);
+  }, [terminalOutput, isExecuting, terminalFullscreen, showTerminal]);
 
   const clearTerminal = () => {
     setTerminalOutput([]);
+    working.set('terminalOutputTruncated', false);
   };
 
   const handleTerminalFocus = () => {
@@ -324,7 +342,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
   const scrcpyLoading = isLoading(`scrcpy_${device.id}`);
 
   return (
-    <div data-accent={t.primary} data-dark={isDarkTheme(t)} onClickCapture={event => {
+    <div data-accent={t.primary} data-dark={isDarkTheme(t)} data-density={deviceCardDensity} onClickCapture={event => {
       if (!event.target.closest('[data-device-pin]')) onSelectDevice?.();
     }} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
       <DeviceCardHeader device={device} deviceName={deviceName} theme={t} isOnline={isOnline}
@@ -335,6 +353,9 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
         onSelectDevice={onSelectDevice} onTogglePin={onTogglePin} onDisconnect={onDisconnect} onStart={onStart} />
 
       <div className={`device-card-actions ${t.text}`}>
+        {working.state.storageError && <div role="alert" className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+          {deviceWorkingErrorMessage(working.state.storageError)}<button type="button" onClick={working.retrySave} className="ml-2 underline">{tr('重试')}</button>
+        </div>}
         {operationError && (
           <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-400">
             <span className="min-w-0 flex-1 break-words">{tr(operationError)}</span>
@@ -350,9 +371,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
         )}
         <DeviceNavigationControls deviceId={device.id} isOnline={isOnline} showToast={showToast} theme={t} onOpenApps={onApkManager} />
         <section className="device-control-section" aria-label={tr("常用工具")}>
-          <h4 className={`device-control-heading ${t.textMuted}`}>{tr("常用工具")}</h4>
+          <div className="device-control-toolbar"><h4 className={`device-control-heading ${t.textMuted}`}>{tr("常用工具")}</h4>
+            {compact && <button type="button" aria-expanded={moreToolsOpen} onClick={() => working.set('moreToolsOpen', !moreToolsOpen)}
+              className={`device-more-tools rounded border px-2 py-1 text-xs ${t.button.secondary}`}>{moreToolsOpen ? tr('收起更多工具') : tr('更多工具')}<ChevronDown size={12} className={moreToolsOpen ? 'rotate-180' : ''} /></button>}
+          </div>
           <div className="device-tool-grid">
-            {onOpenReproduction && <ControlButton icon={<ClipboardCheck size={16} />} label={tr('复现采证')} onClick={() => onOpenReproduction(device.id)} disabled={!isOnline} theme={t} isOnline={isOnline} />}
+            {showSecondaryTools && onOpenReproduction && <ControlButton icon={<ClipboardCheck size={16} />} label={tr('复现采证')} onClick={() => onOpenReproduction(device.id)} disabled={!isOnline} theme={t} isOnline={isOnline} />}
             <ControlButton
               icon={<Camera size={16} />}
               label={isLoading(`screenshot_${device.id}`) ? tr("截图中...") : tr("截图")}
@@ -373,14 +397,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               isOnline={isOnline}
               isRecording={recordButton.recording}
             />
-            <ControlButton
+            {showSecondaryTools && <ControlButton
               icon={<ScrollText size={16} />}
               label={tr("设备日志")}
               onClick={() => onViewApplicationLogs({ deviceId: device.id })}
               disabled={!isOnline}
               theme={t}
               isOnline={isOnline}
-            />
+            />}
             <ControlButton
               icon={<Package size={16} />}
               label={harmony ? tr('应用管理') : tr("APK管理")}
@@ -392,21 +416,21 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             <ControlButton
               icon={<Terminal size={16} />}
               label={tr("终端")}
-              onClick={() => setShowTerminal(true)}
+              onClick={() => { terminalScrollRestoreRef.current = working.state.terminalScroll; setShowTerminal(true); }}
               disabled={!isOnline}
               theme={t}
               isOnline={isOnline}
             />
             {/* 设备巡检报告与证据包导出入口 */}
-            <ControlButton
+            {showSecondaryTools && <ControlButton
               icon={<ClipboardCheck size={16} />}
               label={tr("巡检")}
               onClick={() => setShowInspection(true)}
               disabled={!isOnline}
               theme={t}
               isOnline={isOnline}
-            />
-            <ControlButton
+            />}
+            {showSecondaryTools && <ControlButton
               icon={<RotateCcw size={16} />}
               label={isLoading(`reboot_${device.id}`) ? tr("重启中...") : tr("重启")}
               onClick={onReboot}
@@ -414,21 +438,20 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               loading={isLoading(`reboot_${device.id}`)}
               theme={t}
               isOnline={isOnline}
-            />
+            />}
           </div>
-          <label className={`device-record-options mt-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
+          {showSecondaryTools && <label className={`device-record-options mt-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
             <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" /><span className="device-record-options-label">{tr("录屏同时抓取日志")}</span><span className="device-record-options-note text-[11px] opacity-75">{tr("不调用 AI · 上限 100 MB")}</span>
-          </label>
+          </label>}
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
-        <section className="device-control-section" aria-label={tr("设备维护")}>
+        {showSecondaryTools && <section className="device-control-section" aria-label={tr("设备维护")}>
           <button
             type="button"
             aria-expanded={maintenanceOpen}
             onClick={() => {
               const next = !maintenanceOpen;
               setMaintenanceOpen(next);
-              localStorage.setItem(`deviceMaintenance:${device.id}`, String(next));
             }}
             className={`device-control-heading device-maintenance-toggle ${t.textMuted}`}
           >
@@ -473,8 +496,8 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               isOnline={isOnline}
             />
           </div>}
-        </section>
-        <DeviceRecentMedia deviceId={device.id} theme={t} showToast={showToast} />
+        </section>}
+        {showSecondaryTools && <DeviceRecentMedia deviceId={device.id} theme={t} showToast={showToast} />}
       </div>
 
       {/* App 包管理增强：使用独立面板承载安装、推送、文件浏览、应用列表与会员操作 */}
@@ -808,8 +831,6 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                 onClick={() => {
                   setShowTerminal(false);
                   setTerminalFullscreen(false);
-                  setTerminalOutput([]);
-                  setTerminalCommand('');
                   setHistoryIndex(-1);
                   setShowHistory(false);
                 }}
@@ -823,6 +844,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           {/* Terminal Output - 放大模式下 flex-1 撑满，支持 Ctrl+滚轮缩放 */}
           <div
             ref={terminalOutputRef}
+            onScroll={event => {
+              const output = event.currentTarget;
+              working.set('terminalScroll', { top: output.scrollTop,
+                atBottom: output.scrollHeight - output.clientHeight - output.scrollTop <= 2 }, { silent: true });
+            }}
             style={{ fontSize: `${terminalFontSize}px` }}
             className={`device-terminal-output ${t.terminal.output} rounded-lg p-3 mb-3 overflow-y-auto font-mono select-text border border-[#3E4145] ${terminalFullscreen ? 'flex-1' : 'h-56'}`}
           >
@@ -833,7 +859,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               </div>
             ) : (
               <div className="space-y-0.5">
-                {terminalOutput.map((line, index) => {
+                {visibleOutput.rows.map((line, index) => {
                   const isCmd = line.type === 'command';
                   const isErr = line.type === 'error';
                   return (
@@ -845,7 +871,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                     >
                       {/* 行号 */}
                       <span className="text-slate-600 select-none text-[10px] mt-0.5 w-6 text-right shrink-0">
-                        {String(index + 1).padStart(2, '0')}
+                        {String(line.position).padStart(2, '0')}
                       </span>
                       {/* 类型标记 */}
                       <span className={`select-none shrink-0 text-[10px] mt-0.5 w-4 ${
@@ -872,6 +898,12 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             )}
           </div>
 
+          <p className="mb-2 text-[11px] text-slate-500">{tr('终端输出仅在本次运行中保留，重启后不会恢复或自动执行命令。')}</p>
+          {(working.state.terminalOutputTruncated || visibleOutput.clipped) && <p role="status" className="mb-2 text-xs text-amber-500">
+            {working.state.terminalOutputTruncated ? tr('较早的终端输出已按内存上限清理。') : tr('仅显示最近的部分输出，较早内容仍在本次运行的缓冲中。')}
+          </p>}
+          {working.state.draftNotSaved && <p role="status" className="mb-2 text-xs text-amber-500">{tr('终端草稿超过 {0} 字符，仅在本次运行中保留。', { 0: DEVICE_WORKING_LIMITS.draft })}</p>}
+
           {/* Terminal Input */}
           <form onSubmit={handleTerminalSubmit} className="device-terminal-input">
             <span className={`font-mono text-sm transition-colors ${suMode ? 'text-red-400' : 'text-emerald-400'}`} title={suMode ? tr("ROOT 模式") : tr("普通模式")}>{suMode ? '#' : '$'}</span>
@@ -879,6 +911,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               <input
                 ref={terminalInputRef}
                 type="text"
+                data-terminal-command
                 value={terminalCommand}
                 onChange={(e) => setTerminalCommand(e.target.value)}
                 onKeyDown={handleTerminalKeyDown}

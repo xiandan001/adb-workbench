@@ -3,7 +3,7 @@ import { tr, useLocale } from '../shared/i18n';
 import { prepareLogHandoffContext } from '../shared/logHandoffContext';
 import AiContextButton from './AiContextButton';
 
-export default function LogFilterHandoff({ rows, deviceId, sourceTruncated = false, isDark = false }) {
+export default function LogFilterHandoff({ rows, deviceId, sourceTruncated = false, isDark = false, compact = false }) {
   useLocale();
   const detailText = isDark ? 'text-slate-300' : 'text-slate-600';
   const [prepared, setPrepared] = useState(null), [created, setCreated] = useState(false);
@@ -20,8 +20,8 @@ export default function LogFilterHandoff({ rows, deviceId, sourceTruncated = fal
       question: `${describe(snapshot)}${partial}${tr('请仅分析这些局部内容，不要将其视为全部日志。')}` } };
   };
   return <div role="group" aria-label={tr('日志筛选上下文')} className="min-w-0 max-w-lg space-y-1">
-    <AiContextButton disabled={!rows.length} context={prepare} onCreated={() => setCreated(true)} />
-    <p className={`text-[11px] ${detailText}`}>{tr('仅带入最近最多 2,000 行 / 448 KiB；不会自动发送 AI。')}</p>
+    <AiContextButton disabled={!rows.length} context={prepare} onCreated={() => setCreated(true)} label={compact ? tr('AI 分析') : undefined} />
+    {!compact && <p className={`text-[11px] ${detailText}`}>{tr('仅带入最近最多 2,000 行 / 448 KiB；不会自动发送 AI。')}</p>}
     {prepared && <p role="status" className={`break-words text-[11px] leading-5 ${detailText}`}>
       {describe(prepared)}{prepared.partialEntries > 0 && tr('其中 {0} 条记录仅保留末尾片段。', { 0: prepared.partialEntries })}
       {tr('仅代表上述局部内容，不是全部日志。')}{created && tr('已带入 AI 工作区；最终内容以脱敏预览为准。')}

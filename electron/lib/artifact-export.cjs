@@ -43,8 +43,7 @@ function zipDirectory(source, destination) {
   });
 }
 
-async function exportArtifact(item, destination) {
-  const selected = await collectArtifactFiles(item);
+async function validateExportDestination(selected, destination) {
   const target = path.resolve(destination);
   const targetStat = await fs.promises.lstat(target).catch(error => {
     if (error.code === 'ENOENT') return null;
@@ -58,6 +57,12 @@ async function exportArtifact(item, destination) {
   if (path.relative(selected.source, realTarget) === '' || (selected.directory && isWithin(selected.source, realTarget))) {
     throw new Error(tr("请将证据包保存在原产物目录之外"));
   }
+  return { target, realTarget };
+}
+
+async function exportArtifact(item, destination) {
+  const selected = await collectArtifactFiles(item);
+  const { target, realTarget } = await validateExportDestination(selected, destination);
   // 从当前原始证据重新打包，避免把旧的或失败遗留的 ZIP 当作有效证据。
   if (item.type === 'inspection') selected.files = selected.files.filter(file => file.name !== 'evidence-package.zip');
   if (!selected.files.length) throw new Error(tr("没有可导出的原始证据文件"));
@@ -94,4 +99,4 @@ async function exportArtifact(item, destination) {
   }
 }
 
-module.exports = { collectArtifactFiles, exportArtifact, isWithin };
+module.exports = { collectArtifactFiles, exportArtifact, isWithin, validateExportDestination };

@@ -1,10 +1,11 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftRight, X } from 'lucide-react';
+import { ArrowLeftRight, Copy, Download, X } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
-import { compareTaskRuns, recommendTaskComparison } from '../shared/taskRunComparison';
+import { compareTaskRuns, recommendTaskComparison, taskComparisonSummary } from '../shared/taskRunComparison';
+import { exportTaskComparison } from '../shared/taskResultDelivery.js';
 import SelectMenu from './SelectMenu';
 
 const CHANGE_LABELS = () => ({
@@ -29,6 +30,7 @@ export default function TaskRunComparisonDialog({ history, theme, onClose, onOpe
   const [beforeId, setBeforeId] = useState(() => initialBeforeId || recommendTaskComparison(history, initialAfterId).beforeId);
   const [afterId, setAfterId] = useState(() => recommendTaskComparison(history, initialAfterId).afterId);
   const [changesOnly, setChangesOnly] = useState(true);
+  const [deliveryBusy, setDeliveryBusy] = useState(''), [delivery, setDelivery] = useState(null);
   const before = history.find(run => run.id === beforeId);
   const after = history.find(run => run.id === afterId);
   const comparison = useMemo(() => { void locale; return compareTaskRuns(before, after); }, [before, after, locale]);
@@ -42,6 +44,23 @@ export default function TaskRunComparisonDialog({ history, theme, onClose, onOpe
     dialog?.showModal();
     return () => { dialog?.close(); previousFocus?.focus?.(); };
   }, []);
+  useEffect(() => { setDelivery(null); }, [beforeId, afterId]);
+  async function deliver(kind) {
+    if (deliveryBusy || !comparison.comparable) return;
+    setDeliveryBusy(kind); setDelivery(null);
+    try {
+      if (kind === 'copy') {
+        await navigator.clipboard.writeText(taskComparisonSummary(before, after, comparison));
+        setDelivery({ message: tr('对比摘要已复制。') });
+      } else {
+        const result = await exportTaskComparison(before.id, after.id, window.electronAPI);
+        if (result?.cancelled) return;
+        if (!result?.ok) throw new Error(result?.error || tr('证据包导出失败'));
+        setDelivery({ path: result.path, message: tr('对比摘要和两次运行证据已导出。') });
+      }
+    } catch (failure) { setDelivery({ error: failure.message }); }
+    finally { setDeliveryBusy(''); }
+  }
 
   return createPortal(
     <dialog ref={dialogRef} onCancel={event => { event.preventDefault(); onClose(); }} aria-labelledby="task-comparison-title" className={`fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-5xl rounded-xl border p-0 shadow-2xl backdrop:bg-black/50 ${panel}`}>
@@ -51,11 +70,13 @@ export default function TaskRunComparisonDialog({ history, theme, onClose, onOpe
           <button type="button" autoFocus aria-label={tr("关闭运行对比")} onClick={onClose} className="rounded-lg p-2 hover:bg-slate-500/10"><X size={20} /></button>
         </header>
         <div className="space-y-4 overflow-auto p-5">
-          <div className="grid items-end gap-3 md:grid-cols-[1fr_auto_1fr]">
-            <div className="min-w-0"><label htmlFor="compare-before" className={`mb-2 block text-xs ${muted}`}>{tr("基准运行")}</label><SelectMenu id="compare-before" value={beforeId} options={options} onChange={setBeforeId} isDark={isDark} placeholder={tr("选择基准运行")} /></div>
+          <fieldset disabled={Boolean(deliveryBusy)} className="grid min-w-0 items-end gap-3 md:grid-cols-[1fr_auto_1fr]">
+            <div className="min-w-0"><label htmlFor="compare-before" className={`mb-2 block text-xs ${muted}`}>{tr("基准运行")}</label><SelectMenu id="compare-before" value={beforeId} options={options} onChange={setBeforeId} disabled={Boolean(deliveryBusy)} isDark={isDark} placeholder={tr("选择基准运行")} /></div>
             <button type="button" onClick={() => { setBeforeId(afterId); setAfterId(beforeId); }} aria-label={tr("交换基准和本次运行")} className={`justify-self-center rounded-lg border p-2.5 ${theme.button.secondary}`}><ArrowLeftRight size={17} /></button>
-            <div className="min-w-0"><label htmlFor="compare-after" className={`mb-2 block text-xs ${muted}`}>{tr("本次运行")}</label><SelectMenu id="compare-after" value={afterId} options={options} onChange={id => { setAfterId(id); setBeforeId(recommendTaskComparison(history, id).beforeId); }} isDark={isDark} placeholder={tr("选择本次运行")} /></div>
-          </div>
+            <div className="min-w-0"><label htmlFor="compare-after" className={`mb-2 block text-xs ${muted}`}>{tr("本次运行")}</label><SelectMenu id="compare-after" value={afterId} options={options} onChange={id => { setAfterId(id); setBeforeId(recommendTaskComparison(history, id).beforeId); }} disabled={Boolean(deliveryBusy)} isDark={isDark} placeholder={tr("选择本次运行")} /></div>
+          </fieldset>
+          <div className="flex flex-wrap gap-2"><button type="button" disabled={!comparison.comparable || Boolean(deliveryBusy)} onClick={() => deliver('copy')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Copy size={14} />{tr('复制对比摘要')}</button><button type="button" disabled={!comparison.comparable || Boolean(deliveryBusy)} onClick={() => deliver('export')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`}><Download size={14} />{deliveryBusy === 'export' ? tr('正在导出…') : tr('导出对比证据')}</button></div>
+          {delivery && <div role={delivery.error ? 'alert' : 'status'} className={`rounded-lg border border-current/10 p-3 text-sm ${delivery.error ? 'text-red-500' : 'text-emerald-500'}`}><p>{delivery.error || delivery.message}</p>{delivery.path && <button type="button" onClick={() => onOpenPath(delivery.path)} className="mt-2 hover:underline">{tr('打开已导出的证据包')}</button>}</div>}
           {after?.parentTaskId && <p className={`text-xs ${muted}`}>{tr('已优先选择本次复跑的原运行；比较只读取已有结果，不会执行任务。')}</p>}
           {!comparison.comparable ? <p role="status" className={`rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>{comparison.reason}</p> : (
             <>

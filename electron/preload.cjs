@@ -257,6 +257,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mcpStart: () => ipcRenderer.invoke('mcp:start'),
   mcpStop: () => ipcRenderer.invoke('mcp:stop'),
   logAnalyzerOpen: (context) => ipcRenderer.invoke('logAnalyzer:open', context),
+  logAnalyzerApplyContext: context => ipcRenderer.invoke('logAnalyzer:applyContext', context),
   logAnalyzerGetContext: () => ipcRenderer.invoke('logAnalyzer:getContext'),
   logSessionSave: (payload) => ipcRenderer.invoke('logSession:save', payload),
   logSessionList: () => ipcRenderer.invoke('logSession:list'),
@@ -298,6 +299,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiWorkspaceCasebookSimilar: args => ipcRenderer.invoke('ai-workspace:casebookSimilar', args),
   aiHandoffCreate: args => ipcRenderer.invoke('ai-handoff:create', args),
   aiHandoffGet: args => ipcRenderer.invoke('ai-handoff:get', args),
+  aiHandoffList: () => ipcRenderer.invoke('ai-handoff:list'),
+  aiHandoffRemove: args => ipcRenderer.invoke('ai-handoff:remove', args),
+  aiHandoffClear: () => ipcRenderer.invoke('ai-handoff:clear'),
+  worksetList: () => ipcRenderer.invoke('worksets:list'),
+  worksetSave: args => ipcRenderer.invoke('worksets:save', args),
+  worksetRemove: args => ipcRenderer.invoke('worksets:remove', args),
+  worksetRemember: args => ipcRenderer.invoke('worksets:remember', args),
   onAiHandoffAvailable: callback => {
     const listener = safeListener(callback);
     ipcRenderer.on('ai-handoff:available', listener);
@@ -494,6 +502,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   artifactOpenPath: (targetPath) => ipcRenderer.invoke('artifacts:openPath', targetPath),
   artifactsDelete: (args) => ipcRenderer.invoke('artifacts:delete', args),
   artifactExport: (id) => ipcRenderer.invoke('artifacts:export', { id }),
+  artifactExportComparison: args => ipcRenderer.invoke('artifacts:exportComparison', args),
   artifactPreview: (args) => ipcRenderer.invoke('artifacts:preview', args),
   // Quality center: regression baselines and difference reports
   regressionListBaselines: () => ipcRenderer.invoke('regression:listBaselines'),

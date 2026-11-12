@@ -71,6 +71,9 @@
   background: color-mix(in srgb, var(--device-accent) 10%, transparent);
 }
 .device-control-section { margin-top: 18px; }
+.device-control-toolbar { display: flex; align-items: flex-start; gap: 8px; }
+.device-control-toolbar > .device-control-heading { flex: 1; min-width: 0; }
+.device-more-tools { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin-bottom: 9px; }
 .device-control-heading {
   display: flex;
   align-items: center;
@@ -107,6 +110,14 @@
 .device-card-actions button.bg-red-500:enabled:hover { background: #dc2626; }
 .device-card-actions button:focus-visible { outline: 2px solid var(--device-accent); outline-offset: 3px; }
 .device-card-actions button:disabled { opacity: .5; cursor: not-allowed; }
+
+.device-card[data-density="compact"] .device-card-header { gap: 10px; padding: 16px; }
+.device-card[data-density="compact"] .device-card-identity { gap: 12px; }
+.device-card[data-density="compact"] .device-card-avatar { width: 40px; height: 40px; }
+.device-card[data-density="compact"] .device-card-name { font-size: 16px; }
+.device-card[data-density="compact"] .device-card-actions { padding: 14px 16px 16px; }
+.device-card[data-density="compact"] .device-control-section { margin-top: 12px; }
+.device-card[data-density="compact"] .device-card-primary { min-width: 104px; padding: 8px 12px; }
 
 @container (max-width: 560px) {
   .device-card-header { flex-wrap: wrap; gap: 16px; }

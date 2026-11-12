@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { tr, useLocale } from '../shared/i18n';
-import { AI_WORKSPACE_MODES, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, workspaceReportRef, workspaceRequestCurrent } from './AiWorkspaceState';
+import { AI_WORKSPACE_MODES, appendWorkspaceBasket, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, workspaceReportRef, workspaceRequestCurrent } from './AiWorkspaceState';
 import { adoptWorkspaceDefaults, normalizeWorkspaceReportRequest, prepareWorkspaceVerification } from './AiWorkspaceFlow';
+import { editableTask } from './AiWorkspaceTaskEditing';
 
 const newCase = (mode, deviceId = '') => createWorkspaceCase(mode, deviceId, crypto.randomUUID());
 const api = () => window.electronAPI;
@@ -16,12 +17,14 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
   const [history, setHistory] = useState([]);
   const [casebook, setCasebook] = useState([]);
   const [pendingHandoff, setPendingHandoff] = useState(null);
+  const [pendingBasket, setPendingBasket] = useState(false);
   const [pendingReport, setPendingReport] = useState(null);
   const [reportBusy, setReportBusy] = useState('');
   const [reportError, setReportError] = useState('');
   const casesRef = useRef(cases); const alive = useRef(true); const refreshTicket = useRef(0); const reportLock = useRef(false);
   const incomingHandled = useRef('');
   const reportRequestHandled = useRef('');
+  const basketRefreshTicket = useRef(0), handoffTicket = useRef(0);
   const update = useCallback((key, change) => {
     const next = { ...casesRef.current, [key]: change(casesRef.current[key]) };
     casesRef.current = next;
@@ -72,6 +75,23 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     const stored = await api()?.aiWorkspaceCasebookList?.({});
     if (stored?.ok && alive.current) setCasebook(stored.items || []);
   }, []);
+  const refreshBasket = useCallback(async metadata => {
+    if (!api()?.aiHandoffList) return;
+    const ticket = ++basketRefreshTicket.current;
+    let response;
+    try { response = await api().aiHandoffList(); }
+    catch (error) { if (!alive.current || ticket !== basketRefreshTicket.current) return false; throw error; }
+    if (!alive.current || ticket !== basketRefreshTicket.current) return false;
+    if (!response?.ok) throw new Error(response?.error || tr('无法读取本地证据篮。'));
+    const current = casesRef.current.analysis;
+    if (current.basketRevision !== null && response.basket.revision < current.basketRevision) return false;
+    if (current.basketRevision === response.basket.revision) { setPendingBasket(false); return true; }
+    if (current.busy || reportLock.current) { setPendingBasket(true); return false; }
+    const retainedMetadata = response.basket.items.some(item => item.id === metadata?.id) ? metadata : undefined;
+    update('analysis', value => appendWorkspaceBasket(value, response.basket, retainedMetadata));
+    setPendingBasket(false);
+    return true;
+  }, [update]);
   const sourceDeviceId = cases[mode].deviceId;
   const refresh = useCallback(async () => {
     const ticket = ++refreshTicket.current;
@@ -81,10 +101,11 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
       if (!result?.ok) throw new Error(result?.error || tr('无法读取 AI 工作区状态，请刷新后重试。'));
       if (alive.current && ticket === refreshTicket.current) setSources(result);
       await refreshHistory();
+      if (alive.current && ticket === refreshTicket.current) await refreshBasket();
     } catch (error) {
       if (alive.current && ticket === refreshTicket.current) setSourceError(error.message);
     } finally { if (alive.current && ticket === refreshTicket.current) setLoading(false); }
-  }, [refreshHistory, sourceDeviceId]);
+  }, [refreshBasket, refreshHistory, sourceDeviceId]);
 
   useEffect(() => {
     alive.current = true;
@@ -94,14 +115,27 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     };
   }, []);
   useEffect(() => { if (active) void refresh(); }, [active, locale, refresh]);
-  const acceptHandoff = useCallback((metadata, force = false) => {
+  const acceptHandoff = useCallback(async (metadata, force = false) => {
+    const ticket = ++handoffTicket.current;
+    if (metadata.basketItem) {
+      if (casesRef.current.analysis.busy || reportLock.current) { setPendingHandoff(metadata); return; }
+      await refreshBasket(metadata);
+      if (!alive.current || ticket !== handoffTicket.current) return;
+      const current = casesRef.current.analysis;
+      if (!current.basketItems.some(item => item.id === metadata.id)) {
+        setPendingHandoff(previous => previous?.id === metadata.id ? null : previous); return;
+      }
+      if (current.busy || reportLock.current) { setPendingHandoff(metadata); return; }
+      if (!current.question.trim()) update('analysis', value => ({ ...value, question: metadata.question || metadata.title || '' }));
+      setPendingHandoff(null); setMode('analysis'); return;
+    }
     const targets = metadata.taskTargets || [];
     const key = targets.length ? 'task' : 'analysis';
     const current = casesRef.current[key];
     if (current.busy || reportLock.current || (!force && (current.question.trim() || current.draft))) { setPendingHandoff(metadata); return; }
     update(key, value => prepareWorkspaceHandoff(value, metadata));
     setPendingHandoff(null); setMode(key);
-  }, [update]);
+  }, [refreshBasket, update]);
   useEffect(() => {
     if (!incomingHandoffId || incomingHandled.current === incomingHandoffId) return;
     let valid = true;
@@ -109,7 +143,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
       if (!valid || !alive.current) return;
       if (!response?.ok) throw new Error(response?.error || tr('所选上下文已过期，请重新带入。'));
       incomingHandled.current = incomingHandoffId;
-      acceptHandoff(response.handoff);
+      return acceptHandoff(response.handoff);
     }).catch(error => { if (valid && alive.current) setSourceError(error.message); });
     return () => { valid = false; };
   }, [incomingHandoffId, acceptHandoff]);
@@ -120,7 +154,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     const token = { caseId: current.caseId, revision: current.revision, operation };
     update(key, value => ({ ...value, busy: operation, error: '',
       ...(['collect', 'compare'].includes(operation) ? { preview: null, result: null, usage: null, reportView: null } : {}),
-      ...(operation === 'generate' ? { draft: null, usage: null } : {}),
+      ...(operation === 'generate' ? { draft: null, draftEdits: null, usage: null } : {}),
     }));
     const isCurrent = () => alive.current && workspaceRequestCurrent(casesRef.current[key], token);
     try {
@@ -154,10 +188,40 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
       if (alive.current && casesRef.current[key].caseId === current.caseId) update(key, value => ({ ...value, busy: '' }));
     }
   };
-  const reset = () => update(mode, current => current.busy ? current : {
+  const reset = async () => {
+    if (casesRef.current[mode].busy || reportLock.current) return;
+    if (mode === 'analysis' && api()?.aiHandoffClear) {
+      basketRefreshTicket.current++; handoffTicket.current++;
+      reportLock.current = true; setReportBusy('basket');
+      try {
+        const response = await api().aiHandoffClear();
+        if (!response?.ok) throw new Error(response?.error || tr('无法读取本地证据篮。'));
+        if (!alive.current) return;
+        update(mode, current => ({ ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId),
+          revision: current.revision + 1, turns: current.turns,
+          basketRevision: Math.max(current.basketRevision ?? 0, response.basket.revision),
+          basketItems: current.basketRevision > response.basket.revision ? current.basketItems : response.basket.items }));
+        return;
+      } catch (error) { update(mode, current => ({ ...current, error: error.message })); return; }
+      finally { reportLock.current = false; if (alive.current) setReportBusy(''); }
+    }
+    update(mode, current => current.busy ? current : {
     ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId), revision: current.revision + 1,
     turns: current.turns,
-  });
+    });
+  };
+  const changeBasket = async id => {
+    if (casesRef.current.analysis.busy || reportLock.current) return;
+    basketRefreshTicket.current++; handoffTicket.current++;
+    reportLock.current = true; setReportBusy('basket');
+    try {
+      const response = id ? await api().aiHandoffRemove({ id }) : await api().aiHandoffClear();
+      if (!response?.ok) throw new Error(response?.error || tr('无法读取本地证据篮。'));
+      if (!alive.current) return;
+      update('analysis', current => appendWorkspaceBasket(current, response.basket));
+    } catch (error) { update('analysis', current => ({ ...current, error: error.message })); }
+    finally { reportLock.current = false; if (alive.current) setReportBusy(''); }
+  };
   const plan = () => run('plan', value => api().aiWorkspacePlan({ caseId: value.caseId, question: value.question, deviceId: value.deviceId, diagnostic: value.diagnostic }), (value, response) => ({
     ...value, plan: response.plan, checks: response.plan.checks, preview: null, result: null, planUsage: response.usage, usage: null, cached: false,
   }));
@@ -166,13 +230,14 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     question: value.question, ...(!value.contextRef || value.selectionChanged ? { selection: value.selection } : {}),
     ...(value.contextRef ? { contextRef: value.contextRef } : {}),
     ...(mode === 'diagnose' ? { diagnostic: value.diagnostic } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
+    ...(mode === 'analysis' && value.basketRevision !== null ? { basketRevision: value.basketRevision } : {}),
   }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
   const analyze = () => run('analyze', value => api().aiWorkspaceAnalyze({ caseId: value.caseId, previewId: value.preview.id, consent: true }), completeWorkspaceTurn);
   const generate = () => run('generate', value => api().aiWorkspaceGenerateTask({ caseId: value.caseId, deviceId: value.deviceId, goal: value.question, requirements: value.requirements,
     ...(value.contextRef ? { contextRef: value.contextRef } : {}), ...(Number.isInteger(value.findingIndex) ? { findingIndex: value.findingIndex } : {}),
     ...(value.targetSelection.tokens.length ? { targetSelection: value.targetSelection } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
-  }), (value, response) => ({ ...value, preparing: false, draft: response.draft, usage: response.usage }));
-  const save = () => run('save', value => api().aiWorkspaceSaveTask({ caseId: value.caseId, draftId: value.draft.id }), value => ({ ...value, draft: null }));
+  }), (value, response) => ({ ...value, preparing: false, draft: response.draft, draftEdits: editableTask(response.draft), usage: response.usage }));
+  const save = editedDraft => run('save', value => api().aiWorkspaceSaveTask({ caseId: value.caseId, draftId: value.draft.id, editedDraft }), value => ({ ...value, draft: null, draftEdits: null }));
   const compare = () => run('compare', value => api().aiWorkspaceComparisonPreview({ caseId: value.caseId,
     beforeRef: workspaceReportRef(value.baseline), afterRef: value.reportView?.reportRef || { caseId: value.caseId, previewId: value.preview?.id },
   }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
@@ -287,9 +352,11 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     }
   });
   return { mode, setMode, cases, current: cases[mode], sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, analyze, generate, save,
+    editDraft: draftEdits => update('task', value => value.busy || !value.draft ? value : { ...value, draftEdits }),
     history, reportBusy, reportError, selectTurn, loadHistory, saveReport, deleteHistory, exportReport, useContext, compare, prepareVerification,
     casebook, searchCasebook, similarCases, loadCase, saveCase, deleteCase, pendingHandoff,
-    acceptPendingHandoff: () => pendingHandoff && acceptHandoff(pendingHandoff, true),
+    acceptPendingHandoff: () => pendingHandoff && acceptHandoff(pendingHandoff, true).catch(error => setSourceError(error.message)),
+    pendingBasket, refreshBasket: () => refreshBasket().catch(error => setSourceError(error.message)), removeBasketItem: changeBasket, clearBasket: () => changeBasket(),
     pendingReport, acceptPendingReport: () => pendingReport && openRequestedReport(pendingReport), openRequestedReport,
     setBaseline: baseline => update(mode, value => ({ ...value, baseline })),
     showPreview: () => update(mode, value => ({ ...value, reportView: null })),

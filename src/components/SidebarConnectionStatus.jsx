@@ -3,7 +3,7 @@ import { Cable, Server } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { hasConnectionActivity, subscribeConnectionStatus } from '../shared/connectionStatus.js';
 
-export default function SidebarConnectionStatus({ onNavigate }) {
+export default function SidebarConnectionStatus({ onNavigate, onSummary }) {
   useLocale();
   const [states, setStates] = useState({});
   const [errors, setErrors] = useState({});
@@ -14,6 +14,10 @@ export default function SidebarConnectionStatus({ onNavigate }) {
   }), []);
   const items = [{ id: 'serial', name: tr('串口'), icon: Cable }, { id: 'ssh', name: 'SSH', icon: Server }]
     .filter(item => errors[item.id] || hasConnectionActivity(states[item.id]));
+  useEffect(() => {
+    onSummary?.({ connections: Object.values(states).reduce((sum, value) => sum + (value?.activeCount || 0), 0),
+      issues: Object.values(states).reduce((sum, value) => sum + (value?.failedCount || 0), 0) + Object.values(errors).filter(Boolean).length });
+  }, [states, errors, onSummary]);
   if (!items.length) return null;
   return <div aria-label={tr('后台连接状态')} className="space-y-1 border-t border-white/10 px-3 py-2">
     {items.map(item => {

@@ -8,6 +8,15 @@ export function addSerialScheme(preferences, { id, name, workspace, config, term
   return normalizePreferences({ ...current, version: 3, schemes: [...(current.schemes || []), scheme] });
 }
 
+export function updateSerialScheme(preferences, { id, workspace, config, terminalEnter = 'cr' }) {
+  const current = normalizePreferences(preferences);
+  const previous = current.schemes?.find(item => item.id === id && item.workspace === workspace);
+  if (!previous) throw new Error(tr('连接方案不存在或属于另一工作区'));
+  const scheme = normalizeSerialScheme({ ...previous, config, terminalEnter,
+    receiveMode: current.receiveMode, sendMode: current.sendMode, lineEnding: current.lineEnding });
+  return normalizePreferences({ ...current, schemes: current.schemes.map(item => item.id === id ? scheme : item) });
+}
+
 export function applySerialScheme(preferences, id, workspace, { status, pending = false } = {}) {
   if (pending || !['disconnected', 'error'].includes(status)) throw new Error(tr('请先断开当前串口，再套用连接方案'));
   const current = normalizePreferences(preferences);

@@ -4,11 +4,15 @@ import { tr, useLocale, formatDateTime } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
 import SelectMenu from './SelectMenu';
 import ReproductionPreview from './ReproductionPreview';
+import { REPRODUCTION_CONFIG_KEY, readReproductionConfig, revalidateReproductionConfig, saveReproductionConfig } from '../shared/connectionPreferences.js';
 
 export default function ReproductionDialog({ theme, devices = [], deviceId = '', sessionId = '', onClose }) {
   useLocale();
   const dialog = useRef(null), alive = useRef(true), request = useRef(0);
   const initializedSelection = useRef(Boolean(sessionId));
+  const configDirty = useRef(false);
+  const [savedConfig] = useState(() => { try { return { value: localStorage.getItem(REPRODUCTION_CONFIG_KEY) === null ? null : readReproductionConfig(), error: '' }; } catch (failure) { return { value: null, error: failure.message }; } });
+  const [lastConfig, setLastConfig] = useState(savedConfig.value), [preferenceError, setPreferenceError] = useState(savedConfig.error);
   const [state, setState] = useState({ sessions: [], activeId: '', unreadable: 0 });
   const [sources, setSources] = useState({ serial: [], ssh: [] });
   const [selectedDevice, setSelectedDevice] = useState(deviceId), [title, setTitle] = useState(tr('问题复现'));
@@ -23,6 +27,14 @@ export default function ReproductionDialog({ theme, devices = [], deviceId = '',
   const currentActive = current && current.id === state.activeId;
   const input = `w-full rounded-lg border px-3 py-2 text-sm ${theme.input}`;
   const button = `inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm disabled:opacity-40 ${theme.button.secondary}`;
+  const changeConfig = action => { configDirty.current = true; action(); };
+  useEffect(() => {
+    if (!configDirty.current || !title.trim()) return;
+    try {
+      const next = saveReproductionConfig({ version: 1, title, deviceId: selectedDevice, durationMs: duration, selection });
+      setLastConfig(next); setPreferenceError('');
+    } catch (failure) { setPreferenceError(failure.message); }
+  }, [title, selectedDevice, duration, selection]);
   const refresh = async () => {
     const [list, available] = await Promise.all([window.electronAPI.reproductionList(), window.electronAPI.reproductionSources()]);
     if (!alive.current) return;
@@ -80,22 +92,33 @@ export default function ReproductionDialog({ theme, devices = [], deviceId = '',
     } catch (failure) { if (alive.current) setError(failure.message); }
     finally { if (alive.current) setBusy(''); }
   };
-  const toggle = (kind, item) => setSelection(value => ({ ...value, [kind]: value[kind].some(ref => JSON.stringify(ref) === JSON.stringify(item)) ? value[kind].filter(ref => JSON.stringify(ref) !== JSON.stringify(item)) : [...value[kind], item] }));
+  const reuseConfig = async config => {
+    const available = await window.electronAPI.reproductionSources();
+    if (!available?.ok) throw new Error(available?.error || tr('复现会话读取失败。'));
+    if (!alive.current) return { ok: true };
+    const next = revalidateReproductionConfig(config, devices, available);
+    setSources(available); configDirty.current = true;
+    setTitle(next.title); setSelectedDevice(next.deviceId); setDuration(next.durationMs); setSelection(next.selection);
+    setNotice(tr('已复用配置，未开始采集；离线设备和失效会话已取消选择。'));
+    return { ok: true };
+  };
+  const toggle = (kind, item) => changeConfig(() => setSelection(value => ({ ...value, [kind]: value[kind].some(ref => JSON.stringify(ref) === JSON.stringify(item)) ? value[kind].filter(ref => JSON.stringify(ref) !== JSON.stringify(item)) : [...value[kind], item] })));
   const hasSelection = selection.video || selection.logs || selection.performance || selection.serial.length || selection.ssh.length;
   const status = { starting: tr('正在准备'), recording: tr('正在采集'), stopping: tr('正在保存'), completed: tr('已完成'), partial: tr('部分完成'), interrupted: tr('已中断') };
   return <dialog ref={dialog} onCancel={event => { event.preventDefault(); onClose(); }} aria-label={tr('复现采证')} className={`fixed m-auto max-h-[92vh] w-[min(68rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${panel}`}>
     <header className="flex items-center justify-between border-b border-current/10 p-4"><div><h3 className="text-lg font-semibold">{tr('复现采证')}</h3><p className={`mt-1 text-xs ${theme.textMuted}`}>{tr('把本次复现的所选证据保存在同一会话；不会自动发送给 AI。')}</p></div><button type="button" autoFocus onClick={onClose} aria-label={tr('关闭')} className="rounded-lg p-2 hover:bg-slate-500/10"><X size={20} /></button></header>
     <div className="grid max-h-[72vh] gap-5 overflow-y-auto p-5 md:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.3fr)]">
       <div className="min-w-0 space-y-4">
-        <label className="block space-y-1 text-xs">{tr('复现会话名称')}<input className={input} maxLength={100} value={title} disabled={Boolean(active || busy)} onChange={event => setTitle(event.target.value)} /></label>
-        <SelectMenu ariaLabel={tr('复现目标设备')} value={selectedDevice} onChange={setSelectedDevice} isDark={isDark} disabled={Boolean(active || busy)} className="w-full" options={[{ value: '', label: tr('请选择在线设备') }, ...devices.filter(device => device.status === 'device').map(device => ({ value: device.id, label: `${device.model || device.name || device.id} · ${device.id}` }))]} />
+        <button type="button" disabled={!lastConfig || Boolean(active || busy)} className={button} onClick={() => execute('reuse', () => reuseConfig(lastConfig))}>{tr('复用上次配置')}</button>
+        <label className="block space-y-1 text-xs">{tr('复现会话名称')}<input className={input} maxLength={100} value={title} disabled={Boolean(active || busy)} onChange={event => changeConfig(() => setTitle(event.target.value))} /></label>
+        <SelectMenu ariaLabel={tr('复现目标设备')} value={selectedDevice} onChange={value => changeConfig(() => setSelectedDevice(value))} isDark={isDark} disabled={Boolean(active || busy)} className="w-full" options={[{ value: '', label: tr('请选择在线设备') }, ...devices.filter(device => device.status === 'device').map(device => ({ value: device.id, label: `${device.model || device.name || device.id} · ${device.id}` }))]} />
         <fieldset disabled={Boolean(active || busy)} className="space-y-2 rounded-xl border border-current/10 p-3"><legend className="px-1 text-xs">{tr('仅采集勾选的来源')}</legend>
-          {[['video', tr('设备录屏')], ['logs', tr('设备日志（最多 100 MiB）')], ['performance', tr('性能快照（每 5 秒）')]].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-emerald-500" checked={selection[key]} onChange={event => setSelection(value => ({ ...value, [key]: event.target.checked }))} />{label}</label>)}
+          {[['video', tr('设备录屏')], ['logs', tr('设备日志（最多 100 MiB）')], ['performance', tr('性能快照（每 5 秒）')]].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-emerald-500" checked={selection[key]} onChange={event => changeConfig(() => setSelection(value => ({ ...value, [key]: event.target.checked })))} />{label}</label>)}
           {sources.serial.map(item => { const ref = { workspace: item.workspace, sessionId: item.sessionId }; return <label key={item.workspace} className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-emerald-500" checked={selection.serial.some(value => value.workspace === item.workspace && value.sessionId === item.sessionId)} onChange={() => toggle('serial', ref)} />{item.label}</label>; })}
           {sources.ssh.map(item => { const ref = { sessionId: item.sessionId, terminalId: item.terminalId }; return <label key={`${item.sessionId}:${item.terminalId}`} className="flex items-center gap-2 text-xs"><input type="checkbox" className="accent-emerald-500" checked={selection.ssh.some(value => value.sessionId === item.sessionId && value.terminalId === item.terminalId)} onChange={() => toggle('ssh', ref)} />{item.label}</label>; })}
         </fieldset>
         <p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr('串口和 SSH 只读取已打开的会话，不自动连接；每个来源最多保存 8 MiB，缓冲遗漏会明确标注。')}</p>
-        <SelectMenu ariaLabel={tr('最长采集时间')} value={String(duration)} onChange={value => setDuration(Number(value))} disabled={Boolean(active || busy)} isDark={isDark} className="w-full" options={[{ value: '30000', label: tr('30 秒') }, { value: '60000', label: tr('1 分钟') }, { value: '180000', label: tr('3 分钟') }, { value: '300000', label: tr('5 分钟') }]} />
+        <SelectMenu ariaLabel={tr('最长采集时间')} value={String(duration)} onChange={value => changeConfig(() => setDuration(Number(value)))} disabled={Boolean(active || busy)} isDark={isDark} className="w-full" options={[{ value: '30000', label: tr('30 秒') }, { value: '60000', label: tr('1 分钟') }, { value: '180000', label: tr('3 分钟') }, { value: '300000', label: tr('5 分钟') }]} />
         <button type="button" disabled={Boolean(active || busy) || !selectedDevice || !title.trim() || !hasSelection} onClick={() => execute('start', () => window.electronAPI.reproductionStart({ deviceId: selectedDevice, title, durationMs: duration, selection }))} className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm disabled:opacity-40 ${theme.button.primary}`}><Play size={15} />{tr('开始复现采集')}</button>
         {active && <div className="space-y-2 rounded-xl border border-emerald-500/30 p-3"><p className="text-sm font-medium">{active.title} · {status[active.status]}</p><button type="button" className={button} disabled={Boolean(busy)} onClick={() => setViewId(active.id)}>{tr('查看当前采集')}</button><input aria-label={tr('问题标记说明')} value={note} onChange={event => setNote(event.target.value)} maxLength={240} placeholder={tr('问题标记说明（可选）')} className={input} /><div className="flex flex-wrap gap-2"><button type="button" disabled={Boolean(busy) || active.status !== 'recording'} className={button} onClick={() => execute('mark', () => window.electronAPI.reproductionMark({ id: active.id, note: note.trim() || tr('问题发生在这里') }))}><BookmarkPlus size={14} />{tr('标记问题')}</button><button type="button" disabled={Boolean(busy) || active.status === 'stopping'} className={button} onClick={() => execute('stop', () => window.electronAPI.reproductionStop({ id: active.id }))}><Square size={14} />{tr('结束并保存')}</button></div></div>}
         <div className="space-y-2 border-t border-current/10 pt-3"><div className="flex items-center justify-between"><h4 className="text-sm font-medium">{tr('已保存的复现会话')}</h4><button type="button" className={button} disabled={Boolean(busy)} onClick={() => execute('refresh', async () => { await refresh(); return { ok: true }; })}><RefreshCw size={14} /></button></div>
@@ -103,8 +126,8 @@ export default function ReproductionDialog({ theme, devices = [], deviceId = '',
           {state.unreadable > 0 && <p className="text-xs text-amber-500">{tr('有 {0} 份记录无法读取，原文件已保留。', { 0: state.unreadable })}</p>}
         </div>
       </div>
-      <div className="min-w-0 space-y-4">{current ? <><ReproductionPreview key={current.id} session={current} videoUrl={opened.videoUrl} theme={theme} />{!currentActive && <div className="flex flex-wrap gap-2">{current.unsaved && <button type="button" disabled={Boolean(busy)} className={button} onClick={() => execute('retrySave', () => window.electronAPI.reproductionRetrySave({ id: current.id }))}>{tr('重试保存会话状态')}</button>}<button type="button" disabled={Boolean(busy || current.unsaved)} onClick={() => execute('analyze', () => window.electronAPI.reproductionAnalyze({ id: current.id }))} className={button}><Sparkles size={15} />{tr('准备 AI 分析预览')}</button><button type="button" disabled={Boolean(busy || current.unsaved)} onClick={() => execute('export', () => window.electronAPI.reproductionExport({ id: current.id }))} className={button}><Download size={15} />{tr('导出复现证据包')}</button></div>}</> : <p className={`rounded-xl border border-dashed p-8 text-center text-sm leading-6 ${theme.textMuted}`}>{tr('勾选来源后开始复现，或选择一份已保存的会话查看证据。')}</p>}
-        {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-red-500">{tr(error)}</p>}{notice && <p role="status" className="text-xs text-emerald-500">{tr(notice)}</p>}
+      <div className="min-w-0 space-y-4">{current ? <><ReproductionPreview key={current.id} session={current} videoUrl={opened.videoUrl} theme={theme} />{!currentActive && <div className="flex flex-wrap gap-2"><button type="button" disabled={Boolean(active || busy)} className={button} onClick={() => execute('reuse', () => reuseConfig({ version: 1, title: current.title, deviceId: current.deviceId, durationMs: current.durationLimitMs, selection: current.selection }))}>{tr('按此配置再采一次')}</button>{current.unsaved && <button type="button" disabled={Boolean(busy)} className={button} onClick={() => execute('retrySave', () => window.electronAPI.reproductionRetrySave({ id: current.id }))}>{tr('重试保存会话状态')}</button>}<button type="button" disabled={Boolean(busy || current.unsaved)} onClick={() => execute('analyze', () => window.electronAPI.reproductionAnalyze({ id: current.id }))} className={button}><Sparkles size={15} />{tr('准备 AI 分析预览')}</button><button type="button" disabled={Boolean(busy || current.unsaved)} onClick={() => execute('export', () => window.electronAPI.reproductionExport({ id: current.id }))} className={button}><Download size={15} />{tr('导出复现证据包')}</button></div>}</> : <p className={`rounded-xl border border-dashed p-8 text-center text-sm leading-6 ${theme.textMuted}`}>{tr('勾选来源后开始复现，或选择一份已保存的会话查看证据。')}</p>}
+        {preferenceError && <p role="alert" className="text-xs text-amber-500">{tr(preferenceError)}</p>}{error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-red-500">{tr(error)}</p>}{notice && <p role="status" className="text-xs text-emerald-500">{tr(notice)}</p>}
       </div>
     </div>
     <footer className={`flex items-center gap-2 border-t border-current/10 p-4 text-xs ${theme.textMuted}`}>{busy && <Loader2 size={14} className="animate-spin" />}{active ? tr('关闭窗口不会停止采集，可从后台活动返回；退出应用前会询问保存。') : tr('视频和原始日志只保存在本机，发送给 AI 前仍需核对脱敏预览。')}</footer>

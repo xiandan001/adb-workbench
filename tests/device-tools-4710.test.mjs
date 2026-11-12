@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { tr } from '../src/shared/i18n.js';
 import { defaultDeviceShortcuts, normalizeDeviceShortcuts } from '../src/shared/deviceNavigationShortcuts.js';
+import { normalizeLogFilter, normalizeLogBuffers } from '../src/shared/logWorkspace.js';
 
 const require = createRequire(import.meta.url);
 const parser = require('@babel/parser');
@@ -60,14 +61,14 @@ test('log button forwards the clicked card identity and disables disconnected de
 test('existing App callback opens explicit device context and retains failure feedback without device operations', async () => {
   const app = source('App.jsx'), calls = [], selection = [], messages = [];
   let response = { ok: true };
-  const open = new Function('window', 'setActiveDeviceId', 'activeDeviceId', 'tr', 'showToast', `return (${initializer(app, 'viewApplicationLogs')});`)(
+  const open = new Function('window', 'chooseDevice', 'activeDeviceId', 'tr', 'showToast', 'navigationContext', 'worksetRequest', 'rememberWorksetContext', `return (${initializer(app, 'viewApplicationLogs')});`)(
     { electronAPI: { logAnalyzerOpen: async value => { calls.push(value); return response; } } },
-    value => selection.push(value), 'global-device', tr, value => messages.push(value));
+    value => selection.push(value), 'global-device', tr, value => messages.push(value), null, null, () => {});
   await open({ deviceId: 'card-B' });
   await open({ deviceId: 'card-A', packageName: 'com.example.fixture' });
   await open();
   assert.deepEqual(selection, ['card-B', 'card-A']);
-  assert.deepEqual(calls, [{ deviceId: 'card-B', packageName: undefined }, { deviceId: 'card-A', packageName: 'com.example.fixture' }, { deviceId: 'global-device', packageName: undefined }]);
+  assert.deepEqual(calls, [{ deviceId: 'card-B', packageName: '' }, { deviceId: 'card-A', packageName: 'com.example.fixture' }, { deviceId: 'global-device', packageName: '' }]);
   assert.deepEqual(messages, []);
   response = { ok: false, error: 'fixture open failed' }; await open({ deviceId: 'card-B' });
   assert.equal(messages.length, 1); assert.match(messages[0], /fixture open failed/);
@@ -76,16 +77,19 @@ test('existing App callback opens explicit device context and retains failure fe
 test('log context navigation only selects idle device/filter and refuses active capture or AI', () => {
   const logs = source('components/LogAnalyzer.jsx');
   const compile = (running, analyzing) => {
-    const events = [];
-    const fn = new Function('runningRef', 'aiAnalyzingRef', 'setNote', 'clearTimeout', 'filterDebounceRef', 'setDeviceId', 'setFilter', 'setFilterTextInput', 'tr', `return (${initializer(logs, 'applyContext')});`)(
+    const events = [], restoredBuffers = []; let pending;
+    const fn = new Function('runningRef', 'aiAnalyzingRef', 'setNote', 'clearTimeout', 'filterDebounceRef', 'setDeviceId', 'setFilter', 'setFilterTextInput', 'tr', 'useCallback', 'setPendingLogContext', 'normalizeLogFilter', 'normalizeLogBuffers', 'setBuffers', `return (${initializer(logs, 'applyContext')});`)(
       { current: running }, { current: analyzing }, value => events.push(['note', value]), value => events.push(['clearTimer', value]), { current: 17 },
-      value => events.push(['device', value]), value => events.push(['filter', value]), value => events.push(['textFilter', value]), tr);
-    return { fn, events };
+      value => events.push(['device', value]), value => events.push(['filter', value]), value => events.push(['textFilter', value]), tr,
+      callback => callback, value => { pending = value; }, normalizeLogFilter, normalizeLogBuffers, value => restoredBuffers.push(value));
+    return { fn, events, restoredBuffers, get pending() { return pending; } };
   };
   for (const [running, analyzing] of [[true, false], [false, true], [true, true]]) {
-    const { fn, events } = compile(running, analyzing); fn({ deviceId: 'other-device', packageName: 'other.package' });
+    const instance = compile(running, analyzing), { fn, events } = instance;
+    fn({ deviceId: 'other-device', packageName: 'other.package' });
     assert.equal(events.length, 1); assert.equal(events[0][0], 'note');
     assert.match(events[0][1], /未切换设备或过滤条件/); assert.doesNotMatch(events[0][1], /应用详情/);
+    assert.equal(instance.pending.deviceId, 'other-device'); assert.deepEqual(instance.restoredBuffers, []);
   }
   const { fn, events } = compile(false, false);
   fn(null); assert.deepEqual(events, []);

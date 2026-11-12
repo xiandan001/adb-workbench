@@ -23,9 +23,12 @@ function targetKey(entries, deviceId) {
   if (deviceId && entries.every(entry => entry.targetKey === deviceKey(deviceId))) return deviceKey(deviceId);
   return keys.length === entries.length && new Set(keys).size === 1 ? keys[0] : null;
 }
+function frozenEntryKey({ id: _id, ...entry }) {
+  return createHash('sha256').update(JSON.stringify(entry)).digest('hex');
+}
 
 function createAiWorkspaceService({ client, evidence, membership, saveTask, confirmSave, history, casebook,
-  processor = computeWorkspaceJob, resolveHandoff, resolveTaskTargets, activity,
+  processor = computeWorkspaceJob, resolveHandoff, resolveBasket, resolveTaskTargets, activity,
   confirmDelete = async () => false, exportReport = async () => ({ cancelled: true }), now = Date.now }) {
   const cases = new Map();
   const lifetime = new AbortController();
@@ -122,24 +125,28 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       const question = shortText(args.question), selection = normalizeSelection(args.selection), diagnostic = normalizeDiagnostic(args.diagnostic);
       const prior = args.contextRef ? await resolveReport(args.contextRef) : null;
       const handoff = args.handoffId && resolveHandoff ? await resolveHandoff(args.handoffId) : null;
+      const basket = args.basketRevision !== undefined && resolveBasket ? await resolveBasket(args.basketRevision) : null;
+      if (args.basketRevision !== undefined && !basket) throw fail('AI_CONTEXT', tr('证据篮已变化，请重新采集并核对预览。'));
       if (args.handoffId && !handoff) throw fail('AI_CONTEXT', tr('所选上下文已过期，请重新带入。'));
       state.preview = null; state.cache = null;
       const hasNew = Boolean(args.checks?.length || args.sourceIds?.length || args.text?.trim());
       if (prior && args.deviceId && prior.preview.targetFingerprint && prior.preview.targetFingerprint !== deviceKey(args.deviceId)) throw fail('AI_SOURCE_CHANGED', tr('所选来源已变化，请刷新来源后重新选择。'));
-      const collected = hasNew || (!prior && !handoff) ? await evidence.collect({ deviceId: args.deviceId, selectedChecks: args.checks || [],
+      const collected = hasNew || (!prior && !handoff && !basket?.entries.length) ? await evidence.collect({ deviceId: args.deviceId, selectedChecks: args.checks || [],
         sourceIds: args.sourceIds || [], text: args.text || '', selection, diagnostic, signal }) : null;
       if (prior && args.deviceId && !args.checks?.length && evidence.verifyTarget) await evidence.verifyTarget(args.deviceId, signal);
       assertCurrent();
       let old = prior?.preview.entries || [];
       if (prior && !hasNew && args.selection) old = await process('refilter', { entries: old, selection, now: now() }, signal);
-      const imported = handoff?.entries || [];
+      const priorEntries = new Set((prior?.preview.entries || []).map(frozenEntryKey));
+      const imported = [...(handoff?.entries || []), ...(basket?.entries || []).filter(entry => !priorEntries.has(frozenEntryKey(entry)))];
       const data = await process('bundle', { entries: [...old, ...imported, ...(collected?.entries || [])] }, signal);
       if (!data.entries.some(entry => entry.text?.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
       const fingerprint = collected ? targetKey(collected.entries, args.deviceId) : prior?.preview.targetFingerprint;
       return freezePreview(state, { question, ...data, selection, ...(diagnostic ? { diagnostic } : {}),
         ...(isHarmonyDevice(args.deviceId) || data.entries.some(entry => entry.platform === 'harmony') ? { platform: data.entries.some(entry => entry.source === 'adb') ? 'mixed' : 'harmony' } : {}),
         ...(args.mode === 'diagnose' && args.deviceId ? { deviceId: args.deviceId } : {}),
-        targetFingerprint: handoff ? null : prior ? (prior.preview.targetFingerprint === fingerprint ? fingerprint : null) || null : fingerprint,
+        targetFingerprint: handoff || basket?.entries.length ? null : prior ? (prior.preview.targetFingerprint === fingerprint ? fingerprint : null) || null : fingerprint,
+        ...(basket ? { basketRevision: basket.revision } : {}),
         ...(prior ? { context: { question: prior.preview.question, summary: prior.result.summary, ...(prior.review ? { caseReview: prior.review, caseName: prior.name } : {}) } } : {}),
         ...(handoff ? { handoff: { origin: handoff.origin, title: handoff.title, deviceId: handoff.deviceId, provenance: handoff.provenance, createdAt: handoff.createdAt, expiresAt: handoff.expiresAt } } : {}) }, signal);
     }),
@@ -166,6 +173,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
     analyze: args => operate(args, async (state, signal, assertCurrent) => {
       const preview = state.preview;
       if (args.consent !== true || !preview || args.previewId !== preview.id || now() >= Date.parse(preview.expiresAt)) throw fail('AI_PREVIEW_EXPIRED', tr('请重新生成并确认证据预览后再分析。'));
+      if (preview.basketRevision !== undefined && resolveBasket) await resolveBasket(preview.basketRevision);
       const unavailableChecks = new Set(preview.entries.filter(entry => entry.unavailable).map(entry => entry.evidenceKind?.split(':').at(-1)));
       const availableVerificationChecks = checks().map(check => check.id).filter(id => !unavailableChecks.has(id) && (preview.diagnostic?.packageName || !APP_CHECKS.includes(id)));
       const payload = { question: preview.question, evidence: preview.entries,
@@ -223,7 +231,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       const missing = parsed.missingInformation || [];
       if (!required.expectedResult && (args.requirements || report)) missing.push(tr('请补充预期结果和验收标准。'));
       const observationOnly = parsed.steps.every(step => ['screenshot', 'perfSnapshot', 'delay'].includes(step.type));
-      if (observationOnly) missing.push(tr('此草案仅采集观察数据，需在任务中心补充并核对交互与断言。'));
+      if (observationOnly) missing.push(tr('生成草案仅含观察步骤，需补充并核对交互与断言。'));
       const draft = { id: randomUUID(), name: sanitize(parsed.name), description: sanitize(parsed.description), steps: parsed.steps,
         ...(platform === 'harmony' ? { targetPlatform: 'harmony', deviceId: taskDeviceId } : {}),
         expiresAt: new Date(Math.min(now() + TTL, ...targets.map(target => Date.parse(target.expiresAt)).filter(Number.isFinite))).toISOString(), missingInformation: [...new Set(missing.map(sanitize))].slice(0, 8),
@@ -239,6 +247,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       }
       state.draft = clone(draft);
       state.draftTargets = clone(targets);
+      state.draftInputAllowed = platform !== 'harmony' || deviceRef.capabilities.textInput === true;
       state.draftOrigin = report ? { ...args.contextRef, caseId: args.contextRef.caseId || args.caseId, turnId: report.turnId || report.id,
         ...(Number.isInteger(args.findingIndex) ? { findingIndex: args.findingIndex } : {}), question: report.preview.question, summary: report.result.summary, ...(finding ? { finding } : {}) } : null;
       return { draft, usage: answer.usage };
@@ -247,10 +256,15 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       await entitled(); assertCurrent();
       const draft = state.draft;
       if (!draft || args.draftId !== draft.id || now() >= Date.parse(draft.expiresAt)) throw fail('AI_DRAFT_EXPIRED', tr('任务草案已失效，请重新生成。'));
-      if (!await confirmSave(clone(draft))) return { cancelled: true };
+      const edited = args.editedDraft === undefined ? { name: draft.name, description: draft.description, steps: draft.steps }
+        : args.editedDraft;
+      const validated = parseTask(JSON.stringify(edited), { targets: state.draftTargets || [], platform: draft.targetPlatform || 'android' });
+      if (Object.keys(edited).some(key => !['name', 'description', 'steps'].includes(key))) throw fail('AI_TASK_INPUT', tr('测试要求无效或过长。'));
+      if (draft.targetPlatform === 'harmony' && !state.draftInputAllowed && validated.steps.some(step => step.type === 'input')) throw fail('AI_TASK_INPUT', tr('尚未确认此设备的焦点文本输入能力，请改用观察步骤或明确的控件任务。'));
+      if (!await confirmSave({ ...clone(draft), ...validated })) return { cancelled: true };
       assertCurrent();
       if (state.draft !== draft || now() >= Date.parse(draft.expiresAt)) throw fail('AI_DRAFT_EXPIRED', tr('任务草案已失效，请重新生成。'));
-      const script = await saveTask({ name: draft.name, description: draft.description, steps: draft.steps },
+      const script = await saveTask(validated,
         { ...(state.draftOrigin ? { origin: state.draftOrigin } : {}), ...(state.draftTargets?.length ? { targets: state.draftTargets } : {}), ...(draft.targetPlatform === 'harmony' ? { targetPlatform: 'harmony', deviceId: draft.deviceId } : {}) });
       state.draft = null;
       state.draftTargets = null; state.draftOrigin = null;

@@ -27,6 +27,13 @@ let captureSerial = 0;
 let captureError = '';
 const captureOperations = {};
 let navigationContext = null;
+function normalizeNavigationContext(context) {
+  const { normalizePart } = require('./workbench-worksets-policy.cjs');
+  const application = normalizePart('application', { deviceId: context.deviceId, packageName: typeof context.packageName === 'string' ? context.packageName : '' });
+  const logs = context.worksetLogs ? normalizePart('logs', context.worksetLogs) : null;
+  if (logs && logs.deviceId !== application.deviceId) throw new Error(tr('工作集数据无效，原文件已保留。'));
+  return { ...application, ...(logs ? { worksetLogs: logs } : {}) };
+}
 let pkgResolverTimer = null;
 let pidPackageMap = new Map();
 // logStore 字节总量追踪：用于按字节限制内存占用（防止超大日志导致 OOM）
@@ -504,7 +511,7 @@ function register(ipcMain) {
 
   ipcMain.handle('logAnalyzer:open', async (_event, context) => {
     if (context && typeof context.deviceId === 'string') {
-      navigationContext = { deviceId: context.deviceId, packageName: typeof context.packageName === 'string' ? context.packageName : '' };
+      navigationContext = normalizeNavigationContext(context);
     }
     const window = createLogAnalyzerWindow();
     if (context && navigationContext && !window.webContents.isLoading()) {
@@ -513,6 +520,16 @@ function register(ipcMain) {
     return { ok: true };
   });
   ipcMain.handle('logAnalyzer:getContext', async () => navigationContext);
+  ipcMain.handle('logAnalyzer:applyContext', async (event, context) => {
+    const main = ctx.getMainWindow();
+    if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return { ok: false, error: tr('只允许在应用窗口管理工作集。') };
+    try {
+      navigationContext = normalizeNavigationContext(context);
+      const window = ctx.getLogAnalyzerWindow();
+      if (window && !window.isDestroyed() && !window.webContents.isLoading()) window.webContents.send('logAnalyzer:context', navigationContext);
+      return { ok: true };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
 
   ipcMain.handle('logAnalyzer:close', async () => {
     const logAnalyzerWindow = ctx.getLogAnalyzerWindow();

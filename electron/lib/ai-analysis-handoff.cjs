@@ -28,7 +28,7 @@ function targetMetadata(values) {
     return { token: value.token, label: sanitize(field(value.label, 240)), deviceId: field(value.deviceId, 160), capturedAt: value.capturedAt, expiresAt: value.expiresAt };
   });
 }
-function createHandoffBroker({ getOwner, freeze, publish, readReference, now = Date.now }) {
+function createHandoffBroker({ getOwner, freeze, publish, readReference, basket, now = Date.now }) {
   const contexts = new Map(), watched = new WeakSet(), generations = new WeakMap(); let preparing = 0, lifecycle = 0;
   function watch(owner) {
     if (watched.has(owner)) return;
@@ -81,10 +81,16 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, now = D
       if ([...contexts.values()].reduce((sum, entry) => sum + entry.bytes, storedBytes) > LIMITS.totalBytes) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
       const id = randomUUID();
       const entry = { id, owner, generation, origin, title: labels.entries[0].label,
-        question: labels.entries[0].text.replace(/^\[L\d+\] /gm, ''), deviceId,
+        question: labels.entries[0].text.replace(/^\[L\d+\] /gm, ''), deviceId: sanitize(deviceId),
         ...(contextRef ? { contextRef } : {}), ...(taskTargets ? { taskTargets } : {}), entries: result.entries,
         provenance, createdAt: new Date(capturedAt).toISOString(), expiresAt: capturedAt + LIMITS.ttl,
         bytes: storedBytes, lineCount: result.entries.reduce((sum, item) => sum + item.lineCount, 0), truncated: result.truncated };
+      if (basket && !taskTargets?.length) {
+        const { id, origin, title, question, deviceId, createdAt, provenance, truncated, entries } = entry;
+        const saved = await basket.append({ id, origin, title, question, deviceId, createdAt, provenance, truncated: Boolean(truncated), entries });
+        entry.basketItem = true; entry.basketRevision = saved.revision;
+        if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
+      }
       contexts.set(id, entry); publish(owner, { handoffId: id }, { foreground });
       return { handoffId: id };
     } finally { preparing--; }
@@ -111,6 +117,18 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, now = D
       return create(view, 'renderer-view', undefined, true);
     },
     get: id => metadata(resolve(id)),
+    list: () => basket ? basket.list() : { revision: 0, items: [], bytes: 0 },
+    async remove(id) {
+      if (!basket) throw fail(tr('AI 工作区暂不可用。'));
+      const result = await basket.remove(id); contexts.delete(id); return result;
+    },
+    async clear() {
+      if (!basket) throw fail(tr('AI 工作区暂不可用。'));
+      const result = await basket.clear();
+      for (const [id, entry] of contexts) if (entry.basketItem) contexts.delete(id);
+      return result;
+    },
+    resolveBasket: revision => basket ? basket.resolve(revision) : { revision: 0, items: [], entries: [] },
     async resolveForWorkspace(id) {
       const entry = resolve(id);
       return { ...metadata(entry), entries: entry.entries.map(item => ({ ...item, provenance: { ...item.provenance },
@@ -164,21 +182,29 @@ function publishHandoff(ctx, owner, payload, { foreground = false } = {}) {
 function runtime() {
   if (!broker) {
     const ctx = require('./app-context.cjs');
+    const { app } = require('electron');
+    const path = require('node:path');
     broker = createHandoffBroker({ getOwner: () => ctx.getMainWindow()?.webContents,
       freeze: (args, options) => runWorkspaceJob('freeze', args, options), readReference,
+      basket: require('./ai-evidence-basket-store.cjs').createEvidenceBasketStore({ filename: path.join(app.getPath('userData'), 'ai-workspace-evidence-basket.json') }),
       publish: (owner, value, options) => publishHandoff(ctx, owner, value, options) });
   }
   return broker;
 }
 function register(ipcMain) {
   const ctx = require('./app-context.cjs');
-  for (const method of ['create', 'get']) ipcMain.handle(`ai-handoff:${method}`, async (event, args) => {
-    const windows = method === 'get' ? [ctx.getMainWindow()] : [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()];
+  for (const method of ['create', 'get', 'list', 'remove', 'clear']) ipcMain.handle(`ai-handoff:${method}`, async (event, args) => {
+    const windows = method === 'create' ? [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()] : [ctx.getMainWindow()];
     const allowed = windows.some(window => window && !window.isDestroyed() && window.webContents === event.sender && event.senderFrame === window.webContents.mainFrame);
     if (!allowed) return { ok: false, code: 'AI_HANDOFF_OWNER', error: tr('仅允许在应用主窗口或日志窗口带入 AI 上下文。') };
-    try { return method === 'get' ? { ok: true, handoff: runtime().get(args?.handoffId) } : { ok: true, ...await runtime().createFromRenderer(args) }; }
+    try {
+      if (method === 'get') return { ok: true, handoff: runtime().get(args?.handoffId) };
+      if (method === 'create') return { ok: true, ...await runtime().createFromRenderer(args) };
+      const basket = await (method === 'list' ? runtime().list() : method === 'remove' ? runtime().remove(args?.id) : runtime().clear());
+      return { ok: true, basket };
+    }
     catch (error) { return { ok: false, code: error.code, error: error.message }; }
   });
 }
 module.exports = { createHandoffBroker, publishHandoff, LIMITS, register, createInternal: input => runtime().createInternal(input),
-  resolveForWorkspace: id => runtime().resolveForWorkspace(id), cleanup: () => broker?.cleanup() };
+  resolveForWorkspace: id => runtime().resolveForWorkspace(id), resolveBasket: revision => runtime().resolveBasket(revision), cleanup: () => broker?.cleanup() };

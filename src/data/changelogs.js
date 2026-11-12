@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.21': {
+    title: 'v4.7.21',
+    date: '2026-11-13',
+    items: [
+      { type: 'feature', get text() { return tr('新增调试工作集和跨页证据篮，配置与脱敏材料可在本机持久保存。'); } },
+      { type: 'improve', get text() { return tr('AI 测试草案支持原地编辑，常用连接、采证配置和结果交付操作更连贯。'); } },
+      { type: 'improve', get text() { return tr('设备终端切页保留现场，新增可选紧凑视图与统一活动入口。'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.7.20': {
     title: 'v4.7.20',
     date: '2026-11-12',

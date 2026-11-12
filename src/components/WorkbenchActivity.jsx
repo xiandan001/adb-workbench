@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CheckCircle2, CircleAlert, Loader2, Square, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
+import SidebarConnectionStatus from './SidebarConnectionStatus';
 
 const running = status => ['running', 'queued', 'starting', 'recording', 'stopping', 'saving', 'cancelling'].includes(status);
 const timestamp = value => Number.isFinite(value) ? value : Date.parse(value) || 0;
-export default function WorkbenchActivity({ tasks = [], onOpen, showToast }) {
+export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection }) {
   const locale = useLocale();
   const [registry, setRegistry] = useState({ items: [], olderCount: 0 });
   const [external, setExternal] = useState({ tasks: [], guards: [], recordings: [] });
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(''), [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [connectionSummary, setConnectionSummary] = useState({ connections: 0, issues: 0 });
   const dialog = useRef(null), toast = useRef(showToast), seenRunning = useRef(new Set()), notified = useRef(new Set());
   useEffect(() => { toast.current = showToast; }, [showToast]);
   useEffect(() => {
@@ -70,10 +72,14 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast }) {
     } catch (failure) { setError(failure.message); } finally { setBusy(''); }
   };
   return <div className="border-t border-[#3E4145] px-4 py-3">
-    <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })}</span></span></button>
-    {open && <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className="fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-slate-600 bg-[#202124] p-0 text-slate-100 shadow-2xl backdrop:bg-black/50" aria-label={tr('后台活动')}>
+    <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · {tr('连接 {0}', { 0: connectionSummary.connections })}</span></span></button>
+    <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className="fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-slate-600 bg-[#202124] p-0 text-slate-100 shadow-2xl backdrop:bg-black/50" aria-label={tr('后台活动')}>
       <header className="flex items-center justify-between border-b border-white/10 p-4"><h3 className="font-semibold">{tr('后台活动')}</h3><button type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-white/10"><X size={18} /></button></header>
       <div className="max-h-[60vh] space-y-2 overflow-auto p-4">
+        <h4 className="text-xs font-medium text-slate-300">{tr('连接状态')}</h4>
+        <SidebarConnectionStatus onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
+        {!connectionSummary.connections && !connectionSummary.issues && <p className="py-2 text-xs text-slate-400">{tr('当前没有活动连接。')}</p>}
+        <h4 className="pt-3 text-xs font-medium text-slate-300">{tr('任务与采集')}</h4>
         {!items.length && <p className="py-8 text-center text-sm text-slate-400">{tr('当前没有后台活动。')}</p>}
         {items.slice(0, 60).map(item => <div key={item.id} className="rounded-xl border border-white/10 p-3">
           <div className="flex items-start gap-3">{running(item.status) ? <Loader2 size={17} className="mt-1 shrink-0 animate-spin text-emerald-400" /> : item.status === 'failed' ? <CircleAlert size={17} className="mt-1 shrink-0 text-amber-400" /> : <CheckCircle2 size={17} className="mt-1 shrink-0 text-slate-400" />}
@@ -88,6 +94,6 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast }) {
         {(registry.olderCount > 0 || items.length > 60) && <p className="text-xs text-slate-400">{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
         {error && <p role="alert" className="text-xs text-red-400">{tr(error)}</p>}
       </div>
-    </dialog>}
+    </dialog>
   </div>;
 }
