@@ -24,8 +24,8 @@ function fakeClock() {
     },
   };
 }
-function harness({ development = false, clock } = {}) {
-  const handlers = new Map(); const events = []; const calls = { checks: 0, downloads: 0, wakes: 0, disposals: 0, quits: 0, pollers: 0 };
+function harness({ development = false, clock, launch = async () => ({ ok: true, code: 'READY', installerPid: 5252 }) } = {}) {
+  const handlers = new Map(); const events = []; const calls = { checks: 0, downloads: 0, wakes: 0, disposals: 0, quits: 0, pollers: 0, launches: 0 };
   const app = new EventEmitter(); app.quit = () => calls.quits++;
   const powerMonitor = new EventEmitter(); const updater = new EventEmitter();
   const main = { isDestroyed: () => false, webContents: { isDestroyed: () => false, mainFrame: {}, send: (_channel, event) => events.push(structuredClone(event)) } };
@@ -42,6 +42,8 @@ function harness({ development = false, clock } = {}) {
   updater.checkForUpdates = () => { calls.checks++; return check(); };
   updater.downloadUpdate = () => { calls.downloads++; return download(); };
   updater.quitAndInstall = () => {};
+  updater.installerPath = 'C:\\Updater\\fixture.exe';
+  updater.downloadedUpdateHelper = { downloadedFileInfo: { sha512: 'fixture-digest' } };
   const retryDelays = []; const module = { exports: {} };
   const load = vm.runInThisContext(`(function(require,module,exports,setTimeout,clearTimeout,console){\n${source}\n})`, { filename: 'updater-service-fixture.cjs' });
   load(name => {
@@ -50,7 +52,7 @@ function harness({ development = false, clock } = {}) {
     if (name === './app-context.cjs') return { isDev: development, getMainWindow: () => main, getLogAnalyzerWindow: () => analyzer };
     if (name === './version.cjs') return { getAppVersion: () => '4.7.2', compareVersions: (a, b) => a.localeCompare(b, undefined, { numeric: true }) };
     if (name === './android-tool-cleanup.cjs') return { cleanupAndroidToolProcesses: async () => ({ ok: true }) };
-    if (name === './update-installer-launch.cjs') return { launchUpdateInstaller: async () => ({ ok: true, code: 'READY', installerPid: 5252 }) };
+    if (name === './update-installer-launch.cjs') return { launchUpdateInstaller: value => { calls.launches++; return launch(value); } };
     if (name === './feedback.cjs') return { record() {} };
     if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
     if (name === './update-poller.cjs') return { createUpdatePoller(value) {
@@ -131,15 +133,175 @@ test('a check during download waits for its shared result without a cycle or a s
   assert.equal(result.available, true); assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 1);
 });
 
-test('ready updates are never rechecked or redownloaded, and stale checking events cannot erase readiness', async () => {
+test('ready updates pause automatic checks and redundant downloads while manual checks refresh without losing readiness', async () => {
   const h = harness(); h.setCheck(async () => available); await h.invoke('check'); await h.invoke('download');
   await h.invoke('configure-auto', { enabled: true }); await h.auto(); await h.invoke('check'); await h.invoke('download');
   h.updater.emit('checking-for-update'); h.updater.emit('update-not-available', { version: '4.7.2' });
   h.updater.emit('download-progress', { percent: 10 });
   const status = await h.invoke('status');
-  assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 1); assert.equal(status.downloaded, true);
+  assert.equal(h.calls.checks, 2); assert.equal(h.calls.downloads, 1); assert.equal(status.downloaded, true);
   assert.equal(status.checking, false); assert.equal(status.available, true); assert.equal(status.info.version, '4.7.3');
   assert.equal(h.canRun(), false);
+});
+
+test('manual ready refresh shares one check and downloads only the confirmed newer candidate after that check settles', async () => {
+  const h = harness(); const old = { version: '4.7.23' }, newer = { version: '4.7.24' };
+  h.updater.emit('update-downloaded', old);
+  const checking = deferred(), downloading = deferred(); let checkSettled = false;
+  h.setCheck(() => checking.promise.finally(() => { checkSettled = true; }));
+  h.setDownload(() => { assert.equal(checkSettled, true); return downloading.promise; });
+  const refresh = h.invoke('check'), duplicate = h.invoke('check'), download = h.invoke('download');
+  assert.equal(duplicate, refresh); assert.equal(download, refresh);
+  assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), false);
+  assert.equal((await h.invoke('install')).success, false);
+  assert.equal((await h.api.beginUpdateInstall()).ok, false);
+  assert.equal(h.api.quitAndInstallPreparedUpdate(), false);
+  await tick(); let state = await h.invoke('status');
+  assert.equal(state.refreshing, true); assert.equal(state.checking, true); assert.equal(state.downloaded, true); assert.equal(state.info.version, old.version);
+  assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 0); assert.equal(h.calls.quits, 0); assert.equal(h.calls.launches, 0);
+  h.updater.emit('update-available', newer);
+  checking.resolve({ updateInfo: newer, isUpdateAvailable: true }); await tick();
+  state = await h.invoke('status');
+  assert.equal(state.refreshing, true); assert.equal(state.downloaded, false); assert.equal(state.downloading, true); assert.equal(state.info.version, newer.version);
+  assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 1);
+  assert.equal((await h.invoke('install')).success, false);
+  assert.equal(h.invoke('check'), refresh); assert.equal(h.invoke('download'), refresh);
+  h.updater.emit('update-downloaded', newer); downloading.resolve(['fixture-latest.exe']);
+  const result = await refresh; await Promise.all([duplicate, download]);
+  assert.equal(result.success, true); assert.equal(result.available, true); assert.equal(result.info.version, newer.version);
+  state = await h.invoke('status');
+  assert.equal(state.downloaded, true); assert.equal(state.refreshing, false); assert.equal(state.downloading, false);
+  assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), true);
+  assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 1);
+});
+
+test('same, lower and unavailable newer candidates preserve the old ready package after a real manual check', async () => {
+  for (const result of [{ updateInfo: { version: '4.7.23' }, isUpdateAvailable: true },
+    { updateInfo: { version: '4.7.22' }, isUpdateAvailable: true },
+    { updateInfo: { version: '4.7.24' }, isUpdateAvailable: false }, null]) {
+    const h = harness(); h.updater.emit('update-downloaded', { version: '4.7.23' });
+    h.setCheck(async () => result);
+    const response = await h.invoke('check'), state = await h.invoke('status');
+    assert.equal(response.success, true); assert.equal(response.info.version, '4.7.23');
+    assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 0);
+    assert.equal(state.downloaded, true); assert.equal(state.info.version, '4.7.23');
+    assert.equal(state.checking, false); assert.equal(state.refreshing, false); assert.equal(state.error, null);
+    assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), true);
+  }
+});
+
+test('actual vendor checks preserve the downloaded helper path and digest for an acknowledged old-package install', async () => {
+  const { AppUpdater } = require('electron-updater/out/AppUpdater');
+  const { BaseUpdater } = require('electron-updater/out/BaseUpdater');
+  const { DownloadedUpdateHelper } = require('electron-updater/out/DownloadedUpdateHelper');
+  const semver = require('node:module').createRequire(require.resolve('electron-updater/out/AppUpdater'))('semver');
+  for (const [version, eligible, networkFailure] of [['4.7.23', true, false], ['4.7.22', true, false],
+    ['4.7.24', false, false], ['4.7.24', true, true]]) {
+    const launches = []; const h = harness({ launch: async input => { launches.push(input); return { ok: true, code: 'READY', installerPid: 5252 }; } });
+    const helper = new DownloadedUpdateHelper('C:\\OwnedFixtureCacheNeverAccessed');
+    helper._file = 'C:\\OwnedFixtureCacheNeverAccessed\\pending\\setup-4.7.23.exe';
+    helper._downloadedFileInfo = { fileName: 'setup-4.7.23.exe', sha512: 'verified-old-fixture-digest' };
+    helper.clear = async () => assert.fail('a check that retains readiness must not clear the valid cached package');
+    h.updater.downloadedUpdateHelper = helper;
+    Object.defineProperty(h.updater, 'installerPath', { get: Object.getOwnPropertyDescriptor(BaseUpdater.prototype, 'installerPath').get });
+    Object.assign(h.updater, { _logger: { info() {}, warn() {}, debug() {} }, currentVersion: semver.parse('4.7.2'),
+      allowDowngrade: false, isUpdateSupported: () => true, isUserWithinRollout: () => eligible,
+      isUpdaterActive: () => true, isUpdateAvailable: AppUpdater.prototype.isUpdateAvailable,
+      doCheckForUpdates: AppUpdater.prototype.doCheckForUpdates, onUpdateAvailable: AppUpdater.prototype.onUpdateAvailable,
+      getUpdateInfoAndProvider: async () => {
+        if (networkFailure) throw new Error('PRIVATE_VENDOR_CHECK_FAILURE');
+        return { info: { version, files: [{ url: 'fixture-not-requested.exe' }] }, provider: {} };
+      },
+    });
+    h.setCheck(() => AppUpdater.prototype.checkForUpdates.call(h.updater));
+    h.updater.emit('update-downloaded', { version: '4.7.23' });
+    assert.equal((await h.invoke('check')).success, !networkFailure);
+    assert.equal(h.updater.downloadedUpdateHelper, helper); assert.equal(h.updater.installerPath, helper._file);
+    assert.equal(helper.downloadedFileInfo.sha512, 'verified-old-fixture-digest');
+    assert.equal((await h.invoke('status')).downloaded, true); assert.equal(h.calls.downloads, 0);
+    assert.equal((await h.api.beginUpdateInstall()).ok, true);
+    assert.equal(launches[0].installerPath, helper._file); assert.equal(launches[0].sha512, helper.downloadedFileInfo.sha512);
+  }
+});
+
+test('failed ready checks retain the old package and release refresh locks for a successful newer retry', async () => {
+  const h = harness(); h.updater.emit('update-downloaded', { version: '4.7.23' });
+  h.setCheck(async () => { throw new Error('PRIVATE_REFRESH_FAILURE'); });
+  const failure = await h.invoke('check'); let state = await h.invoke('status');
+  assert.equal(failure.success, false); assert.doesNotMatch(failure.error, /PRIVATE/);
+  assert.equal(state.downloaded, true); assert.equal(state.info.version, '4.7.23'); assert.equal(state.refreshing, false);
+  assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), true); assert.equal(h.calls.downloads, 0);
+  h.setCheck(async () => ({ updateInfo: { version: '4.7.24' }, isUpdateAvailable: true }));
+  h.setDownload(async () => { h.updater.emit('update-downloaded', { version: '4.7.24' }); return ['fixture-latest.exe']; });
+  const retried = await h.invoke('check'); state = await h.invoke('status');
+  assert.equal(retried.success, true); assert.equal(retried.info.version, '4.7.24');
+  assert.equal(state.downloaded, true); assert.equal(state.refreshing, false); assert.equal(state.error, null);
+  assert.equal(h.calls.checks, 2); assert.equal(h.calls.downloads, 1);
+});
+
+test('ready-refresh retries remain single-flight with automatic checks and keep the old package locked until completion', async () => {
+  const h = harness(), finalCheck = deferred(); h.updater.emit('update-downloaded', { version: '4.7.23' });
+  h.setCheck(() => {
+    assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), false);
+    if (h.calls.checks < 3) {
+      const error = Object.assign(new Error('PRIVATE_TRANSIENT_FAILURE'), { code: 'ETIMEDOUT' });
+      h.updater.emit('error', error); throw error;
+    }
+    return finalCheck.promise;
+  });
+  h.setDownload(async () => { h.updater.emit('update-downloaded', { version: '4.7.24' }); return ['fixture-latest.exe']; });
+  const manual = h.invoke('check'); await tick();
+  const automatic = h.auto(), download = h.invoke('download');
+  assert.equal(h.calls.checks, 3); assert.equal(h.calls.downloads, 0); assert.equal(h.invoke('check'), manual);
+  const pending = await h.invoke('status'); assert.equal(pending.refreshing, true); assert.equal(pending.downloaded, true);
+  assert.equal(pending.info.version, '4.7.23'); assert.equal((await h.invoke('install')).success, false);
+  finalCheck.resolve({ updateInfo: { version: '4.7.24' }, isUpdateAvailable: true });
+  const results = await Promise.all([manual, automatic, download]);
+  assert.ok(results.every(result => result.success && result.info.version === '4.7.24'));
+  assert.deepEqual(h.retryDelays, [2000, 5000]); assert.equal(h.calls.downloads, 1);
+  assert.equal((await h.invoke('status')).refreshing, false);
+});
+
+test('latest-download failure never reinstates the older ready state and explicit download can retry the newer candidate', async () => {
+  const h = harness(); h.updater.emit('update-downloaded', { version: '4.7.23' });
+  h.setCheck(async () => ({ updateInfo: { version: '4.7.24' }, isUpdateAvailable: true }));
+  h.setDownload(async () => { throw new Error('PRIVATE_LATEST_DOWNLOAD_FAILURE'); });
+  const result = await h.invoke('check'); let state = await h.invoke('status');
+  assert.equal(result.success, false); assert.equal(state.downloaded, false); assert.equal(state.info.version, '4.7.24');
+  assert.equal(state.refreshing, false); assert.equal(state.downloading, false); assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), false);
+  assert.equal((await h.invoke('install')).success, false);
+  h.setDownload(async () => { h.updater.emit('update-downloaded', { version: '4.7.24' }); return ['fixture-latest.exe']; });
+  assert.equal((await h.invoke('download')).success, true); state = await h.invoke('status');
+  assert.equal(state.downloaded, true); assert.equal(state.info.version, '4.7.24');
+  assert.equal(h.calls.checks, 1); assert.equal(h.calls.downloads, 2);
+});
+
+test('a ready event before the old download promise settles cannot create a refresh/check/download cycle', async () => {
+  const h = harness(); h.setCheck(async () => available); await h.invoke('check');
+  const oldDownload = deferred(); h.setDownload(() => oldDownload.promise);
+  const first = h.invoke('download'); await tick(); h.updater.emit('update-downloaded', available.updateInfo);
+  h.setCheck(async () => ({ updateInfo: { version: '4.7.24' }, isUpdateAvailable: true }));
+  const refresh = h.invoke('check'); await tick();
+  assert.equal(h.calls.checks, 1); assert.equal(h.api.shouldInstallDownloadedUpdateOnQuit(), false);
+  h.setDownload(async () => { h.updater.emit('update-downloaded', { version: '4.7.24' }); return ['fixture-latest.exe']; });
+  oldDownload.resolve(['fixture-old.exe']); await first;
+  const result = await refresh;
+  assert.equal(result.success, true); assert.equal(result.info.version, '4.7.24');
+  assert.equal(h.calls.checks, 2); assert.equal(h.calls.downloads, 2);
+});
+
+test('manual checks and downloads cannot mutate an active installer handoff or quitting updater', async () => {
+  const launching = deferred(); const h = harness({ launch: () => launching.promise });
+  h.updater.emit('update-downloaded', { version: '4.7.23' });
+  const handoff = h.api.beginUpdateInstall(); await tick();
+  assert.equal((await h.invoke('check')).success, false); assert.equal((await h.invoke('download')).success, false);
+  assert.equal(h.calls.checks, 0); assert.equal(h.calls.downloads, 0);
+  launching.resolve({ ok: true, code: 'READY', installerPid: 5252 }); await handoff;
+  assert.equal((await h.invoke('check')).success, false); assert.equal((await h.invoke('download')).success, false);
+  assert.equal(h.api.quitAndInstallPreparedUpdate(), true);
+  assert.equal((await h.invoke('check')).success, false);
+  const closed = harness(); closed.updater.emit('update-downloaded', { version: '4.7.23' }); closed.app.emit('will-quit');
+  assert.equal((await closed.invoke('check')).success, false); assert.equal(closed.calls.checks, 0);
 });
 
 test('disabling during an automatic check invalidates only its future download; manual download remains available', async () => {

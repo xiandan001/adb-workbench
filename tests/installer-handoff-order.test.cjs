@@ -20,16 +20,34 @@ test('installer initialization only parses identity and locale, never waits for 
 test('native ready acknowledgement follows successful explicit UI show and painting', () => {
   const ready = native.slice(native.indexOf('SKIN_EXPORT(ShowReady)'), native.indexOf('SKIN_EXPORT(BeginInstall)'));
   assert.match(ready, /ShowWindow/);
-  assert.match(ready, /UpdateWindow/);
+  assert.match(ready, /RedrawWindow/);
   assert.match(ready, /SignalReady/);
   assert.ok(ready.indexOf('ShowWindow') < ready.indexOf('SignalReady'));
-  assert.ok(ready.indexOf('UpdateWindow') < ready.indexOf('SignalReady'));
+  assert.ok(ready.indexOf('RedrawWindow') < ready.indexOf('SignalReady'));
   assert.match(callback('VeyloGuiInit'), /VeyloInstaller::ShowReady/);
   const init = callback('VeyloGuiInit');
   const page = init.indexOf('VeyloInstaller::Page');
   const acknowledge = init.indexOf('VeyloInstaller::ShowReady');
   assert.ok(page >= 0 && page < acknowledge);
   assert.match(init.slice(page, acknowledge), /\$0 != "ok"[\s\S]*PreparationFailed[\s\S]*Return/);
+});
+
+test('ready display overrides startup hide before verifying visibility, restored state and paint', () => {
+  const ready = native.slice(native.indexOf('SKIN_EXPORT(ShowReady)'), native.indexOf('SKIN_EXPORT(BeginInstall)'));
+  const consume = ready.indexOf('ShowWindow(parent, SW_SHOWNORMAL)');
+  const restore = ready.indexOf('ShowWindow(parent, SW_RESTORE)');
+  const showParent = ready.indexOf('SetWindowPos(parent,');
+  const showSkin = ready.indexOf('SetWindowPos(skin::s.window, HWND_TOP');
+  const paint = ready.indexOf('RedrawWindow(parent,');
+  assert.ok(consume >= 0 && consume < restore && restore < showParent && showParent < showSkin);
+  assert.match(ready, /SWP_SHOWWINDOW/);
+  assert.match(ready, /IsWindowVisible\(parent\)/);
+  assert.match(ready, /IsWindowVisible\(skin::s.window\)/);
+  assert.match(ready, /!IsIconic\(parent\)/);
+  assert.ok(showSkin < paint && paint < ready.indexOf('SignalReady'));
+  assert.match(ready, /RDW_INVALIDATE \| RDW_ALLCHILDREN \| RDW_UPDATENOW/);
+  assert.match(ready, /readyConfirmed\.store\(ok\)/);
+  assert.match(ready, /ok \? L"ok" : L"error"/);
 });
 
 test('predeployment override acquires guard before exact cleanup and safely aborts failures', () => {

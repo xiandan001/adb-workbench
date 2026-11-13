@@ -42,6 +42,7 @@ let updaterStatus = {
   progress: null,        // { percent, transferred, total, bytesPerSecond }
   downloaded: false,
   installing: false,
+  refreshing: false,
   error: null,
   info: null             // { version, releaseNotes, releaseName }
 };
@@ -51,6 +52,7 @@ let installLaunchFlight = null;
 let installerReady = false;
 let checkFlight = null;
 let downloadFlight = null;
+let refreshFlight = null;
 let updatePoller = null;
 let pollingDisposed = false;
 let updateInstallLocale = getLocale();
@@ -222,7 +224,7 @@ async function prepareForUpdateInstall() {
 }
 
 function shouldInstallDownloadedUpdateOnQuit() {
-  return updaterStatus.downloaded && !quitAndInstallInProgress;
+  return updaterStatus.downloaded && !refreshFlight && !quitAndInstallInProgress;
 }
 
 function isQuitAndInstallInProgress() {
@@ -243,6 +245,7 @@ function installerFailureMessage(code) {
 }
 
 function beginUpdateInstall() {
+  if (refreshFlight) return Promise.resolve({ ok: false, code: 'START_FAILED', error: tr('正在检查更新…') });
   if (!updaterStatus.downloaded) return Promise.resolve({ ok: false, code: 'INVALID_INSTALLER', error: tr('更新尚未下载完成') });
   if (installerReady) return Promise.resolve({ ok: true, code: 'READY' });
   if (installLaunchFlight) return installLaunchFlight;
@@ -272,7 +275,7 @@ function beginUpdateInstall() {
 function noteUpdateInstallQuitting() { if (installerReady) recordInstall('quitting', { code: 'READY' }); }
 
 function quitAndInstallPreparedUpdate() {
-  if (!updaterStatus.downloaded) return false;
+  if (!updaterStatus.downloaded || refreshFlight) return false;
   if (process.platform === 'win32') {
     if (!installerReady) return false;
     quitAndInstallInProgress = true;
@@ -331,19 +334,24 @@ function setupAutoUpdater() {
 // 在模块加载时立即绑定事件（保持与原 main.cjs 顶层绑定的行为一致）
 setupAutoUpdater();
 
-function checkForUpdates() {
+function checkForUpdates({ refreshReady = false } = {}) {
   if (isDev) return Promise.resolve({ success: false, error: tr('开发模式不支持自动更新，请打包后使用') });
-  if (updaterStatus.downloaded) return Promise.resolve(checkResultFromState());
+  if (updaterStatus.downloaded && !refreshReady) return Promise.resolve(checkResultFromState());
   // Reuse the original check first: a download may itself be waiting for it.
   if (checkFlight) return checkFlight;
   if (downloadFlight) return downloadFlight.then(() => checkResultFromState());
   const flight = Promise.resolve().then(async () => {
-    updateState({ checking: true, available: false, notAvailable: false, error: null });
+    const keepReady = refreshReady && updaterStatus.downloaded;
+    updateState(keepReady ? { checking: true, error: null } : { checking: true, available: false, notAvailable: false, error: null });
     try {
       const result = await runUpdaterTaskWithRetry(tr('检查更新'), () => autoUpdater.checkForUpdates());
-      if (updaterStatus.downloaded) return checkResultFromState();
+      if (updaterStatus.downloaded && !keepReady) return checkResultFromState();
       const info = result?.updateInfo || null;
       const available = Boolean(info && compareVersions(info.version, getAppVersion()) > 0 && result.isUpdateAvailable !== false);
+      if (keepReady) {
+        updateState({ checking: false, error: null });
+        return { success: true, available, notAvailable: !available, info };
+      }
       updateState({ checking: false, available, notAvailable: !available, info, error: null });
       return checkResultFromState();
     } catch (error) {
@@ -382,6 +390,52 @@ function downloadUpdate() {
   return flight;
 }
 
+function installHandoffActive() {
+  return Boolean(installLaunchFlight || installerReady || quitAndInstallInProgress || pollingDisposed);
+}
+
+function handoffBusyResult() {
+  return { success: false, error: tr('正在启动安装器…') };
+}
+
+async function refreshDownloadedUpdate(cachedVersion, pendingDownload) {
+  if (pendingDownload) await pendingDownload;
+  if (installHandoffActive()) return handoffBusyResult();
+  const checked = await checkForUpdates({ refreshReady: true });
+  if (!checked.success) return checked;
+  if (installHandoffActive()) return handoffBusyResult();
+  const info = checked.info;
+  if (!checked.available || typeof cachedVersion !== 'string' || typeof info?.version !== 'string'
+    || compareVersions(info.version, cachedVersion) <= 0) return checkResultFromState();
+  updateInstallPrepared = false;
+  updateState({ checking: false, downloaded: false, available: true, notAvailable: false, info, progress: null, error: null });
+  // The check's finally has completed. Never start a download inside its own check flight.
+  const downloaded = await downloadUpdate();
+  return downloaded.success ? checkResultFromState() : downloaded;
+}
+
+function manualCheckForUpdates() {
+  if (installHandoffActive()) return Promise.resolve(handoffBusyResult());
+  if (refreshFlight) return refreshFlight;
+  if (isDev || !updaterStatus.downloaded) return checkForUpdates();
+  const cachedVersion = updaterStatus.info?.version, pendingDownload = downloadFlight;
+  const flight = Promise.resolve().then(() => refreshDownloadedUpdate(cachedVersion, pendingDownload))
+    .catch(error => {
+      const message = formatUpdaterError(error); updateState({ checking: false, error: message });
+      return { success: false, error: message };
+    }).finally(() => {
+      if (refreshFlight === flight) { refreshFlight = null; updateState({ refreshing: false, checking: false }); }
+    });
+  refreshFlight = flight;
+  updateState({ refreshing: true, checking: true, error: null });
+  return flight;
+}
+
+function manualDownloadUpdate() {
+  if (installHandoffActive()) return Promise.resolve(handoffBusyResult());
+  return refreshFlight || downloadUpdate();
+}
+
 function configureAuto(event, value) {
   const main = ctx.getMainWindow();
   if (!main || main.isDestroyed() || main.webContents.isDestroyed() || !main.webContents.mainFrame
@@ -406,8 +460,9 @@ function configureAuto(event, value) {
 function register(ipcMain) {
   if (!updatePoller) {
     updatePoller = createUpdatePoller({
-      canRun: () => !isDev && !updaterStatus.downloaded && !quitAndInstallInProgress,
+      canRun: () => !isDev && !updaterStatus.downloaded && !refreshFlight && !quitAndInstallInProgress,
       run: async isCurrent => {
+        if (refreshFlight) return refreshFlight;
         const result = await checkForUpdates();
         if (result.success && result.available && isCurrent() && !updaterStatus.downloaded) await downloadUpdate();
       },
@@ -417,11 +472,12 @@ function register(ipcMain) {
     app.once('will-quit', () => { pollingDisposed = true; updatePoller.dispose(); powerMonitor.removeListener('resume', wake); });
   }
   ipcMain.handle('updater:configure-auto', configureAuto);
-  ipcMain.handle('updater:check', checkForUpdates);
-  ipcMain.handle('updater:download', downloadUpdate);
+  ipcMain.handle('updater:check', manualCheckForUpdates);
+  ipcMain.handle('updater:download', manualDownloadUpdate);
 
   // 安装更新（退出应用并安装）
   ipcMain.handle('updater:install', async () => {
+    if (refreshFlight) return { success: false, error: tr('正在检查更新…') };
     if (updaterStatus.downloaded) {
       app.quit();
       return { success: true };

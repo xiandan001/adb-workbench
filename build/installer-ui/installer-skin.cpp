@@ -822,11 +822,15 @@ SKIN_EXPORT(GetUpdateLanguage) { skin::Push(stack, stringSize, skin::updateArgum
 SKIN_EXPORT(ShowReady) {
   bool ok = skin::s.window && parent == skin::s.parent && GetWindowThreadProcessId(parent, nullptr) == GetCurrentThreadId();
   if (ok) {
-    ShowWindow(skin::s.window, SW_SHOW);
+    // The first top-level ShowWindow can consume a launcher's hidden startup state.
     ShowWindow(parent, SW_SHOWNORMAL);
-    UpdateWindow(skin::s.window);
-    UpdateWindow(parent);
-    ok = IsWindowVisible(parent) && IsWindowVisible(skin::s.window) && veylo::installer::SignalReady(skin::updateArguments);
+    ShowWindow(parent, SW_RESTORE);
+    const UINT showFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    ok = SetWindowPos(parent, nullptr, 0, 0, 0, 0, showFlags | SWP_NOZORDER)
+      && SetWindowPos(skin::s.window, HWND_TOP, 0, 0, 0, 0, showFlags);
+    ok = ok && IsWindowVisible(parent) && IsWindowVisible(skin::s.window) && !IsIconic(parent)
+      && RedrawWindow(parent, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    if (ok) ok = veylo::installer::SignalReady(skin::updateArguments);
   }
   skin::readyConfirmed.store(ok);
   skin::Push(stack, stringSize, ok ? L"ok" : L"error");

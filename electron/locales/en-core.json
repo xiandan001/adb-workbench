@@ -940,5 +940,6 @@
   "已取消权限确认，应用将继续运行。": "Permission confirmation was cancelled. The app will keep running.",
   "安装器未能就绪，应用将继续运行。": "The installer did not become ready. The app will keep running.",
   "等待安装器超时，应用将继续运行。": "The wait for the installer timed out. The app will keep running.",
-  "安装期间新增自定义等待提示，安装完成后可重新打开应用。": "A custom waiting prompt now appears during installation. You can reopen the app when installation finishes."
+  "安装期间新增自定义等待提示，安装完成后可重新打开应用。": "A custom waiting prompt now appears during installation. You can reopen the app when installation finishes.",
+  "已下载更新后仍可检查并自动下载更新版本。": "You can still check for and automatically download a newer version after an update has been downloaded."
 }

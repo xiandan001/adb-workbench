@@ -221,15 +221,41 @@ function App() {
   const [appVersion, setAppVersion] = useState('');
   const [updaterState, setUpdaterState] = useState({
     checking: false,
+    refreshing: false,
     available: false,
     downloading: false,
     downloaded: false,
+    installing: false,
     progress: null,
     error: null,
     info: null,
     notAvailable: false
   });
+  const [manualUpdateChecking, setManualUpdateChecking] = useState(false);
+  const manualUpdateCheckRef = useRef(false);
   const updateInstalling = updaterState.installing === true;
+  const updateActionBusy = manualUpdateChecking || updateInstalling || updaterState.checking || updaterState.refreshing || updaterState.downloading;
+  const handleManualUpdateCheck = useCallback(async () => {
+    if (manualUpdateCheckRef.current || updateActionBusy) return;
+    manualUpdateCheckRef.current = true;
+    setManualUpdateChecking(true);
+    setUpdaterState(prev => ({ ...prev, error: null, checking: true, notAvailable: false, available: false }));
+    try {
+      const result = await window.electronAPI?.checkForUpdates?.();
+      setUpdaterState(prev => result?.success ? {
+        ...prev, checking: false, available: !!result.available, notAvailable: !!result.notAvailable, info: result.info || prev.info
+      } : { ...prev, checking: false, error: result?.error || tr('检查失败') });
+    } catch {
+      setUpdaterState(prev => ({ ...prev, checking: false, error: tr('检查失败') }));
+    } finally {
+      manualUpdateCheckRef.current = false;
+      setManualUpdateChecking(false);
+    }
+  }, [updateActionBusy]);
+  const handleInstallUpdate = useCallback(() => {
+    if (manualUpdateCheckRef.current || updateActionBusy || !updaterState.downloaded) return;
+    return window.electronAPI?.installUpdate?.();
+  }, [updateActionBusy, updaterState.downloaded]);
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(() => {
     return localStorage.getItem('autoUpdateEnabled') !== 'false';
   });
@@ -1592,7 +1618,7 @@ function App() {
       />
 
       {/* 更新安装确认对话框（带加载条） */}
-      {updateInstallModal && (
+      {updateInstallModal && (updaterState.downloaded || updateInstalling) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className={`p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4 ${isDarkTheme(t) ? 'bg-[#2D2F33]' : 'bg-white'}`}>
             {!updateInstalling ? (
@@ -1613,8 +1639,9 @@ function App() {
                     className={`px-4 py-2 text-sm rounded-lg transition-colors ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                   >{tr("稍后")}</button>
                   <button
-                    onClick={() => window.electronAPI?.installUpdate?.()}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+                    disabled={updateActionBusy}
+                    onClick={handleInstallUpdate}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <RefreshCw size={14} />{tr("安装并重启")}</button>
                 </div>
@@ -1802,8 +1829,9 @@ function App() {
         {updaterState.downloaded && (
           <div className="px-4 py-3 border-t border-[#3E4145]">
             <button
-              onClick={() => setUpdateInstallModal(true)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 transition-all active:scale-95"
+              disabled={updateActionBusy}
+              onClick={() => { if (!manualUpdateCheckRef.current && !updateActionBusy) setUpdateInstallModal(true); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               title={tr("新版本 v{0} 已就绪，点击安装并重启", { 0: updaterState.info?.version || '' })}
             >
               <div className="relative">
@@ -2901,23 +2929,8 @@ function App() {
                       <div className="flex flex-wrap gap-2 pt-1">
                         {/* 检查更新按钮 */}
                         <button
-                          onClick={async () => {
-                            setUpdaterState(prev => ({ ...prev, error: null, checking: true, notAvailable: false, available: false }));
-                            const res = await window.electronAPI?.checkForUpdates?.();
-                            if (!res?.success) {
-                              setUpdaterState(prev => ({ ...prev, checking: false, error: res?.error || tr("检查失败") }));
-                            } else {
-                              // 使用 IPC 返回的状态作为兜底（事件可能已先行更新 state）
-                              setUpdaterState(prev => ({
-                                ...prev,
-                                checking: false,
-                                available: !!res.available,
-                                notAvailable: !!res.notAvailable,
-                                info: res.info || prev.info
-                              }));
-                            }
-                          }}
-                          disabled={updaterState.checking || updaterState.downloading}
+                          onClick={handleManualUpdateCheck}
+                          disabled={updateActionBusy}
                           className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                             isDarkTheme(t)
                               ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145] active:scale-95 shadow-sm'
@@ -2932,6 +2945,7 @@ function App() {
                         {/* 下载按钮（发现新版本且未下载时显示） */}
                         {updaterState.available && !updaterState.downloading && !updaterState.downloaded && (
                           <button
+                            disabled={updateActionBusy}
                             onClick={() => window.electronAPI?.downloadUpdate?.()}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
                               isDarkTheme(t)
@@ -2947,8 +2961,8 @@ function App() {
                         {/* 立即安装按钮（下载完成后显示） */}
                         {updaterState.downloaded && (
                           <button
-                            disabled={updateInstalling}
-                            onClick={() => window.electronAPI?.installUpdate?.()}
+                            disabled={updateActionBusy}
+                            onClick={handleInstallUpdate}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
                               isDarkTheme(t)
                                 ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
