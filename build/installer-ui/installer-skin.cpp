@@ -3,6 +3,7 @@
 #include "installer-path-filesystem.h"
 #include "installer-orbit.h"
 #include "installer-progress.h"
+#include "installer-lifecycle.h"
 #include <commctrl.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -12,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <atomic>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "gdiplus.lib")
@@ -26,6 +28,7 @@ constexpr int kWidth = 760, kHeight = 500, kLeft = 250;
 constexpr UINT_PTR kTimer = 475, kSubclass = 475, kNativeSubclass = 476;
 constexpr UINT kConcealNativeMessage = WM_APP + 476;
 constexpr UINT kInstallStageMessage = WM_APP + 477;
+constexpr UINT kPreparationFailureMessage = WM_APP + 478;
 constexpr COLORREF kBackground = RGB(0, 0, 0), kLeftBackground = RGB(0, 0, 0);
 constexpr COLORREF kText = RGB(244, 244, 244), kMuted = RGB(164, 164, 164);
 constexpr COLORREF kAccent = RGB(29, 213, 162), kBorder = RGB(37, 37, 37);
@@ -50,7 +53,7 @@ struct State {
   ULONG_PTR gdiplusToken = 0;
   std::unique_ptr<Gdiplus::Image> image;
   std::vector<std::unique_ptr<NativeWindow>> nativeWindows;
-  std::wstring version, initialPath, trustedInitialPath, installPath, folderName, error;
+  std::wstring version, initialPath, trustedInitialPath, installPath, folderName, error, failureBodyKey;
   int locale = 0;
   InstallationProgress installation;
   ULONGLONG lastSampleAt = 0, lastDetailsAt = 0, displayedElapsed = 0;
@@ -64,6 +67,9 @@ struct State {
 };
 static State s;
 static HINSTANCE gInstance = nullptr;
+static veylo::installer::UpdateArguments updateArguments;
+static veylo::installer::InstallGuard installGuard;
+static std::atomic<bool> readyConfirmed{false};
 constexpr int kLanguageIds[] = {2052, 1028, 1033, 1041, 1042};
 int Px(float value);
 bool ProtectNativeWindow(HWND window);
@@ -295,8 +301,8 @@ void Layout() {
   SetWindowTextW(s.keep, ActionText(L"continue", L"unContinue")); SetWindowTextW(s.exit, ActionText(L"exit", L"unExit"));
   SetWindowTextW(s.shortcut, T(L"shortcut")); SetWindowTextW(s.parent, ActionText(L"title", L"unTitle"));
   Place(s.language, 578, 7, 150, 200, welcome && !s.uninstall);
-  Place(s.primary, 282, 354, 446, 46, welcome || (finish && !s.failed));
-  Place(s.secondary, 282, 410, welcome ? 310 : 446, 34, !s.uninstall && (welcome || (finish && !s.failed)));
+  Place(s.primary, 282, 354, 446, 46, !s.failed && (welcome || finish));
+  Place(s.secondary, 282, 410, welcome ? 310 : 446, 34, !s.failed && !s.uninstall && (welcome || finish));
   Place(s.path, 284, 240, 342, 32, welcome && s.custom && !s.uninstall);
   Place(s.browse, 634, 239, 94, 34, welcome && s.custom && !s.uninstall);
   Place(s.shortcut, 282, 284, 446, 30, welcome && s.custom && !s.uninstall);
@@ -390,7 +396,8 @@ void PaintTo(HWND window, HDC dc) {
     DrawText(graphics, ActionText(welcome ? L"welcomeLabel" : finish ? L"finishLabel" : L"installLabel", welcome ? L"unWelcomeLabel" : finish ? L"unFinishLabel" : L"unInstallLabel"), 282, 39, 446, 24, 12, kAccent);
     DrawText(graphics, ActionText(s.failed ? L"failedTitle" : welcome ? L"welcomeTitle" : finish ? L"finishTitle" : L"installTitle", s.failed ? L"unFailedTitle" : welcome ? L"unWelcomeTitle" : finish ? L"unFinishTitle" : L"unInstallTitle"), 282, 77, 446, 55, 29, kText, true);
     if (!s.showingDetails) {
-      DrawText(graphics, ActionText(s.failed ? L"failedBody" : welcome ? L"welcomeBody" : finish ? L"finishBody" : L"installBody", s.failed ? L"unFailedBody" : welcome ? L"unWelcomeBody" : finish ? L"unFinishBody" : L"unInstallBody"), 282, 137, 446, 65, 13, kMuted);
+      const wchar_t* failureKey = s.failureBodyKey.empty() ? L"failedBody" : s.failureBodyKey.c_str();
+      DrawText(graphics, ActionText(s.failed ? failureKey : welcome ? L"welcomeBody" : finish ? L"finishBody" : L"installBody", s.failed ? L"unFailedBody" : welcome ? L"unWelcomeBody" : finish ? L"unFinishBody" : L"unInstallBody"), 282, 137, 446, 65, 13, kMuted);
       if (welcome) {
         DrawText(graphics, T(L"pathLabel"), 282, 211, 446, 24, 12, kMuted);
         if (!s.custom) {
@@ -683,6 +690,12 @@ LRESULT CALLBACK ParentProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
     case kInstallStageMessage: ApplyInstallStage(wParam); return 0;
+    case kPreparationFailureMessage:
+      installGuard.End();
+      s.failed = true; s.cancelOverlay = false; s.showingDetails = false; s.mode = Mode::Install;
+      s.failureBodyKey = wParam == 1 ? L"readyFailedBody" : wParam == 2 ? L"installBusyBody" :
+        wParam == 3 ? L"guardFailedBody" : L"applicationRunningBody";
+      Layout(); return 0;
     case kConcealNativeMessage:
       s.concealPending = false;
       for (const auto& native : s.nativeWindows)
@@ -719,6 +732,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
   return DefWindowProcW(window, message, wParam, lParam);
 }
 void Cleanup() {
+  installGuard.End();
   if (s.parent) RemoveWindowSubclass(s.parent, ParentProc, kSubclass);
   if (s.window) { KillTimer(s.window, kTimer); DestroyWindow(s.window); }
   RestoreNativeChildren();
@@ -798,6 +812,40 @@ SKIN_EXPORT(Init) {
   const bool ok = requestedParent == parent && skin::Initialize(parent, image, language, version);
   skin::Push(stack, stringSize, ok ? L"ok" : L"error");
 }
+SKIN_EXPORT(ConfigureUpdate) {
+  skin::updateArguments = veylo::installer::ParseUpdateArguments(GetCommandLineW());
+  skin::readyConfirmed.store(false);
+  skin::Push(stack, stringSize, skin::updateArguments.valid ? L"ok" : L"error");
+}
+SKIN_EXPORT(GetUpdatePid) { skin::Push(stack, stringSize, skin::updateArguments.valid ? skin::updateArguments.parentPid : L""); }
+SKIN_EXPORT(GetUpdateLanguage) { skin::Push(stack, stringSize, skin::updateArguments.valid ? skin::updateArguments.locale : L""); }
+SKIN_EXPORT(ShowReady) {
+  bool ok = skin::s.window && parent == skin::s.parent && GetWindowThreadProcessId(parent, nullptr) == GetCurrentThreadId();
+  if (ok) {
+    ShowWindow(skin::s.window, SW_SHOW);
+    ShowWindow(parent, SW_SHOWNORMAL);
+    UpdateWindow(skin::s.window);
+    UpdateWindow(parent);
+    ok = IsWindowVisible(parent) && IsWindowVisible(skin::s.window) && veylo::installer::SignalReady(skin::updateArguments);
+  }
+  skin::readyConfirmed.store(ok);
+  skin::Push(stack, stringSize, ok ? L"ok" : L"error");
+}
+SKIN_EXPORT(BeginInstall) {
+  const auto mode = skin::Pop(stack, stringSize);
+  const bool silent = mode == L"silent" && skin::updateArguments.valid && !skin::updateArguments.tokenProvided;
+  const bool interactive = mode == L"interactive" && skin::readyConfirmed.load();
+  skin::Push(stack, stringSize, silent || interactive ? skin::installGuard.Begin() : L"ready");
+}
+SKIN_EXPORT(EndInstall) { skin::installGuard.End(); }
+SKIN_EXPORT(PreparationFailed) {
+  const auto reason = skin::Pop(stack, stringSize);
+  const WPARAM code = reason == L"ready" ? 1 : reason == L"busy" ? 2 : reason == L"error" ? 3 : 4;
+  DWORD processId = 0;
+  HWND window = FindWindowExW(parent, nullptr, L"VeyloInstallerSkin475", nullptr);
+  if (window && GetWindowThreadProcessId(window, &processId) && processId == GetCurrentProcessId())
+    PostMessageW(window, skin::kPreparationFailureMessage, code, 0);
+}
 SKIN_EXPORT(Page) {
   const auto mode = skin::Pop(stack, stringSize), path = skin::Pop(stack, stringSize), folder = skin::Pop(stack, stringSize);
   const auto progress = skin::Handle(skin::Pop(stack, stringSize)), details = skin::Handle(skin::Pop(stack, stringSize));
@@ -849,7 +897,7 @@ SKIN_EXPORT(TrustExistingPath) {
   if (skin::s.window && parent == skin::s.parent && skin::ValidInstallPath(path, L"", windows) && skin::SafeInstallDirectory(path, true))
     skin::s.trustedInitialPath = path;
 }
-SKIN_EXPORT(Failed) { skin::s.failed = true; skin::s.cancelOverlay = false; skin::Layout(); }
+SKIN_EXPORT(Failed) { skin::installGuard.End(); skin::s.failed = true; skin::s.cancelOverlay = false; skin::Layout(); }
 SKIN_EXPORT(Dispose) { skin::Cleanup(); }
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
   if (reason == DLL_PROCESS_ATTACH) { skin::gInstance = instance; DisableThreadLibraryCalls(instance); }

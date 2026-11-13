@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { types } = require('node:util');
+const installSpec = require('./update-install-spec.json');
 
 const MODULES = new Set(['app', 'ipc', 'renderer', 'updater', 'startup', 'diagnostics']);
 const OPERATIONS = new Set(['startup', 'ready', 'shutdown', 'failure', 'ipc', 'renderer-error', 'check', 'download', 'install', 'collect', 'snapshot']);
@@ -31,6 +32,11 @@ function normalizeEvent(value, time, version) {
   if (get('errorCode') !== undefined) next.errorCode = CODES.has(get('errorCode')) ? get('errorCode') : 'UNKNOWN';
   if (['thrown', 'rejected', 'structured', 'Error', 'TypeError', 'RangeError', 'AbortError'].includes(get('errorType'))) next.errorType = get('errorType');
   if (Number.isFinite(get('durationMs')) && get('durationMs') >= 0) next.durationMs = Math.min(Math.round(get('durationMs')), 3600000);
+  if (next.module === 'updater' && next.operation === 'install') {
+    if (installSpec.phases.includes(get('installPhase'))) next.installPhase = get('installPhase');
+    if (installSpec.codes.includes(get('installCode'))) next.installCode = get('installCode');
+    if (Number.isSafeInteger(get('installerPid')) && get('installerPid') > 0 && get('installerPid') <= 4294967295) next.installerPid = get('installerPid');
+  }
   return next;
 }
 

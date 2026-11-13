@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$status = [ordered]@{ ok = $false; mode = $Mode; stopped = @(); skipped = @(); parent = 'not-requested' }
+$status = [ordered]@{ ok = $false; mode = $Mode; stopped = @(); skipped = @(); parent = 'not-requested'; applications = 'not-checked' }
 $exitCode = 2
 $allowedNames = @('adb.exe', 'scrcpy.exe', 'fastboot.exe', 'hdc.exe')
 
@@ -33,8 +33,9 @@ function Test-SamePath([string]$Left, [string]$Right) {
 function Get-Timeout($Payload, [int]$DefaultValue) {
     if (-not $Payload.PSObject.Properties['timeoutMs']) { return $DefaultValue }
     $value = $Payload.timeoutMs
-    if (($value -isnot [int] -and $value -isnot [long]) -or $value -lt 1 -or $value -gt 15000) {
-        throw 'Process cleanup timeout must be an integer from 1 to 15000 milliseconds.'
+    $maximum = $(if ($Mode -eq 'PrepareInstall') { 60000 } else { 15000 })
+    if (($value -isnot [int] -and $value -isnot [long]) -or $value -lt 1 -or $value -gt $maximum) {
+        throw 'Process cleanup timeout is outside the allowed range.'
     }
     return [int]$value
 }
@@ -156,6 +157,41 @@ function Wait-ForUpdateParent([int]$TimeoutMs) {
     } finally { $parent.Dispose() }
 }
 
+function Wait-ForInstallApplications([int]$TimeoutMs) {
+    if ($EnvOnlyMode -or -not $script:canonicalApp) { return }
+    $handles = [Collections.Generic.List[Veylo.UpdateProcessHandle]]::new()
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $name = [IO.Path]::GetFileNameWithoutExtension($script:canonicalApp)
+        foreach ($candidate in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            $main = [Veylo.UpdateProcessHandle]::Open($candidate.Id, $false)
+            if ($null -eq $main) {
+                if (-not (Get-Process -Id $candidate.Id -ErrorAction SilentlyContinue)) { continue }
+                throw 'Unable to verify an application process before installation.'
+            }
+            try {
+                if ($main.Wait(0)) { $main.Dispose(); continue }
+                $image = [Veylo.UpdateProcessHandle]::CanonicalPath($main.ImagePath())
+                if (-not $image) {
+                    if ($main.Wait(0)) { $main.Dispose(); continue }
+                    throw 'Unable to verify an application image before installation.'
+                }
+                if (-not (Test-SamePath $image $script:canonicalApp)) { $main.Dispose(); continue }
+                $handles.Add($main)
+            } catch { $main.Dispose(); throw }
+        }
+        $status.applications = 'waiting'
+        foreach ($main in $handles) {
+            $remaining = [Math]::Max(0, $TimeoutMs - [int]$clock.ElapsedMilliseconds)
+            if (-not $main.Wait($remaining)) {
+                $status.applications = 'timeout'; $script:exitCode = 3
+                throw 'Close the application before installing; it will not be force-terminated.'
+            }
+        }
+        $status.applications = 'exited'
+    } finally { foreach ($main in $handles) { $main.Dispose() } }
+}
+
 function Stop-ToolTargets([string[]]$Targets, [int]$TimeoutMs) {
     $canonicalTargets = @()
     foreach ($target in $Targets) {
@@ -190,13 +226,15 @@ function Stop-ToolTargets([string[]]$Targets, [int]$TimeoutMs) {
 try {
     if ($Mode -notin @('StopTools', 'PrepareInstall')) { throw 'Unknown process cleanup mode.' }
     $payload = Read-Payload
-    $timeout = Get-Timeout $payload $(if ($Mode -eq 'PrepareInstall') { 15000 } else { 5000 })
+    $timeout = Get-Timeout $payload $(if ($Mode -eq 'PrepareInstall') { 60000 } else { 5000 })
     if ($Mode -eq 'StopTools') { $targets = @(Get-ToolTargets $payload) }
     Initialize-NativeApi
     if ($Mode -eq 'PrepareInstall') {
         $targets = @(Get-InstallTargets)
+        $applicationClock = [Diagnostics.Stopwatch]::StartNew()
         try { Wait-ForUpdateParent $timeout }
         catch { if ($status.parent -eq 'timeout') { $exitCode = 3 }; throw }
+        Wait-ForInstallApplications ([Math]::Max(0, $timeout - [int]$applicationClock.ElapsedMilliseconds))
     }
     $exitCode = 1
     Stop-ToolTargets $targets ([Math]::Min($timeout, 5000))

@@ -929,5 +929,16 @@
   "应用日志状态格式无效，请重新读取。": "The application log status is invalid. Read it again.",
   "当前环境不支持应用日志，请在桌面应用中使用。": "Application logs are unavailable in this environment. Use the desktop app.",
   "新增全局应用日志，支持开始记录、停止并导出，单次上限 20 MiB": "Added application-wide logging with start, stop-and-export, and a 20 MiB limit per capture",
-  "设备列表的常用设备提示和视图切换统一靠右显示。": "The favorites indicator and view switcher are now grouped on the right of the device list."
+  "设备列表的常用设备提示和视图切换统一靠右显示。": "The favorites indicator and view switcher are now grouped on the right of the device list.",
+  "正在安装更新": "Installing update",
+  "安装程序正在更新卓控台，请等待安装完成后再打开。": "The installer is updating Veylo. Please wait until installation finishes before opening the app.",
+  "暂时无法确认安装状态，请稍后重新检查。": "The installation status cannot be confirmed right now. Please check again shortly.",
+  "重新检查": "Check again",
+  "正在启动安装器…": "Starting installer…",
+  "未能启动安装器": "Could not start installer",
+  "应用尚未退出。请重试更新，或稍后重新安装。": "The app has not exited. Please retry the update or reinstall later.",
+  "已取消权限确认，应用将继续运行。": "Permission confirmation was cancelled. The app will keep running.",
+  "安装器未能就绪，应用将继续运行。": "The installer did not become ready. The app will keep running.",
+  "等待安装器超时，应用将继续运行。": "The wait for the installer timed out. The app will keep running.",
+  "安装期间新增自定义等待提示，安装完成后可重新打开应用。": "A custom waiting prompt now appears during installation. You can reopen the app when installation finishes."
 }

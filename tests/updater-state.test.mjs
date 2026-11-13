@@ -17,6 +17,14 @@ test('cached ready state is restored after a renderer reload', async () => {
   await flush(); assert.equal(f.state().downloaded, true); assert.equal(f.state().info.version, '5.0.0');
   assert.equal(Object.hasOwn(f.state(), 'currentVersion'), false); f.stop();
 });
+test('installer startup state survives snapshots, live progress and failed-launch retry reset', async () => {
+  const f = fixture(async () => ({ downloaded: true, installing: true }));
+  await flush(); assert.equal(f.state().installing, true);
+  f.emit({ eventName: 'state', payload: { installing: false, error: 'fixture retryable failure' } });
+  assert.equal(f.state().installing, false); assert.equal(f.state().downloaded, true);
+  f.emit({ eventName: 'state', payload: { installing: true, error: null } });
+  assert.equal(f.state().installing, true); assert.equal(f.state().error, null); f.stop();
+});
 test('a delayed snapshot cannot overwrite a newer automatic check or download event', async () => {
   const pending = deferred(), f = fixture(() => pending.promise); await flush();
   f.emit({ eventName: 'state', payload: { checking: true, error: null } });

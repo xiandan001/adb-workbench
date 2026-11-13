@@ -14,6 +14,7 @@
   Var VeyloLocale
   Var VeyloDisplayName
   Var VeyloShortcut
+  Var VeyloHandoffStatus
   !undef SHORTCUT_NAME
   !define SHORTCUT_NAME "$VeyloDisplayName"
   !undef isNoDesktopShortcut
@@ -29,18 +30,13 @@
   !macroend
   !macro customPageAfterChangeDir
     !define MUI_PAGE_CUSTOMFUNCTION_SHOW VeyloInstallShow
+    !define MUI_PAGE_CUSTOMFUNCTION_LEAVE VeyloInstallLeave
   !macroend
   !macro customFinishPage
     Page custom VeyloFinish VeyloFinishLeave
   !macroend
 
   !macro customHeader
-    LangString VeyloSkinError 1033 "Setup could not open. Please download the installer again."
-    LangString VeyloSkinError 2052 "无法打开安装界面，请重新下载安装包。"
-    LangString VeyloSkinError 1028 "無法開啟安裝介面，請重新下載安裝程式。"
-    LangString VeyloSkinError 1041 "セットアップを開けませんでした。インストーラーを再度ダウンロードしてください。"
-    LangString VeyloSkinError 1042 "설치 화면을 열 수 없습니다. 설치 파일을 다시 다운로드해 주세요."
-
     Function VeyloSetDisplayLanguage
       StrCpy $VeyloDisplayName "Veylo"
       ${Switch} $LANGUAGE
@@ -149,7 +145,7 @@
       VeyloInstaller::Init /NOUNLOAD "$HWNDPARENT" "$PLUGINSDIR\veylo-brand.png" "$LANGUAGE" "${VERSION}"
       Pop $0
       ${If} $0 != "ok"
-        MessageBox MB_OK|MB_ICONSTOP "$(VeyloSkinError)"
+        ; A confirmed updater retains its custom error surface until ready.
         SetErrorLevel 2
         Quit
       ${EndIf}
@@ -159,6 +155,23 @@
       ${If} $0 == $INSTDIR
       ${AndIf} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
         VeyloInstaller::TrustExistingPath /NOUNLOAD "$INSTDIR"
+      ${EndIf}
+      ${If} ${isUpdated}
+        VeyloInstaller::Page /NOUNLOAD "install" "$INSTDIR" "${APP_FILENAME}" "0" "0"
+        Pop $0
+        ${If} $0 != "ok"
+          StrCpy $VeyloHandoffStatus "error"
+          VeyloInstaller::PreparationFailed /NOUNLOAD "ready"
+          Return
+        ${EndIf}
+      ${EndIf}
+      VeyloInstaller::ShowReady /NOUNLOAD
+      Pop $0
+      ${If} $0 != "ok"
+        StrCpy $VeyloHandoffStatus "error"
+        VeyloInstaller::PreparationFailed /NOUNLOAD "ready"
+      ${Else}
+        StrCpy $VeyloHandoffStatus "ok"
       ${EndIf}
     FunctionEnd
 
@@ -194,9 +207,21 @@
     Function VeyloInstallShow
       VeyloInstaller::Page /NOUNLOAD "install" "$INSTDIR" "${APP_FILENAME}" "$mui.InstFilesPage.ProgressBar" "$mui.InstFilesPage.Log"
       Pop $0
+      ${If} $0 != "ok"
+        StrCpy $VeyloHandoffStatus "error"
+        VeyloInstaller::PreparationFailed /NOUNLOAD "ready"
+      ${EndIf}
+    FunctionEnd
+
+    Function VeyloInstallLeave
+      IfAbort 0 veyloInstallNotFailed
+        VeyloInstaller::EndInstall /NOUNLOAD
+        VeyloInstaller::Failed /NOUNLOAD
+      veyloInstallNotFailed:
     FunctionEnd
 
     Function VeyloFinish
+      VeyloInstaller::EndInstall /NOUNLOAD
       nsDialogs::Create 1018
       Pop $0
       ${If} $0 == "error"
@@ -209,6 +234,7 @@
     FunctionEnd
 
     Function VeyloFinishLeave
+      VeyloInstaller::EndInstall /NOUNLOAD
       VeyloInstaller::GetLaunch /NOUNLOAD
       Pop $0
       ${If} $0 == "1"
@@ -222,11 +248,13 @@
     FunctionEnd
 
     Function .onInstFailed
+      VeyloInstaller::EndInstall /NOUNLOAD
       ${If} $VeyloReady == "1"
         VeyloInstaller::Failed /NOUNLOAD
       ${EndIf}
     FunctionEnd
     Function .onGUIEnd
+      VeyloInstaller::EndInstall /NOUNLOAD
       ${If} $VeyloReady == "1"
         VeyloInstaller::Dispose
       ${EndIf}

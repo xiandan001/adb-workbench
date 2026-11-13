@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, dialog, screen, Menu } = require('electron'
 const path = require('path');
 const fs = require('fs');
 
+require('./lib/installer-startup-guard.cjs').runUnlessInstalling({ app }, () => {
 configureUserDataPath();
 
 const ctx = require('./lib/app-context.cjs');
@@ -152,7 +153,7 @@ function createWindow() {
     if (!currentUrl || url !== currentUrl) event.preventDefault();
   });
   mainWindow.on('close', event => {
-    if (!quitCleanupFinished && (screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
+    if (!quitCleanupFinished && (updater.shouldInstallDownloadedUpdateOnQuit() || screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
       event.preventDefault();
       app.quit();
     }
@@ -334,6 +335,16 @@ app.on('before-quit', async (event) => {
     return;
   }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();
+  if (shouldInstallUpdate) {
+    const result = await updater.beginUpdateInstall();
+    if (!result.ok) {
+      quitCleanupRunning = false;
+      await appMessageDialog.ask({ type: 'error', title: tr('未能启动安装器'), message: result.error,
+        buttons: [tr('返回应用')], defaultId: 0, cancelId: 0 });
+      return;
+    }
+    updater.noteUpdateInstallQuitting();
+  }
   try {
     await cleanupBeforeQuit({ forUpdateInstall: shouldInstallUpdate });
   } catch (err) {
@@ -355,4 +366,5 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
 });

@@ -721,9 +721,28 @@ int Run() {
     Page(L"install", initial); Click(Details); Pump(100);
     FooterChecks(locale);
     Check(ParentEvidence(L"footer-" + std::to_wstring(locale)), "localized footer and details do not expose original NSIS controls");
+    for (const wchar_t* reason : {L"ready", L"busy", L"error", L"application"}) {
+      Call("PreparationFailed", {reason}, false); Pump(80);
+      Check(!IsWindowVisible(Control(Primary)) && !IsWindowVisible(Control(Secondary)) && IsWindowVisible(Control(Cancel)),
+        "predeployment failure exposes only custom close and details actions");
+      Screenshot(skin, L"preflight-" + std::wstring(reason) + L"-" + std::to_wstring(locale) + L"-skin");
+      Check(ParentEvidence(L"preflight-" + std::wstring(reason) + L"-" + std::to_wstring(locale)),
+        "localized predeployment failure remains in the custom skin without native overlays");
+    }
     Dispose();
   }
   if (offscreen) {
+    // Activating an offscreen host invalidates the client-DC capture oracle.
+    // Check hidden-to-visible readiness last, then capture the skin's direct paint.
+    Initialize(1033); Page(L"install", initial);
+    Check(Call("ConfigureUpdate") == L"ok", "manual native fixture parses without a launcher identity");
+    Check(Call("BeginInstall", {L"interactive"}) == L"ready", "deployment is rejected before a window acknowledgement without touching the install guard");
+    ShowWindow(parent, SW_HIDE);
+    Check(!IsWindowVisible(parent), "the owned fixture starts readiness with its parent hidden");
+    Check(Call("ShowReady") == L"ok" && IsWindowVisible(parent) && IsWindowVisible(skin),
+      "manual readiness explicitly shows the owned custom window before success");
+    Screenshot(skin, L"ready-rendered-skin-1033");
+    Dispose();
     DestroyWindow(parent); FreeLibrary(library);
     std::printf("RESULT %d offscreen native capture checks passed; no directory dialog or installation executed\n", checks);
     return 0;

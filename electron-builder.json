@@ -25,6 +25,9 @@
       ]
     }
   ],
+  "extraResources": [
+    { "from": "build/generated/installer-ui/VeyloInstallWait.exe", "to": "installer-wait.exe" }
+  ],
   "win": {
     "target": [
       {
@@ -53,6 +56,8 @@
   "npmRebuild": false,
   "asar": true,
   "asarUnpack": [
+    "electron/assets/installer-active.ps1",
+    "electron/assets/update-launch.ps1",
     "electron/assets/update-processes.ps1",
     "electron/lib/device-platform.cjs",
     "electron/lib/device-registry.cjs",

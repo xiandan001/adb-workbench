@@ -25,7 +25,8 @@ test('native installer uses complete five-language catalogs and localized brand'
 });
 
 test('native display plugin preserves the explicit NSIS ABI', () => {
-  const exports = ['Init', 'Page', 'Stage', 'GetPath', 'GetShortcut', 'GetLaunch', 'GetLanguage', 'TrustExistingPath', 'Failed', 'Dispose'];
+  const exports = ['Init', 'ConfigureUpdate', 'GetUpdatePid', 'GetUpdateLanguage', 'ShowReady', 'BeginInstall', 'EndInstall',
+    'PreparationFailed', 'Page', 'Stage', 'GetPath', 'GetShortcut', 'GetLaunch', 'GetLanguage', 'TrustExistingPath', 'Failed', 'Dispose'];
   const source = read('installer-skin.cpp');
   for (const name of exports) {
     assert.ok(read('installer-skin.def').includes(`${name}=Skin${name}`), name);

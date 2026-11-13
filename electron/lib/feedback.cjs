@@ -59,9 +59,11 @@ function register(ipcMain) {
   const baseLogger = createAppDiagnosticLog({ directory: path.join(app.getPath('userData'), 'diagnostics'), version: app.getVersion() });
   logger = { ...baseLogger, record(event) {
     const accepted = baseLogger.record(event);
-    applicationLog.record({ source: event.module === 'ipc' ? 'ipc' : 'app',
-      event: event.module === 'ipc' ? 'failure' : ['startup', 'ready', 'shutdown', 'renderer-error'].includes(event.operation) ? event.operation : 'failure',
-      component: event.module, level: event.level, channel: event.channel, errorCode: event.errorCode, durationMs: event.durationMs });
+    const install = event.module === 'updater' && event.operation === 'install';
+    applicationLog.record({ source: install ? 'updater' : event.module === 'ipc' ? 'ipc' : 'app',
+      event: install ? 'install' : event.module === 'ipc' ? 'failure' : ['startup', 'ready', 'shutdown', 'renderer-error'].includes(event.operation) ? event.operation : 'failure',
+      component: event.module, level: event.level, channel: event.channel, errorCode: event.errorCode, durationMs: event.durationMs,
+      ...(install ? { installPhase: event.installPhase, installCode: event.installCode, installerPid: event.installerPid } : {}) });
     return accepted;
   } };
   const github = createFeedbackGithub();

@@ -1,6 +1,13 @@
 LIBRARY VeyloInstaller
 EXPORTS
   Init=SkinInit
+  ConfigureUpdate=SkinConfigureUpdate
+  GetUpdatePid=SkinGetUpdatePid
+  GetUpdateLanguage=SkinGetUpdateLanguage
+  ShowReady=SkinShowReady
+  BeginInstall=SkinBeginInstall
+  EndInstall=SkinEndInstall
+  PreparationFailed=SkinPreparationFailed
   Page=SkinPage
   Stage=SkinStage
   GetPath=SkinGetPath

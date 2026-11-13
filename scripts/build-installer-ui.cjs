@@ -28,11 +28,15 @@ function build() {
   const visualStudio = cp.execFileSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8', windowsHide: true }).trim();
   assert.ok(visualStudio && fs.existsSync(visualStudio), 'MSVC x86 Build Tools are required');
   const vcvars = path.join(visualStudio, 'VC/Auxiliary/Build/vcvarsall.bat');
-  const command = `call "${vcvars}" x86 >nul && cl.exe /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /LD /DUNICODE /D_UNICODE /I"${output}" /Fo"${path.join(output, 'installer-skin.obj')}" "${path.join(source, 'installer-skin.cpp')}" /link /DEF:"${path.join(source, 'installer-skin.def')}" /OUT:"${path.join(output, 'VeyloInstaller.dll')}" user32.lib gdi32.lib comctl32.lib gdiplus.lib ole32.lib shell32.lib uuid.lib`;
+  const skinCommand = `cl.exe /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /LD /DUNICODE /D_UNICODE /I"${output}" /Fo"${path.join(output, 'installer-skin.obj')}" "${path.join(source, 'installer-skin.cpp')}" /link /DEF:"${path.join(source, 'installer-skin.def')}" /OUT:"${path.join(output, 'VeyloInstaller.dll')}" user32.lib gdi32.lib comctl32.lib gdiplus.lib ole32.lib shell32.lib uuid.lib`;
+  const waitCommand = `cl.exe /nologo /utf-8 /std:c++17 /O2 /MT /EHsc /DUNICODE /D_UNICODE /I"${output}" /Fo"${path.join(output, 'installer-wait.obj')}" "${path.join(source, 'installer-wait.cpp')}" /link /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /OUT:"${path.join(output, 'VeyloInstallWait.exe')}" user32.lib gdi32.lib shell32.lib crypt32.lib`;
+  const command = `call "${vcvars}" x86 >nul && ${skinCommand} && ${waitCommand}`;
   cp.execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${command}"`], { cwd: output, windowsHide: true, windowsVerbatimArguments: true, stdio: 'inherit', timeout: 120000 });
   const binary = fs.readFileSync(path.join(output, 'VeyloInstaller.dll'));
   assert.equal(binary.readUInt16LE(binary.readUInt32LE(0x3c) + 4), 0x14c, 'NSIS skin must be x86');
-  console.log('Native installer skin built (x86, static CRT, five languages).');
+  const waitBinary = fs.readFileSync(path.join(output, 'VeyloInstallWait.exe'));
+  assert.equal(waitBinary.readUInt16LE(waitBinary.readUInt32LE(0x3c) + 4), 0x14c, 'Standalone waiting host must be x86');
+  console.log('Native installer skin and independent waiting host built (x86, static CRT, five languages).');
 }
 if (require.main === module) { try { build(); } catch (error) { console.error(error.message); process.exitCode = 1; } }
 module.exports = { compileStrings };

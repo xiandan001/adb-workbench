@@ -147,7 +147,6 @@ function App() {
   const [confirmLoading, setConfirmLoading] = useState(false);
   // 更新安装确认框状态（带加载条）
   const [updateInstallModal, setUpdateInstallModal] = useState(false);
-  const [updateInstalling, setUpdateInstalling] = useState(false);
   const [environmentCheckModalOpen, setEnvironmentCheckModalOpen] = useState(false);
   const showConfirm = useCallback((options, onConfirm) => {
     const next = typeof options === 'string'
@@ -230,6 +229,7 @@ function App() {
     info: null,
     notAvailable: false
   });
+  const updateInstalling = updaterState.installing === true;
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(() => {
     return localStorage.getItem('autoUpdateEnabled') !== 'false';
   });
@@ -1613,13 +1613,7 @@ function App() {
                     className={`px-4 py-2 text-sm rounded-lg transition-colors ${isDarkTheme(t) ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                   >{tr("稍后")}</button>
                   <button
-                    onClick={async () => {
-                      setUpdateInstalling(true);
-                      // 短暂延迟让加载条可见，然后执行安装
-                      setTimeout(() => {
-                        window.electronAPI?.installUpdate?.();
-                      }, 800);
-                    }}
+                    onClick={() => window.electronAPI?.installUpdate?.()}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
                   >
                     <RefreshCw size={14} />{tr("安装并重启")}</button>
@@ -1630,7 +1624,7 @@ function App() {
                 <div className="flex items-center justify-center mb-4">
                   <Loader2 size={32} className="animate-spin text-emerald-500" />
                 </div>
-                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("正在安装更新，应用即将重启…")}</p>
+                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr('正在启动安装器…')}</p>
                 <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
                   <div className="h-full bg-emerald-500 rounded-full animate-[loading_1.2s_ease-in-out_infinite]" style={{ width: '100%' }} />
                 </div>
@@ -2953,6 +2947,7 @@ function App() {
                         {/* 立即安装按钮（下载完成后显示） */}
                         {updaterState.downloaded && (
                           <button
+                            disabled={updateInstalling}
                             onClick={() => window.electronAPI?.installUpdate?.()}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
                               isDarkTheme(t)
@@ -2961,7 +2956,7 @@ function App() {
                             }`}
                           >
                             <DownloadCloud size={14} />
-                            <span>{tr("立即安装并重启")}</span>
+                            <span>{updateInstalling ? tr('正在启动安装器…') : tr("立即安装并重启")}</span>
                           </button>
                         )}
                       </div>

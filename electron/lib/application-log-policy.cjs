@@ -1,11 +1,12 @@
 const { types } = require('node:util');
 const { safeDiagnosticChannel } = require('./app-diagnostic-log.cjs');
+const installSpec = require('./update-install-spec.json');
 
 const EVENTS = {
   session: new Set(['start', 'stop']),
   app: new Set(['startup', 'ready', 'shutdown', 'failure', 'console', 'renderer-error', 'renderer-gone', 'load-failed']),
   ipc: new Set(['failure']),
-  updater: new Set(['checking-for-update', 'update-available', 'update-not-available', 'download-progress', 'update-downloaded', 'error', 'retry']),
+  updater: new Set(['checking-for-update', 'update-available', 'update-not-available', 'download-progress', 'update-downloaded', 'error', 'retry', 'install']),
   media: new Set(['opening', 'state', 'configure', 'configured', 'decode-error', 'fallback', 'first-frame', 'queue-limit', 'decode-summary', 'first-frame-timeout', 'transport-error', 'control-request', 'control-stage', 'control-result']),
 };
 const ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'NotSupportedError', 'DataError', 'InvalidStateError', 'EncodingError', 'AbortError', 'OperationError', 'SecurityError', 'UnknownError', 'TimeoutError', 'QuotaExceededError']);
@@ -28,6 +29,11 @@ function normalizeApplicationLogEvent(value) {
   const get = fields(value);
   if (!get || typeof get('source') !== 'string' || !Object.hasOwn(EVENTS, get('source')) || !EVENTS[get('source')].has(get('event'))) return null;
   const row = { source: get('source'), event: get('event') };
+  if (row.source === 'updater' && row.event === 'install') {
+    if (installSpec.phases.includes(get('installPhase'))) row.installPhase = get('installPhase');
+    if (installSpec.codes.includes(get('installCode'))) row.installCode = get('installCode');
+    if (Number.isSafeInteger(get('installerPid')) && get('installerPid') > 0 && get('installerPid') <= 4294967295) row.installerPid = get('installerPid');
+  }
   const control = get('source') === 'media' && ['control-request', 'control-stage', 'control-result'].includes(get('event'));
   if (get('channel') !== undefined) row.channel = safeDiagnosticChannel(get('channel'));
   const enums = { level: ['info', 'warn', 'error'], mode: ['hardware', 'software', 'default'],

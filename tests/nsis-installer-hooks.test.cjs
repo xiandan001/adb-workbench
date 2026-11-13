@@ -43,7 +43,11 @@ test('native callbacks retain real engine controls, update flags, shortcut opt-o
   assert.match(hooks, /"--updated"/);
   assert.match(hooks, /Function \.onGUIEnd/);
   assert.match(hooks, /Function \.onInstFailed/);
-  for (const language of [1033,2052,1028,1041,1042]) assert.match(hooks, new RegExp(`LangString VeyloSkinError ${language} `));
+  const catalog = JSON.parse(read('build/installer-ui/strings.json'));
+  for (const messages of Object.values(catalog)) {
+    for (const key of ['readyFailedBody', 'installBusyBody', 'guardFailedBody', 'applicationRunningBody']) assert.ok(messages[key]);
+  }
+  assert.doesNotMatch(hooks, /MessageBox/);
   assert.ok(!hooks.includes('\r\n')); assert.ok(!hooks.includes('\uFFFD'));
 });
 
@@ -65,7 +69,7 @@ test('installer paths are passed as environment data, never interpolated as Powe
   }
   assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_TOOL_DIR", p 0\)/g) || []).length, 2);
   const prepare = calls.find(call => call.includes('-Mode PrepareInstall'));
-  assert.match(prepare, /\/TIMEOUT=25000/);
+  assert.match(prepare, /\/TIMEOUT=90000/);
   assert.match(prepare, /-File "\$PLUGINSDIR\\veylo-update-processes.ps1"/);
   assert.doesNotMatch(prepare, /-Command|\$INSTDIR|\$R0/);
   assert.match(source, /File \/oname=\$PLUGINSDIR\\veylo-update-processes.ps1 "\$\{PROJECT_DIR\}\\electron\\assets\\update-processes.ps1"/);
@@ -73,7 +77,11 @@ test('installer paths are passed as environment data, never interpolated as Powe
   for (const name of ['VEYLO_INSTALLER_ROOT', 'VEYLO_INSTALLER_APP_EXE', 'VEYLO_UPDATE_PID', 'VEYLO_UPDATE_EXE']) {
     assert.ok(source.includes(`SetEnvironmentVariableW(w "${name}", p 0)`));
   }
-  assert.match(source, /!macro customInit\s+Call VeyloInitLanguage\s+!insertmacro VeyloPrepareBundledProcesses ""/);
+  const init = source.match(/!macro customInit\s+([\s\S]*?)!macroend/)[1];
+  assert.match(init, /VeyloInstaller::ConfigureUpdate/);
+  assert.match(init, /Call VeyloInitLanguage/);
+  assert.doesNotMatch(init, /VeyloPrepareBundledProcesses/);
+  assert.match(source, /!ifndef BUILD_UNINSTALLER\s+!macro customCheckAppRunning/);
   assert.match(source, /!macro customUnInstall\s+!insertmacro VeyloPrepareBundledProcesses "-EnvOnlyMode"/);
   assert.doesNotMatch(source, /kill-server|killall|Stop-Process -Name|taskkill|!macro checkAppRunning/);
   assert.ok(!source.includes('\r'));

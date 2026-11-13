@@ -1,4 +1,5 @@
 !include "installer-ui.nsh"
+Var VeyloPreparationResult
 
 !macro VeyloPrepareBundledProcesses FLAGS
   Push $0
@@ -12,13 +13,20 @@
   StrCpy $1 "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
   System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_ROOT", w r0)'
   System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_APP_EXE", w r1)'
+  !ifndef BUILD_UNINSTALLER
+    VeyloInstaller::GetUpdatePid /NOUNLOAD
+    Pop $0
+    System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_UPDATE_PID", w r0)'
+    System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_UPDATE_EXE", w r1)'
+  !endif
   StrCpy $2 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
   ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
     StrCpy $2 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
   ${EndIf}
-  nsExec::ExecToStack /TIMEOUT=25000 `"$2" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\veylo-update-processes.ps1" -Mode PrepareInstall ${FLAGS}`
+  nsExec::ExecToStack /TIMEOUT=90000 `"$2" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\veylo-update-processes.ps1" -Mode PrepareInstall ${FLAGS}`
   Pop $3
   Pop $4
+  StrCpy $VeyloPreparationResult $3
   ${If} $3 == "0"
     DetailPrint "Bundled tool processes exited"
   ${Else}
@@ -36,9 +44,50 @@
 !macroend
 
 !macro customInit
+  VeyloInstaller::ConfigureUpdate /NOUNLOAD
+  Pop $VeyloHandoffStatus
+  VeyloInstaller::GetUpdateLanguage /NOUNLOAD
+  Pop $0
+  ${If} $0 != ""
+    System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_UPDATE_LANGUAGE", w r0)'
+  ${EndIf}
   Call VeyloInitLanguage
-  !insertmacro VeyloPrepareBundledProcesses ""
 !macroend
+
+; The stock engine calls this before uninstalling or replacing application files.
+!ifndef BUILD_UNINSTALLER
+!macro customCheckAppRunning
+  ${If} $VeyloHandoffStatus != "ok"
+    VeyloInstaller::PreparationFailed /NOUNLOAD "ready"
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  ${If} ${Silent}
+    StrCpy $0 "silent"
+  ${Else}
+    StrCpy $0 "interactive"
+  ${EndIf}
+  VeyloInstaller::BeginInstall /NOUNLOAD "$0"
+  Pop $0
+  ${If} $0 != "ok"
+    VeyloInstaller::PreparationFailed /NOUNLOAD "$0"
+    VeyloInstaller::EndInstall /NOUNLOAD
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  !insertmacro VeyloPrepareBundledProcesses ""
+  ${If} $VeyloPreparationResult != "0"
+    ${If} $VeyloPreparationResult == "3"
+      VeyloInstaller::PreparationFailed /NOUNLOAD "application"
+    ${Else}
+      VeyloInstaller::PreparationFailed /NOUNLOAD "error"
+    ${EndIf}
+    VeyloInstaller::EndInstall /NOUNLOAD
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+!macroend
+!endif
 
 !macro customInstall
   !insertmacro VeyloSaveInstallerLanguage
@@ -69,6 +118,10 @@
 
   ci_done:
   Pop $R0
+  ; Silent installs skip the finish/GUI callbacks; stock may immediately launch.
+  ${If} ${Silent}
+    VeyloInstaller::EndInstall /NOUNLOAD
+  ${EndIf}
 !macroend
 
 !macro customUnInstall

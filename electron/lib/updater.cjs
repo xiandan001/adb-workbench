@@ -13,6 +13,8 @@ const { isDev } = ctx;
 const { getAppVersion, compareVersions } = require('./version.cjs');
 const { cleanupAndroidToolProcesses } = require('./android-tool-cleanup.cjs');
 const { createUpdatePoller } = require('./update-poller.cjs');
+const { launchUpdateInstaller } = require('./update-installer-launch.cjs');
+const feedback = require('./feedback.cjs');
 
 const UPDATER_MAX_RETRIES = 2;
 const UPDATER_RETRY_DELAYS_MS = [2000, 5000];
@@ -24,7 +26,7 @@ const UPDATER_REQUEST_HEADERS = {
 };
 
 autoUpdater.autoDownload = false;  // 不自动下载，由用户点击或自动检查逻辑触发
-autoUpdater.autoInstallOnAppQuit = true;  // 下载完成后退出应用时自动安装
+autoUpdater.autoInstallOnAppQuit = process.platform !== 'win32'; // Windows uses the acknowledged application-owned handoff.
 autoUpdater.logger = console;  // 启用日志，便于排查更新问题
 autoUpdater.requestHeaders = {
   ...(autoUpdater.requestHeaders || {}),
@@ -39,11 +41,14 @@ let updaterStatus = {
   downloading: false,
   progress: null,        // { percent, transferred, total, bytesPerSecond }
   downloaded: false,
+  installing: false,
   error: null,
   info: null             // { version, releaseNotes, releaseName }
 };
 let quitAndInstallInProgress = false;
 let updateInstallPrepared = false;
+let installLaunchFlight = null;
+let installerReady = false;
 let checkFlight = null;
 let downloadFlight = null;
 let updatePoller = null;
@@ -224,8 +229,56 @@ function isQuitAndInstallInProgress() {
   return quitAndInstallInProgress;
 }
 
+function recordInstall(installPhase, result = {}) {
+  feedback.record({ module: 'updater', operation: 'install', installPhase, installCode: result.code,
+    installerPid: result.installerPid, level: installPhase === 'failed' ? 'error' : 'info',
+    outcome: installPhase === 'failed' ? result.code === 'UAC_CANCELLED' ? 'cancelled' : 'failure' : installPhase === 'launching' ? 'started' : 'success' });
+}
+
+function installerFailureMessage(code) {
+  if (code === 'UAC_CANCELLED') return tr('已取消权限确认，应用将继续运行。');
+  if (['READY_TIMEOUT', 'HELPER_TIMEOUT'].includes(code)) return tr('等待安装器超时，应用将继续运行。');
+  if (code === 'CHECKSUM_MISMATCH') return tr('更新包校验失败，请重新下载');
+  return tr('安装器未能就绪，应用将继续运行。');
+}
+
+function beginUpdateInstall() {
+  if (!updaterStatus.downloaded) return Promise.resolve({ ok: false, code: 'INVALID_INSTALLER', error: tr('更新尚未下载完成') });
+  if (installerReady) return Promise.resolve({ ok: true, code: 'READY' });
+  if (installLaunchFlight) return installLaunchFlight;
+  if (process.platform !== 'win32') return Promise.resolve({ ok: true, code: 'READY' });
+  const flight = Promise.resolve().then(async () => {
+    updateState({ installing: true, error: null }); recordInstall('launching');
+    let result;
+    try {
+      result = await launchUpdateInstaller({ installerPath: autoUpdater.installerPath, parentPid: process.pid,
+        locale: updateInstallLocale, sha512: autoUpdater.downloadedUpdateHelper?.downloadedFileInfo?.sha512 });
+    } catch { result = { ok: false, code: 'START_FAILED' }; }
+    if (result?.ok === true && result.code === 'READY') {
+      installerReady = true; recordInstall('ready', result); return result;
+    }
+    const code = typeof result?.code === 'string' ? result.code : 'PROTOCOL_ERROR';
+    recordInstall('failed', { code });
+    quitAndInstallInProgress = false; installerReady = false; updateInstallPrepared = false;
+    const invalidPackage = ['CHECKSUM_MISMATCH', 'INVALID_INSTALLER'].includes(code);
+    if (invalidPackage) { try { await autoUpdater.downloadedUpdateHelper?.clear?.(); } catch { /* The next explicit download can retry cache cleanup. */ } }
+    const error = installerFailureMessage(code); updateState({ installing: false, error, ...(invalidPackage ? { downloaded: false } : {}) });
+    return { ok: false, code, error };
+  }).finally(() => { if (installLaunchFlight === flight) installLaunchFlight = null; });
+  installLaunchFlight = flight;
+  return flight;
+}
+
+function noteUpdateInstallQuitting() { if (installerReady) recordInstall('quitting', { code: 'READY' }); }
+
 function quitAndInstallPreparedUpdate() {
   if (!updaterStatus.downloaded) return false;
+  if (process.platform === 'win32') {
+    if (!installerReady) return false;
+    quitAndInstallInProgress = true;
+    app.quit();
+    return true;
+  }
   prepareUpdateInstallLanguage();
   prepareUpdateInstallIdentity();
   quitAndInstallInProgress = true;
@@ -385,6 +438,8 @@ function register(ipcMain) {
 module.exports = {
   register,
   prepareForUpdateInstall,
+  beginUpdateInstall,
+  noteUpdateInstallQuitting,
   shouldInstallDownloadedUpdateOnQuit,
   isQuitAndInstallInProgress,
   quitAndInstallPreparedUpdate

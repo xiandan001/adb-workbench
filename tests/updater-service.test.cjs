@@ -50,6 +50,8 @@ function harness({ development = false, clock } = {}) {
     if (name === './app-context.cjs') return { isDev: development, getMainWindow: () => main, getLogAnalyzerWindow: () => analyzer };
     if (name === './version.cjs') return { getAppVersion: () => '4.7.2', compareVersions: (a, b) => a.localeCompare(b, undefined, { numeric: true }) };
     if (name === './android-tool-cleanup.cjs') return { cleanupAndroidToolProcesses: async () => ({ ok: true }) };
+    if (name === './update-installer-launch.cjs') return { launchUpdateInstaller: async () => ({ ok: true, code: 'READY', installerPid: 5252 }) };
+    if (name === './feedback.cjs') return { record() {} };
     if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
     if (name === './update-poller.cjs') return { createUpdatePoller(value) {
       calls.pollers++; options = value;

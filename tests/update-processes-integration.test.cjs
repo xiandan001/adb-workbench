@@ -111,4 +111,65 @@ describe('shared update process script with isolated Windows native children', {
     assert.ok(parent.isAlive(), 'timeout must preserve the old main app and quit-cancellation protection');
     assert.ok(tools.every(child => child.isAlive()), 'timeout must not pretend the install was prepared');
   });
+
+  test('manual installation waits for every exact main image without an updater PID and preserves other installations', async () => {
+    const install = installation('manual-install');
+    const mains = await Promise.all([0, 1].map(index => suite.start(install.app, { gate: `manual-main-${index}.release` })));
+    const foreign = await suite.start(suite.copy('manual-install/other/Veylo.exe'), { gate: 'manual-foreign.release' });
+    const tool = await suite.start(install.tools[0]);
+    const pending = suite.invoke('PrepareInstall', { timeoutMs: 15000 }, {
+      VEYLO_INSTALLER_ROOT: install.root, VEYLO_INSTALLER_APP_EXE: install.app,
+    }, { observeParentWait: true });
+    let finished = false;
+    pending.finally(() => { finished = true; }).catch(() => {});
+    await pending.parentWait;
+    await delay(200);
+    assert.ok(mains.every(child => child.isAlive()) && tool.isAlive());
+    assert.equal(finished, false);
+    mains[0].release();
+    await bounded(mains[0].done, 3000, 'first manual main did not exit');
+    await delay(200);
+    assert.equal(finished, false, 'a second exact main instance must still block installation');
+    mains[1].release();
+    assert.equal((await bounded(mains[1].done, 3000, 'second manual main did not exit')).code, 0);
+    const result = await pending;
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.result.parent, 'not-requested');
+    assert.equal(result.result.applications, 'exited');
+    await assertStopped([tool]);
+    assert.ok(foreign.isAlive(), 'another installation must not be waited on or terminated');
+  });
+
+  test('manual-install timeout leaves a same-image main and bundled tools untouched', async () => {
+    const install = installation('manual-timeout');
+    const main = await suite.start(install.app, { gate: 'manual-timeout.release' });
+    const tool = await suite.start(install.tools[3]);
+    const result = await suite.invoke('PrepareInstall', { timeoutMs: 300 }, {
+      VEYLO_INSTALLER_ROOT: install.root, VEYLO_INSTALLER_APP_EXE: install.app,
+    });
+    assert.equal(result.code, 3, result.stderr);
+    assert.equal(result.result.applications, 'timeout');
+    assert.ok(main.isAlive() && tool.isAlive(), 'manual installation must not force close the app or clean tools on failure');
+  });
+
+  test('an external waiting host remains alive and cannot block replacement after the main app exits', async () => {
+    const install = installation('external-waiting-host');
+    const main = await suite.start(install.app, { gate: 'external-host-main.release' });
+    const tool = await suite.start(install.tools[0]);
+    const host = await suite.start(suite.copy('external-wait-host/VeyloInstallWait.exe'), { gate: 'external-host.release' });
+    const pending = suite.invoke('PrepareInstall', { timeoutMs: 15000 }, installerEnvironment(install, main), { observeParentWait: true });
+    let finished = false;
+    pending.finally(() => { finished = true; }).catch(() => {});
+    await pending.parentWait;
+    await delay(200);
+    assert.equal(finished, false);
+    assert.ok(main.isAlive() && tool.isAlive() && host.isAlive());
+    main.release();
+    assert.equal((await bounded(main.done, 3000, 'main did not exit naturally')).code, 0);
+    const result = await pending;
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.result.parent, 'exited');
+    await assertStopped([tool]);
+    assert.ok(host.isAlive(), 'the external waiting UI host must not be waited on or stopped');
+  });
 });

@@ -1,4 +1,4 @@
-const stateKeys = ['checking', 'available', 'notAvailable', 'downloading', 'progress', 'downloaded', 'error', 'info'];
+const stateKeys = ['checking', 'available', 'notAvailable', 'downloading', 'progress', 'downloaded', 'installing', 'error', 'info'];
 
 export function observeUpdaterState(api, update) {
   let active = true;
