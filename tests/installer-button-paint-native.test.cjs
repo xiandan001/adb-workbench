@@ -67,5 +67,9 @@ for (const locale of [2052, 1028, 1033, 1041, 1042]) test('owner-drawn button ba
   }
   assert.equal(entry.result.backgroundBrushColor, 0, 'owner-drawn erase uses the owned black brush, not the default system face');
   assert.notEqual(entry.result.eraseResult, 0); assert.equal(entry.result.eraseColor, 0, 'actual BUTTON background erase fills black');
+  assert.equal(entry.result.originalParentClip, 1); assert.equal(entry.result.beforeDisposeParentClip, 1);
+  assert.equal(entry.result.afterDisposeParentClip, 1, 'Disposal preserves a clipping bit owned by the original host');
+  assert.notEqual(entry.result.unrelatedBefore, entry.result.unrelatedChanged);
+  assert.equal(entry.result.unrelatedAfter, entry.result.unrelatedChanged, 'Disposal does not restore unrelated host styles');
   entry.passed = true;
 });

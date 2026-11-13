@@ -170,3 +170,15 @@ test('owner-drawn button backgrounds stay black and enabled-state changes redraw
   assert.doesNotMatch(fixture, /SendMessageW\([^\n]*WM_DRAWITEM/);
   assert.match(fixture, /BitBlt\(/);
 });
+
+test('the real NSIS parent clips its children and cleanup restores only the style bit owned by the skin', () => {
+  const source = read('installer-skin.cpp');
+  const initialize = source.slice(source.indexOf('bool Initialize('), source.indexOf('SKIN_EXPORT(Init)'));
+  const cleanup = source.slice(source.indexOf('void Cleanup()'), source.indexOf('bool Initialize('));
+  assert.match(initialize, /parentClipChildrenAdded = \(parentStyle & WS_CLIPCHILDREN\) == 0/);
+  assert.match(initialize, /SetWindowLongPtrW\(parent, GWL_STYLE, parentStyle \| WS_CLIPCHILDREN\)/);
+  assert.ok(initialize.indexOf('parentStyle | WS_CLIPCHILDREN') < initialize.indexOf('ProtectNativeChildren()'));
+  assert.match(cleanup, /if \(s\.parentClipChildrenAdded && IsWindow\(s\.parent\)\)/);
+  assert.match(cleanup, /style & ~static_cast<LONG_PTR>\(WS_CLIPCHILDREN\)/);
+  assert.ok(cleanup.indexOf('DestroyWindow(s.window)') < cleanup.indexOf('style & ~static_cast'));
+});

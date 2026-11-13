@@ -16,6 +16,7 @@ struct Pixels { int black = 0, white = 0, ink = 0, total = 0; };
 struct Stage { const char* name; int draws = 0; UINT state = 0; Pixels drawn{}, retained{}; };
 HWND parent = nullptr, skin = nullptr, cancel = nullptr;
 HMODULE library = nullptr;
+LONG_PTR initialParentStyle = 0;
 Stage* current = nullptr;
 std::wstring Handle(HWND window) { return std::to_wstring(reinterpret_cast<UINT_PTR>(window)); }
 void Push(Stack** stack, const std::wstring& value) {
@@ -90,6 +91,7 @@ void CreateHost(const std::wstring& icon, int locale) {
   description.dialog.cx = 760; description.dialog.cy = 500;
   parent = CreateDialogIndirectParamW(GetModuleHandleW(nullptr), &description.dialog, nullptr, HostProc, 0);
   if (!parent) throw std::runtime_error("owned dialog creation failed");
+  initialParentStyle = GetWindowLongPtrW(parent, GWL_STYLE);
   CreateWindowExW(0, L"BUTTON", L"engine cancel", WS_CHILD, 0, 0, 80, 25, parent, reinterpret_cast<HMENU>(IDCANCEL), nullptr, nullptr);
   HWND progress = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD, 0, 0, 100, 10, parent, nullptr, nullptr, nullptr);
   if (Call("Init", {Handle(parent), icon, std::to_wstring(locale), L"button paint fixture"}) != L"ok") throw std::runtime_error("DLL Init failed");
@@ -138,13 +140,20 @@ int wmain(int argc, wchar_t** argv) {
     current = &restored; EnableWindow(GetDlgItem(parent, IDCANCEL), TRUE); Pump(260); ReadRetained(restored);
     const bool restoredState = IsWindowEnabled(cancel) != FALSE; current = nullptr;
     int brushColor = -1, erasedColor = -1; LRESULT erased = 0; ProbeBackground(brushColor, erasedColor, erased);
+    const LONG_PTR beforeDispose = GetWindowLongPtrW(parent, GWL_STYLE);
+    SetWindowLongPtrW(parent, GWL_STYLE, beforeDispose ^ WS_HSCROLL);
+    const LONG_PTR unrelatedChanged = GetWindowLongPtrW(parent, GWL_STYLE);
+    Call("Dispose", {}, false);
+    const LONG_PTR afterDispose = GetWindowLongPtrW(parent, GWL_STYLE);
     auto getDpi = reinterpret_cast<UINT(WINAPI*)(HWND)>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
     wchar_t observed[128]{}; DWORD bytes = 0; GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()), UOI_NAME, observed, sizeof(observed), &bytes);
     std::printf("{\"locale\":%d,\"actualWindowDpi\":%u,\"privateDesktopVerified\":%s,\"backgroundBrushColor\":%d,\"eraseResult\":%lld,\"eraseColor\":%d,\"engineDisabledMirrored\":%s,\"engineEnabledMirrored\":%s,\"stages\":[", locale, getDpi ? getDpi(parent) : 0,
       desktop == observed ? "true" : "false", brushColor, static_cast<long long>(erased), erasedColor, disabledState ? "true" : "false", restoredState ? "true" : "false");
     PrintStage(first); std::printf(","); PrintStage(disabled); std::printf(","); PrintStage(restored);
-    std::printf("],\"naturalFrameMethod\":\"observe actual WM_DRAWITEM HDC after production handler; no forced repaint or input; retained client DC recorded separately and may be cached on inactive desktops\",\"scratchEraseProbeAfterFrames\":true}\n");
-    Call("Dispose", {}, false); DestroyWindow(parent); FreeLibrary(library); SetThreadDesktop(original); CloseDesktop(owned); return 0;
+    std::printf("],\"naturalFrameMethod\":\"observe actual WM_DRAWITEM HDC after production handler; no forced repaint or input; retained client DC recorded separately and may be cached on inactive desktops\",\"scratchEraseProbeAfterFrames\":true,\"originalParentClip\":%d,\"beforeDisposeParentClip\":%d,\"afterDisposeParentClip\":%d,\"unrelatedBefore\":%d,\"unrelatedChanged\":%d,\"unrelatedAfter\":%d}\n",
+      (initialParentStyle & WS_CLIPCHILDREN) != 0, (beforeDispose & WS_CLIPCHILDREN) != 0, (afterDispose & WS_CLIPCHILDREN) != 0,
+      (beforeDispose & WS_HSCROLL) != 0, (unrelatedChanged & WS_HSCROLL) != 0, (afterDispose & WS_HSCROLL) != 0);
+    DestroyWindow(parent); FreeLibrary(library); SetThreadDesktop(original); CloseDesktop(owned); return 0;
   } catch (const std::exception& error) { std::fprintf(stderr, "%s (Win32 %lu)\n", error.what(), GetLastError());
     if (parent) DestroyWindow(parent); if (library) FreeLibrary(library); if (original) SetThreadDesktop(original); if (owned) CloseDesktop(owned); return 1; }
 }

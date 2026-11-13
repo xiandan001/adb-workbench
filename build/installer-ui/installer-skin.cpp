@@ -62,6 +62,7 @@ struct State {
   bool custom = false, launch = false, animate = true, failed = false, uninstall = false;
   bool cancelOverlay = false, showingDetails = false, bypassCancel = false, forwardingNext = false;
   bool concealPending = false;
+  bool parentClipChildrenAdded = false;
   ULONGLONG start = 0;
   Mode mode = Mode::Welcome;
 };
@@ -746,6 +747,10 @@ void Cleanup() {
   if (s.parent) RemoveWindowSubclass(s.parent, ParentProc, kSubclass);
   if (s.window) { KillTimer(s.window, kTimer); DestroyWindow(s.window); }
   RestoreNativeChildren();
+  if (s.parentClipChildrenAdded && IsWindow(s.parent)) {
+    const auto style = GetWindowLongPtrW(s.parent, GWL_STYLE);
+    SetWindowLongPtrW(s.parent, GWL_STYLE, style & ~static_cast<LONG_PTR>(WS_CLIPCHILDREN));
+  }
   s.image.reset();
   if (s.gdiplusToken) Gdiplus::GdiplusShutdown(s.gdiplusToken);
   if (s.font) DeleteObject(s.font);
@@ -790,6 +795,12 @@ bool Initialize(HWND parent, const std::wstring& image, const std::wstring& lang
   for (HWND control : {s.path, s.shortcut, s.detailEdit, s.language}) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(s.font), FALSE);
   s.nativeCancel = GetDlgItem(parent, IDCANCEL);
   if (!SetWindowSubclass(parent, ParentProc, kSubclass, 0)) { Cleanup(); return false; }
+  const auto parentStyle = GetWindowLongPtrW(parent, GWL_STYLE);
+  s.parentClipChildrenAdded = (parentStyle & WS_CLIPCHILDREN) == 0;
+  if (s.parentClipChildrenAdded) {
+    SetWindowLongPtrW(parent, GWL_STYLE, parentStyle | WS_CLIPCHILDREN);
+    if (!(GetWindowLongPtrW(parent, GWL_STYLE) & WS_CLIPCHILDREN)) { Cleanup(); return false; }
+  }
   RECT rectangle{0, 0, Px(kWidth), Px(kHeight)};
   AdjustWindowRectEx(&rectangle, GetWindowLongW(parent, GWL_STYLE), GetMenu(parent) != nullptr, GetWindowLongW(parent, GWL_EXSTYLE));
   RECT old{}; GetWindowRect(parent, &old);
