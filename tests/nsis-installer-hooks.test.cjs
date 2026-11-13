@@ -14,6 +14,7 @@ test('custom installer retains stock NSIS engine, stable identity and packaged l
   assert.equal(builder.nsis.deleteAppDataOnUninstall, false);
   assert.deepEqual(builder.nsis.installerLanguages, ['en_US', 'zh_CN', 'zh_TW', 'ja_JP', 'ko_KR']);
   assert.ok(builder.asarUnpack.includes('electron/lib/installer-language.cjs'));
+  assert.ok(builder.asarUnpack.includes('electron/assets/update-processes.ps1'));
 });
 
 test('installer default English and language receipt are explicit and path scoped', () => {
@@ -56,15 +57,24 @@ test('final configuration stage uses an actual install hook and leaves the stock
 test('installer paths are passed as environment data, never interpolated as PowerShell code', () => {
   const source = read('build/installer.nsh');
   const calls = source.split('\n').filter(line => line.includes('nsExec::ExecToStack'));
-  assert.equal(calls.length, 4);
-  for (const call of calls) {
-    assert.match(call, /\$\$(?:dir=\$\$env:VEYLO_INSTALLER_TOOL_DIR|target=\[IO.Path\]::GetFullPath\(\$\$env:VEYLO_INSTALLER_HDC\))/);
+  assert.equal(calls.length, 3);
+  for (const call of calls.filter(line => line.includes('-Command'))) {
+    assert.match(call, /\$\$dir=\$\$env:VEYLO_INSTALLER_TOOL_DIR/);
     assert.ok(!call.includes('$INSTDIR') && !call.includes('$R0'));
     assert.match(call, /\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe/);
   }
-  assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_TOOL_DIR", p 0\)/g) || []).length, 3);
-  assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_HDC", p 0\)/g) || []).length, 1);
-  const hdc = calls.find(call => call.includes('VEYLO_INSTALLER_HDC'));
-  assert.match(hdc, /\[string\]::Equals\(\$\$_\.ExecutablePath,\$\$target/);
-  assert.doesNotMatch(hdc, /kill-server|killall|Stop-Process -Name|StartsWith/);
+  assert.equal((source.match(/SetEnvironmentVariableW\(w "VEYLO_INSTALLER_TOOL_DIR", p 0\)/g) || []).length, 2);
+  const prepare = calls.find(call => call.includes('-Mode PrepareInstall'));
+  assert.match(prepare, /\/TIMEOUT=25000/);
+  assert.match(prepare, /-File "\$PLUGINSDIR\\veylo-update-processes.ps1"/);
+  assert.doesNotMatch(prepare, /-Command|\$INSTDIR|\$R0/);
+  assert.match(source, /File \/oname=\$PLUGINSDIR\\veylo-update-processes.ps1 "\$\{PROJECT_DIR\}\\electron\\assets\\update-processes.ps1"/);
+  assert.match(source, /\$WINDIR\\Sysnative\\WindowsPowerShell/);
+  for (const name of ['VEYLO_INSTALLER_ROOT', 'VEYLO_INSTALLER_APP_EXE', 'VEYLO_UPDATE_PID', 'VEYLO_UPDATE_EXE']) {
+    assert.ok(source.includes(`SetEnvironmentVariableW(w "${name}", p 0)`));
+  }
+  assert.match(source, /!macro customInit\s+Call VeyloInitLanguage\s+!insertmacro VeyloPrepareBundledProcesses ""/);
+  assert.match(source, /!macro customUnInstall\s+!insertmacro VeyloPrepareBundledProcesses "-EnvOnlyMode"/);
+  assert.doesNotMatch(source, /kill-server|killall|Stop-Process -Name|taskkill|!macro checkAppRunning/);
+  assert.ok(!source.includes('\r'));
 });

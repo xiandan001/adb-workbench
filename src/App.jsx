@@ -1988,9 +1988,11 @@ function App() {
                   />
                   {deviceQuery && <button type="button" aria-label={tr("清空设备搜索")} title={tr("清空搜索")} onClick={() => setDeviceQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${t.textMuted}`}><X size={15} /></button>}
                 </div>
-                <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />{tr("常用设备优先 · ")}{visibleDevices.length} / {eligibleDevices.length}{tr(" 台")}</span>
-                <div role="group" aria-label={tr('设备卡片视图')} className={`inline-flex shrink-0 rounded-lg border p-1 ${t.card}`}>
-                  {[['full', tr('完整视图')], ['compact', tr('紧凑视图')]].map(([value, label]) => <button type="button" key={value} aria-pressed={deviceCardDensity === value} onClick={() => setDeviceCardDensity(value)} className={`rounded-md px-2.5 py-1.5 text-xs ${deviceCardDensity === value ? t.button.primary : t.textMuted}`}>{label}</button>)}
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+                  <span className={`inline-flex items-center gap-1.5 text-xs ${t.textMuted}`}><Star size={13} />{tr("常用设备优先 · ")}{visibleDevices.length} / {eligibleDevices.length}{tr(" 台")}</span>
+                  <div role="group" aria-label={tr('设备卡片视图')} className={`inline-flex shrink-0 rounded-lg border p-1 ${t.card}`}>
+                    {[['full', tr('完整视图')], ['compact', tr('紧凑视图')]].map(([value, label]) => <button type="button" key={value} aria-pressed={deviceCardDensity === value} onClick={() => setDeviceCardDensity(value)} className={`rounded-md px-2.5 py-1.5 text-xs ${deviceCardDensity === value ? t.button.primary : t.textMuted}`}>{label}</button>)}
+                  </div>
                 </div>
               </div>}
               <div className="workbench-device-list">

@@ -53,6 +53,7 @@
   "npmRebuild": false,
   "asar": true,
   "asarUnpack": [
+    "electron/assets/update-processes.ps1",
     "electron/lib/device-platform.cjs",
     "electron/lib/device-registry.cjs",
     "electron/lib/device-invocation.cjs",

@@ -5,7 +5,8 @@ const { execFile } = require('child_process');
 const TOOL_NAMES = {
   adb: 'adb.exe',
   scrcpy: 'scrcpy.exe',
-  fastboot: 'fastboot.exe'
+  fastboot: 'fastboot.exe',
+  hdc: 'hdc.exe'
 };
 
 function sleep(ms) {
@@ -31,12 +32,16 @@ function uniqueExistingDirs(dirs) {
   return result;
 }
 
-function getBundledToolDirs() {
+function getBundledDirs(directory) {
   return uniqueExistingDirs([
-    path.join(__dirname, '../../scrcpy-win64'),
-    process.resourcesPath ? path.join(process.resourcesPath, '..', 'scrcpy-win64') : '',
-    process.execPath ? path.join(path.dirname(process.execPath), 'scrcpy-win64') : ''
+    path.join(__dirname, '../..', directory),
+    process.resourcesPath ? path.join(process.resourcesPath, '..', directory) : '',
+    process.execPath ? path.join(path.dirname(process.execPath), directory) : ''
   ]);
+}
+
+function getBundledToolDirs() {
+  return getBundledDirs('scrcpy-win64');
 }
 
 function findExecutable(name, dirs = getBundledToolDirs()) {
@@ -66,54 +71,48 @@ function runFile(command, args, timeoutMs) {
   });
 }
 
-function runPowerShell(script, timeoutMs) {
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  return runFile('powershell.exe', [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-EncodedCommand',
-    encoded
-  ], timeoutMs);
+function getCleanupScriptPath() {
+  const local = path.join(__dirname, '../assets/update-processes.ps1')
+    .replace(/\.asar([\\/])/, '.asar.unpacked$1');
+  const candidates = [local, process.resourcesPath
+    ? path.join(process.resourcesPath, 'app.asar.unpacked/electron/assets/update-processes.ps1') : ''];
+  return candidates.find(candidate => candidate && fs.existsSync(candidate));
 }
 
-async function stopProcessesInDirs(names, dirs) {
-  if (process.platform !== 'win32' || dirs.length === 0 || names.length === 0) {
+async function stopBundledProcesses(targets) {
+  if (process.platform !== 'win32' || targets.length === 0) {
     return { ok: true, skipped: true };
   }
-
-  const payload = JSON.stringify({ names, dirs });
-  const script = `
-$payload = @'
-${payload}
-'@ | ConvertFrom-Json
-$names = @($payload.names)
-$dirs = @($payload.dirs)
-$procs = Get-CimInstance Win32_Process | Where-Object {
-  $path = $_.ExecutablePath
-  $name = $_.Name
-  if (-not $path -or -not $name) { return $false }
-  if ($names -notcontains $name) { return $false }
-  foreach ($dir in $dirs) {
-    $prefix = $dir.TrimEnd('\\\\') + '\\\\'
-    if ($path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-      return $true
-    }
+  const scriptPath = getCleanupScriptPath();
+  if (!scriptPath) return { ok: false, error: 'Bundled process cleanup script is unavailable', stdout: '', stderr: '' };
+  const windowsDirectory = process.env.SystemRoot || 'C:\\Windows';
+  const nativePowerShell = path.join(windowsDirectory, 'Sysnative/WindowsPowerShell/v1.0/powershell.exe');
+  const powershell = fs.existsSync(nativePowerShell) ? nativePowerShell
+    : path.join(windowsDirectory, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const payload = Buffer.from(JSON.stringify({ targets, timeoutMs: 5000 }), 'utf8').toString('base64');
+  const result = await runFile(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', scriptPath, '-Mode', 'StopTools', '-PayloadBase64', payload
+  ], 10000);
+  let details;
+  try { details = JSON.parse(result.stdout.trim()); }
+  catch { return { ...result, ok: false, error: result.error || 'Process cleanup returned invalid status' }; }
+  if (!details || typeof details !== 'object' || typeof details.ok !== 'boolean') {
+    return { ...result, ok: false, error: result.error || 'Process cleanup returned invalid status' };
   }
-  return $false
-}
-foreach ($proc in $procs) {
-  Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-}
-Write-Output ($procs | Measure-Object).Count
-`;
-  return runPowerShell(script, 5000);
+  return {
+    ...result,
+    ok: result.ok && details.ok === true,
+    error: details.error || result.error || (details.ok === true ? '' : 'Process cleanup failed'),
+    details
+  };
 }
 
 async function cleanupAndroidToolProcesses(options = {}) {
   const {
     includeScrcpy = false,
     includeFastboot = false,
+    includeHdc = false,
     stopAdbServer = false,
     settleMs = 350
   } = options;
@@ -122,6 +121,11 @@ async function cleanupAndroidToolProcesses(options = {}) {
   const names = [TOOL_NAMES.adb];
   if (includeScrcpy) names.push(TOOL_NAMES.scrcpy);
   if (includeFastboot) names.push(TOOL_NAMES.fastboot);
+  const targets = dirs.flatMap(dir => names.map(name => path.join(dir, name)));
+  if (includeHdc) {
+    names.push(TOOL_NAMES.hdc);
+    for (const dir of getBundledDirs('hdc')) targets.push(path.join(dir, TOOL_NAMES.hdc));
+  }
 
   if (stopAdbServer) {
     const adbPath = findExecutable(TOOL_NAMES.adb, dirs);
@@ -130,7 +134,7 @@ async function cleanupAndroidToolProcesses(options = {}) {
     }
   }
 
-  const result = await stopProcessesInDirs(names, dirs);
+  const result = await stopBundledProcesses(targets);
   if (settleMs > 0) await sleep(settleMs);
   return { ...result, dirs, names };
 }

@@ -928,5 +928,6 @@
   "导出日志": "Export logs",
   "应用日志状态格式无效，请重新读取。": "The application log status is invalid. Read it again.",
   "当前环境不支持应用日志，请在桌面应用中使用。": "Application logs are unavailable in this environment. Use the desktop app.",
-  "新增全局应用日志，支持开始记录、停止并导出，单次上限 20 MiB": "Added application-wide logging with start, stop-and-export, and a 20 MiB limit per capture"
+  "新增全局应用日志，支持开始记录、停止并导出，单次上限 20 MiB": "Added application-wide logging with start, stop-and-export, and a 20 MiB limit per capture",
+  "设备列表的常用设备提示和视图切换统一靠右显示。": "The favorites indicator and view switcher are now grouped on the right of the device list."
 }

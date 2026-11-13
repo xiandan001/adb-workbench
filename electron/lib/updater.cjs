@@ -6,6 +6,7 @@ const { tr, getLocale, onLocaleChanged } = require('./localization.cjs');
 
 const { app, powerMonitor } = require('electron');
 const { types } = require('node:util');
+const path = require('node:path');
 const { autoUpdater } = require('electron-updater');
 const ctx = require('./app-context.cjs');
 const { isDev } = ctx;
@@ -56,11 +57,22 @@ function prepareUpdateInstallLanguage() {
     process.env.VEYLO_UPDATE_LANGUAGE = updateInstallLocale;
   } else delete process.env.VEYLO_UPDATE_LANGUAGE;
 }
+function prepareUpdateInstallIdentity() {
+  const supported = process.platform === 'win32' && !isDev && Number.isSafeInteger(process.pid) && process.pid > 0
+    && typeof process.execPath === 'string' && path.isAbsolute(process.execPath);
+  if (supported) {
+    process.env.VEYLO_UPDATE_PID = String(process.pid);
+    process.env.VEYLO_UPDATE_EXE = process.execPath;
+  } else {
+    delete process.env.VEYLO_UPDATE_PID;
+    delete process.env.VEYLO_UPDATE_EXE;
+  }
+}
 
 // electron-updater's automatic quit handler also spawns NSIS from process.env.
 // Prepend so the handoff is ready even when its own quit handler is already set.
 app.prependListener('quit', () => {
-  if (updaterStatus.downloaded) prepareUpdateInstallLanguage();
+  if (updaterStatus.downloaded) { prepareUpdateInstallLanguage(); prepareUpdateInstallIdentity(); }
   removeLocaleListener();
 });
 
@@ -195,10 +207,12 @@ async function runUpdaterTaskWithRetry(action, task) {
 
 async function prepareForUpdateInstall() {
   if (updateInstallPrepared) return;
-  await cleanupAndroidToolProcesses({
+  const result = await cleanupAndroidToolProcesses({
     includeScrcpy: true,
-    includeFastboot: true
+    includeFastboot: true,
+    includeHdc: true
   });
+  if (result?.ok !== true) throw new Error('UPDATE_TOOL_CLEANUP_FAILED');
   updateInstallPrepared = true;
 }
 
@@ -213,8 +227,8 @@ function isQuitAndInstallInProgress() {
 function quitAndInstallPreparedUpdate() {
   if (!updaterStatus.downloaded) return false;
   prepareUpdateInstallLanguage();
+  prepareUpdateInstallIdentity();
   quitAndInstallInProgress = true;
-  updateInstallPrepared = true;
   autoUpdater.quitAndInstall();
   return true;
 }

@@ -49,7 +49,7 @@ function harness({ development = false, clock } = {}) {
     if (name === 'electron-updater') return { autoUpdater: updater };
     if (name === './app-context.cjs') return { isDev: development, getMainWindow: () => main, getLogAnalyzerWindow: () => analyzer };
     if (name === './version.cjs') return { getAppVersion: () => '4.7.2', compareVersions: (a, b) => a.localeCompare(b, undefined, { numeric: true }) };
-    if (name === './android-tool-cleanup.cjs') return { cleanupAndroidToolProcesses: async () => {} };
+    if (name === './android-tool-cleanup.cjs') return { cleanupAndroidToolProcesses: async () => ({ ok: true }) };
     if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
     if (name === './update-poller.cjs') return { createUpdatePoller(value) {
       calls.pollers++; options = value;
@@ -57,6 +57,7 @@ function harness({ development = false, clock } = {}) {
       return poller;
     } };
     if (name === 'node:util') return require(name);
+    if (name === 'node:path') return require(name);
     throw new Error(`Unexpected test dependency: ${name}`);
   }, module, module.exports, (callback, ms) => { retryDelays.push(ms); queueMicrotask(callback); return retryDelays.length; }, () => {}, { log() {}, warn() {}, error() {} });
   module.exports.register({ handle: (name, callback) => handlers.set(name, callback) });

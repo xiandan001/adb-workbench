@@ -1,26 +1,43 @@
 !include "installer-ui.nsh"
 
-!macro VeyloStopBundledHdc
-  IfFileExists "$INSTDIR\hdc\hdc.exe" 0 +8
-  StrCpy $0 "$INSTDIR\hdc\hdc.exe"
-  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_HDC", w r0)'
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$target=[IO.Path]::GetFullPath($$env:VEYLO_INSTALLER_HDC); Get-CimInstance Win32_Process -Filter 'Name=''hdc.exe''' | Where-Object { $$_.ExecutablePath -and [string]::Equals($$_.ExecutablePath,$$target,[StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
-  Pop $0
+!macro VeyloPrepareBundledProcesses FLAGS
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\veylo-update-processes.ps1 "${PROJECT_DIR}\electron\assets\update-processes.ps1"
+  StrCpy $0 "$INSTDIR"
+  StrCpy $1 "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_ROOT", w r0)'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_APP_EXE", w r1)'
+  StrCpy $2 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    StrCpy $2 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  nsExec::ExecToStack /TIMEOUT=25000 `"$2" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\veylo-update-processes.ps1" -Mode PrepareInstall ${FLAGS}`
+  Pop $3
+  Pop $4
+  ${If} $3 == "0"
+    DetailPrint "Bundled tool processes exited"
+  ${Else}
+    DetailPrint "Process preparation requires attention: $3 $4"
+  ${EndIf}
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_ROOT", p 0)'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_APP_EXE", p 0)'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_UPDATE_PID", p 0)'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_UPDATE_EXE", p 0)'
+  Pop $4
+  Pop $3
+  Pop $2
   Pop $1
-  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_HDC", p 0)'
-  DetailPrint "Prepared bundled HDC for update"
+  Pop $0
 !macroend
 
 !macro customInit
   Call VeyloInitLanguage
-  !insertmacro VeyloStopBundledHdc
-  StrCpy $0 "$INSTDIR\scrcpy-win64"
-  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_TOOL_DIR", w r0)'
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$dir=$$env:VEYLO_INSTALLER_TOOL_DIR; $$names=@('adb.exe','scrcpy.exe','fastboot.exe'); $$procs=Get-CimInstance Win32_Process | Where-Object { $$path=$$_.ExecutablePath; $$name=$$_.Name; $$path -and $$name -and ($$names -contains $$name) -and $$path.StartsWith(($$dir.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase) }; foreach($$proc in $$procs){ Stop-Process -Id $$proc.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 350; Write-Host 'TOOLS_CLEANED'"`
-  Pop $0
-  Pop $1
-  System::Call 'kernel32::SetEnvironmentVariableW(w "VEYLO_INSTALLER_TOOL_DIR", p 0)'
-  DetailPrint "Prepared bundled Android tools for update"
+  !insertmacro VeyloPrepareBundledProcesses ""
 !macroend
 
 !macro customInstall
@@ -55,7 +72,7 @@
 !macroend
 
 !macro customUnInstall
-  !insertmacro VeyloStopBundledHdc
+  !insertmacro VeyloPrepareBundledProcesses "-EnvOnlyMode"
   Push $R0
   StrCpy $R0 "$INSTDIR\scrcpy-win64"
 
