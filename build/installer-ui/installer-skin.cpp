@@ -278,6 +278,11 @@ std::wstring Text(HWND window, size_t limit = 4096) {
 }
 bool CanCancel() { return !s.nativeCancel || (IsWindow(s.nativeCancel) && IsWindowEnabled(s.nativeCancel)); }
 void Repaint() { if (s.window) InvalidateRect(s.window, nullptr, FALSE); }
+void SetEnabled(HWND window, bool enabled) {
+  if (!window || (IsWindowEnabled(window) != FALSE) == enabled) return;
+  EnableWindow(window, enabled);
+  RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+}
 void Place(HWND window, int x, int y, int width, int height, bool show = true) {
   SetWindowPos(window, nullptr, Px(x), Px(y), Px(width), Px(height), SWP_NOZORDER | SWP_NOACTIVATE);
   ShowWindow(window, show ? SW_SHOW : SW_HIDE);
@@ -313,10 +318,9 @@ void Layout() {
   if (s.showingDetails) ShowWindow(s.primary, SW_HIDE);
   const HWND controls[] = {s.primary, s.secondary, s.path, s.browse, s.shortcut, s.cancel, s.details, s.copy, s.language, s.detailEdit};
   for (HWND control : controls) {
-    EnableWindow(control, !s.cancelOverlay);
+    SetEnabled(control, !s.cancelOverlay && (control != s.cancel || CanCancel() || s.failed));
     if (s.cancelOverlay) ShowWindow(control, SW_HIDE);
   }
-  EnableWindow(s.cancel, !s.cancelOverlay && (CanCancel() || s.failed));
   Place(s.keep, 300, 285, 170, 40, s.cancelOverlay);
   Place(s.exit, 490, 285, 170, 40, s.cancelOverlay);
   Repaint();
@@ -594,7 +598,7 @@ void RequestCancel() {
 void ForwardNext() {
   if (s.forwardingNext) return;
   s.forwardingNext = true;
-  EnableWindow(s.primary, FALSE); EnableWindow(s.secondary, FALSE);
+  SetEnabled(s.primary, false); SetEnabled(s.secondary, false);
   if (!PostMessageW(s.parent, WM_COMMAND, IDOK, 0)) { s.forwardingNext = false; Layout(); }
 }
 void Command(int id) {
@@ -633,7 +637,7 @@ void Tick() {
         SendMessageTimeoutW(s.progress, PBM_GETRANGE, 0, reinterpret_cast<LPARAM>(&range), SMTO_ABORTIFHUNG, 50, &ignored) &&
         SendMessageTimeoutW(s.progress, PBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 50, &position);
       if (s.installation.Observe(readable, range.iLow, range.iHigh, static_cast<int>(position), now)) Repaint();
-      EnableWindow(s.cancel, !s.cancelOverlay && CanCancel());
+      SetEnabled(s.cancel, !s.cancelOverlay && CanCancel());
     }
     const auto elapsed = s.installation.Elapsed(now);
     const bool determinate = s.installation.Determinate(now);
@@ -718,6 +722,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
       return 0;
     case WM_DRAWITEM: DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam)); return TRUE;
     case WM_TIMER: if (wParam == kTimer) Tick(); return 0;
+    case WM_CTLCOLORBTN: {
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      SetTextColor(dc, kText);
+      SetBkColor(dc, kBackground);
+      return reinterpret_cast<LRESULT>(s.backgroundBrush);
+    }
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {

@@ -462,24 +462,32 @@ function App() {
     let stopped = false;
     let timer;
     let generation = 0;
-    const poll = async (currentGeneration = generation) => {
+    const poll = async (currentGeneration = generation, force = false) => {
+      if (stopped || currentGeneration !== generation) return;
       clearTimeout(timer);
-      if (document.visibilityState !== 'hidden') await fetchDevices({ silent: true });
-      if (!stopped && currentGeneration === generation) timer = setTimeout(() => poll(currentGeneration), 5000);
+      try {
+        if (force || document.visibilityState !== 'hidden') await fetchDevices({ silent: true });
+      } catch { /* fetchDevices owns error reporting; unexpected rejection must not stop polling. */ }
+      finally {
+        if (!stopped && currentGeneration === generation) timer = setTimeout(() => poll(currentGeneration), 5000);
+      }
     };
     const onVisibilityChange = () => {
       generation += 1;
-      clearTimeout(timer);
-      if (document.visibilityState !== 'hidden') void poll();
+      void poll();
+    };
+    const onFocus = () => {
+      generation += 1;
+      void poll(generation, true);
     };
     timer = setTimeout(poll, 5000);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('focus', onVisibilityChange);
+    window.addEventListener('focus', onFocus);
     return () => {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('focus', onVisibilityChange);
+      window.removeEventListener('focus', onFocus);
     };
   }, [fetchDevices]);
 

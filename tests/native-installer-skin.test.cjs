@@ -154,3 +154,19 @@ test('installer stages cross the worker boundary by a fixed message and never fa
   assert.match(drawButton, /primary \? 14\.0f : 12\.0f/);
   assert.match(drawButton, /Gdiplus::StringAlignmentCenter, true\)/);
 });
+
+test('owner-drawn button backgrounds stay black and enabled-state changes redraw only the changed child', () => {
+  const source = read('installer-skin.cpp');
+  const handler = source.slice(source.indexOf('LRESULT CALLBACK WindowProc('), source.indexOf('void Cleanup()'));
+  assert.match(handler, /case WM_CTLCOLORBTN:/);
+  assert.match(handler, /return reinterpret_cast<LRESULT>\(edit \? s\.editBrush : s\.backgroundBrush\)/);
+  const enabled = source.match(/void \w+\(HWND window, bool enabled\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(enabled, /IsWindowEnabled\(window\)[\s\S]*== enabled\) return/);
+  assert.match(enabled, /EnableWindow\(window, enabled\)/);
+  assert.match(enabled, /RedrawWindow\(window, nullptr, nullptr, RDW_INVALIDATE \| RDW_ERASE \| RDW_UPDATENOW\)/);
+  assert.doesNotMatch(enabled, /RDW_ALLCHILDREN/);
+  const fixture = fs.readFileSync(path.join(root, 'tests/native-installer-button-paint.cpp'), 'utf8');
+  assert.doesNotMatch(fixture, /\bRedrawWindow\s*\(|\bPrintWindow\s*\(|\bWM_PRINT\b|\bBM_CLICK\b/);
+  assert.doesNotMatch(fixture, /SendMessageW\([^\n]*WM_DRAWITEM/);
+  assert.match(fixture, /BitBlt\(/);
+});
