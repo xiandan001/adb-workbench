@@ -3,6 +3,18 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.28': {
+    title: 'v4.7.28',
+    date: '2026-11-17',
+    items: [
+      { type: 'feature', get text() { return tr('日志支持渐进导入、可选本机归档和采集中保存快照。'); } },
+      { type: 'feature', get text() { return tr('新增日志问题聚合、时间窗口、会话对比与问题包导出。'); } },
+      { type: 'improve', get text() { return tr('日志筛选、阅读与内置 AI 分析可在当前窗口连贯完成。'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.7.27': {
     title: 'v4.7.27',
     date: '2026-11-16',

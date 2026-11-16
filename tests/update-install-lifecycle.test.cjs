@@ -20,9 +20,13 @@ function callback(object, event) {
   assert.ok(result, `${object}.${event}`); return result;
 }
 
-function fixture({ launch, proceed = true, restart = false } = {}) {
-  const calls = [], dialogs = []; const owner = { isDestroyed: () => false };
+function fixture({ launch, proceed = true, restart = false, logProceed = true, prepareLogs } = {}) {
+  const calls = [], dialogs = [], logFlow = []; const logState = { closing: false, blocked: false }; const owner = { isDestroyed: () => false };
   const context = {
+    logCloseGuard: { confirmQuit: async () => { logFlow.push('review'); return { proceed: logProceed }; },
+      allowQuit: () => { logState.closing = true; logFlow.push('lock'); return true; }, revokeQuit: () => { logState.closing = false; logFlow.push('revoke'); } },
+    logSessions: { prepareQuit: async () => { logState.blocked = true; logFlow.push('prepare'); await prepareLogs?.(); },
+      resumeAfterQuit: () => { logState.blocked = false; logFlow.push('resume'); } },
     ctx: { getMainWindow: () => owner }, createWindow: () => assert.fail('main window must be preserved'),
     serial: { needsQuitConfirmation: () => false, saveAll() {} }, ssh: { needsQuitConfirmation: () => false, confirmQuit: async () => true },
     screenRecording: { listUnresolved: () => [] }, reproduction: { hasActive: () => false, confirmQuit: async () => { calls.push('confirm'); return proceed; } },
@@ -39,7 +43,7 @@ function fixture({ launch, proceed = true, restart = false } = {}) {
     return { before: ${callback('app', 'before-quit')}, close: ${callback('mainWindow', 'close')},
       flags: () => ({ finished: quitCleanupFinished, running: quitCleanupRunning }) }; })()`, context);
   let prevented = 0;
-  return { calls, dialogs, state, event: () => ({ preventDefault: () => { prevented++; } }), prevented: () => prevented };
+  return { calls, dialogs, state, logFlow, logState, event: () => ({ preventDefault: () => { prevented++; } }), prevented: () => prevented };
 }
 
 test('main waits for acknowledged launch before stopping any resource or diagnostic capture', async () => {
@@ -47,6 +51,7 @@ test('main waits for acknowledged launch before stopping any resource or diagnos
   const f = fixture({ launch: () => pending });
   const quit = f.state.before(f.event()); await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(f.calls, ['confirm', 'launch']); assert.equal(f.state.flags().running, true);
+  assert.deepEqual(f.logFlow, ['review', 'prepare', 'lock']); assert.equal(f.logState.blocked, true);
   await f.state.before(f.event()); assert.deepEqual(f.calls, ['confirm', 'launch']);
   release({ ok: true, code: 'READY' }); await quit;
   assert.deepEqual(f.calls, ['confirm', 'launch', 'quitting-record', 'cleanup', 'acknowledged-quit']);
@@ -60,8 +65,18 @@ test('UAC cancellation and launch failure preserve the window, services and retr
     await f.state.before(f.event());
     assert.deepEqual(f.calls, ['quit-request', 'confirm', 'launch']); assert.equal(f.dialogs.length, 1);
     assert.equal(f.dialogs[0].title, '未能启动安装器'); assert.equal(f.state.flags().running, false); assert.equal(f.state.flags().finished, false);
+    assert.equal(f.logState.blocked, false); assert.equal(f.logState.closing, false);
     await f.state.before(f.event()); assert.equal(f.dialogs.length, 2);
   }
+});
+
+test('log cancellation or failed temporary-file cleanup never launches the installer and restores operation gates', async () => {
+  const cancel = fixture({ logProceed: false }); await cancel.state.before(cancel.event());
+  assert.deepEqual(cancel.calls, []); assert.deepEqual(cancel.logFlow, ['review', 'revoke', 'resume']);
+  const failure = fixture({ prepareLogs: async () => { throw Error('temporary cleanup failed'); } });
+  await failure.state.before(failure.event()); assert.deepEqual(failure.calls, ['confirm']);
+  assert.equal(failure.logState.closing, false); assert.equal(failure.logState.blocked, false);
+  assert.equal(failure.dialogs[0].title, '未能完成退出前保存');
 });
 
 test('save cancellation never launches, while a migration restart never starts an updater installer', async () => {

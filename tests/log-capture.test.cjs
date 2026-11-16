@@ -53,6 +53,7 @@ function captureHarness({ maxBytes } = {}) {
   const context = {
     isDev: false,
     broadcastToAllWindows: (channel, payload) => events.push({ channel, payload }),
+    getLogAnalyzerWindow: () => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (channel, payload) => events.push({ channel, payload }) } }),
     getMainWindow: () => null
   };
   const adb = {
@@ -226,7 +227,7 @@ test('MCP capture uses the same bounded batcher and ignores an old process exit'
   assert.equal(h.timers.size, 0);
 });
 
-test('repeated diagnosed stack lines do not log or snapshot again inside the debounce window', () => {
+test('repeated diagnosed stack lines do not log or snapshot again inside the debounce window', async () => {
   const module = { exports: {} };
   const filename = path.join(__dirname, '../electron/lib/auto-diagnose.cjs');
   const messages = [];
@@ -234,7 +235,7 @@ test('repeated diagnosed stack lines do not log or snapshot again inside the deb
   let snapshots = 0;
   class FixedDate extends Date { static now() { return 10000; } }
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
-    module, Buffer, Date: FixedDate,
+    module, Buffer, Date: FixedDate, setTimeout, clearTimeout, setImmediate,
     console: { log: message => messages.push(message) },
     require: name => {
       if (name === './localization.cjs') return require('../electron/lib/localization.cjs');
@@ -244,12 +245,16 @@ test('repeated diagnosed stack lines do not log or snapshot again inside the deb
       if (name === './ai-analyze.cjs') return { aiKeys: {} };
       if (name === './vip.cjs') return {};
       if (name === './ai-outbound-transport.cjs') return { protectIpc: ipc => ipc };
+      if (name === './log-diagnostic-matcher.cjs') return require('../electron/lib/log-diagnostic-matcher.cjs');
       if (name === './log-analyzer.cjs') return { getLogStore: () => { snapshots += 1; return { realtime: [{ raw: 'FATAL EXCEPTION' }] }; } };
       return require(name);
     }
   }, { filename });
   for (let index = 0; index < 5000; index += 1) module.exports.autoDiagnoseOnLine('FATAL EXCEPTION', 0);
+  const deadline = Date.now() + 5000;
+  while (!events.length) { assert.ok(Date.now() < deadline); await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.equal(events.length, 1);
   assert.equal(snapshots, 1);
   assert.equal(messages.length, 2);
+  module.exports.disposeDiagnostics();
 });

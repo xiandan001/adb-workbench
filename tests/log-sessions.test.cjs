@@ -131,7 +131,7 @@ test('rename refuses a name that would exceed the size limit before changing the
   const module = { exports: {} };
   // Exercise the exact production byte guard with a small cap instead of allocating a 64 MB fixture.
   vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8').replace('64 * 1024 * 1024', '2048'), {
-    module, exports: module.exports, require: name => name === './localization.cjs' ? require('../electron/lib/localization.cjs') : require(name), Buffer
+    module, exports: module.exports, require: name => name.startsWith('./') ? createRequire(sourcePath)(name) : require(name), Buffer
   }, { filename: sourcePath });
   const store = module.exports.createSessionStore(directory);
   const input = { ...fixture(), name: 'a' };

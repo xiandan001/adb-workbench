@@ -43,6 +43,9 @@ function captureFixture() {
   const registry = realRequire('./device-registry.cjs');
   registry.registerDiscoveredDevices('hdc', [{ id: 'hdc:LOG-A', status: 'device' }, { id: 'hdc:LOG-READY', status: 'ready' }]);
   const children = [], reads = [], events = [], handlers = new Map(); let failClear = false;
+  const owner = new EventEmitter(); owner.mainFrame = {}; owner.isDestroyed = () => false;
+  owner.send = (channel, payload) => events.push({ channel, payload });
+  const ownerWindow = { webContents: owner, isDestroyed: () => false };
   const child = () => { const value = new EventEmitter(); value.stdout = new PassThrough(); value.stderr = new PassThrough(); value.kills = 0; value.kill = () => { value.kills++; }; children.push(value); return value; };
   const module = { exports: {} }, controls = {
     runHdc: async (id, args) => { reads.push({ id, args }); return failClear ? { ok: false, error: 'fixture disconnected' } : { ok: true, stdout: '' }; },
@@ -53,7 +56,7 @@ function captureFixture() {
     setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
     require(name) {
       if (name === 'electron') return {};
-      if (name === './app-context.cjs') return { isDev: false, broadcastToAllWindows: (channel, payload) => events.push({ channel, payload }) };
+      if (name === './app-context.cjs') return { isDev: false, broadcastToAllWindows: (channel, payload) => events.push({ channel, payload }), getMainWindow: () => ownerWindow, getLogAnalyzerWindow: () => ownerWindow };
       if (name === './adb-runtime.cjs') return { runAdb: async args => { reads.push({ adb: args }); return { ok: true, stdout: '' }; }, spawnAdb: child };
       if (name === './harmony-log.cjs') return { ...hilog, spawnHiLog: (id, opts) => hilog.spawnHiLog(id, opts, controls), clearHiLog: (id, opts) => hilog.clearHiLog(id, opts, controls) };
       if (name === './log-sessions.cjs') return { register() {} };
@@ -62,7 +65,7 @@ function captureFixture() {
       return realRequire(name);
     } }, { filename });
   module.exports.register({ handle: (name, fn) => handlers.set(name, fn) });
-  return { api: module.exports, handlers, reads, children, events, failClear: value => { failClear = value; } };
+  return { api: module.exports, handlers, reads, children, events, event: { sender: owner, senderFrame: owner.mainFrame }, failClear: value => { failClear = value; } };
 }
 
 test('real capture module uses HiLog, excludes Ready and preserves current capture when an invalid target is requested', async () => {
@@ -78,15 +81,18 @@ test('real capture module uses HiLog, excludes Ready and preserves current captu
   assert.equal(h.children[0].kills, 0);
 });
 
-test('clear binds the retained realtime source and keeps evidence on target mismatch or native failure', async () => {
+test('local clear is non-destructive and confirmed native clear keeps evidence on mismatch or failure', async () => {
   const h = captureFixture(); await h.api.startLogCapture({ deviceId: 'hdc:LOG-A' });
   h.children[0].stdout.write('11-09 12:34:56.123 12 13 W A03200/Tag: retained\n');
   assert.equal((await h.api.clearLogs({ source: 'realtime', deviceId: 'hdc:OTHER' })).ok, false);
   assert.equal(h.api.getLogStore().realtime.length, 1);
-  h.failClear(true); assert.equal((await h.api.clearLogs({ source: 'realtime', deviceId: 'hdc:LOG-A' })).ok, false); assert.equal(h.api.getLogStore().realtime.length, 1);
+  const clearDevice = h.handlers.get('log:clearDevice');
+  h.failClear(true); assert.equal((await clearDevice(h.event, { deviceId: 'hdc:LOG-A', confirmed: true })).ok, false); assert.equal(h.api.getLogStore().realtime.length, 1);
   h.failClear(false); h.api.setCurrentLogSource('file', 'another-device');
-  assert.equal((await h.api.clearLogs({ source: 'realtime', deviceId: 'hdc:LOG-A' })).ok, true);
+  assert.equal((await clearDevice(h.event, { deviceId: 'hdc:LOG-A', confirmed: true })).ok, true);
   assert.deepEqual(h.reads.at(-1), { id: 'hdc:LOG-A', args: ['shell', 'hilog', '-r'] });
+  assert.equal(h.api.getLogStore().realtime.length, 1);
+  assert.equal((await h.api.clearLogs({ source: 'realtime', deviceId: 'hdc:LOG-A' })).ok, true);
   assert.equal(h.api.getLogStore().realtime.length, 0);
 });
 

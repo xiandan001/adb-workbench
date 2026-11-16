@@ -21,6 +21,8 @@ const { tr } = localization;
 const { installApplicationMenu } = require('./lib/application-menu.cjs');
 const history = require('./lib/history.cjs');
 const logAnalyzer = require('./lib/log-analyzer.cjs');
+const logCloseGuard = require('./lib/log-window-close.cjs');
+const logSessions = require('./lib/log-sessions.cjs');
 const mcp = require('./lib/mcp-server.cjs');
 const autoDiagnose = require('./lib/auto-diagnose.cjs');
 const aiAnalyze = require('./lib/ai-analyze.cjs');
@@ -209,6 +211,10 @@ app.whenReady().then(async () => {
   startupSettings.register(diagnosticIpc);
   history.register(diagnosticIpc);
   logAnalyzer.register(diagnosticIpc);
+  logCloseGuard.register(diagnosticIpc, { getOwner: ctx.getLogAnalyzerWindow,
+    getActivity: () => Boolean(logAnalyzer.hasCaptureActivity?.() || logAnalyzer.getLogcatProc() || aiAnalyze.hasActiveAiRequest()),
+    getSourceIdentity: () => logAnalyzer.getSourceIdentity?.() || '',
+    getPendingContent: () => Number(logAnalyzer.getLogStoreBytes()?.[logAnalyzer.getCurrentLogSource()]) > 0 });
   mcp.register(diagnosticIpc);
   autoDiagnose.register(diagnosticIpc);
   aiAnalyze.register(diagnosticIpc);
@@ -317,27 +323,35 @@ app.on('before-quit', async (event) => {
   if (quitCleanupRunning) return;
 
   quitCleanupRunning = true;
+  const cancelQuit = () => { logCloseGuard.revokeQuit(); logSessions.resumeAfterQuit(); };
+  let logQuitPermit;
   try {
+    logQuitPermit = await logCloseGuard.confirmQuit();
+    if (!logQuitPermit?.proceed) { cancelQuit(); quitCleanupRunning = false; return; }
     const owner = ctx.getMainWindow();
     if ((!owner || owner.isDestroyed()) && (serial.needsQuitConfirmation() || ssh.needsQuitConfirmation() || screenRecording.listUnresolved().length || reproduction.hasActive())) {
-      createWindow(); quitCleanupRunning = false; return;
+      cancelQuit(); createWindow(); quitCleanupRunning = false; return;
     }
     const ask = options => appMessageDialog.ask(options);
-    if (!await reproduction.confirmQuit(ask)) { quitCleanupRunning = false; return; }
-    if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { quitCleanupRunning = false; return; }
-    if (!await ssh.confirmQuit(ask)) { quitCleanupRunning = false; return; }
+    if (!await reproduction.confirmQuit(ask)) { cancelQuit(); quitCleanupRunning = false; return; }
+    if (!await confirmSerialQuit({ serial, ask, save: () => serial.saveAll() })) { cancelQuit(); quitCleanupRunning = false; return; }
+    if (!await ssh.confirmQuit(ask)) { cancelQuit(); quitCleanupRunning = false; return; }
     const proceed = await confirmRecordingQuit({ recordings: screenRecording, ask });
-    if (!proceed) { quitCleanupRunning = false; return; }
+    if (!proceed) { cancelQuit(); quitCleanupRunning = false; return; }
+    await logSessions.prepareQuit();
   } catch (error) {
+    cancelQuit();
     quitCleanupRunning = false;
     await appMessageDialog.ask({ type: 'error', title: tr('未能完成退出前保存'), message: tr('应用尚未退出，请返回相关页面重试。'), detail: error.message,
       buttons: [tr('返回应用')], defaultId: 0, cancelId: 0 });
     return;
   }
+  if (!logCloseGuard.allowQuit(logQuitPermit)) { cancelQuit(); quitCleanupRunning = false; return; }
   const shouldInstallUpdate = !dataMigration.isRestartRequested() && updater.shouldInstallDownloadedUpdateOnQuit();
   if (shouldInstallUpdate) {
     const result = await updater.beginUpdateInstall();
     if (!result.ok) {
+      cancelQuit();
       quitCleanupRunning = false;
       await appMessageDialog.ask({ type: 'error', title: tr('未能启动安装器'), message: result.error,
         buttons: [tr('返回应用')], defaultId: 0, cancelId: 0 });

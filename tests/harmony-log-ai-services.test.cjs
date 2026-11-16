@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const { createRequire } = require('node:module');
 function load(name, mocks, expose = '') {
   const filename = path.join(__dirname, '../electron/lib', name), realRequire = createRequire(filename), module = { exports: {} };
-  vm.runInNewContext(fs.readFileSync(filename, 'utf8') + expose, { module, Buffer, console: { log() {}, warn() {} }, setImmediate,
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8') + expose, { module, Buffer, console: { log() {}, warn() {} }, setImmediate, setTimeout, clearTimeout,
     require: name => Object.hasOwn(mocks, name) ? mocks[name] : realRequire(name) }, { filename });
   return module.exports;
 }
@@ -19,6 +19,7 @@ test('native fault names trigger distinct rules and HiLog context retains domain
   await api.autoDiagnoseScanFile([{ raw, logFormat: 'hilog', level: 'E' }], 'file');
   assert.equal(events.find(event => event.channel === 'auto-diagnose:detected').payload.issues[0].context, raw);
   assert.equal(events.find(event => event.channel === 'auto-diagnose:scan-complete').payload.issueCount, 1);
+  api.disposeDiagnostics();
 });
 test('real MCP tools use merged descriptors and existing native domain providers, preserving unavailable metrics', async () => {
   const calls = [], targets = [{ id: 'android', status: 'device', platform: 'android' }, { id: 'hdc:H', status: 'device', platform: 'harmony' }, { id: 'hdc:R', status: 'ready', platform: 'harmony' }];

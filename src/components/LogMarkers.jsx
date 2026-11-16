@@ -4,7 +4,7 @@ import { BookmarkPlus, MapPin, Trash2, X } from 'lucide-react';
 import { logEntryIdentity } from '../shared/logMarkers';
 import AiContextButton from './AiContextButton';
 
-export default function LogMarkers({ markers, onChange, draft, onDismissDraft, isDark, onLocate }) {
+export default function LogMarkers({ markers, onChange, draft, onDismissDraft, isDark, onLocate, disabled = false }) {
   useLocale();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState('');
@@ -26,7 +26,7 @@ export default function LogMarkers({ markers, onChange, draft, onDismissDraft, i
 
   return (
     <>
-      <button type="button" className={`${button} flex items-center gap-1`} onClick={() => setOpen(true)}><BookmarkPlus size={13} />{tr("问题标记")}{markers.length ? ` ${markers.length}` : ''}</button>
+      <button type="button" disabled={disabled} className={`${button} flex items-center gap-1 disabled:opacity-40`} onClick={() => setOpen(true)}><BookmarkPlus size={13} />{tr("问题标记")}{markers.length ? ` ${markers.length}` : ''}</button>
       <dialog ref={dialogRef} aria-label={draft ? tr("添加问题标记") : tr("问题标记")} onCancel={close} onClose={close}
         className={`m-auto w-[min(56rem,94vw)] max-h-[85vh] overflow-y-auto rounded-xl border p-5 shadow-2xl backdrop:bg-black/50 ${panel}`}>
         <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{draft ? tr("标记这个问题") : tr("问题标记")}</h2><button type="button" aria-label={tr("关闭问题标记")} onClick={close}><X size={18} /></button></div>

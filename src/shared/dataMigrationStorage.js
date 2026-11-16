@@ -11,6 +11,7 @@ import { APPLICATION_RECENTS_KEY, normalizeApplicationRecents } from './applicat
 import { AI_DRAFT_KEY, normalizeAiSelectionDraft } from './aiSelectionDraft.js';
 import { ARTIFACT_VIEW_KEY, normalizeArtifactViewState } from './artifactViewState.js';
 import { SERIAL_SCHEME_SELECTION_KEY, normalizeSerialSchemeSelection } from './serialSchemeConnection.js';
+import { LOG_VIEW_PREFS_KEY, LOG_VIEW_PREFS_LIMIT, normalizeLogViewPreferences } from './logViewPreferences.js';
 
 // Keep this list in sync with the main-process migration policy (covered by a contract test).
 export const PORTABLE_PREF_KEYS = Object.freeze([
@@ -18,7 +19,7 @@ export const PORTABLE_PREF_KEYS = Object.freeze([
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
   'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, HARMONY_SHORTCUTS_KEY, DEVICE_SHORTCUTS_KEY, PINNED_DEVICES_KEY, SERIAL_PREFS_KEY, SERIAL_TERMINAL_STYLE_KEY, UI_MOTION_PREFS_KEY,
   UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY,
-  APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY
+  APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY, LOG_VIEW_PREFS_KEY
 ]);
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const UX_METADATA_RULES = new Map([
@@ -26,7 +27,8 @@ const UX_METADATA_RULES = new Map([
   [APPLICATION_RECENTS_KEY, { limit: 65536, normalize: normalizeApplicationRecents }],
   [AI_DRAFT_KEY, { limit: 16384, normalize: normalizeAiSelectionDraft }],
   [ARTIFACT_VIEW_KEY, { limit: 131072, normalize: normalizeArtifactViewState }],
-  [SERIAL_SCHEME_SELECTION_KEY, { limit: 2048, characters: true, normalize: normalizeSerialSchemeSelection }]
+  [SERIAL_SCHEME_SELECTION_KEY, { limit: 2048, characters: true, normalize: normalizeSerialSchemeSelection }],
+  [LOG_VIEW_PREFS_KEY, { limit: LOG_VIEW_PREFS_LIMIT, normalize: normalizeLogViewPreferences }]
 ]);
 
 function assertSafeValue(value, depth = 0) {

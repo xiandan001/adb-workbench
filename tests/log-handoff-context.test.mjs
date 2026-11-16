@@ -116,8 +116,11 @@ test('the component prepares only on click, propagates upstream clipping and exp
   assert.equal(range.text, undefined); assert.equal(range.bytes, bytes(payload.view.text)); assert.equal(created, false);
   assert.match(payload.view.question, /局部内容/); assert.match(payload.view.title, /1\/1/);
   const analyzer = fs.readFileSync(new URL('../src/components/LogAnalyzer.jsx', import.meta.url), 'utf8');
-  assert.match(analyzer, /<LogFilterHandoff rows=\{filtered\} deviceId=\{captureDeviceId\} sourceTruncated=\{truncated\} isDark=\{isDark\}/);
+  assert.match(analyzer, /<LogFilterHandoff rows=\{filtered\} deviceId=\{captureDeviceId\} sourceTruncated=\{snapshotTruncated\} isDark=\{isDark\}/);
   assert.match(source, /isDark \? 'text-slate-300' : 'text-slate-600'/);
   assert.doesNotMatch(source, /opacity-/);
-  assert.doesNotMatch(analyzer, /joinAiContextRows/); assert.match(analyzer, /origin: 'log-diagnostic'/);
+  assert.doesNotMatch(analyzer, /joinAiContextRows/);
+  assert.match(analyzer, /label=\{tr\('在完整 AI 工作区继续'\)\}/);
+  assert.match(analyzer, /prepareInlineLogAnalysis\(rows,/);
+  assert.match(analyzer, /onAnalyze=\{group => onAiAnalyze\([^\n]+group\.context, documentId\)\}/);
 });

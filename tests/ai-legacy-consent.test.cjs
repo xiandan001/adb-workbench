@@ -55,6 +55,11 @@ function fixture({ map = false, status = 200 } = {}) {
         if (request === './localization.cjs') return require('../electron/lib/localization.cjs');
         if (request === './analysis-language.cjs') return require('../electron/lib/analysis-language.cjs');
         if (request.includes('/shared/filter')) return { filterEntries: rows => rows };
+        if (request === './log-filter-client.cjs') return { queryLogEntries: async (rows, filter, { offset = 0, limit = 1000, tail = false } = {}) => {
+          const { filterEntries, countByLevel } = require('../electron/lib/log-filter-policy.cjs');
+          const matched = filterEntries(rows, filter);
+          return { total: matched.length, levels: countByLevel(matched), entries: tail ? matched.slice(-limit) : matched.slice(offset, offset + limit), offset, limit };
+        } };
         if (request === './log-analyzer.cjs') return { getLogStore: () => ({ realtime: entries }), getCurrentLogSource: () => 'realtime', getLogcatProc: () => null };
         if (request === './version.cjs') return { getAppVersion: () => 'fixture' };
         if (request === './vip.cjs') return { getStatusAsync: async () => ({ activated: true, scope: 'vip' }) };

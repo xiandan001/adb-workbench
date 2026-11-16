@@ -12,6 +12,7 @@ const { StringDecoder } = require('string_decoder');
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { createDiagnosticMatcher, MATCH_LIMITS } = require('./log-diagnostic-matcher.cjs');
 
 const ctx = require('./app-context.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
@@ -110,6 +111,45 @@ const AUTO_DIAGNOSE_BUILTIN_IDS = new Set(AUTO_DIAGNOSE_BUILTIN_RULES.map(rule =
 let diagnoseRuleStateCache = null;
 let compiledRuleCache = null;
 let compiledRuleLocale = '';
+let ruleRevision = 0, diagnosticEpoch = 0, configuredRevision = -1, diagnosticLocale = '';
+let diagnosticMatcher = null, diagnosticRules = [], diagnosticIncomplete = null, ruleTestMatcher = null;
+let liveTimer = null, liveBytes = 0;
+const pendingLive = new Map(), diagnosticWarnings = new Set();
+function reportDiagnosticIncomplete(value) {
+  const key = JSON.stringify([value.reason, value.ruleId, value.source]);
+  if (diagnosticWarnings.has(key)) return;
+  diagnosticWarnings.add(key);
+  const error = ['timeout', 'blocked-rule'].includes(value.reason)
+    ? tr('部分诊断规则执行超时后已暂停；采集继续，不能据此判断没有异常。')
+    : ['line-limit', 'queue-limit', 'rule-limit'].includes(value.reason)
+      ? tr('规则诊断超出安全工作量，部分日志未诊断；采集继续。')
+      : tr('规则诊断未完成，原始日志仍保留；请检查规则后重试。');
+  diagnosticIncomplete = { ...value, partial: true, error };
+  ctx.broadcastToAllWindows('auto-diagnose:incomplete', diagnosticIncomplete);
+}
+function productionMatcher() {
+  if (!diagnosticMatcher) diagnosticMatcher = createDiagnosticMatcher({ onIncomplete: reportDiagnosticIncomplete });
+  if (configuredRevision !== ruleRevision || diagnosticLocale !== getLocale()) {
+    diagnosticRules = getEffectiveRules().filter(rule => rule.enabled !== false);
+    diagnosticMatcher.configure(diagnosticRules); configuredRevision = ruleRevision; diagnosticLocale = getLocale();
+  }
+  return diagnosticMatcher;
+}
+function flushLiveDiagnostics() {
+  clearTimeout(liveTimer); liveTimer = null;
+  const rows = [...pendingLive.values()], epoch = diagnosticEpoch; pendingLive.clear(); liveBytes = 0;
+  if (!rows.length || !autoDiagnoseEnabled) return;
+  let matcher;
+  try { matcher = productionMatcher(); }
+  catch { reportDiagnosticIncomplete({ reason: 'rule-limit', source: 'realtime' }); return; }
+  void matcher.match(rows.map(row => row.line), { source: rows[0].source }).then(result => {
+    if (epoch !== diagnosticEpoch || !autoDiagnoseEnabled) return;
+    for (const issue of result.matches) {
+      const row = rows[issue.index];
+      emitDiagnosedIssue(issue, row.line, row.index, row.source, row.contextEntries, row.entry);
+    }
+  }).catch(error => { if (epoch === diagnosticEpoch && error.code !== 'DIAGNOSTIC_CANCELLED') reportDiagnosticIncomplete({ reason: error.reason || 'worker-error', ruleId: error.ruleId, source: rows[0].source }); });
+}
 
 // 自动诊断状态
 // - autoDiagnoseEnabled: 总开关（用户可在 UI 关闭）
@@ -163,6 +203,7 @@ function writeRuleState(state) {
     customRules: Array.isArray(state.customRules) ? state.customRules.map(normalizeCustomRule).filter(Boolean) : []
   };
   compiledRuleCache = null;
+  ruleRevision++;
   fs.mkdirSync(path.dirname(getRulesFilePath()), { recursive: true });
   fs.writeFileSync(getRulesFilePath(), JSON.stringify(diagnoseRuleStateCache, null, 2), 'utf8');
 }
@@ -177,6 +218,7 @@ function getEffectiveRules() {
 }
 
 function getCompiledRules() {
+  // Synchronous compatibility is test-only; production matching is owned by the terminable worker.
   if (compiledRuleCache && compiledRuleLocale === getLocale()) return compiledRuleCache;
   compiledRuleLocale = getLocale();
   compiledRuleCache = getEffectiveRules()
@@ -311,12 +353,20 @@ function detectIssue(line) {
  * @param {number} lineIndex 当前日志在 logStore 中的索引
  * @param {string} source 日志源（'realtime' | 'file'），默认 'realtime'
  */
-function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries = null) {
+function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries = null, entry = null) {
   if (!autoDiagnoseEnabled) return;
-
-  const issue = detectIssue(line);
-  if (!issue) return;
-
+  if (typeof line !== 'string') { reportDiagnosticIncomplete({ reason: 'line-limit', source }); return; }
+  try { productionMatcher(); } catch { reportDiagnosticIncomplete({ reason: 'rule-limit', source }); return; }
+  if (!diagnosticRules.some(rule => !rule.keywords?.length || rule.keywords.some(word => line.includes(word)))) return;
+  const key = JSON.stringify([source, line]);
+  if (pendingLive.has(key)) return;
+  const bytes = Buffer.byteLength(line);
+  if (bytes > MATCH_LIMITS.batchBytes) { reportDiagnosticIncomplete({ reason: 'line-limit', source }); return; }
+  if (pendingLive.size >= MATCH_LIMITS.rows || liveBytes + bytes > MATCH_LIMITS.batchBytes) flushLiveDiagnostics();
+  pendingLive.set(key, { line, index: lineIndex, source, contextEntries, entry: entry ? Object.freeze({ ...entry }) : null }); liveBytes += bytes;
+  if (liveTimer === null) liveTimer = setTimeout(flushLiveDiagnostics, 0);
+}
+function emitDiagnosedIssue(issue, line, lineIndex, source, contextEntries = null, originalEntry = null) {
   const now = Date.now();
   // 同类型问题在去抖窗口内不重复推送
   const lastFire = autoDiagnoseLastFireByType[issue.type] || 0;
@@ -328,10 +378,13 @@ function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries
   // 立即提取上下文快照（避免 logStore 截断后索引失效）
   // 支持外部传入的 entries（用于搜索结果重新扫描场景），避免使用错误的 logStore 源
   const entries = contextEntries || getLogStore()[source] || [];
-  const start = Math.max(0, lineIndex - AUTO_DIAGNOSE_CONTEXT_LINES);
-  const end = Math.min(entries.length, lineIndex + AUTO_DIAGNOSE_CONTEXT_LINES + 1);
-  const contextSnapshot = entries.slice(start, end).map(e => {
-    if (e.logFormat === 'hilog' && e.raw) return e.raw;
+  let index = originalEntry?.id ? entries.findIndex(entry => entry.id === originalEntry.id && entry.raw === originalEntry.raw && entry.deviceId === originalEntry.deviceId) : lineIndex;
+  if (originalEntry && entries[index]?.raw !== originalEntry.raw) index = -1;
+  const start = Math.max(0, index - AUTO_DIAGNOSE_CONTEXT_LINES);
+  const end = Math.min(entries.length, index + AUTO_DIAGNOSE_CONTEXT_LINES + 1);
+  const rows = index < 0 ? [originalEntry || { raw: line }] : entries.slice(start, end);
+  const contextSnapshot = (index < 0 ? tr('上下文已离开保留窗口，仅保留诊断命中原文。') + '\n' : '') + rows.map(e => {
+    if (typeof e.raw === 'string') return e.raw;
     const ts = e.ts ? new Date(e.ts).toLocaleString('zh-CN', { hour12: false }) : '';
     const lvl = e.level || 'V';
     const tag = e.tag || '';
@@ -348,7 +401,7 @@ function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries
     type: issue.type,
     label: issue.label,
     severity: issue.severity,
-    context: contextSnapshot
+    context: contextSnapshot, ruleId: issue.ruleId, entryId: originalEntry?.id || '', deviceId: originalEntry?.deviceId || '', contextPartial: index < 0
   };
 
   const summary = { total: 1, [issue.type]: 1 };
@@ -371,43 +424,60 @@ function autoDiagnoseOnLine(line, lineIndex, source = 'realtime', contextEntries
 // 改为 async 函数，每 1000 条 yield 一次，防止阻塞主进程
 async function autoDiagnoseScanFile(entries, source = 'file') {
   if (!autoDiagnoseEnabled || !entries || entries.length === 0) return;
-
+  if (!Array.isArray(entries) || entries.length > 200000) { reportDiagnosticIncomplete({ reason: 'line-limit', source }); return; }
+  resetAutoDiagnoseLastFire();
+  const epoch = diagnosticEpoch;
+  let matcher;
+  try { matcher = productionMatcher(); } catch { reportDiagnosticIncomplete({ reason: 'rule-limit', source }); return; }
   console.log(`[AutoDiagnose] 开始扫描日志，共 ${entries.length} 行（源: ${source}）`);
 
   // 遍历所有条目，检测关键问题
   // 每种类型只取第一次出现的位置
   const detectedTypes = new Set();
-  const CHUNK_SIZE = 1000;
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const line = entry.raw || entry.message || '';
-    const issue = detectIssue(line);
-    if (issue && !detectedTypes.has(issue.type)) {
-      detectedTypes.add(issue.type);
-      // 传入 entries 作为上下文来源，确保搜索结果场景下上下文正确
-      autoDiagnoseOnLine(line, i, source, entries);
+  let incomplete = false;
+  for (let offset = 0; offset < entries.length;) {
+    if (epoch !== diagnosticEpoch || !autoDiagnoseEnabled) return;
+    const lines = [], indices = [], originals = []; let bytes = 0;
+    while (offset < entries.length && lines.length < MATCH_LIMITS.rows) {
+      const entry = entries[offset];
+      if (!entry || typeof (entry.raw ?? entry.message) !== 'string') { incomplete = true; reportDiagnosticIncomplete({ reason: 'line-limit', source }); offset++; continue; }
+      const line = entry.raw ?? entry.message, size = Buffer.byteLength(line);
+      if (size > MATCH_LIMITS.batchBytes) { incomplete = true; reportDiagnosticIncomplete({ reason: 'line-limit', source }); offset++; continue; }
+      if (lines.length && bytes + size > MATCH_LIMITS.batchBytes) break;
+      originals.push({ ...entries[offset], raw: line }); indices.push(offset++); lines.push(line); bytes += size;
     }
-    // 每 1000 条 yield 一次，让出主进程事件循环
-    if ((i + 1) % CHUNK_SIZE === 0) {
-      await new Promise(r => setImmediate(r));
+    try {
+      const result = await matcher.match(lines, { source });
+      if (epoch !== diagnosticEpoch || !autoDiagnoseEnabled) return;
+      incomplete ||= result.incomplete;
+      for (const issue of result.matches) {
+        if (detectedTypes.has(issue.type)) continue;
+        detectedTypes.add(issue.type); const index = indices[issue.index];
+        emitDiagnosedIssue(issue, lines[issue.index], index, source, entries, originals[issue.index]);
+      }
+    } catch (error) {
+      if (epoch !== diagnosticEpoch || error.code === 'DIAGNOSTIC_CANCELLED') return;
+      incomplete = true; reportDiagnosticIncomplete({ reason: error.reason || 'worker-error', ruleId: error.ruleId, source });
     }
   }
 
-  console.log(`[AutoDiagnose] 日志扫描完成（源: ${source}），检测到 ${detectedTypes.size} 种问题`);
+  console.log(`[AutoDiagnose] ${incomplete ? '日志扫描不完整' : '日志扫描完成'}（源: ${source}），检测到 ${detectedTypes.size} 种问题`);
 
   // 扫描完成后广播事件，渲染进程据此从"监控中"切换到"扫描完成（无异常）"状态
   // 仅当 issueCount === 0 且非实时捕获时，渲染进程才切换到 clean 状态
-  ctx.broadcastToAllWindows('auto-diagnose:scan-complete', {
+  if (!incomplete && epoch === diagnosticEpoch) { diagnosticIncomplete = null; ctx.broadcastToAllWindows('auto-diagnose:scan-complete', {
     issueCount: detectedTypes.size,
     source,
     timestamp: Date.now()
-  });
+  }); }
 
   return detectedTypes.size;
 }
 
 // 重置自动诊断去抖时间戳（log:clear / toggle 关闭时调用）
 function resetAutoDiagnoseLastFire() {
+  diagnosticEpoch++; clearTimeout(liveTimer); liveTimer = null; pendingLive.clear(); liveBytes = 0; diagnosticWarnings.clear();
+  diagnosticMatcher?.cancel(); ruleTestMatcher?.dispose(); ruleTestMatcher = null;
   Object.keys(autoDiagnoseLastFireByType).forEach(k => delete autoDiagnoseLastFireByType[k]);
 }
 
@@ -463,14 +533,21 @@ function register(rawIpcMain) {
   ipcMain.handle('auto-diagnose:rules:test', async (event, args) => {
     const line = String(args?.line || '');
     const rawRule = args?.rule;
-    if (rawRule) {
-      const normalized = normalizeRuleInput(rawRule);
-      if (!normalized.ok) return { ok: false, error: normalized.error };
-      const regex = new RegExp(normalized.rule.pattern, normalized.rule.flags);
-      return { ok: true, matched: regex.test(line), rule: normalized.rule };
-    }
-    const issue = detectIssue(line);
-    return { ok: true, matched: !!issue, issue };
+    const normalized = rawRule ? normalizeRuleInput(rawRule) : null;
+    if (normalized && !normalized.ok) return { ok: false, error: normalized.error };
+    ruleTestMatcher?.dispose();
+    const matcher = createDiagnosticMatcher({ onIncomplete: value => reportDiagnosticIncomplete({ ...value, source: 'rule-test' }) });
+    ruleTestMatcher = matcher; const epoch = diagnosticEpoch, owner = event.sender;
+    const cancel = () => matcher.dispose(); owner?.once?.('destroyed', cancel);
+    const navigate = (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) cancel(); };
+    owner?.on?.('did-start-navigation', navigate);
+    try {
+      matcher.configure(normalized ? [normalized.rule] : getEffectiveRules());
+      const result = await matcher.match([line], { source: 'rule-test' });
+      if (epoch !== diagnosticEpoch || owner?.isDestroyed?.() || ruleTestMatcher !== matcher) return { ok: false, cancelled: true };
+      return { ok: true, matched: result.matches.length > 0, ...(normalized ? { rule: normalized.rule } : { issue: result.matches[0] || null }) };
+    } catch (error) { return error.code === 'DIAGNOSTIC_CANCELLED' ? { ok: false, cancelled: true } : { ok: false, error: tr('规则测试未完成，请检查规则或缩小测试内容。'), code: error.code }; }
+    finally { owner?.removeListener?.('destroyed', cancel); owner?.removeListener?.('did-start-navigation', navigate); matcher.dispose(); if (ruleTestMatcher === matcher) ruleTestMatcher = null; }
   });
 
   ipcMain.handle('auto-diagnose:rules:export', async () => {
@@ -724,9 +801,11 @@ function register(rawIpcMain) {
         // 扫描当前日志源的所有日志
         const logStore = getLogStore();
         const currentEntries = logStore.realtime.length > 0 ? logStore.realtime : logStore.file;
+        const epoch = diagnosticEpoch;
         if (currentEntries.length > 0) {
           console.log(`[AutoDiagnose] 重新开启，扫描已有日志 ${currentEntries.length} 条`);
           setTimeout(() => {
+            if (epoch !== diagnosticEpoch || !autoDiagnoseEnabled) return;
             // autoDiagnoseScanFile 现在是 async 函数，使用 .catch 处理 Promise rejection
             autoDiagnoseScanFile(currentEntries).catch(e => {
               console.error('[AutoDiagnose] 重新扫描失败:', e.message);
@@ -742,7 +821,7 @@ function register(rawIpcMain) {
   ipcMain.handle('auto-diagnose:status', async () => {
     // 返回规则数量，供前端展示规则库状态。
     const rules = publicRules();
-    return { ok: true, enabled: autoDiagnoseEnabled, ruleCount: rules.filter(rule => rule.enabled).length, rules };
+    return { ok: true, enabled: autoDiagnoseEnabled, ruleCount: rules.filter(rule => rule.enabled).length, rules, incomplete: diagnosticIncomplete };
   });
 
   // 清空自动诊断去抖时间戳（用户手动清除后可立即再次触发）
@@ -782,11 +861,13 @@ function register(rawIpcMain) {
 
     // 清空去抖时间戳，确保重新扫描时能立即触发各类问题
     resetAutoDiagnoseLastFire();
+    const epoch = diagnosticEpoch;
 
     console.log(`[AutoDiagnose] 日志显示区域变更，重新扫描 ${entriesToScan.length} 条（源: ${source}）`);
 
     // 延迟 100ms 让渲染进程先重置 UI 到 "监控中" 状态
     setTimeout(() => {
+      if (epoch !== diagnosticEpoch || !autoDiagnoseEnabled) return;
       autoDiagnoseScanFile(entriesToScan, source).catch(e => {
         console.error('[AutoDiagnose] 重新扫描失败:', e.message);
       });
@@ -797,6 +878,8 @@ function register(rawIpcMain) {
 }
 
 module.exports = {
+  _detectIssueForTests: detectIssue,
+  disposeDiagnostics: () => { diagnosticMatcher?.dispose(); diagnosticMatcher = null; ruleTestMatcher?.dispose(); ruleTestMatcher = null; configuredRevision = -1; resetAutoDiagnoseLastFire(); },
   register,
   autoDiagnoseOnLine,
   autoDiagnoseScanFile,

@@ -233,8 +233,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Android Log Analyzer 集成
   adbListDevices: () => ipcRenderer.invoke('adb:listDevices'),
   adbStartLog: (args) => ipcRenderer.invoke('adb:startLog', args),
-  adbStopLog: () => ipcRenderer.invoke('adb:stopLog'),
+  adbStopLog: args => ipcRenderer.invoke('adb:stopLog', args),
   logOpenFile: () => ipcRenderer.invoke('log:openFile'),
+  logCancelImport: args => ipcRenderer.invoke('log:cancelImport', args),
+  logClearDevice: args => ipcRenderer.invoke('log:clearDevice', args),
+  logOpenArchiveDirectory: () => ipcRenderer.invoke('log:openArchiveDirectory'),
+  onLogImportState: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('log:import-state', listener);
+    return () => ipcRenderer.off('log:import-state', listener);
+  },
+  onLogArchiveState: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('log:archive-state', listener);
+    return () => ipcRenderer.off('log:archive-state', listener);
+  },
   logClear: (args) => ipcRenderer.invoke('log:clear', args),
   logGetState: () => ipcRenderer.invoke('log:getState'),
   onLogCaptureState: callback => {
@@ -260,10 +271,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logAnalyzerApplyContext: context => ipcRenderer.invoke('logAnalyzer:applyContext', context),
   logAnalyzerGetContext: () => ipcRenderer.invoke('logAnalyzer:getContext'),
   logSessionSave: (payload) => ipcRenderer.invoke('logSession:save', payload),
-  logSessionList: () => ipcRenderer.invoke('logSession:list'),
+  logSessionList: args => ipcRenderer.invoke('logSession:list', args),
   logSessionLoad: (args) => ipcRenderer.invoke('logSession:load', args),
   logSessionRename: (args) => ipcRenderer.invoke('logSession:rename', args),
   logSessionDelete: (args) => ipcRenderer.invoke('logSession:delete', args),
+  logSessionCompare: args => ipcRenderer.invoke('logSession:compare', args),
+  logSessionExport: args => ipcRenderer.invoke('logSession:export', args),
+  logSessionExportPreview: args => ipcRenderer.invoke('logSession:exportPreview', args),
+  logSessionCancel: args => ipcRenderer.invoke('logSession:cancel', args),
+  logDocumentState: args => ipcRenderer.invoke('log:documentState', args),
+  logCloseDecision: args => ipcRenderer.invoke('log:closeDecision', args),
+  onLogCloseRequested: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('log:closeRequested', listener);
+    return () => ipcRenderer.off('log:closeRequested', listener);
+  },
+  onLogCloseCancelled: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('log:closeCancelled', listener);
+    return () => ipcRenderer.off('log:closeCancelled', listener);
+  },
   onLogAnalyzerContext: (callback) => {
     const listener = safeListener(callback);
     ipcRenderer.on('logAnalyzer:context', listener);
@@ -373,6 +398,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = safeListener(callback);
     ipcRenderer.on('auto-diagnose:scan-complete', listener);
     return () => ipcRenderer.off('auto-diagnose:scan-complete', listener);
+  },
+  onAutoDiagnoseIncomplete: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('auto-diagnose:incomplete', listener);
+    return () => ipcRenderer.off('auto-diagnose:incomplete', listener);
   },
   // 智能日志搜索
   smartSearch: (args) => ipcRenderer.invoke('smart-search:search', args),

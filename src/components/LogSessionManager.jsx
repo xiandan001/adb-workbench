@@ -1,10 +1,12 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
-import { useMemo, useRef, useEffect, useState } from 'react';
+import { useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { History, Save, Search, Pencil, Trash2, X } from 'lucide-react';
 import SelectMenu from './SelectMenu';
 import { filterLogSessions } from '../shared/logMarkers';
+import { freezeLogSnapshot, saveBeforeRestore } from '../shared/logSessionWorkflow';
+import LogSessionComparison from './LogSessionComparison';
 
-export default function LogSessionManager({ isDark, disabled, getSnapshot, onRestore, onMessage, entryCount, truncated, markerCount = 0 }) {
+export default function LogSessionManager({ isDark, disabled = false, canRestore = !disabled, sourceIdentity, getSnapshot, onRestore, onSaved, onMessage, entryCount, truncated, markerCount = 0, hasUnsaved = false, defaultName = '' }) {
   const locale = useLocale();
   const [mode, setMode] = useState('');
   const [name, setName] = useState('');
@@ -15,7 +17,12 @@ export default function LogSessionManager({ isDark, disabled, getSnapshot, onRes
   const [query, setQuery] = useState('');
   const [period, setPeriod] = useState('all');
   const [action, setAction] = useState('');
+  const [comparison, setComparison] = useState(null);
+  const [compareId, setCompareId] = useState('');
   const dialogRef = useRef(null);
+  const epoch = useRef(0), activeRequest = useRef(''), alive = useRef(true), flight = useRef(false);
+  const currentSource = useRef(sourceIdentity);
+  useLayoutEffect(() => { currentSource.current = sourceIdentity; }, [sourceIdentity]);
   const visibleSessions = useMemo(() => { void locale; return filterLogSessions(sessions, query, period); }, [sessions, query, period, locale]);
   const panel = isDark ? 'bg-[#202124] border-[#5F6368] text-[#E8EAED]' : 'bg-white border-slate-300 text-slate-800';
   const button = `rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${panel}`;
@@ -25,64 +32,95 @@ export default function LogSessionManager({ isDark, disabled, getSnapshot, onRes
     if (mode && !dialog?.open) dialog?.showModal();
     if (!mode && dialog?.open) dialog.close();
   }, [mode]);
+  useEffect(() => {
+    alive.current = true;
+    const lifetime = epoch;
+    return () => { alive.current = false; lifetime.current++; if (activeRequest.current) void window.electronAPI.logSessionCancel?.({ requestId: activeRequest.current }); };
+  }, []);
+  const close = () => {
+    epoch.current++; flight.current = false;
+    if (activeRequest.current) void window.electronAPI.logSessionCancel?.({ requestId: activeRequest.current });
+    activeRequest.current = ''; setBusy(false); setMode('');
+  };
+  const suggestedName = () => String(defaultName || tr('日志分析 {0}', { 0: new Date().toLocaleString(getLocale()) })).slice(0, 80);
 
   async function openHistory() {
+    if (flight.current) return;
+    const ticket = ++epoch.current, requestId = crypto.randomUUID();
+    flight.current = true; activeRequest.current = requestId;
     setMode('history'); setError(''); setSelected(null); setAction(''); setBusy(true);
     try {
-      const result = await window.electronAPI.logSessionList();
+      const result = await window.electronAPI.logSessionList({ requestId });
+      if (!alive.current || ticket !== epoch.current) return;
       if (!result.ok) throw new Error(result.error);
       setSessions(result.sessions);
       if (result.errors?.length) setError(tr("{0} 个会话文件无法读取，其余会话仍可打开", { 0: result.errors.length }));
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) { if (alive.current && ticket === epoch.current) setError(failure.message); }
+    finally { if (ticket === epoch.current) { flight.current = false; activeRequest.current = ''; if (alive.current) setBusy(false); } }
   }
 
   async function save() {
+    if (flight.current) return;
+    let snapshot;
+    try { snapshot = freezeLogSnapshot(getSnapshot, name); } catch (failure) { setError(failure.message); return; }
+    const ticket = ++epoch.current, requestId = crypto.randomUUID();
+    flight.current = true; activeRequest.current = requestId;
     setBusy(true); setError('');
     try {
-      const result = await window.electronAPI.logSessionSave({ ...getSnapshot(), name });
+      const result = await window.electronAPI.logSessionSave({ ...snapshot, requestId });
+      if (!alive.current || ticket !== epoch.current) return;
       if (!result.ok) throw new Error(result.error);
+      onSaved?.(snapshot, result.session);
       setMode('');
       onMessage(tr("已在本机保存会话“{0}”：{1} 条已加载日志", { 0: result.session.name, 1: result.session.entryCount.toLocaleString(getLocale()) }));
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) { if (alive.current && ticket === epoch.current) setError(failure.message); }
+    finally { if (ticket === epoch.current) { flight.current = false; activeRequest.current = ''; if (alive.current) setBusy(false); } }
   }
 
   async function runAction(type) {
+    if (flight.current || type.startsWith('restore') && !canRestore || !selected) return;
+    const target = { ...selected }; let snapshot = null;
+    try { if (type.startsWith('restore')) snapshot = freezeLogSnapshot(getSnapshot, suggestedName()); } catch (failure) { setError(failure.message); return; }
+    const expectedSourceIdentity = snapshot?.sourceIdentity ?? sourceIdentity;
+    const ticket = ++epoch.current, requestId = crypto.randomUUID(), current = () => alive.current && ticket === epoch.current
+      && (expectedSourceIdentity === undefined || currentSource.current === undefined || currentSource.current === expectedSourceIdentity);
+    flight.current = true; activeRequest.current = requestId;
     setBusy(true); setError('');
     try {
-      if (type === 'restore') {
-        const result = await window.electronAPI.logSessionLoad({ id: selected.id });
-        if (!result.ok) throw new Error(result.error);
-        onRestore(result.session); setMode('');
+      if (type.startsWith('restore')) {
+        const response = await saveBeforeRestore({ snapshot, id: target.id, requestId, expectedSourceIdentity, saveCurrent: type === 'restore-save', api: window.electronAPI, isCurrent: current, onSaved });
+        if (response) { onRestore(response.session, response); setMode(''); }
       } else if (type === 'rename') {
-        const result = await window.electronAPI.logSessionRename({ id: selected.id, name });
+        const result = await window.electronAPI.logSessionRename({ id: target.id, name, requestId });
+        if (!current()) return;
         if (!result.ok) throw new Error(result.error);
         setSessions(previous => previous.map(item => item.id === result.session.id ? result.session : item));
         setSelected(result.session); setAction('');
         onMessage(tr("会话已重命名，原始日志与标记保持不变"));
       } else {
-        const result = await window.electronAPI.logSessionDelete({ id: selected.id, confirmed: true });
+        const result = await window.electronAPI.logSessionDelete({ id: target.id, confirmed: true, requestId });
+        if (!current()) return;
         if (!result.ok) throw new Error(result.error);
-        setSessions(previous => previous.filter(item => item.id !== selected.id));
+        setSessions(previous => previous.filter(item => item.id !== target.id));
         setSelected(null); setAction('');
         onMessage(tr("会话已移至系统回收站，可从回收站恢复"));
       }
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) { if (current()) setError(failure.message); }
+    finally { if (ticket === epoch.current) { flight.current = false; activeRequest.current = ''; if (alive.current) setBusy(false); } }
   }
 
   return (
     <>
       <button type="button" className={`${button} flex items-center gap-1`} disabled={disabled || (!entryCount && !markerCount)} onClick={() => {
-        setMode('save'); setName(tr("日志分析 {0}", { 0: new Date().toLocaleString(getLocale()) })); setError('');
+        epoch.current++; setMode('save'); setName(suggestedName()); setError('');
       }} title={tr("保存已加载的原始日志、问题标记、过滤条件和 AI 对话")}><Save size={13} />{tr("保存会话")}</button>
       <button type="button" className={`${button} flex items-center gap-1`} disabled={disabled} onClick={openHistory}><History size={13} />{tr("历史会话")}</button>
-      <dialog ref={dialogRef} onCancel={event => { if (busy) event.preventDefault(); else setMode(''); }} onClose={() => setMode('')}
+      {hasUnsaved && <span className="text-xs text-amber-500" role="status">{tr('有未保存更改')}</span>}
+      <dialog ref={dialogRef} onCancel={event => { event.preventDefault(); close(); }}
         aria-label={mode === 'save' ? tr("保存分析会话") : tr("恢复分析会话")} className={`m-auto w-[min(42rem,94vw)] max-h-[85vh] overflow-y-auto rounded-xl border p-5 shadow-2xl backdrop:bg-black/50 ${panel}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold">{mode === 'save' ? tr("保存分析会话到本机") : tr("历史分析会话")}</h2>
-          <button type="button" aria-label={tr("关闭会话窗口")} disabled={busy} onClick={() => setMode('')}><X size={18} /></button>
+          <button type="button" aria-label={tr("关闭会话窗口")} onClick={close}><X size={18} /></button>
         </div>
         {mode === 'save' ? (
           <>
@@ -111,15 +149,20 @@ export default function LogSessionManager({ isDark, disabled, getSnapshot, onRes
             {selected && <div className="mt-4 rounded-lg border border-emerald-500/30 p-3">
               <p className="truncate text-sm font-medium">{tr("已选择：{0}", { 0: selected.name })}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" disabled={busy || disabled} onClick={() => setAction('restore')} className={button}>{tr("恢复会话")}</button>
+                <button type="button" disabled={busy || !canRestore} onClick={() => setAction('restore')} className={button}>{tr("恢复会话")}</button>
                 <button type="button" disabled={busy} onClick={() => { setAction('rename'); setName(selected.name); }} className={`${button} flex items-center gap-1`}><Pencil size={12} />{tr("重命名")}</button>
                 <button type="button" disabled={busy} onClick={() => setAction('delete')} className={`${button} flex items-center gap-1 text-red-500`}><Trash2 size={12} />{tr("移至回收站")}</button>
               </div>
+              {!canRestore && <p className="mt-2 text-xs text-amber-500">{tr('保存快照不会停止采集；恢复前请先停止采集和 AI。')}</p>}
+              <div className="mt-3 flex flex-wrap gap-2"><SelectMenu value={compareId} onChange={setCompareId} isDark={isDark} ariaLabel={tr('对比另一份会话')} disabled={busy}
+                options={sessions.filter(item => item.id !== selected.id).map(item => ({ value: item.id, label: item.name }))} placeholder={tr('对比另一份会话')} className="min-w-0 flex-1" />
+                <button type="button" disabled={busy || !compareId || compareId === selected.id} onClick={() => setComparison({ beforeId: selected.id, afterId: compareId })} className={button}>{tr('本地比较')}</button></div>
               {action === 'rename' && <label className="mt-3 block text-xs">{tr("新名称")}<input aria-label={tr("会话新名称")} value={name} maxLength={80} onChange={event => setName(event.target.value)} className={`mt-1 block w-full rounded-lg border p-2 ${panel}`} /></label>}
-              {action === 'restore' && <p className="mt-3 text-xs text-amber-500">{tr("将替换当前未保存的日志、标记和对话。需要保留当前内容时，请先关闭此窗口并保存。")}</p>}
+              {action === 'restore' && <p className="mt-3 text-xs text-amber-500">{hasUnsaved ? tr('当前有未保存更改。可以先保存当前快照，再恢复所选会话。保存失败不会替换当前内容。') : tr('恢复只替换当前视图，不抓日志、不调用 AI；历史 AI 对话为只读。')}</p>}
               {action === 'delete' && <p className="mt-3 text-xs text-amber-500">{tr("确认将“{0}”移至系统回收站？当前已打开的视图不受影响，可从回收站恢复文件。", { 0: selected.name })}</p>}
               {action && <div className="mt-3 flex gap-2">
-                <button type="button" disabled={busy || (action === 'restore' && disabled) || (action === 'rename' && !name.trim())} onClick={() => runAction(action)} className={`rounded-lg px-3 py-2 text-xs text-white disabled:opacity-40 ${action === 'delete' ? 'bg-red-600' : 'bg-emerald-600'}`}>{action === 'restore' ? tr("替换视图并恢复") : action === 'rename' ? tr("保存名称") : tr("确认移至回收站")}</button>
+                {action === 'restore' && hasUnsaved && <button type="button" disabled={busy || !canRestore} onClick={() => runAction('restore-save')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs text-white disabled:opacity-40">{tr('先保存当前再恢复')}</button>}
+                <button type="button" disabled={busy || (action === 'restore' && !canRestore) || (action === 'rename' && !name.trim())} onClick={() => runAction(action)} className={`rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${action === 'delete' ? 'bg-red-600 text-white' : action === 'restore' && hasUnsaved ? button : 'bg-emerald-600 text-white'}`}>{action === 'restore' ? tr("替换视图并恢复") : action === 'rename' ? tr("保存名称") : tr("确认移至回收站")}</button>
                 <button type="button" disabled={busy} onClick={() => setAction('')} className={button}>{tr("取消")}</button>
               </div>}
             </div>}
@@ -127,6 +170,7 @@ export default function LogSessionManager({ isDark, disabled, getSnapshot, onRes
         )}
         {error && <p role="alert" className="mt-3 text-sm text-red-500">{tr(error)}</p>}
       </dialog>
+      {comparison && <LogSessionComparison isDark={isDark} request={comparison} onClose={() => setComparison(null)} />}
     </>
   );
 }

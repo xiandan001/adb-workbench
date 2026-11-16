@@ -32,14 +32,18 @@ async function collectArtifactFiles(item) {
   return { source, directory: stat.isDirectory(), files };
 }
 
-function zipDirectory(source, destination) {
+function zipDirectory(source, destination, signal) {
   const quote = value => `'${value.replace(/'/g, "''")}'`;
   const script = `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; `
     + `[IO.Compression.ZipFile]::CreateFromDirectory(${quote(source)}, ${quote(destination)}, [IO.Compression.CompressionLevel]::Optimal, $false)`;
   return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      windowsHide: true, timeout: 180000, maxBuffer: 1024 * 1024
-    }, (error, stdout, stderr) => error ? reject(new Error(stderr || stdout || error.message)) : resolve());
+    let closed = false, callbackDone = false, failure;
+    const settle = () => { if (closed && callbackDone) failure ? reject(failure) : resolve(); };
+    const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      windowsHide: true, timeout: 180000, maxBuffer: 1024 * 1024, signal
+    }, (error, stdout, stderr) => { callbackDone = true; failure = error ? new Error(stderr || stdout || error.message) : null; settle(); });
+    // Abort may report its error before the native process closes its file handles.
+    child.once('close', () => { closed = true; settle(); });
   });
 }
 
@@ -60,14 +64,15 @@ async function validateExportDestination(selected, destination) {
   return { target, realTarget };
 }
 
-async function exportArtifact(item, destination) {
+async function exportArtifact(item, destination, { temporaryDirectory = os.tmpdir(), signal } = {}) {
   const selected = await collectArtifactFiles(item);
   const { target, realTarget } = await validateExportDestination(selected, destination);
   // 从当前原始证据重新打包，避免把旧的或失败遗留的 ZIP 当作有效证据。
   if (item.type === 'inspection') selected.files = selected.files.filter(file => file.name !== 'evidence-package.zip');
   if (!selected.files.length) throw new Error(tr("没有可导出的原始证据文件"));
 
-  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'adb-workbench-evidence-'));
+  const tempParent = path.resolve(temporaryDirectory);
+  const tempRoot = await fs.promises.mkdtemp(path.join(tempParent, 'adb-workbench-evidence-'));
   try {
     const staging = path.join(tempRoot, 'content');
     const bundle = path.join(tempRoot, 'evidence.zip');
@@ -88,11 +93,11 @@ async function exportArtifact(item, destination) {
       files: copiedFiles
     };
     await fs.promises.writeFile(path.join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
-    await zipDirectory(staging, bundle);
+    await zipDirectory(staging, bundle, signal);
+    signal?.throwIfAborted();
     await fs.promises.copyFile(bundle, realTarget);
     return { path: target, fileCount: selected.files.length, reused: false };
   } finally {
-    const tempParent = path.resolve(os.tmpdir());
     if (isWithin(tempParent, tempRoot) && path.basename(tempRoot).startsWith('adb-workbench-evidence-')) {
       await fs.promises.rm(tempRoot, { recursive: true, force: true });
     }

@@ -54,6 +54,9 @@ test('log workset context only updates local selections and queues running captu
   assert.ok(body); const changes = [], runningRef = { current: true }, aiAnalyzingRef = { current: false };
   const context = { deviceId: 'workset-device', worksetLogs: { filter: { text: 'error', tag: 'Fixture' }, buffers: ['crash'] } };
   const apply = vm.runInNewContext(`(${body})`, { runningRef, aiAnalyzingRef, clearTimeout() {}, filterDebounceRef: {}, tr: value => value,
+    hydratedRef: { current: true }, smartSearchingRef: { current: false }, importFlightRef: { current: null }, latestDocument: { current: null },
+    explicitPreference: { current: '' }, preparedContext: { current: null }, preparedBufferTarget: { current: '' },
+    setTargetField() {}, readTargetView: () => ({ buffers: ['main'], filter: {} }), compatibleFor: (_id, buffers) => buffers, setScopeBuffers() {},
     normalizeLogFilter, normalizeLogBuffers, setPendingLogContext: value => changes.push(['pending', value]), setNote() {},
     setDeviceId: value => changes.push(['device', value]), setFilter: value => changes.push(['filter', value]),
     setFilterTextInput: value => changes.push(['text', value]), setBuffers: value => changes.push(['buffers', value]) });
@@ -62,6 +65,7 @@ test('log workset context only updates local selections and queues running captu
   assert.deepEqual(changes[0], ['device', 'workset-device']); assert.deepEqual(changes[1], ['filter', context.worksetLogs.filter]);
   assert.deepEqual(changes[3], ['buffers', ['crash']]); assert.deepEqual(changes[4], ['pending', null]);
   assert.doesNotMatch(body, /logAnalyzerStart|aiAnalyze|connect|runAdb/);
-  assert.match(source, /useLogWorksetMemory\(\{ deviceId, filter, buffers \}\)/);
+  assert.match(source, /useLogWorksetMemory\(\{ deviceId, filter: rememberedFilter, buffers \}\)/);
+  assert.match(source, /rememberedFilter = source === 'file' \|\| captureDeviceId && captureDeviceId !== deviceId \? forTargetView\(deviceId, 'realtime'\)\.filter : filter/);
   assert.match(source, /disabled=\{running \|\| aiAnalyzing\} onClick=\{\(\) => applyContext\(pendingLogContext\)\}/);
 });

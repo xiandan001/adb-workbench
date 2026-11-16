@@ -2,12 +2,55 @@ const { tr } = require('./localization.cjs');
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const { runSessionJob, cleanupSessionJobs } = require('./log-session-jobs.cjs');
 
 const MAX_SESSION_BYTES = 64 * 1024 * 1024;
 const MAX_SESSION_ENTRIES = 50000;
 const MAX_EVIDENCE_ENTRIES = 100000;
 const MAX_MARKERS = 500;
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const liveOperations = new Set();
+const failedTemporaryCleanup = new Map();
+let cleanupFlight = null;
+let quitting = false;
+async function removePrivateTemporary(file, directory = false) {
+  try { if (directory) await fs.promises.rm(file, { recursive: true, force: true }); else await fs.promises.unlink(file); failedTemporaryCleanup.delete(file); }
+  catch (failure) {
+    if (failure.code === 'ENOENT') { failedTemporaryCleanup.delete(file); return; }
+    failedTemporaryCleanup.set(file, directory);
+    throw Object.assign(new Error(tr('会话临时文件清理失败，请重试后再退出。')), { code: 'LOG_SESSION_CLEANUP_FAILED', cause: failure });
+  }
+}
+function cleanup() {
+  if (cleanupFlight) return cleanupFlight;
+  const flight = (async () => {
+    const operations = [...liveOperations];
+    for (const operation of operations) operation.controller.abort();
+    await cleanupSessionJobs();
+    await Promise.allSettled(operations.filter(operation => operation.started && operation.awaitCleanup).map(operation => operation.completion));
+    for (const [file, directory] of [...failedTemporaryCleanup]) await removePrivateTemporary(file, directory);
+  })().finally(() => { if (cleanupFlight === flight) cleanupFlight = null; });
+  cleanupFlight = flight; return flight;
+}
+async function prepareQuit() { quitting = true; await cleanup(); }
+function resumeAfterQuit() { quitting = false; }
+function chooseUntilCancelled(choosing, signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => { signal.removeEventListener('abort', abort); resolve({ canceled: true }); };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(choosing).then(value => { signal.removeEventListener('abort', abort); resolve(value); }, failure => { signal.removeEventListener('abort', abort); reject(failure); });
+    if (signal.aborted) abort();
+  });
+}
+
+function normalizeSessionTimeRange(value = { kind: 'all' }) {
+  const exact = keys => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  if (exact(['kind']) && value.kind === 'all') return { kind: 'all' };
+  if (exact(['kind', 'durationMs', 'basis']) && value.kind === 'recent' && [30000, 300000].includes(value.durationMs) && ['source', 'received'].includes(value.basis)) return { ...value };
+  if (exact(['kind', 'entryId', 'windowMs', 'basis']) && value.kind === 'around' && [5000, 30000].includes(value.windowMs) && ['source', 'received'].includes(value.basis)
+    && typeof value.entryId === 'string' && value.entryId.length > 0 && value.entryId.length <= 200 && ![...value.entryId].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return { ...value };
+  throw new Error(tr('会话时间范围无效，未保存或恢复。'));
+}
 
 function normalizeEntries(entries, limit, withReferences = false) {
   if (!Array.isArray(entries) || entries.length > limit) throw new Error(tr("日志数量无效或超过 {0} 条限制；未保存或截断数据", { 0: limit.toLocaleString() }));
@@ -18,9 +61,10 @@ function normalizeEntries(entries, limit, withReferences = false) {
     for (const key of ['source', 'message', 'pkg', 'tag', 'level', 'deviceId', 'platform', 'logFormat', 'domain', 'processName', 'clockBasis', 'timestamp']) {
       if (typeof entry[key] === 'string') next[key] = entry[key];
     }
-    for (const key of ['ts', 'pid', 'tid']) {
+    for (const key of ['ts', 'pid', 'tid', 'receivedAt']) {
       if (Number.isFinite(entry[key])) next[key] = entry[key];
     }
+    if (typeof entry.timeKnown === 'boolean') next.timeKnown = entry.timeKnown;
     if (withReferences) {
       if (!/^L[1-9]\d*$/.test(entry.ref) || seen.has(entry.ref)) throw new Error(tr("证据编号无效或重复"));
       seen.add(entry.ref);
@@ -34,6 +78,7 @@ function normalizeSession(input) {
   if (!input || !['realtime', 'file'].includes(input.source)) throw new Error(tr("会话来源无效"));
   const name = String(input.name || '').trim();
   if (!name || name.length > 80) throw new Error(tr("会话名称需为 1–80 字"));
+  if (typeof input.deviceId === 'string' && input.deviceId.length > 300 || typeof input.sourceLabel === 'string' && input.sourceLabel.length > 4096) throw new Error(tr('会话来源信息过长，未保存。'));
   const filter = {};
   for (const key of ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel']) {
     if (typeof input.filter?.[key] === 'string') filter[key] = input.filter[key];
@@ -57,6 +102,7 @@ function normalizeSession(input) {
   return {
     schemaVersion: 1, name, source: input.source, sourceLabel: String(input.sourceLabel || ''),
     deviceId: String(input.deviceId || ''), filter, buffers, entries, evidence, aiTurns, markers,
+    timeRange: normalizeSessionTimeRange(input.timeRange),
     truncated: input.truncated === true, savedScope: 'loaded-entries', readOnlyAi: true
   };
 }
@@ -93,23 +139,26 @@ function validSummary(summary, id) {
     && Number.isInteger(summary.markerCount) && summary.markerCount >= 0 && summary.markerCount <= MAX_MARKERS;
 }
 
-function createSessionStore(directory, { trashItem } = {}) {
+function createSessionStore(directory, { trashItem, signal, maxBytes = MAX_SESSION_BYTES } = {}) {
   const metadataDirectory = path.join(directory, '.metadata');
   function sessionPath(id) {
     if (!ID_PATTERN.test(String(id))) throw new Error(tr("会话 ID 无效"));
     return path.join(directory, `${id}.json`);
   }
   async function fileStat(id) {
+    signal?.throwIfAborted();
+    const root = await fs.promises.lstat(directory);
+    if (!root.isDirectory() || root.isSymbolicLink()) throw new Error(tr('会话目录必须是普通目录，不能是链接。'));
     const stat = await fs.promises.lstat(sessionPath(id));
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_SESSION_BYTES) throw new Error(tr("会话文件无效或超过 64 MB 限制"));
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) throw new Error(tr("会话文件无效或超过 64 MB 限制"));
     return stat;
   }
   async function read(id) {
     const file = sessionPath(id);
     await fileStat(id);
-    const data = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-    if (data.schemaVersion !== 1 || data.id !== id) throw new Error(tr("不支持的会话格式"));
-    return { ...normalizeSession(data), id, savedAt: data.savedAt };
+    const bytes = await fs.promises.readFile(file, signal ? { signal } : undefined);
+    if (bytes.length > maxBytes) throw new Error(tr("会话文件无效或超过 64 MB 限制"));
+    return runSessionJob('decode', { bytes, id }, { signal, maxBytes });
   }
   async function writeMetadata(session) {
     const stat = await fileStat(session.id);
@@ -119,7 +168,7 @@ function createSessionStore(directory, { trashItem } = {}) {
     const temporary = path.join(metadataDirectory, `${session.id}.${randomUUID()}.tmp`);
     try {
       await fs.promises.writeFile(temporary, JSON.stringify({
-        version: 1, size: stat.size, mtimeMs: stat.mtimeMs, session: sessionSummary(session)
+        version: 1, size: stat.size, mtimeMs: stat.mtimeMs, session: Array.isArray(session.entries) ? sessionSummary(session) : session
       }), { encoding: 'utf8', flag: 'wx' });
       await fs.promises.rename(temporary, path.join(metadataDirectory, `${session.id}.json`));
     } finally { await fs.promises.unlink(temporary).catch(() => {}); }
@@ -142,27 +191,33 @@ function createSessionStore(directory, { trashItem } = {}) {
   }
   return {
     async save(input) {
-      const session = { ...normalizeSession(input), id: randomUUID(), savedAt: new Date().toISOString() };
-      const json = JSON.stringify(session);
-      if (Buffer.byteLength(json, 'utf8') > MAX_SESSION_BYTES) throw new Error(tr("会话超过 64 MB 限制，未保存、未截断。请先导出原始日志后拆分分析"));
+      const id = randomUUID(), savedAt = new Date().toISOString();
+      const encoded = await runSessionJob('encode', { input, id, savedAt }, { signal, maxBytes });
+      if (signal?.aborted) throw new Error(tr('会话操作已取消；当前内容保持不变。'));
       await fs.promises.mkdir(directory, { recursive: true });
-      await fs.promises.writeFile(sessionPath(session.id), json, { encoding: 'utf8', flag: 'wx' });
-      await writeMetadata(session).catch(() => {});
-      return sessionSummary(session);
+      const root = await fs.promises.lstat(directory);
+      if (!root.isDirectory() || root.isSymbolicLink()) throw new Error(tr('会话目录必须是普通目录，不能是链接。'));
+      const temporary = path.join(directory, `${id}.${randomUUID()}.tmp`);
+      try {
+        await fs.promises.writeFile(temporary, encoded.bytes, { flag: 'wx' });
+        if (signal?.aborted) throw new Error(tr('会话操作已取消；当前内容保持不变。'));
+        await fs.promises.rename(temporary, sessionPath(id));
+      } finally { await removePrivateTemporary(temporary); }
+      await writeMetadata(encoded.summary).catch(() => {});
+      return encoded.summary;
     },
     read,
     async rename(id, name) {
       const session = await read(id);
-      const renamed = { ...normalizeSession({ ...session, name }), id, savedAt: session.savedAt };
-      const json = JSON.stringify(renamed);
-      if (Buffer.byteLength(json, 'utf8') > MAX_SESSION_BYTES) throw new Error(tr("新名称将使会话超过 64 MB 限制，未修改原文件"));
+      const encoded = await runSessionJob('encode', { input: { ...session, name }, id, savedAt: session.savedAt }, { signal, maxBytes });
       const temporary = path.join(directory, `${id}.${randomUUID()}.tmp`);
       try {
-        await fs.promises.writeFile(temporary, json, { encoding: 'utf8', flag: 'wx' });
+        await fs.promises.writeFile(temporary, encoded.bytes, { flag: 'wx' });
+        if (signal?.aborted) throw new Error(tr('会话操作已取消；当前内容保持不变。'));
         await fs.promises.rename(temporary, sessionPath(id));
-      } finally { await fs.promises.unlink(temporary).catch(() => {}); }
-      await writeMetadata(renamed).catch(() => {});
-      return sessionSummary(renamed);
+      } finally { await removePrivateTemporary(temporary); }
+      await writeMetadata(encoded.summary).catch(() => {});
+      return encoded.summary;
     },
     async trash(id, confirmed) {
       if (confirmed !== true) throw new Error(tr("请先确认将会话移至回收站"));
@@ -184,11 +239,13 @@ function createSessionStore(directory, { trashItem } = {}) {
       const sessions = [];
       const errors = [];
       for (const name of names) {
+        signal?.throwIfAborted();
         const id = name.endsWith('.json') ? name.slice(0, -5) : '';
         if (!ID_PATTERN.test(id)) continue;
         try {
           sessions.push(await summary(id));
         } catch (error) {
+          if (signal?.aborted) throw error;
           errors.push({ id, error: error.message });
         }
       }
@@ -198,25 +255,116 @@ function createSessionStore(directory, { trashItem } = {}) {
   };
 }
 
-function register(ipcMain, { getDirectory, restore, trashItem }) {
-  const store = () => createSessionStore(getDirectory(), { trashItem });
+function register(ipcMain, { getDirectory, restore, trashItem, chooseDestination, getProtectedPaths = () => [], getSourceIdentity = () => '' } = {}) {
+  const store = signal => createSessionStore(getDirectory(), { trashItem, signal });
   let pending = Promise.resolve();
-  const handle = (channel, action) => ipcMain.handle(channel, async (_event, args) => {
+  const operations = new Map();
+  const protectedPaths = () => {
+    const paths = getProtectedPaths();
+    if (!Array.isArray(paths) || paths.length > 32 || paths.some(file => typeof file !== 'string' || !path.isAbsolute(file))) throw new Error(tr('导出选项无效。'));
+    return [...paths];
+  };
+  const assertUnprotected = async (destination, originalPaths) => {
+    for (const file of new Set([...originalPaths, ...protectedPaths()])) {
+      const resolved = await fs.promises.realpath(file).catch(() => path.resolve(file));
+      if (resolved.toLowerCase() === destination.toLowerCase()) throw new Error(tr('导出不能覆盖当前导入的原始日志文件。'));
+    }
+  };
+  const handle = (channel, action) => ipcMain.handle(channel, async (event, args) => {
+    if (cleanupFlight || quitting) return { ok: false, cancelled: true, error: tr('会话操作已取消；当前内容保持不变。') };
+    const sender = event?.sender;
+    if (sender) {
+      const window = require('./app-context.cjs').getLogAnalyzerWindow();
+      if (!window || window.isDestroyed() || sender !== window.webContents || event.senderFrame !== sender.mainFrame) return { ok: false, error: tr('会话请求来源无效。') };
+    }
+    const requestId = args?.requestId || randomUUID();
+    if (!ID_PATTERN.test(requestId) || operations.has(requestId) || operations.size >= 8) return { ok: false, error: tr('会话请求无效或已有操作等待完成。') };
+    const sourceAtRequest = channel === 'logSession:load' ? getSourceIdentity() : '';
+    if (channel === 'logSession:load' && (typeof sourceAtRequest !== 'string'
+      || args?.expectedSourceIdentity !== undefined && (typeof args.expectedSourceIdentity !== 'string' || args.expectedSourceIdentity.length > 4096 || args.expectedSourceIdentity !== sourceAtRequest))) {
+      return { ok: false, error: tr('日志来源已变化，未恢复会话；当前内容保持不变。') };
+    }
+    const controller = new AbortController(), operation = { controller, sender, started: false, awaitCleanup: true, sourceAtRequest };
+    operations.set(requestId, operation); liveOperations.add(operation);
+    const abort = () => controller.abort(); sender?.once('destroyed', abort);
+    const current = () => !controller.signal.aborted && !sender?.isDestroyed();
     // Keep rename/delete/list migration ordered, including requests from separate windows.
-    const request = pending.then(() => action(args));
+    const request = operation.completion = pending.then(() => { if (!current()) throw new Error(tr('会话操作已取消；当前内容保持不变。')); operation.started = true; return action(args, controller.signal, current, sender, operation); });
     pending = request.catch(() => {});
     try { return { ok: true, ...await request }; }
-    catch (error) { return { ok: false, error: error.message }; }
+    catch (error) { return { ok: false, ...(controller.signal.aborted ? { cancelled: true } : {}), error: error.message }; }
+    finally { sender?.removeListener('destroyed', abort); operations.delete(requestId); liveOperations.delete(operation); }
   });
-  handle('logSession:save', async args => ({ session: await store().save(args) }));
-  handle('logSession:list', () => store().list());
-  handle('logSession:rename', async args => ({ session: await store().rename(args?.id, args?.name) }));
-  handle('logSession:delete', async args => store().trash(args?.id, args?.confirmed));
-  handle('logSession:load', async args => {
-    const session = await store().read(args?.id);
-    await restore(session);
-    return { session };
+  ipcMain.handle('logSession:cancel', async (event, args) => {
+    const operation = operations.get(args?.requestId);
+    if (!operation || operation.sender !== event?.sender || event?.sender && event.senderFrame !== event.sender.mainFrame) return { ok: false };
+    operation.controller.abort(); return { ok: true };
+  });
+  handle('logSession:save', async (args, signal) => ({ session: await store(signal).save(args) }));
+  handle('logSession:list', (_args, signal) => store(signal).list());
+  handle('logSession:rename', async (args, signal) => ({ session: await store(signal).rename(args?.id, args?.name) }));
+  handle('logSession:delete', async (args, signal) => store(signal).trash(args?.id, args?.confirmed));
+  handle('logSession:load', async (args, signal, current, _sender, operation) => {
+    if (getSourceIdentity() !== operation.sourceAtRequest) throw new Error(tr('日志来源已变化，未恢复会话；当前内容保持不变。'));
+    const session = await store(signal).read(args?.id);
+    if (!current()) throw new Error(tr('会话操作已取消；当前内容保持不变。'));
+    if (getSourceIdentity() !== operation.sourceAtRequest) throw new Error(tr('日志来源已变化，未恢复会话；当前内容保持不变。'));
+    const restored = await restore(session);
+    return { session, ...(typeof restored?.sourceIdentity === 'string' && restored.sourceIdentity ? { sourceIdentity: restored.sourceIdentity } : {}) };
+  });
+  handle('logSession:compare', async (args, signal) => {
+    if (!args || Object.keys(args).some(key => !['beforeId', 'afterId', 'requestId'].includes(key))) throw new Error(tr('比较请求无效。'));
+    const before = await store(signal).read(args.beforeId), after = await store(signal).read(args.afterId);
+    return { comparison: await runSessionJob('compare', { before, after }, { signal }) };
+  });
+  handle('logSession:exportPreview', async (args, signal) => {
+    if (!args || Object.keys(args).some(key => !['requestId', 'scope', 'format', 'redact', 'snapshot', 'includeAi'].includes(key))
+      || args.format !== 'bundle' || args.redact !== true || typeof args.includeAi !== 'boolean') throw new Error(tr('导出选项无效。'));
+    return { preview: await runSessionJob('preview', { input: args.snapshot, options: { scope: args.scope, format: 'bundle', redact: true, includeAi: args.includeAi } }, { signal }) };
+  });
+  handle('logSession:export', async (args, signal, current, sender, operation) => {
+    if (!args || Object.keys(args).some(key => !['requestId', 'scope', 'format', 'redact', 'snapshot', 'includeAi'].includes(key))
+      || !['loaded', 'filtered', 'issue'].includes(args.scope) || !['raw', 'bundle'].includes(args.format)
+      || typeof args.redact !== 'boolean' || typeof args.includeAi !== 'boolean' || args.format === 'raw' && args.includeAi) throw new Error(tr('导出选项无效。'));
+    const options = { scope: args.scope, format: args.format, redact: args.redact, includeAi: args.includeAi };
+    const originalPaths = protectedPaths();
+    const extension = args.format === 'raw' ? 'log' : 'zip';
+    operation.awaitCleanup = false;
+    const choosing = chooseDestination ? chooseDestination(options) : require('electron').dialog.showSaveDialog(
+      sender ? require('electron').BrowserWindow.fromWebContents(sender) : undefined,
+      { title: tr('导出日志'), defaultPath: `Veylo-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`,
+        filters: [{ name: args.format === 'raw' ? tr('原始日志') : tr('问题证据包'), extensions: [extension] }] });
+    const result = await chooseUntilCancelled(choosing, signal);
+    if (result?.canceled || !result?.filePath || !current()) return { cancelled: true };
+    operation.awaitCleanup = true;
+    const target = result.filePath;
+    if (!path.isAbsolute(target) || path.extname(target).toLowerCase() !== `.${extension}`) throw new Error(tr('导出文件类型与所选格式不一致。'));
+    const parent = await fs.promises.realpath(path.dirname(target)), destination = path.join(parent, path.basename(target));
+    await assertUnprotected(destination, originalPaths);
+    if (args.snapshot?.source === 'file' && typeof args.snapshot.sourceLabel === 'string' && path.isAbsolute(args.snapshot.sourceLabel)
+      && path.resolve(args.snapshot.sourceLabel).toLowerCase() === destination.toLowerCase()) throw new Error(tr('导出不能覆盖当前导入的原始日志文件。'));
+    const sessionRoot = await fs.promises.realpath(getDirectory()).catch(() => path.resolve(getDirectory()));
+    const relative = path.relative(sessionRoot, destination);
+    if (!relative || !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) throw new Error(tr('请将导出文件保存在会话目录之外。'));
+    const original = await fs.promises.lstat(destination).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (original && (!original.isFile() || original.isSymbolicLink() || original.nlink > 1)) throw new Error(tr('保存位置必须是普通文件，不能是链接。'));
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(parent, '.veylo-log-export-'));
+    try {
+      const temporary = path.join(temporaryRoot, `export.${extension}`);
+      const built = await runSessionJob('export', { input: args.snapshot, options, staging: path.join(temporaryRoot, 'content'), bundle: temporary }, { signal });
+      if (built.bytes) await fs.promises.writeFile(temporary, built.bytes, { flag: 'wx' });
+      if (!current()) return { cancelled: true };
+      const latest = await fs.promises.lstat(destination).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (Boolean(latest) !== Boolean(original) || latest && (latest.dev !== original.dev || latest.ino !== original.ino || latest.size !== original.size || latest.mtimeMs !== original.mtimeMs)) throw new Error(tr('保存位置已发生变化，未替换原文件。'));
+      const bytes = (await fs.promises.stat(temporary)).size;
+      await assertUnprotected(destination, originalPaths);
+      if (!current()) return { cancelled: true };
+      await fs.promises.rename(temporary, destination);
+      return { path: destination, bytes, entryCount: built.entryCount };
+    } finally {
+      if (path.dirname(temporaryRoot) === parent && path.basename(temporaryRoot).startsWith('.veylo-log-export-')) await removePrivateTemporary(temporaryRoot, true);
+    }
   });
 }
 
-module.exports = { MAX_SESSION_BYTES, MAX_SESSION_ENTRIES, normalizeSession, createSessionStore, register };
+module.exports = { MAX_SESSION_BYTES, MAX_SESSION_ENTRIES, normalizeSession, normalizeSessionTimeRange, createSessionStore, register, cleanup, prepareQuit, resumeAfterQuit };

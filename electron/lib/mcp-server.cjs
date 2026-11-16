@@ -65,7 +65,7 @@ function buildMcpTools() {
     },
     {
       name: 'log_clear',
-      description: tr('清空所选日志来源；实时来源仅清理其绑定设备的日志缓冲，文件来源不操作设备。'),
+      description: tr('清空所选日志来源的本机显示和缓存，不修改设备日志缓冲。'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -271,7 +271,7 @@ async function readJsonBody(req, maxBytes) {
 }
 
 async function callMcpTool(name, args, signal) {
-  const { filterEntries, countByLevel } = require('../../src/shared/filter');
+  const { queryLogEntries } = require('./log-filter-client.cjs');
 
   // 通过 getter 访问 log-analyzer 的内部状态（保持模块边界清晰）
   const logStore = logAnalyzer.getLogStore();
@@ -373,15 +373,14 @@ async function callMcpTool(name, args, signal) {
     const source = args.source;
     const offset = Number(args.offset ?? 0);
     const limit = Number(args.limit ?? 200);
-    const entries = filterEntries(logStore[source] || [], args.filter ?? {});
-    const page = entries.slice(offset, offset + limit).map(e => e.raw);
-    return mcpText({ source, offset, limit, total: entries.length, filter: args.filter, lines: page });
+    const result = await queryLogEntries(logStore[source] || [], args.filter ?? {}, { offset, limit, signal });
+    return mcpText({ source, offset, limit, total: result.total, filter: args.filter, lines: result.entries.map(entry => entry.raw) });
   }
 
   if (name === 'log_stats') {
     const source = args.source;
-    const entries = filterEntries(logStore[source] || [], args.filter ?? {});
-    return mcpText({ source, filter: args.filter ?? {}, total: entries.length, levels: countByLevel(entries) });
+    const result = await queryLogEntries(logStore[source] || [], args.filter ?? {}, { limit: 0, signal });
+    return mcpText({ source, filter: args.filter ?? {}, total: result.total, levels: result.levels });
   }
 
   if (name === 'log_watch') {
@@ -417,8 +416,9 @@ async function callMcpTool(name, args, signal) {
     const customPrompt = args.customPrompt;
     const timeoutMs = Number(args.timeoutMs ?? 120000);
 
-    const allEntries = filterEntries(logStore[source] || [], filter);
-    if (allEntries.length === 0) {
+    const filtered = await queryLogEntries(logStore[source] || [], filter, { tail: true, limit: AI_MAX_LOG_LINES, signal });
+    const allEntries = filtered.entries;
+    if (filtered.total === 0) {
       return mcpText({ ok: false, message: tr("没有可分析的日志，请先抓取或加载日志") });
     }
 
@@ -430,7 +430,7 @@ async function callMcpTool(name, args, signal) {
       return `${ts} ${e.pid ?? 0} ${e.tid ?? e.pid ?? 0} ${e.level ?? 'V'} ${e.tag ?? ''}: ${e.message ?? e.raw}${e.pkg ? ` [pkg:${e.pkg}]` : ''}`;
     });
 
-    const truncated = lines.length > AI_MAX_LOG_LINES;
+    const truncated = filtered.total > AI_MAX_LOG_LINES;
     const effectiveLines = truncated ? lines.slice(lines.length - AI_MAX_LOG_LINES) : lines;
 
     // 判断是否需要 Map-Reduce

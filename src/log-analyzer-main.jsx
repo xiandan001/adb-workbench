@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import LogAnalyzer from './components/LogAnalyzer'
+import LogWindowApp from './components/LogWindowApp.jsx'
 import UiMotionPreferences from './components/UiMotionPreferences'
 import { initializeLanguage } from './shared/i18n.js'
 import LogWindowTitle from './components/LogWindowTitle.jsx'
@@ -10,6 +10,6 @@ initializeLanguage().then(() => createRoot(document.getElementById('root')).rend
   <StrictMode>
     <LogWindowTitle />
     <UiMotionPreferences />
-    <LogAnalyzer />
+    <LogWindowApp />
   </StrictMode>,
 ))
