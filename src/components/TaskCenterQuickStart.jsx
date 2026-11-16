@@ -1,6 +1,10 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
+import { useState } from 'react';
 import {
   Clock3,
+  Play,
+  Pencil,
+  Search,
   Settings2,
   Smartphone,
   Upload
@@ -9,12 +13,14 @@ import { isDarkTheme } from '../shared/theme';
 
 function TaskCenterQuickStart({
   theme,
-  scripts,
+  scripts = [],
   activeTasks,
   history,
   onRecord,
   onImport,
   onOpenScript,
+  onRunScript,
+  running = false,
   onOpenAdvanced,
   onOpenTask,
   onCompare
@@ -30,6 +36,9 @@ function TaskCenterQuickStart({
   const secondaryButton = isDark
     ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]'
     : 'border-slate-200 text-slate-700 hover:bg-slate-50';
+  const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState('');
+  const scriptName = script => script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name;
   const entries = [
     {
       id: 'record',
@@ -46,7 +55,8 @@ function TaskCenterQuickStart({
       action: onImport
     }
   ];
-  const visibleScripts = (scripts || []).slice(0, 5);
+  const matchingScripts = (scripts || []).filter(script => !query.trim() || [scriptName(script), script.description, script.id].some(value => String(value || '').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
+  const visibleScripts = showAll || query.trim() ? matchingScripts : matchingScripts.slice(0, 5);
   const recentHistory = (history || []).slice(0, 5);
   const runningTasks = (activeTasks || []).filter(
     task => task.status === 'running' || task.status === 'queued'
@@ -105,20 +115,23 @@ function TaskCenterQuickStart({
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className={'rounded-xl border p-5 ' + panelClass}>
-          <h4 className={'font-semibold ' + textClass}>{tr("已保存测试")}</h4>
-          <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2"><h4 className={'font-semibold ' + textClass}>{tr("已保存测试")}</h4>
+            <button type="button" onClick={() => setShowAll(value => !value)} className="text-xs text-emerald-500 hover:underline">{showAll ? tr('收起') : tr('全部测试')}</button>
+          </div>
+          {(showAll || scripts.length > 5) && <label className="relative mt-3 block"><span className="sr-only">{tr('搜索已保存测试')}</span><Search size={14} className={`pointer-events-none absolute left-2.5 top-2.5 ${mutedClass}`} /><input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder={tr('搜索已保存测试')} className={`w-full rounded-lg border py-2 pl-8 pr-3 text-xs ${theme.input}`} /></label>}
+          <div className="mt-3 max-h-96 space-y-2 overflow-y-auto">
             {visibleScripts.length === 0 ? (
               <p className={'py-6 text-center text-sm ' + mutedClass}>{tr("暂无已保存测试")}</p>
             ) : visibleScripts.map(script => (
-              <button
+              <article
                 key={script.id}
-                type="button"
-                onClick={() => onOpenScript(script)}
-                className={'block w-full rounded-lg border p-3 text-left transition-colors ' + cardClass}
+                className={'flex flex-wrap items-center gap-3 rounded-lg border p-3 text-left transition-colors ' + cardClass}
               >
-                <span className={'block truncate font-medium ' + textClass}>{script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name}</span>
-                <span className={'mt-1 block text-xs ' + mutedClass}>{script.steps?.length || 0}{tr(" 个步骤")}</span>
-              </button>
+                <div className="min-w-0 flex-1 basis-32"><span title={scriptName(script)} className={'block truncate font-medium ' + textClass}>{scriptName(script)}</span>
+                  <span className={'mt-1 block text-xs ' + mutedClass}>{script.steps?.length || 0}{tr(" 个步骤")}</span></div>
+                <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={running || !script.steps?.length} onClick={() => onRunScript?.(script)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${theme.button.primary}`}><Play size={13} />{tr('运行')}</button>
+                  <button type="button" onClick={() => onOpenScript(script)} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs ${secondaryButton}`}><Pencil size={13} />{tr('编辑')}</button></div>
+              </article>
             ))}
           </div>
         </section>

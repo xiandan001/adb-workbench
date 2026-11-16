@@ -7,13 +7,14 @@ const { storageKey: SHORTCUTS_KEY, deviceStorageKey: DEVICE_SHORTCUTS_KEY, maxDe
 const { normalizePreferences: normalizeSerialPreferences } = require('./serial-policy.cjs');
 const { UI_WORKSPACE_KEY, normalizeUiWorkspace } = require('./workbench-worksets-policy.cjs');
 const { SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, normalizeSshConnectionMemory, normalizeReproductionConfig } = require('./connection-preferences-policy.cjs');
+const { UX_METADATA_KEYS, normalizeUxMetadataPreference } = require('./ux-metadata-policy.cjs');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
   'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', DEVICE_SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
   'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1',
-  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY
+  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, ...UX_METADATA_KEYS
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json', 'hdc_terminal_command_history.json',
@@ -165,6 +166,7 @@ function normalizeDraft(value) {
 }
 function normalizePreference(key, raw) {
   text(raw, 16 * 1024 * 1024, tr("偏好 {0}", { 0: key }));
+  if (UX_METADATA_KEYS.includes(key)) return normalizeUxMetadataPreference(key, raw);
   if (key === DEVICE_SHORTCUTS_KEY && Buffer.byteLength(raw, 'utf8') > maxDeviceOverrideBytes) invalid(tr('设备独立快捷配置超过存储上限'));
   if (key === 'adb-workbench.serial-terminal-style.v1' && raw.length > 64) invalid(tr("串口终端样式数据过长"));
   if (key === 'adb-workbench.ui-motion.v1' && raw.length > 256) invalid(tr("启动与动效偏好数据过长"));

@@ -5,14 +5,14 @@ export default function useWorkbenchUiWorkspace(page) {
   const [boot] = useState(() => { try { return { value: readUiWorkspace(), error: '' }; } catch (error) { return { value: defaultUiWorkspace(), error: error.message }; } });
   const [value, setValue] = useState(boot.value), [saveError, setSaveError] = useState(boot.error);
   const latest = useRef(value), positions = useRef({ ...boot.value.scrollPositions }), timer = useRef(null), mainRef = useRef(null);
-  useLayoutEffect(() => { latest.current = value; }, [value]);
+  useLayoutEffect(() => { latest.current = { ...value, lastPage: page }; }, [value, page]);
   const persist = useCallback(() => {
     clearTimeout(timer.current); timer.current = null;
     try { saveUiWorkspace({ ...latest.current, scrollPositions: { ...positions.current } }); setSaveError(''); }
     catch (error) { setSaveError(error.message); }
   }, []);
   const schedule = useCallback(() => { clearTimeout(timer.current); timer.current = setTimeout(persist, 350); }, [persist]);
-  useEffect(() => { schedule(); }, [value, schedule]);
+  useEffect(() => { schedule(); }, [value, page, schedule]);
   useEffect(() => {
     window.addEventListener('beforeunload', persist);
     return () => { window.removeEventListener('beforeunload', persist); clearTimeout(timer.current); };

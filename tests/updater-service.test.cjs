@@ -411,3 +411,16 @@ test('preload exposes only a typed configure-auto method with the exact boolean 
   api.configureAutoUpdates(true); assert.equal(calls[0][0], 'updater:configure-auto');
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0][1])), { enabled: true });
 });
+
+test('install UI phases distinguish launch, acknowledged readiness and safe quitting without changing the handoff order', async () => {
+  const pending = deferred(); const h = harness({ launch: () => pending.promise });
+  h.updater.emit('update-downloaded', { version: '4.7.27' });
+  const handoff = h.api.beginUpdateInstall(); await tick();
+  assert.equal((await h.invoke('status')).installPhase, 'launching');
+  h.api.noteUpdateInstallQuitting(); assert.equal((await h.invoke('status')).installPhase, 'launching');
+  assert.equal(h.calls.quits, 0);
+  pending.resolve({ ok: true, code: 'READY', installerPid: 5252 }); await handoff;
+  assert.equal((await h.invoke('status')).installPhase, 'ready');
+  h.api.noteUpdateInstallQuitting(); assert.equal((await h.invoke('status')).installPhase, 'quitting');
+  assert.equal(h.calls.quits, 0, 'Publishing the closing phase does not force the process to exit');
+});

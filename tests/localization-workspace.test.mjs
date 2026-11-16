@@ -36,6 +36,7 @@ test('every explicit component message is catalogued and no parameter is passed 
           if (['DeviceNavigationControls.jsx', 'DeviceShortcutEditor.jsx'].includes(file) && /^(?:builtin\.label|item\.label|check\.reason|selectedCheck\.reason)$/.test(argument)) return;
           if (file === 'StartupPreferences.jsx' && argument === 'state.message') return;
           if (file === 'GlobalCommandPalette.jsx' && argument === 'command.group') return;
+          if (file === 'AiWorkspace.jsx' && argument === 'state.draftPersistenceError') return;
           assert.ok(['TaskCenter.jsx', 'TaskCenterQuickStart.jsx'].includes(file), file);
           assert.match(argument, /^script\.(name|description)$/);
           assert.match(text.slice(Math.max(0, node.start - 130), node.start), /script\.id === 'default-smoke-test' && script\.createdAt === 'builtin' && script\.updatedAt === 'builtin' \? $/);

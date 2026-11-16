@@ -61,9 +61,9 @@ test('log button forwards the clicked card identity and disables disconnected de
 test('existing App callback opens explicit device context and retains failure feedback without device operations', async () => {
   const app = source('App.jsx'), calls = [], selection = [], messages = [];
   let response = { ok: true };
-  const open = new Function('window', 'chooseDevice', 'activeDeviceId', 'tr', 'showToast', 'navigationContext', 'worksetRequest', 'rememberWorksetContext', `return (${initializer(app, 'viewApplicationLogs')});`)(
+  const open = new Function('window', 'chooseDevice', 'activeDeviceId', 'tr', 'showToast', 'navigationContext', 'worksetRequest', 'rememberWorksetContext', 'applicationForDevice', 'applicationMemoryRef', `return (${initializer(app, 'viewApplicationLogs')});`)(
     { electronAPI: { logAnalyzerOpen: async value => { calls.push(value); return response; } } },
-    value => selection.push(value), 'global-device', tr, value => messages.push(value), null, null, () => {});
+    value => selection.push(value), 'global-device', tr, value => messages.push(value), null, null, () => {}, () => '', { current: { version: 1, entries: [] } });
   await open({ deviceId: 'card-B' });
   await open({ deviceId: 'card-A', packageName: 'com.example.fixture' });
   await open();

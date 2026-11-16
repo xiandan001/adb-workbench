@@ -6,7 +6,7 @@ import { toggleWorkspaceSelection, workspaceDeviceOnline } from './AiWorkspaceSt
 import { AiWorkspaceUsage } from './AiWorkspaceEvidence';
 import { AiWorkspaceReport, AiWorkspaceTask } from './AiWorkspaceResults';
 import { AiWorkspaceContext, AiWorkspaceRequirements, AiWorkspaceSelection } from './AiWorkspaceControls';
-import AiWorkspaceHistory, { AiWorkspaceComparison, AiWorkspaceReportActions } from './AiWorkspaceHistory';
+import AiWorkspaceHistory, { AiWorkspaceComparison, AiWorkspaceReportActions, AiWorkspaceNextActions } from './AiWorkspaceHistory';
 import AiWorkspaceDiagnostics from './AiWorkspaceDiagnostics';
 import AiWorkspaceCasebook from './AiWorkspaceCasebook';
 import AiWorkspaceHandoff from './AiWorkspaceHandoff';
@@ -36,9 +36,9 @@ function SelectionCards({ items, selected, onToggle, disabled, theme, empty }) {
   </label>)}</div>;
 }
 
-export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', incomingHandoffId = '', incomingReportRef, onOpenTasks, onOpenRelatedTask, onOpenMembership, showToast }) {
+export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', applicationContext, incomingHandoffId = '', incomingReportRef, onOpenTasks, onOpenRelatedTask, onOpenMembership, showToast }) {
   useLocale();
-  const state = useAiWorkspace({ active, devices, activeDeviceId, incomingHandoffId, incomingReportRef, onOpenTasks, showToast });
+  const state = useAiWorkspace({ active, devices, activeDeviceId, applicationContext, incomingHandoffId, incomingReportRef, onOpenTasks, showToast });
   const { mode, current, sources, loading, sourceError } = state;
   const dark = isDarkTheme(theme); const busy = Boolean(current.busy || state.reportBusy);
   const entitled = sources.entitled === true;
@@ -71,6 +71,8 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
       <button type="button" onClick={state.refresh} disabled={loading} className={button} title={tr('只刷新本地来源与会员状态，不调用 AI')}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} />{tr('刷新来源')}</button>
     </div>
     <WorkspaceRules theme={theme} />
+    {state.draftNotice && <div role="status" className={`flex flex-wrap items-center gap-2 rounded-lg border p-3 text-xs ${theme.card}`}><span className="min-w-0 flex-1">{tr('已恢复设备和检查选择；问题描述、日志及发送授权未保留，请重新采集后核对。')}</span><button type="button" onClick={state.dismissDraftNotice} className={button}>{tr('知道了')}</button></div>}
+    {state.draftPersistenceError && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs text-amber-600"><span className="min-w-0 flex-1">{tr(state.draftPersistenceError)}</span><button type="button" onClick={state.retryDraftPersistence} className={button}>{tr('重试保存选择项')}</button></div>}
     {sourceError && <p role="alert" className="rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-500">{tr(sourceError)}</p>}
     {current.error && <p role="alert" className="break-words rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-5 text-red-500">{tr(current.error)}</p>}
     {state.reportError && <p role="alert" className="rounded-lg border border-red-500/25 p-3 text-xs text-red-500">{state.reportError}</p>}
@@ -106,7 +108,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
             ]} /></div>
             {current.deviceId && !online && <p className="text-xs leading-5 text-amber-600">{tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。')}</p>}
             <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('调整只读检查与专项排查')}</summary><div className="mt-3 space-y-3">
-            <AiWorkspaceDiagnostics current={current} presets={sources.diagnosticPresets || []} onChange={state.edit} disabled={busy} online={online} theme={theme} />
+            <AiWorkspaceDiagnostics current={current} presets={sources.diagnosticPresets || []} onChange={state.edit} disabled={busy} online={online} device={devices.find(item => item.id === current.deviceId)} theme={theme} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">{tr('只读检查项目')}</span><button type="button" onClick={state.plan} disabled={busy || !entitled || !online || !current.question.trim()} className={button}><Sparkles size={14} />{tr('AI 建议检查计划')}</button></div>
             <SelectionCards items={sources.checks || []} selected={current.checks} onToggle={id => state.edit({ checks: toggleWorkspaceSelection(current.checks, id) })} disabled={busy} theme={theme} empty={loading ? tr('正在读取可用检查…') : tr('未读取到检查项目，请刷新来源。')} />
             {current.plan && <div className="space-y-2 rounded-lg bg-emerald-500/5 p-3"><p className={`whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{current.plan.reason}</p><AiWorkspaceUsage usage={current.planUsage} theme={theme} /></div>}
@@ -121,7 +123,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
           </>}
           {mode === 'task' ? <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('补充测试参数（可选）')}</summary><div className="mt-3"><AiWorkspaceRequirements requirements={current.requirements} onChange={requirements => state.edit({ requirements })} disabled={busy} theme={theme} /></div></details> : <AiWorkspaceSelection selection={current.selection} onChange={selection => state.edit({ selection })} disabled={busy} theme={theme} />}
           {blocked && <p role="status" className={`text-xs leading-5 ${theme.textMuted}`}>{blockedReasons[blocked]}</p>}
-          {mode === 'task' ? <><p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('支持受控的点击、滑动、输入、按键、文本校验、等待、截图和性能采样。不会生成任意 Shell 或安装、删除操作。')}</p><button type="button" onClick={state.generate} disabled={Boolean(blocked)} className={primary}><Sparkles size={15} />{tr('生成任务草案')}</button></> : <button type="button" onClick={state.collect} disabled={!canCollect} className={phase === 'prepare' ? primary : button}><Database size={15} />{tr('采集并预览')}</button>}
+          {mode === 'task' ? <><p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('支持受控的点击、滑动、输入、按键、文本校验、等待、截图和性能采样。不会生成任意 Shell 或安装、删除操作。')}</p><button type="button" onClick={state.generate} disabled={Boolean(blocked)} className={primary}><Sparkles size={15} />{tr('生成任务草案')}</button></> : <button type="button" onClick={state.collectAndReview} disabled={!canCollect} className={phase === 'prepare' ? primary : button}><Database size={15} />{tr('采集并核对发送')}</button>}
           </div>
         </details>
         <details className={`rounded-xl border p-3 ${theme.card}`}><summary className="cursor-pointer text-xs font-medium">{tr('已完成分析与本地历史')}</summary><div className="mt-3"><AiWorkspaceHistory state={state} theme={theme} /></div></details>
@@ -130,12 +132,13 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
       </div>
       <div className={`min-w-0 space-y-4 ${phase === 'result' ? 'order-first xl:order-last' : ''}`}>
         {view ? <>
+          <AiWorkspaceReport key={view.report.preview.id} preview={view.report.preview} result={view.report.result} usage={view.report.usage} cached={view.cached} theme={theme} readOnly onRegression={!busy && !state.cases.task.busy ? index => state.useContext('task', index) : undefined} checks={sources.checks} onPrepareVerification={!busy && !Object.values(state.cases).some(value => value.busy) ? state.prepareVerification : undefined} actions={<AiWorkspaceNextActions state={state} theme={theme} />} />
           <AiWorkspaceReportActions key={view.reportRef.casebookId || view.reportRef.historyId || view.reportRef.turnId} view={view} state={state} theme={theme} />
-          <AiWorkspaceReport key={view.report.preview.id} preview={view.report.preview} result={view.report.result} usage={view.report.usage} cached={view.cached} theme={theme} readOnly onRegression={!busy && !state.cases.task.busy ? index => state.useContext('task', index) : undefined} checks={sources.checks} onPrepareVerification={!busy && !Object.values(state.cases).some(value => value.busy) ? state.prepareVerification : undefined} />
           <AiWorkspaceRelated key={view.report.id} view={view} onOpen={onOpenRelatedTask} disabled={busy} theme={theme} active={active} />
         </> : current.preview && <AiWorkspaceReport key={current.preview.id} preview={current.preview} result={current.result} usage={current.usage} cached={current.cached} busy={current.busy} entitled={entitled} onAnalyze={state.analyze} theme={theme} />}
         {current.draft && <AiWorkspaceTask key={current.draft.id} draft={current.draft} editedDraft={current.draftEdits} onEditDraft={state.editDraft} busy={current.busy} onSave={state.save} usage={current.usage} theme={theme} />}
-        {!view && !current.preview && !current.draft && <div className={`flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center ${theme.card}`}><FileSearch size={36} className="mb-4 text-emerald-500/50" /><h3 className="text-sm font-semibold">{mode === 'task' ? tr('先生成，再审阅，最后保存') : tr('先看证据，再让 AI 分析')}</h3><p className={`mt-2 max-w-sm text-xs leading-6 ${theme.textMuted}`}>{mode === 'task' ? tr('草案将逐步展示操作和参数。保存到任务中心后，你仍可以编辑并决定何时运行。') : tr('采集后会在这里显示完整发送预览。不同工作区与目标相互独立，切换页面不会丢失本次内容。')}</p></div>}
+        {current.savedTask && <div role="status" className={`space-y-3 rounded-xl border border-emerald-500/30 p-4 ${theme.card}`}><p className="text-sm font-medium">{tr('测试任务已保存，尚未执行。')}</p><p className={`text-xs ${theme.textMuted}`}>{tr('可继续当前分析，或主动打开任务后核对运行。')}</p><button type="button" onClick={state.openSavedTask} disabled={busy} className={primary}>{tr('查看已保存任务')}</button></div>}
+        {!view && !current.preview && !current.draft && !current.savedTask && <div className={`flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center ${theme.card}`}><FileSearch size={36} className="mb-4 text-emerald-500/50" /><h3 className="text-sm font-semibold">{mode === 'task' ? tr('先生成，再审阅，最后保存') : tr('先看证据，再让 AI 分析')}</h3><p className={`mt-2 max-w-sm text-xs leading-6 ${theme.textMuted}`}>{mode === 'task' ? tr('草案将逐步展示操作和参数。保存到任务中心后，你仍可以编辑并决定何时运行。') : tr('采集后会在这里显示完整发送预览。不同工作区与目标相互独立，切换页面不会丢失本次内容。')}</p></div>}
       </div>
     </div>
   </section>;

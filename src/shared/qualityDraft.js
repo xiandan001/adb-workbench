@@ -16,6 +16,14 @@ export function normalizeQualityDraft(value = {}) {
   }
   return output;
 }
+export function seedQualityApplication(value, deviceId, applicationContext) {
+  const draft = normalizeQualityDraft(value);
+  if (!deviceId || applicationContext?.deviceId !== deviceId || typeof applicationContext.packageName !== 'string'
+    || !applicationContext.packageName || applicationContext.packageName.length > 240
+    || [...applicationContext.packageName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+    || Object.keys(defaults).some(key => draft[key] !== defaults[key])) return draft;
+  return { ...draft, packageName: applicationContext.packageName };
+}
 function readAll(storage) {
   try {
     const source = storage.getItem(KEY);

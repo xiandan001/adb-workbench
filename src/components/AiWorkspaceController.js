@@ -1,16 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { tr, useLocale } from '../shared/i18n';
 import { AI_WORKSPACE_MODES, appendWorkspaceBasket, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, workspaceReportRef, workspaceRequestCurrent } from './AiWorkspaceState';
-import { adoptWorkspaceDefaults, normalizeWorkspaceReportRequest, prepareWorkspaceVerification } from './AiWorkspaceFlow';
+import { adoptWorkspaceDefaults, normalizeWorkspaceReportRequest, prepareWorkspaceVerification, aiSelectionDraft, readAiSelectionDraft, saveAiSelectionDraft, restoreAiSelectionDraft, collectedPreviewCanReview } from './AiWorkspaceFlow';
 import { editableTask } from './AiWorkspaceTaskEditing';
 
 const newCase = (mode, deviceId = '') => createWorkspaceCase(mode, deviceId, crypto.randomUUID());
 const api = () => window.electronAPI;
 
-export default function useAiWorkspace({ active, devices = [], activeDeviceId, incomingHandoffId, incomingReportRef, onOpenTasks, showToast }) {
+export default function useAiWorkspace({ active, devices = [], activeDeviceId, applicationContext, incomingHandoffId, incomingReportRef, onOpenTasks, showToast }) {
   const locale = useLocale();
-  const [mode, setMode] = useState('diagnose');
-  const [cases, setCases] = useState(() => Object.fromEntries(AI_WORKSPACE_MODES.map(item => [item, newCase(item, activeDeviceId)])));
+  const [restoration] = useState(() => {
+    try { return { ...restoreAiSelectionDraft(readAiSelectionDraft(window.localStorage), newCase), error: '' }; }
+    catch (error) { return { error: error.message }; }
+  });
+  const [mode, setSelectedMode] = useState(restoration.mode || 'diagnose');
+  const modeRef = useRef(mode), activeRef = useRef(active);
+  const setMode = value => { if (AI_WORKSPACE_MODES.includes(value)) { modeRef.current = value; setSelectedMode(value); } };
+  const [cases, setCases] = useState(() => restoration.cases || Object.fromEntries(AI_WORKSPACE_MODES.map(item => [item, newCase(item, activeDeviceId)])));
+  const [draftPersistenceError, setDraftPersistenceError] = useState(restoration.error);
+  const [draftNotice, setDraftNotice] = useState(Boolean(restoration.cases && Object.values(restoration.cases).some(value => value.restoredSelection)));
   const [sources, setSources] = useState({ sources: [], checks: [], entitled: false });
   const [loading, setLoading] = useState(false);
   const [sourceError, setSourceError] = useState('');
@@ -31,13 +39,24 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     if (alive.current) setCases(next);
   }, []);
 
+  useEffect(() => { activeRef.current = active; }, [active]);
+
   useEffect(() => {
     if (reportLock.current) return;
     for (const key of AI_WORKSPACE_MODES) {
-      const current = casesRef.current[key], next = adoptWorkspaceDefaults(current, devices, activeDeviceId);
+      const current = casesRef.current[key], next = adoptWorkspaceDefaults(current, devices, activeDeviceId, applicationContext);
       if (next !== current) update(key, () => next);
     }
-  }, [devices, activeDeviceId, update]);
+  }, [devices, activeDeviceId, applicationContext, update]);
+  useEffect(() => {
+    if (!window.localStorage) return;
+    try { saveAiSelectionDraft(aiSelectionDraft(mode, cases), window.localStorage); setDraftPersistenceError(''); }
+    catch (error) { setDraftPersistenceError(error.message); }
+  }, [mode, cases]);
+  const retryDraftPersistence = () => {
+    try { saveAiSelectionDraft(aiSelectionDraft(mode, casesRef.current), window.localStorage); setDraftPersistenceError(''); }
+    catch (error) { setDraftPersistenceError(error.message); }
+  };
 
   const openRequestedReport = useCallback(async request => {
     const ref = normalizeWorkspaceReportRequest(request);
@@ -154,18 +173,20 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     const token = { caseId: current.caseId, revision: current.revision, operation };
     update(key, value => ({ ...value, busy: operation, error: '',
       ...(['collect', 'compare'].includes(operation) ? { preview: null, result: null, usage: null, reportView: null } : {}),
-      ...(operation === 'generate' ? { draft: null, draftEdits: null, usage: null } : {}),
+      ...(operation === 'generate' ? { draft: null, draftEdits: null, savedTask: null, usage: null } : {}),
     }));
     const isCurrent = () => alive.current && workspaceRequestCurrent(casesRef.current[key], token);
     try {
       const response = await invoke(current);
       if (!isCurrent() || response?.cancelled || response?.code === 'CANCELLED') return;
       if (!response?.ok) throw new Error(response?.error || tr('操作未完成，请重试。'));
-      update(key, value => ({ ...accept(value, response), error: '' }));
+      update(key, value => ({ ...accept(value, response), error: '',
+        ...(operation === 'save' && response.script?.id ? { savedTask: { id: response.script.id, name: response.script.name || '' } } : {}),
+      }));
       if (operation === 'save' && response.script?.id) {
         showToast?.(tr('测试任务已保存，尚未执行。'));
-        onOpenTasks?.(response.script.id);
       }
+      return response;
     } catch (error) {
       if (isCurrent()) update(key, value => ({ ...value, error: error.message || tr('操作未完成，请重试。') }));
     } finally {
@@ -197,7 +218,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
         const response = await api().aiHandoffClear();
         if (!response?.ok) throw new Error(response?.error || tr('无法读取本地证据篮。'));
         if (!alive.current) return;
-        update(mode, current => ({ ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId),
+        update(mode, current => ({ ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId, applicationContext),
           revision: current.revision + 1, turns: current.turns,
           basketRevision: Math.max(current.basketRevision ?? 0, response.basket.revision),
           basketItems: current.basketRevision > response.basket.revision ? current.basketItems : response.basket.items }));
@@ -206,7 +227,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
       finally { reportLock.current = false; if (alive.current) setReportBusy(''); }
     }
     update(mode, current => current.busy ? current : {
-    ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId), revision: current.revision + 1,
+    ...adoptWorkspaceDefaults(createWorkspaceCase(mode, current.deviceId, current.caseId), devices, activeDeviceId, applicationContext), revision: current.revision + 1,
     turns: current.turns,
     });
   };
@@ -233,6 +254,13 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
     ...(mode === 'analysis' && value.basketRevision !== null ? { basketRevision: value.basketRevision } : {}),
   }), (value, response) => ({ ...value, preparing: false, preview: response.preview, result: null, usage: null, cached: false }));
   const analyze = () => run('analyze', value => api().aiWorkspaceAnalyze({ caseId: value.caseId, previewId: value.preview.id, consent: true }), completeWorkspaceTurn);
+  const collectAndReview = async () => {
+    const key = mode, current = casesRef.current[key], token = { caseId: current.caseId, revision: current.revision };
+    const response = await collect();
+    // The existing outbound transport still requires its complete frozen-batch review and explicit send decision.
+    if (response?.preview && sources.entitled === true && activeRef.current && modeRef.current === key
+      && collectedPreviewCanReview(casesRef.current[key], token, response.preview.id)) return analyze();
+  };
   const generate = () => run('generate', value => api().aiWorkspaceGenerateTask({ caseId: value.caseId, deviceId: value.deviceId, goal: value.question, requirements: value.requirements,
     ...(value.contextRef ? { contextRef: value.contextRef } : {}), ...(Number.isInteger(value.findingIndex) ? { findingIndex: value.findingIndex } : {}),
     ...(value.targetSelection.tokens.length ? { targetSelection: value.targetSelection } : {}), ...(value.handoffId ? { handoffId: value.handoffId } : {}),
@@ -351,7 +379,9 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, i
       }));
     }
   });
-  return { mode, setMode, cases, current: cases[mode], sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, analyze, generate, save,
+  return { mode, setMode, cases, current: cases[mode], sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, collectAndReview, analyze, generate, save,
+    draftPersistenceError, draftNotice, retryDraftPersistence, dismissDraftNotice: () => setDraftNotice(false),
+    openSavedTask: () => { const task = casesRef.current[mode].savedTask; if (task?.id) onOpenTasks?.(task.id); },
     editDraft: draftEdits => update('task', value => value.busy || !value.draft ? value : { ...value, draftEdits }),
     history, reportBusy, reportError, selectTurn, loadHistory, saveReport, deleteHistory, exportReport, useContext, compare, prepareVerification,
     casebook, searchCasebook, similarCases, loadCase, saveCase, deleteCase, pendingHandoff,

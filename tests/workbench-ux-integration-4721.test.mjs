@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import { suggestWorksetName } from '../src/shared/worksetQuickRestore.js';
+import { resolveActiveDeviceId } from '../src/shared/deviceWorkflow.js';
 const require = createRequire(import.meta.url), { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default;
 const read = path => fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 function effect(path, match) {
@@ -27,7 +29,7 @@ test('late workset application defaults cannot overwrite target or package edits
   for (const changed of ['target', 'application', 'closed', 'none']) {
     let release; const loaded = new Promise(resolve => { release = resolve; });
     const values = {}, mounted = { current: false }, epoch = { current: 0 }, loadTicket = { current: 0 }, targetEdited = { current: false };
-    const bindings = { open: true, mounted, epoch, loadTicket, targetEdited, deviceId: 'A', packageName: '', dialog: { current: { showModal() {}, close() {} } }, document: { activeElement: { focus() {} } },
+    const bindings = { open: true, mounted, epoch, loadTicket, targetEdited, nameEdited: { current: false }, deviceId: 'A', packageName: '', devices: [{ id: 'A' }], page: 'devices', pages: { devices: 'Devices' }, suggestWorksetName, dialog: { current: { showModal() {}, close() {} } }, document: { activeElement: { focus() {} } },
       setTarget: value => { values.target = value; }, setApplication: value => { values.application = value; }, setName() {}, setError() {}, setNotice() {}, setBusy() {}, load: () => { loadTicket.current++; return loaded; } };
     const cleanup = runInNewContext(`(${callback})`, bindings)();
     if (changed === 'target') { targetEdited.current = true; values.target = 'B'; values.application = ''; }
@@ -48,7 +50,7 @@ test('late initial workset list cannot overwrite the result of a newer explicit 
   const old = { ok: true, items: [{ id: 'old' }], context: {} }, current = { ok: true, items: [{ id: 'new' }], context: {} };
   const api = runInNewContext(code, { epoch: { current: 1 }, loadTicket: { current: 0 }, mounted: { current: true },
     window: { electronAPI: { worksetList: () => oldList, worksetSave: async () => current } },
-    setData: value => { visible = value; }, setNotice() {}, name: 'Current configuration', target: 'A', application: 'com.fixture', pages: { devices: 'Devices' }, page: 'devices',
+    setData: value => { visible = value; }, setNotice() {}, name: 'Current configuration', nameEdited: { current: false }, target: 'A', application: 'com.fixture', pages: { devices: 'Devices' }, page: 'devices',
     action: async (_operation, run) => run(), confirmAppMessage: async () => true, tr: value => value });
   const first = api.load(); await api.save(); release(old); await first;
   assert.equal(visible.items[0].id, 'new');
@@ -56,8 +58,8 @@ test('late initial workset list cannot overwrite the result of a newer explicit 
 
 test('a stale initial list failure cannot replace feedback after a successful workset save', async () => {
   let rejectOld; const old = new Promise((_resolve, reject) => { rejectOld = reject; });
-  const values = { error: '', notice: '', items: [] }, scope = { open: true, busy: '', epoch: { current: 0 }, loadTicket: { current: 0 }, targetEdited: { current: false }, mounted: { current: false },
-    deviceId: 'A', packageName: '', name: 'Saved', target: 'A', application: '', page: 'devices', pages: { devices: 'Devices' },
+  const values = { error: '', notice: '', items: [] }, scope = { open: true, busy: '', epoch: { current: 0 }, loadTicket: { current: 0 }, targetEdited: { current: false }, nameEdited: { current: false }, mounted: { current: false },
+    deviceId: 'A', packageName: '', devices: [{ id: 'A' }], suggestWorksetName, name: 'Saved', target: 'A', application: '', page: 'devices', pages: { devices: 'Devices' },
     window: { electronAPI: { worksetList: () => old, worksetSave: async () => ({ ok: true, items: [{ id: 'saved' }], context: {} }) } },
     dialog: { current: { showModal() {}, close() {} } }, document: { activeElement: { focus() {} } },
     setTarget() {}, setApplication() {}, setName() {}, setBusy() {}, setData: value => { values.items = value.items; },
@@ -93,7 +95,7 @@ test('manual scrolling wins over delayed restore and observers do not jump the u
 test('log-file-only worksets restore filter configuration without an implicit device connection or AI call', async () => {
   const calls = [], state = {}, refs = { current: '' }, item = { id: 'x', name: 'File filter', page: 'devices', deviceId: '', packageName: '', logs: { deviceId: '', filter: { text: 'error' }, buffers: ['main'] } };
   const restore = runInNewContext(`(${initializer('src/App.jsx', 'restoreWorkset')})`, {
-    window: { electronAPI: { logAnalyzerApplyContext: async value => { calls.push(value); return { ok: true }; } } }, devices: [], worksetTargetRef: refs,
+    window: { electronAPI: { logAnalyzerApplyContext: async value => { calls.push(value); return { ok: true }; } } }, devicesRef: { current: [] }, worksetTargetRef: refs,
     setActiveDeviceId: value => { state.device = value; }, setNavigationContext: value => { state.context = value; }, setWorksetRequest: value => { state.request = value; },
     setActiveTab: value => { state.page = value; }, setWorksetNotice() {}, rememberWorksetContext: async () => {}, crypto: { randomUUID: () => 'request' }, tr: value => value
   });
@@ -107,4 +109,21 @@ test('global status and connection UI share one entry and keep the same explicit
   assert.equal((activity.match(/<SidebarConnectionStatus/g) || []).length, 1);
   assert.match(activity, /setOpen\(false\); onNavigateConnection\?\.\(page\)/);
   assert.match(activity, /connectionSummary\.connections/);
+});
+
+test('workset restoration rechecks current discovery and pins its explicit device through later disconnects', async () => {
+  let finish;
+  const state = { device: '', devices: [{ id: 'A', status: 'device' }] }, devicesRef = { current: state.devices }, worksetTargetRef = { current: '' };
+  const scope = { devices: state.devices, devicesRef, worksetTargetRef, resolveActiveDeviceId, useMemo: fn => fn(), singleFlight: fn => fn,
+    window: { electronAPI: { logAnalyzerApplyContext: () => new Promise(resolve => { finish = resolve; }), getDevices: async () => devicesRef.current } },
+    setActiveDeviceId: value => { state.device = typeof value === 'function' ? value(state.device) : value; }, setDevices: update => { state.devices = update(state.devices); }, setNavigationContext() {}, setWorksetRequest() {}, setLoading() {}, setError() {},
+    setActiveTab: value => { state.page = value; }, setDeviceQuery() {}, setWorksetNotice() {}, rememberWorksetContext: async () => {}, crypto: { randomUUID: () => 'request' }, tr: value => value };
+  const restore = runInNewContext(`(${initializer('src/App.jsx', 'restoreWorkset')})`, scope);
+  const pending = restore({ deviceId: 'A', packageName: 'com.a', page: 'quality' });
+  devicesRef.current = [{ id: 'B', status: 'device' }]; finish({ ok: true }); await pending;
+  assert.equal(state.device, ''); assert.equal(state.page, 'devices'); assert.equal(worksetTargetRef.current, 'A');
+  const discover = runInNewContext(`(${initializer('src/App.jsx', 'fetchDevices')})`, scope);
+  devicesRef.current.push({ id: 'A', status: 'device' }); await discover(); assert.equal(state.device, 'A');
+  devicesRef.current = [{ id: 'B', status: 'device' }]; await discover();
+  assert.equal(state.device, ''); assert.equal(worksetTargetRef.current, 'A');
 });

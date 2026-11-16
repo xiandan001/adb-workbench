@@ -20,6 +20,7 @@ import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
 import useWorkbenchSearch from './components/useWorkbenchSearch';
 import WorkbenchWorksets from './components/WorkbenchWorksets';
+import WorkbenchContextBar from './components/WorkbenchContextBar';
 import useWorkbenchUiWorkspace from './shared/useWorkbenchUiWorkspace';
 import { recentWirelessEntries } from './shared/workbenchUiState';
 import DangerConfirmModal from './components/DangerConfirmModal';
@@ -34,18 +35,20 @@ import { tr, useLocale, getLocale, useLanguageSelectionPending } from './shared/
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import ApplicationLogSection from './components/ApplicationLogSection';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
-import { observeUpdaterState } from './shared/updaterState.js';
+import { observeUpdaterState, updaterInstallLabel } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { searchDestinations } from './shared/workbenchSearch';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme } from './shared/theme';
-import { deviceConnectionHint, deviceStatusLabel, resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
-import { isHarmonyDevice, platformLabel, displayDeviceId, deviceRemoteRoot, applicationPackageExtensions } from './shared/devicePlatform';
+import { resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
+import { isHarmonyDevice, platformLabel, deviceRemoteRoot, applicationPackageExtensions } from './shared/devicePlatform';
 import { addRecentApk, readRecentApks, RECENT_APKS_KEY, saveShortcutList } from './shared/deviceShortcuts';
 import { connectWirelessDevice, historyConnectionAddress } from './shared/wirelessConnection';
 import { gradientOptions, CARD_BACKGROUNDS, TERMINAL_BACKGROUNDS } from './data/deviceControlOptions';
 import { filterDeviceCards, readPinnedDevices, togglePinnedDevice } from './shared/deviceDiscovery';
+import { readInitialNavigation } from './shared/workbenchUiState';
+import { applicationForDevice, emptyApplicationContext, nextApplicationContext, readApplicationContext, saveApplicationContext } from './shared/applicationContext';
 import SerialPanel from './components/SerialPanel';
 const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
 const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspace'));
@@ -70,14 +73,21 @@ function App() {
   const languageSelectionPending = useLanguageSelectionPending();
   useEffect(() => { document.title = tr('卓控台'); }, [locale]);
   const [devices, setDevices] = useState([]);
+  const devicesRef = useRef([]);
   const [pinnedDeviceIds, setPinnedDeviceIds] = useState(() => readPinnedDevices());
   const [activeDeviceId, setActiveDeviceId] = useState(() => localStorage.getItem('activeDeviceId') || '');
   const previousActiveDeviceIdRef = useRef(activeDeviceId);
   const [navigationContext, setNavigationContext] = useState(null);
+  const [applicationBoot] = useState(() => { try { return { value: readApplicationContext(), error: '' }; } catch (failure) { return { value: emptyApplicationContext(), error: failure.message }; } });
+  const [applicationMemory, setApplicationMemory] = useState(applicationBoot.value);
+  const applicationMemoryRef = useRef(applicationBoot.value);
+  const [applicationSaveError, setApplicationSaveError] = useState(applicationBoot.error);
+  const selectedApplication = navigationContext?.deviceId === activeDeviceId ? navigationContext.packageName || '' : applicationForDevice(applicationMemory, activeDeviceId);
+  const applicationContext = { deviceId: activeDeviceId, packageName: selectedApplication };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
-  const [navigation, setNavigation] = useState({ activeTab: 'devices', sshVisited: false, aiToolsVisited: false, aiVisited: false });
+  const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
   const { deviceQuery, setDeviceQuery, density: deviceCardDensity, setDensity: setDeviceCardDensity,
     expandedDeviceIds, setExpandedDeviceIds, mainRef, saveError: workspaceSaveError, retrySave: retryWorkspaceSave } = useWorkbenchUiWorkspace(activeTab);
@@ -226,6 +236,7 @@ function App() {
     downloading: false,
     downloaded: false,
     installing: false,
+    installPhase: '',
     progress: null,
     error: null,
     info: null,
@@ -427,16 +438,18 @@ function App() {
       const nextDevices = window.electronAPI
         ? await window.electronAPI.getDevices()
         : [];
+      devicesRef.current = nextDevices;
       setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
       setActiveDeviceId(previous => {
         const target = worksetTargetRef.current;
         if (!target) return resolveActiveDeviceId(previous, nextDevices);
-        if (nextDevices.some(device => device.id === target && device.status === 'device')) { worksetTargetRef.current = ''; return target; }
+        if (nextDevices.some(device => device.id === target && device.status === 'device')) return target;
         return '';
       });
       setError('');
     } catch (err) {
       setError(tr("设备状态刷新失败：{0}。已保留设备选择，请运行环境自检。", { 0: err.message || tr("请检查 ADB 环境") }));
+      devicesRef.current = devicesRef.current.map(device => ({ ...device, status: 'offline' }));
       setDevices(previous => previous.map(device => ({ ...device, status: 'offline' })));
     } finally {
       if (!silent) setLoading(false);
@@ -498,14 +511,37 @@ function App() {
       if (!result?.ok) throw new Error(result?.error || tr('工作集上下文未能保存，已有配置保持不变。'));
     } catch (failure) { setWorksetNotice(failure.message); }
   }, []);
+  const rememberApplicationChoice = useCallback((deviceId, packageName) => {
+    if (!deviceId) return;
+    let next;
+    try { next = nextApplicationContext(applicationMemoryRef.current, deviceId, packageName || ''); }
+    catch (failure) { setApplicationSaveError(failure.message); return; }
+    if (JSON.stringify(next) === JSON.stringify(applicationMemoryRef.current)) return;
+    applicationMemoryRef.current = next; setApplicationMemory(next);
+    try { saveApplicationContext(next); setApplicationSaveError(''); }
+    catch (failure) { setApplicationSaveError(failure.message); }
+  }, []);
+  useEffect(() => {
+    if (navigationContext?.deviceId) rememberApplicationChoice(navigationContext.deviceId, navigationContext.packageName || '');
+  }, [navigationContext?.deviceId, navigationContext?.packageName, rememberApplicationChoice]);
   const chooseDevice = deviceId => { worksetTargetRef.current = ''; setActiveDeviceId(deviceId); };
+  const chooseApplication = packageName => {
+    if (!activeDeviceId) return;
+    rememberApplicationChoice(activeDeviceId, packageName);
+    setNavigationContext({ deviceId: activeDeviceId, packageName, requestId: crypto.randomUUID() });
+    void rememberWorksetContext({ part: 'application', value: { deviceId: activeDeviceId, packageName } });
+  };
+  const retryApplicationSave = () => {
+    try { saveApplicationContext(applicationMemoryRef.current); setApplicationSaveError(''); }
+    catch (failure) { setApplicationSaveError(failure.message); }
+  };
   const restoreWorkset = async item => {
     if ((item.deviceId || item.logs) && window.electronAPI?.logAnalyzerApplyContext) {
       const result = await window.electronAPI.logAnalyzerApplyContext({ deviceId: item.deviceId, packageName: item.packageName, ...(item.logs ? { worksetLogs: item.logs } : {}) });
       if (!result?.ok) throw new Error(result?.error || tr('日志过滤配置恢复失败，请重试。'));
     }
-    const online = !item.deviceId || devices.some(device => device.id === item.deviceId && device.status === 'device');
-    worksetTargetRef.current = online ? '' : item.deviceId;
+    const online = !item.deviceId || devicesRef.current.some(device => device.id === item.deviceId && device.status === 'device');
+    worksetTargetRef.current = item.deviceId || '';
     if (item.deviceId) setDeviceQuery('');
     setActiveDeviceId(online ? item.deviceId : '');
     setNavigationContext({ deviceId: item.deviceId, packageName: item.packageName, requestId: crypto.randomUUID() });
@@ -526,7 +562,7 @@ function App() {
 
   const viewApplicationLogs = async ({ deviceId, packageName } = {}) => {
     if (deviceId) chooseDevice(deviceId);
-    const rememberedPackage = navigationContext?.deviceId === (deviceId || activeDeviceId) ? navigationContext.packageName : '';
+    const rememberedPackage = navigationContext?.deviceId === (deviceId || activeDeviceId) ? navigationContext.packageName : applicationForDevice(applicationMemoryRef.current, deviceId || activeDeviceId);
     const selectedPackage = packageName ?? rememberedPackage;
     if (deviceId || activeDeviceId) void rememberWorksetContext({ part: 'application', value: { deviceId: deviceId || activeDeviceId, packageName: selectedPackage || '' } });
     try {
@@ -1659,7 +1695,7 @@ function App() {
                 <div className="flex items-center justify-center mb-4">
                   <Loader2 size={32} className="animate-spin text-emerald-500" />
                 </div>
-                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr('正在启动安装器…')}</p>
+                <p className={`text-center text-sm mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{updaterInstallLabel(updaterState.installPhase)}</p>
                 <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
                   <div className="h-full bg-emerald-500 rounded-full animate-[loading_1.2s_ease-in-out_infinite]" style={{ width: '100%' }} />
                 </div>
@@ -1820,6 +1856,8 @@ function App() {
         </nav>
 
         <BackgroundTaskStack
+          theme={t}
+          isDark={isDark}
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
           showToast={showToast}
           onNavigateConnection={setActiveTab}
@@ -1871,7 +1909,7 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <WorkbenchWorksets theme={t} devices={devices} deviceId={activeDeviceId} packageName={navigationContext?.deviceId === activeDeviceId ? navigationContext.packageName : ''} page={activeTab} onRestore={restoreWorkset} />
+            <WorkbenchWorksets theme={t} devices={devices} deviceId={activeDeviceId} packageName={selectedApplication} page={activeTab} onRestore={restoreWorkset} />
             <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
           </div>
 
@@ -1895,40 +1933,16 @@ function App() {
               </button>
             </div>
           )}
+          {['devices', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'artifacts'].includes(activeTab) &&
+            <WorkbenchContextBar devices={devices} activeDevice={activeDevice} deviceNames={deviceNames} onDeviceChange={chooseDevice}
+              packageName={selectedApplication} onApplicationChange={chooseApplication} theme={t} onEnvironment={() => setEnvironmentCheckModalOpen(true)} />}
         </header>
 
         {/* Content Area */}
         <main ref={mainRef} className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
+          {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
           {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
-          {['devices', 'troubleshoot', 'quality', 'tasks', 'performance'].includes(activeTab) && (
-            <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}>
-              <label htmlFor="active-device" className="text-xs font-medium">{tr("当前设备")}</label>
-              <SelectMenu
-                id="active-device"
-                value={activeDevice?.id || ''}
-                onChange={chooseDevice}
-                isDark={isDark}
-                placeholder={tr("尚未发现设备")}
-                emptyText={tr("尚未发现设备")}
-                className="workbench-active-device"
-                options={[
-                  ...(!activeDevice ? [{ value: '', label: devices.length ? tr('请选择设备') : tr("尚未发现设备") }] : []),
-                  ...devices.map(device => ({
-                    value: device.id,
-                    label: [deviceNames[device.id] || device.model, displayDeviceId(device), platformLabel(device), deviceStatusLabel(device.status)].filter(Boolean).join(' · ')
-                  }))
-                ]}
-              />
-              {activeDevice && activeDevice.status !== 'device' && (
-                <div role="status" className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-500">
-                  <AlertCircle size={14} />
-                  <span className="workbench-wrap-anywhere flex-1">{tr("当前设备")}{deviceStatusLabel(activeDevice.status)}{tr("，正在等待可用的在线设备；发现后会自动选用并刷新。")}{deviceConnectionHint(activeDevice.status)}</span>
-                  <button type="button" onClick={() => setEnvironmentCheckModalOpen(true)} className="underline underline-offset-2">{tr("环境自检")}</button>
-                </div>
-              )}
-            </div>
-          )}
           {error && !['serial', 'ssh'].includes(activeTab) && (
             <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {tr(error)}
@@ -2025,7 +2039,7 @@ function App() {
                   </div>
                 </div>
               </div>}
-              <div className="workbench-device-list">
+              <div className="workbench-device-grid"><div className="workbench-device-list">
                 {devices.length === 0 && !loading && !error ? (
                   <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
                     <Smartphone size={48} className={`mb-4 opacity-50 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
@@ -2123,14 +2137,14 @@ function App() {
                   )}
                   </>
                 )}
-              </div>
+              </div></div>
             </>
           )}
 
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
-              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} incomingHandoffId={incomingHandoffId}
+              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId}
                 incomingReportRef={incomingReportRef}
                 onOpenRelatedTask={({ runId, scriptId }) => { if (runId) openTaskRun(runId); else if (scriptId) { setActivityTaskId(''); setAiTaskId(scriptId); setActiveTab('tasks'); } }}
                 showToast={showToast} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }}
@@ -2162,6 +2176,7 @@ function App() {
 
           {activeTab === 'artifacts' && (
             <ArtifactCenter
+              deviceId={activeDeviceId}
               onArtifactRequestHandled={request => setIncomingArtifactRequest(previous => previous === request ? null : previous)}
               incomingArtifactRequest={incomingArtifactRequest}
               onOpenTaskRun={openTaskRun}
@@ -2174,6 +2189,7 @@ function App() {
 
           {activeTab === 'quality' && (
             <QualityCenter
+              applicationContext={applicationContext}
               onGuardRequestHandled={request => setIncomingGuardId(previous => previous === request ? null : previous)}
               onOpenAnalysis={openAnalysis}
               incomingGuardId={incomingGuardId}
@@ -2978,7 +2994,7 @@ function App() {
                             }`}
                           >
                             <DownloadCloud size={14} />
-                            <span>{updateInstalling ? tr('正在启动安装器…') : tr("立即安装并重启")}</span>
+                            <span>{updateInstalling ? updaterInstallLabel(updaterState.installPhase) : tr("立即安装并重启")}</span>
                           </button>
                         )}
                       </div>
@@ -3164,8 +3180,8 @@ function App() {
   );
 }
 
-function BackgroundTaskStack({ tasks, onOpen, showToast, onNavigateConnection }) {
-  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} onNavigateConnection={onNavigateConnection} />;
+function BackgroundTaskStack({ tasks, onOpen, showToast, onNavigateConnection, theme, isDark }) {
+  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} onNavigateConnection={onNavigateConnection} theme={theme} isDark={isDark} />;
 }
 
 function buildSidebarBackgroundTasks(backgroundTasks) {

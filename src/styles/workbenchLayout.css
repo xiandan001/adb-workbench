@@ -6,6 +6,12 @@
 .workbench-sidebar-nav > button > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .workbench-sidebar-nav > button > svg { flex-shrink: 0; }
 .workbench-main { min-width: 0; min-height: 0; }
+.workbench-context-bar { flex: 1 1 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 1rem; min-width: 0; width: 100%; padding: .625rem .75rem; border-radius: .75rem; }
+.workbench-context-field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .5rem; min-width: 0; }
+.workbench-context-field > :first-child { max-width: 8rem; overflow-wrap: anywhere; }
+.workbench-context-field button { min-height: 36px; }
+.workbench-context-note { grid-column: 1 / -1; min-width: 0; margin: 0; line-height: 1.4; }
+.workbench-device-grid { min-width: 0; container: device-grid / inline-size; }
 .workbench-header-title { flex: 1; min-width: 0; }
 .workbench-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; max-width: 100%; }
 .workbench-toolbar-actions > button { flex-shrink: 0; max-width: 100%; }
@@ -54,6 +60,11 @@
 }
 
 @media (min-width: 1280px) {
-  .workbench-device-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workbench-wireless-form { width: auto; }
+}
+@container device-grid (min-width: 1150px) {
+  .workbench-device-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1150px) {
+  .workbench-context-bar { grid-template-columns: minmax(0, 1fr); }
 }

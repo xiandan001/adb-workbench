@@ -1,4 +1,11 @@
-const stateKeys = ['checking', 'refreshing', 'available', 'notAvailable', 'downloading', 'progress', 'downloaded', 'installing', 'error', 'info'];
+import { tr } from './i18n.js';
+const stateKeys = ['checking', 'refreshing', 'available', 'notAvailable', 'downloading', 'progress', 'downloaded', 'installing', 'installPhase', 'error', 'info'];
+
+export function updaterInstallLabel(phase) {
+  if (phase === 'quitting') return tr('安装器已就绪，正在保存并退出应用…');
+  if (phase === 'ready') return tr('安装器已就绪，正在准备安全退出…');
+  return tr('正在启动安装器…');
+}
 
 export function observeUpdaterState(api, update) {
   let active = true;
@@ -6,6 +13,7 @@ export function observeUpdaterState(api, update) {
   const apply = (value, eventName) => {
     if (!active || !value || typeof value !== 'object' || Array.isArray(value)) return;
     const patch = Object.fromEntries(stateKeys.filter(key => Object.hasOwn(value, key)).map(key => [key, value[key]]));
+    if (Object.hasOwn(patch, 'installPhase') && !['', 'launching', 'ready', 'quitting'].includes(patch.installPhase)) delete patch.installPhase;
     update(previous => previous.downloaded && eventName === 'download-progress' ? previous : { ...previous, ...patch });
   };
   const unsubscribe = api?.onUpdaterEvent?.(({ eventName, payload } = {}) => {

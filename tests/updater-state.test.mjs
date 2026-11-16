@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
-import { observeUpdaterState } from '../src/shared/updaterState.js';
+import { observeUpdaterState, updaterInstallLabel } from '../src/shared/updaterState.js';
 const flush = async () => { for (let index = 0; index < 10; index++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 function fixture(snapshot = async () => ({})) {
@@ -26,6 +26,15 @@ test('cached ready state is restored after a renderer reload', async () => {
   const f = fixture(async () => ({ downloaded: true, checking: false, info: { version: '5.0.0' }, currentVersion: '4.7.2' }));
   await flush(); assert.equal(f.state().downloaded, true); assert.equal(f.state().info.version, '5.0.0');
   assert.equal(Object.hasOwn(f.state(), 'currentVersion'), false); f.stop();
+});
+
+test('UI observes only typed install phases and distinguishes the safe-closing state', async () => {
+  const f = fixture(async () => ({ installing: true, installPhase: 'launching' })); await flush();
+  assert.equal(f.state().installPhase, 'launching');
+  f.emit({ eventName: 'state', payload: { installPhase: 'quitting' } }); assert.equal(f.state().installPhase, 'quitting');
+  assert.match(updaterInstallLabel(f.state().installPhase), /保存并退出/);
+  f.emit({ eventName: 'state', payload: { installPhase: 'UNTRUSTED_PHASE' } }); assert.equal(f.state().installPhase, 'quitting');
+  f.stop();
 });
 test('installer startup state survives snapshots, live progress and failed-launch retry reset', async () => {
   const f = fixture(async () => ({ downloaded: true, installing: true }));

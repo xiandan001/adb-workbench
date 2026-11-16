@@ -11,7 +11,6 @@ import {
   FileDiff,
   FileJson,
   FileText,
-  FolderOpen,
   Loader2,
   RefreshCw,
   Search,
@@ -24,6 +23,9 @@ import { isDarkTheme } from '../shared/theme';
 import { formatBytes, sortArtifacts, resolveArtifactPreviewRequest } from '../shared/artifactWorkspace';
 import SelectMenu from './SelectMenu';
 import ArtifactPreview from './ArtifactPreview';
+import ResultActionsMenu from './ResultActionsMenu';
+import { artifactTechnicalActions } from '../shared/resultActions.js';
+import useArtifactViewState from '../shared/useArtifactViewState.js';
 
 const TYPE_FILTERS = () => ([
   { id: 'all', label: tr("全部") },
@@ -46,7 +48,7 @@ const TYPE_META = {
   reproduction: { icon: ClipboardCheck, color: 'text-emerald-400', bg: 'bg-emerald-500/15' }
 };
 
-function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onOpenTaskRun, incomingArtifactRequest, onArtifactRequestHandled }) {
+function ArtifactCenter({ theme, deviceId = '', showToast, showConfirm, onOpenReproduction, onOpenTaskRun, incomingArtifactRequest, onArtifactRequestHandled }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const [items, setItems] = useState([]);
@@ -55,12 +57,12 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState('');
   const [exportResult, setExportResult] = useState(null);
-  const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
+  const { query, setQuery, typeFilter, setTypeFilter, sortOrder, setSortOrder, visibleCount, setVisibleCount,
+    saveError, retrySave } = useArtifactViewState(deviceId);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectionScope, setSelectionScope] = useState(deviceId);
+  if (selectionScope !== deviceId) { setSelectionScope(deviceId); setSelectedIds(new Set()); }
   const [error, setError] = useState('');
-  const [sortOrder, setSortOrder] = useState('newest');
-  const [visibleCount, setVisibleCount] = useState(30);
   const [previewItem, setPreviewItem] = useState(null);
   const handledPreviewRequest = useRef('');
 
@@ -73,14 +75,14 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
-    const res = await window.electronAPI?.artifactsList?.();
-    if (res?.ok) {
-      setItems(res.items || []);
-      setListReady(true);
-    } else {
-      setError(res?.error || tr("产物列表加载失败"));
-    }
-    setLoading(false);
+    try {
+      const res = await window.electronAPI?.artifactsList?.();
+      if (res?.ok) {
+        setItems(res.items || []);
+        setListReady(true);
+      } else setError(res?.error || tr("产物列表加载失败"));
+    } catch { setError(tr("产物列表加载失败")); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -115,8 +117,6 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
         ].some(value => String(value || '').toLowerCase().includes(keyword));
       }), sortOrder);
   }, [items, query, typeFilter, sortOrder, locale]);
-
-  useEffect(() => { setVisibleCount(30); }, [query, typeFilter, sortOrder]);
 
   const selectedItems = useMemo(() => { void locale; return items.filter(item => selectedIds.has(item.id)); }, [items, selectedIds, locale]);
   const filteredIds = useMemo(() => { void locale; return filteredItems.map(item => item.id); }, [filteredItems, locale]);
@@ -232,23 +232,23 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button
-              onClick={() => deleteArtifacts(filteredIds, hasFilter ? tr("删除筛选结果") : tr("清空全部产物"))}
-              disabled={loading || deleting || Boolean(exporting) || filteredItems.length === 0}
-              className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
-            >
-              <Trash2 size={15} />
-              {hasFilter ? tr("删除筛选结果") : tr("清空全部")}
-            </button>
-            <button
               onClick={refresh}
               disabled={loading || deleting}
               className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-60 ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145] text-[#E8EAED]' : 'border-slate-200 hover:bg-slate-100 text-slate-700'}`}
             >
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />{tr("刷新")}</button>
+            <ResultActionsMenu isDark={isDark} disabled={loading || deleting || Boolean(exporting)} actions={[{
+              id: 'remove-filtered', label: hasFilter ? tr('删除筛选结果') : tr('清空全部产物'), danger: true, disabled: !filteredItems.length,
+              onSelect: () => deleteArtifacts([...filteredIds], hasFilter ? tr('删除筛选结果') : tr('清空全部产物')),
+            }]} />
           </div>
         </div>
 
         <div className="p-5 space-y-4">
+          {saveError && <div role="status" className={`flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${muted}`}>
+            <span className="min-w-0 flex-1 break-words">{tr(saveError)}</span>
+            <button type="button" onClick={retrySave} className="text-emerald-600 underline">{tr('重试保存查看条件')}</button>
+          </div>}
           {exportResult && (
             <div role="status" className={`rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-3 ${exportResult.ok ? (isDark ? 'border-emerald-500/40 text-emerald-300' : 'border-emerald-200 text-emerald-700') : (isDark ? 'border-red-500/40 text-red-300' : 'border-red-200 text-red-700')}`}>
               <span>{exportResult.message}</span>
@@ -260,6 +260,8 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
               <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${muted}`} />
               <input
                 value={query}
+                maxLength={300}
+                aria-label={tr('搜索标题、设备、路径')}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={tr("搜索标题、设备、路径")}
                 className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
@@ -345,6 +347,7 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
                 <ArtifactRow
                   key={item.id}
                   item={item}
+                  primaryClass={theme?.button?.primary}
                   isDark={isDark}
                   text={text}
                   muted={muted}
@@ -370,12 +373,12 @@ function ArtifactCenter({ theme, showToast, showConfirm, onOpenReproduction, onO
   );
 }
 
-function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview, onOpenReproduction, onOpenTaskRun }) {
+function ArtifactRow({ item, isDark, primaryClass, text, muted, selected, disabled, exporting, onExport, onToggleSelect, onDelete, onOpenPath, onPreview, onOpenReproduction, onOpenTaskRun }) {
   useLocale();
   const meta = TYPE_META[item.type] || TYPE_META.task;
   const Icon = meta.icon;
   return (
-    <div className={`rounded-xl border p-4 transition-colors ${selected ? (isDark ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-emerald-50 border-emerald-200') : (isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200')}`}>
+    <div data-artifact-id={item.id} className={`rounded-xl border p-4 transition-colors ${selected ? (isDark ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-emerald-50 border-emerald-200') : (isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200')}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 gap-3">
           <button
@@ -392,48 +395,28 @@ function ArtifactRow({ item, isDark, text, muted, selected, disabled, exporting,
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className={`font-semibold truncate ${text}`}>{item.title}</span>
+              <span title={item.title} className={`font-semibold truncate ${text}`}>{item.title}</span>
               <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] ${meta.bg} ${meta.color}`}>{item.typeLabel}</span>
             </div>
-            <div className={`text-xs mt-1 ${muted}`}>{item.subtitle || tr("产物记录")}</div>
-            <div className={`text-[11px] mt-2 font-mono truncate ${muted}`}>{item.rootPath}</div>
+            <div className={`break-words text-xs mt-1 ${muted}`}>{item.subtitle || tr("产物记录")}</div>
           </div>
         </div>
         <div className={`text-xs shrink-0 ${muted}`}>{formatDate(item.updatedAt || item.createdAt)}</div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className={`text-xs ${muted}`}>
+        <div className={`min-w-0 break-all text-xs ${muted}`}>
           {item.deviceId ? tr("设备：{0}", { 0: item.deviceId }) : tr("未记录设备")} · {item.artifactCount || 0}{tr(" 项")}{' · '}{formatBytes(item.sizeBytes)}
         </div>
         <div className="flex flex-wrap gap-2">
           {item.type === 'reproduction' && onOpenReproduction && <button type="button" disabled={disabled} onClick={() => onOpenReproduction(item.sessionId || item.id)} className={`${buttonClass(isDark)} disabled:opacity-50`}><ClipboardCheck size={14} />{tr('查看复现采证')}</button>}
           {item.type === 'task' && item.taskId && onOpenTaskRun && <button type="button" disabled={disabled} onClick={() => onOpenTaskRun(item.taskId)} className={`${buttonClass(isDark)} disabled:opacity-50`}><ClipboardCheck size={14} />{tr('查看原运行')}</button>}
-          <button type="button" onClick={() => onPreview(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}><Eye size={14} />{tr("预览")}</button>
+          <button type="button" onClick={() => onPreview(item)} disabled={disabled} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${primaryClass || 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'}`}><Eye size={14} />{tr('查看结果')}</button>
           <button type="button" onClick={() => onExport(item)} disabled={disabled} className={`${buttonClass(isDark)} disabled:opacity-50`}>
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
             {exporting ? tr("正在打包…") : tr("导出证据包")}
           </button>
-          {item.reportPath && (
-            <button onClick={() => onOpenPath(item.reportPath)} className={buttonClass(isDark)}>
-              <FileText size={14} />{tr("打开报告")}</button>
-          )}
-          {item.summaryPath && (
-            <button onClick={() => onOpenPath(item.summaryPath)} className={buttonClass(isDark)}>
-              <FileJson size={14} />{tr("打开数据")}</button>
-          )}
-          {item.rootPath && (
-            <button onClick={() => onOpenPath(item.rootPath)} className={buttonClass(isDark)}>
-              <FolderOpen size={14} />{tr("打开目录")}</button>
-          )}
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            disabled={disabled}
-            className={`px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 disabled:opacity-50 ${dangerButtonClass(isDark)}`}
-            title={tr("删除产物")}
-          >
-            <Trash2 size={14} />{tr("删除")}</button>
+          <ResultActionsMenu isDark={isDark} disabled={disabled} actions={artifactTechnicalActions(item, { onOpenPath, onDelete })} />
         </div>
       </div>
     </div>

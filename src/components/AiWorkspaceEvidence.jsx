@@ -36,6 +36,9 @@ export default function AiWorkspaceEvidence({ preview, busy, entitled, onAnalyze
       <span className={`shrink-0 text-xs ${theme.textMuted}`}>{tr('{0} 份证据 · {1} KiB', { 0: formatNumber(preview.entries.length), 1: formatNumber((preview.bytes || 0) / 1024, { maximumFractionDigits: 1 }) })}</span>
     </div>
     <div className="space-y-3 p-4">
+      {!readOnly && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('本地证据已准备。完整消息只在最终发送确认中展示；未明确发送前不会联网。')}</p>}
+      {preview.truncated && <p className="flex items-start gap-2 text-xs leading-5 text-amber-600 dark:text-amber-400"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{tr('部分证据已达到大小限制，AI 只能分析预览中保留的内容。')}</p>}
+      <details open={readOnly} className="rounded-lg border border-slate-400/15 p-3"><summary className="cursor-pointer text-xs font-medium">{readOnly ? tr('报告中的冻结证据') : tr('查看本地证据（不会发送）')}</summary><div className="mt-3 space-y-3">
       <div className={`rounded-lg border p-3 ${theme.input}`}><p className={`mb-1 text-xs ${theme.textMuted}`}>{tr('本次问题')}</p><p className="whitespace-pre-wrap break-words text-sm">{preview.question}</p></div>
       <AiWorkspaceContext context={preview.context} theme={theme} />
       {preview.handoff && <AiWorkspaceHandoff handoff={preview.handoff} theme={theme} />}
@@ -46,11 +49,11 @@ export default function AiWorkspaceEvidence({ preview, busy, entitled, onAnalyze
         {!preview.comparison.comparable && <p className="text-amber-600 dark:text-amber-400">{tr('当前证据不足以可靠比较，结论应为“无法判断”。')}</p>}
         {preview.comparison.warnings?.map((warning, index) => <p key={index} className={theme.textMuted}>{warning}</p>)}
       </div>}
-      {preview.truncated && <p className="flex items-start gap-2 text-xs leading-5 text-amber-600 dark:text-amber-400"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{tr('部分证据已达到大小限制，AI 只能分析预览中保留的内容。')}</p>}
       <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
         {preview.entries.map((entry, index) => <AiWorkspaceEvidenceLines key={entry.id} entry={entry} first={index === 0} highlight={highlight} theme={theme} />)}
       </div>
       <AiWorkspaceEvents entries={preview.entries} onCitation={onCitation} theme={theme} />
+      </div></details>
       {!readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-400/15 pt-3">
         <p className={`flex max-w-md items-start gap-1.5 text-xs leading-5 ${fresh ? theme.textMuted : 'text-amber-600'}`}><LockKeyhole size={14} className="mt-0.5 shrink-0" />{fresh ? tr('继续后将显示最终发送预览；确认前不会联网。') : tr('预览已过期，请重新采集后再分析。')}</p>
         <button type="button" onClick={onAnalyze} disabled={Boolean(busy) || !entitled || !fresh} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`}><Send size={15} />{tr('查看并确认发送')}</button>

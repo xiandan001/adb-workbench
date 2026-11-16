@@ -202,7 +202,7 @@ test('real terminal layout transitions preserve draft, output, font size and a r
     if (typeof type === 'function' && type.name === 'DeviceTerminalSurface') return type({ ...props, children: children[0] });
     return element(type, props, ...children);
   } };
-  for (const name of ['DeviceCardHeader', 'ControlButton', 'SelectMenu', 'DeviceNavigationControls', 'DeviceRecordingStatus', 'DeviceRecentMedia', 'AiContextButton', 'InspectionPanel', 'PackageManagerPanel', 'DangerConfirmModal']) sandbox[name] = () => null;
+  for (const name of ['DeviceCardHeader', 'ControlButton', 'SelectMenu', 'DeviceNavigationControls', 'DeviceRecordingStatus', 'RecordingModeControl', 'DeviceRecentMedia', 'AiContextButton', 'InspectionPanel', 'PackageManagerPanel', 'DangerConfirmModal']) sandbox[name] = () => null;
   const imports = parse(original, { sourceType: 'module', plugins: ['jsx'] }).program.body.find(node => node.type === 'ImportDeclaration' && node.source.value === 'lucide-react');
   for (const item of imports.specifiers) sandbox[item.local.name] = () => null;
   runInNewContext(compiled.code, sandbox);

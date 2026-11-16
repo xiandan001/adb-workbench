@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { tr, useLocale } from '../shared/i18n';
-import { readQualityDraft, writeQualityDraft } from '../shared/qualityDraft';
+import { readQualityDraft, seedQualityApplication, writeQualityDraft } from '../shared/qualityDraft';
 import QualityCenter from './QualityCenter';
 
 export default function QualityWorkspace(props) {
@@ -10,7 +10,7 @@ export default function QualityWorkspace(props) {
 }
 function DeviceQualityDraft({ deviceKey, ...props }) {
   useLocale();
-  const [initialDraft] = useState(() => readQualityDraft(localStorage, deviceKey));
+  const [initialDraft] = useState(() => seedQualityApplication(readQualityDraft(localStorage, deviceKey), deviceKey, props.applicationContext));
   const [failed, setFailed] = useState(false);
   const persist = useCallback(form => { if (deviceKey) setFailed(!writeQualityDraft(localStorage, deviceKey, form)); }, [deviceKey]);
   return <>

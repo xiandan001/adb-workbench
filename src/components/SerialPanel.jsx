@@ -11,6 +11,8 @@ import { applySerialWorkspaceDelta, applySerialWorkspaceSnapshot, createSerialDi
 import { isDarkTheme } from '../shared/theme';
 import { readSerialTerminalStyle, saveSerialTerminalStyle } from '../shared/serialTerminalStyle';
 import SerialSchemeControls from './SerialSchemeControls';
+import { applyAndConnectSerialScheme, readSerialSchemeSelection, resetSerialSchemeSelection, saveSerialSchemeSelection } from '../shared/serialSchemeConnection';
+import { confirmAppMessage } from '../shared/appMessageDialog';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
 const WORKSPACE_LABELS = () => ({ rs232: tr("RS232调试"), terminal: tr("串口终端") });
@@ -21,11 +23,14 @@ function initialSettings() {
   let history = [];
   const workspace = readSerialWorkspace();
   let terminalStyleError = '';
+  let schemeSelectionError = '';
   const errors = [];
+  let selectedSchemes = { version: 1, rs232: '', terminal: '' };
   try { preferences = readSerialPreferences(); } catch (error) { errors.push(error.message); }
   try { history = readSerialHistory(); } catch (error) { errors.push(error.message); }
+  try { selectedSchemes = readSerialSchemeSelection(); } catch (error) { schemeSelectionError = error.message; }
   try { workspace.terminal.style = readSerialTerminalStyle(); } catch (error) { terminalStyleError = error.message; }
-  return { preferences, history, workspace, terminalStyleError, error: errors.join('；') };
+  return { preferences, history, workspace, selectedSchemes, schemeSelectionError, terminalStyleError, error: errors.join('；') };
 }
 
 export default function SerialPanel({ theme, showToast, worksetRequest, onWorksetContext }) {
@@ -35,6 +40,7 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
   const [preferences, setPreferences] = useState(settings.preferences);
   const [history, setHistory] = useState(settings.history);
   const [persistenceError, setPersistenceError] = useState(settings.error);
+  const [schemeSelectionError, setSchemeSelectionError] = useState(settings.schemeSelectionError);
   const [terminalStyleError, setTerminalStyleError] = useState(settings.terminalStyleError);
   const [workspace, setWorkspace] = useState(settings.workspace);
   const [snapshots, setSnapshots] = useState(emptySerialWorkspaces);
@@ -44,7 +50,7 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
   const [errors, setErrors] = useState({ rs232: '', terminal: '' });
   const [pending, setPending] = useState({ rs232: '', terminal: '' });
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedSchemes, setSelectedSchemes] = useState({ rs232: '', terminal: '' });
+  const [selectedSchemes, setSelectedSchemes] = useState(settings.selectedSchemes);
   const [worksetNotice, setWorksetNotice] = useState('');
   const handledWorkset = useRef('');
   const actionRef = useRef({ rs232: null, terminal: null });
@@ -79,15 +85,30 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
     updateSerialWorkspace({ mode: scheme.workspace });
     setWorkspace(previous => ({ ...previous, mode: scheme.workspace }));
     if (scheme.workspace === 'terminal') setTerminalOpened(true);
-    setSelectedSchemes(previous => ({ ...previous, [scheme.workspace]: scheme.id }));
+    const nextSelection = { ...selectedSchemes, [scheme.workspace]: scheme.id };
+    setSelectedSchemes(nextSelection);
+    try { saveSerialSchemeSelection(nextSelection); setSchemeSelectionError(''); }
+    catch (failure) { setSchemeSelectionError(failure.message); }
     setWorksetNotice(tr('已选中工作集的串口方案；仍需手动套用，当前 COM 和连接保持不变。'));
     onWorksetContext?.({ part: 'serial', value: { workspace: scheme.workspace, schemeId: scheme.id } });
-  }, [worksetRequest, preferences.schemes, onWorksetContext]);
+  }, [worksetRequest, preferences.schemes, onWorksetContext, selectedSchemes]);
 
   const selectScheme = schemeId => {
     setWorksetNotice('');
-    setSelectedSchemes(previous => ({ ...previous, [mode]: schemeId }));
+    const next = { ...selectedSchemes, [mode]: schemeId };
+    setSelectedSchemes(next);
+    try { saveSerialSchemeSelection(next); setSchemeSelectionError(''); }
+    catch (failure) { setSchemeSelectionError(failure.message); }
     onWorksetContext?.({ part: 'serial', value: schemeId ? { workspace: mode, schemeId } : null });
+  };
+  const retrySchemeSelection = () => {
+    try { saveSerialSchemeSelection(selectedSchemes); setSchemeSelectionError(''); }
+    catch (failure) { setSchemeSelectionError(failure.message); }
+  };
+  const resetSchemeSelection = async () => {
+    if (!await confirmAppMessage({ type: 'warning', title: tr('重置连接方案选择'), message: tr('只重置方案选择，不删除方案、不改变 COM 或当前连接。'), confirmLabel: tr('重置选择') })) return;
+    try { setSelectedSchemes(resetSerialSchemeSelection()); setSchemeSelectionError(''); onWorksetContext?.({ part: 'serial', value: null }); }
+    catch (failure) { setSchemeSelectionError(failure.message); }
   };
 
   const changeTerminalSettings = changes => {
@@ -264,6 +285,16 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
     const result = await act(target, 'save', () => window.electronAPI.serialSave({ workspace: target }));
     if (result?.success && !result.cancelled && aliveRef.current) { showToast?.(tr("{0}当前记录已保存", { 0: WORKSPACE_LABELS()[target] })); void snapshotRef.current?.(target); }
   };
+  const applySchemeAndConnect = async () => {
+    const target = mode, path = selectedPath, schemeId = selectedSchemes[target];
+    if (!ports.some(port => port.path === path) || actionRef.current[target]) return false;
+    const result = await act(target, 'connect', () => applyAndConnectSerialScheme({
+      preferences: preferencesRef.current, id: schemeId, workspace: target, path,
+      status: snapshots[target].status, pending: snapshots[target].revision < 0,
+      persist: commitScheme, connect: request => window.electronAPI.serialConnect(request)
+    }));
+    return Boolean(result?.success);
+  };
   const connected = snapshot.status === 'connected';
   const summary = snapshot.revision < 0 ? tr("正在读取状态…") : connected ? tr("已连接 · {0} · {1}", { 0: snapshot.path, 1: snapshot.config?.baudRate || config.baudRate })
     : snapshot.status === 'connecting' ? tr("连接中 · {0}", { 0: snapshot.path }) : snapshot.status === 'disconnecting' ? tr("正在断开")
@@ -280,7 +311,8 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
     </div>
     <div className="space-y-4 border-t border-slate-400/20 p-4">
       <AiContextButton disabled={!snapshot.sessionId || !snapshot.entries?.length} context={{ reference: { kind: 'serial', workspace: mode, sessionId: snapshot.sessionId || '' } }} />
-      <SerialSchemeControls key={mode} preferences={preferences} workspace={mode} config={connected ? snapshot.config : config} selectedPath={connected ? snapshot.path : selectedPath} terminalEnter={workspace.terminal.enter} status={snapshot.status} pending={snapshot.revision < 0 || Boolean(currentPending)} onCommit={commitScheme} selected={selectedSchemes[mode]} onSelect={selectScheme} theme={theme} isDark={isDark} />
+      <SerialSchemeControls key={mode} preferences={preferences} workspace={mode} config={connected ? snapshot.config : config} selectedPath={connected ? snapshot.path : selectedPath} terminalEnter={workspace.terminal.enter} status={snapshot.status} pending={snapshot.revision < 0 || Boolean(currentPending)} onCommit={commitScheme} selected={selectedSchemes[mode]} onSelect={selectScheme} onApplyAndConnect={applySchemeAndConnect} canConnect={ports.some(port => port.path === selectedPath) && !selectedOccupied} theme={theme} isDark={isDark} />
+      {schemeSelectionError && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-amber-500"><span className="break-words">{tr(schemeSelectionError)}</span><button type="button" onClick={retrySchemeSelection} className="underline">{tr('重试保存选择')}</button><button type="button" onClick={resetSchemeSelection} className="underline">{tr('重置连接方案选择')}</button></div>}
       {worksetNotice && <p role="status" className={`text-xs ${theme.textMuted}`}>{worksetNotice}</p>}
       <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr("两路独立，可同时连接不同 COM。切换只改变界面，不会断开另一侧连接或停止后台接收。")}{mode === 'terminal' ? tr("连接后点击终端，用键盘操作设备 Shell。") : tr("连接后选择格式，查看或发送数据。")}</p>
       <SerialConnectionSettings key={mode} theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : selectedPath} onSelectPath={value => updateWorkspace({ [mode === 'terminal' ? 'terminalSelectedPath' : 'selectedPath']: value })} config={connected ? snapshot.config : config} onConfig={value => changePreferences({ [mode === 'terminal' ? 'terminalConfig' : 'config']: value })} status={snapshot.status} activePath={snapshot.path} pending={snapshot.revision < 0 || (Boolean(currentPending) && currentPending !== 'send')} connectingRequest={currentPending === 'connect'} cancelling={currentPending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act(mode, 'connect', () => window.electronAPI.serialConnect({ workspace: mode, path: selectedPath, config }))} onDisconnect={() => act(mode, 'disconnect', () => window.electronAPI.serialDisconnect({ workspace: mode }))} advanced={mode === 'terminal' ? workspace.terminalAdvanced : workspace.advanced} onAdvanced={advanced => updateWorkspace({ [mode === 'terminal' ? 'terminalAdvanced' : 'advanced']: advanced })} />

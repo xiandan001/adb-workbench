@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CheckCircle2, CircleAlert, Loader2, Square, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 import SidebarConnectionStatus from './SidebarConnectionStatus';
+import { activityPresentation } from '../shared/activityPresentation.js';
 
 const running = status => ['running', 'queued', 'starting', 'recording', 'stopping', 'saving', 'cancelling'].includes(status);
 const timestamp = value => Number.isFinite(value) ? value : Date.parse(value) || 0;
-export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection }) {
+export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection, theme, isDark }) {
   const locale = useLocale();
+  const colors = activityPresentation(theme, isDark);
   const [registry, setRegistry] = useState({ items: [], olderCount: 0 });
   const [external, setExternal] = useState({ tasks: [], guards: [], recordings: [] });
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(''), [error, setError] = useState('');
@@ -73,25 +75,25 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
   };
   return <div className="border-t border-[#3E4145] px-4 py-3">
     <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · {tr('连接 {0}', { 0: connectionSummary.connections })}</span></span></button>
-    <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className="fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-slate-600 bg-[#202124] p-0 text-slate-100 shadow-2xl backdrop:bg-black/50" aria-label={tr('后台活动')}>
-      <header className="flex items-center justify-between border-b border-white/10 p-4"><h3 className="font-semibold">{tr('后台活动')}</h3><button type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-white/10"><X size={18} /></button></header>
+    <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
+      <header className={`flex items-center justify-between border-b p-4 ${colors.border}`}><h3 className="font-semibold">{tr('后台活动')}</h3><button type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>
       <div className="max-h-[60vh] space-y-2 overflow-auto p-4">
-        <h4 className="text-xs font-medium text-slate-300">{tr('连接状态')}</h4>
-        <SidebarConnectionStatus onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
-        {!connectionSummary.connections && !connectionSummary.issues && <p className="py-2 text-xs text-slate-400">{tr('当前没有活动连接。')}</p>}
-        <h4 className="pt-3 text-xs font-medium text-slate-300">{tr('任务与采集')}</h4>
-        {!items.length && <p className="py-8 text-center text-sm text-slate-400">{tr('当前没有后台活动。')}</p>}
-        {items.slice(0, 60).map(item => <div key={item.id} className="rounded-xl border border-white/10 p-3">
+        <h4 className={`text-xs font-medium ${colors.heading}`}>{tr('连接状态')}</h4>
+        <SidebarConnectionStatus isDark={colors.dark} onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
+        {!connectionSummary.connections && !connectionSummary.issues && <p className={`py-2 text-xs ${colors.muted}`}>{tr('当前没有活动连接。')}</p>}
+        <h4 className={`pt-3 text-xs font-medium ${colors.heading}`}>{tr('任务与采集')}</h4>
+        {!items.length && <p className={`py-8 text-center text-sm ${colors.muted}`}>{tr('当前没有后台活动。')}</p>}
+        {items.slice(0, 60).map(item => <div key={item.id} className={`rounded-xl border p-3 ${colors.border}`}>
           <div className="flex items-start gap-3">{running(item.status) ? <Loader2 size={17} className="mt-1 shrink-0 animate-spin text-emerald-400" /> : item.status === 'failed' ? <CircleAlert size={17} className="mt-1 shrink-0 text-amber-400" /> : <CheckCircle2 size={17} className="mt-1 shrink-0 text-slate-400" />}
-            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { onOpen?.(item.target.page, item.deviceId || item.target.deviceId, item.target.id); setOpen(false); }}><span className="block break-words text-sm font-medium">{item.title}</span><span className="mt-1 block text-xs text-slate-400">{labels[item.status] || tr('状态未知')}{item.deviceId ? ` · ${item.deviceId}` : ''}</span></button>
-            {item.canCancel && <button type="button" disabled={Boolean(busy) || item.status === 'cancelling'} onClick={() => act(item.id, true)} aria-label={tr('取消活动')} className="rounded p-2 text-amber-400 hover:bg-white/10 disabled:opacity-40"><Square size={14} /></button>}
-            {!running(item.status) && registry.items.some(value => value.id === item.id) && <button type="button" disabled={Boolean(busy)} onClick={() => act(item.id, false)} aria-label={tr('移除活动记录')} className="rounded p-2 text-slate-400 hover:bg-white/10"><X size={14} /></button>}
+            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { onOpen?.(item.target.page, item.deviceId || item.target.deviceId, item.target.id); setOpen(false); }}><span className="block break-words text-sm font-medium">{item.title}</span><span className={`mt-1 block text-xs ${colors.muted}`}>{labels[item.status] || tr('状态未知')}{item.deviceId ? ` · ${item.deviceId}` : ''}</span></button>
+            {item.canCancel && <button type="button" disabled={Boolean(busy) || item.status === 'cancelling'} onClick={() => act(item.id, true)} aria-label={tr('取消活动')} className={`rounded p-2 text-amber-500 disabled:opacity-40 ${colors.hover}`}><Square size={14} /></button>}
+            {!running(item.status) && registry.items.some(value => value.id === item.id) && <button type="button" disabled={Boolean(busy)} onClick={() => act(item.id, false)} aria-label={tr('移除活动记录')} className={`rounded p-2 ${colors.muted} ${colors.hover}`}><X size={14} /></button>}
           </div>
-          {(item.stage || item.detail) && <p className="mt-2 whitespace-pre-wrap break-words text-xs text-slate-400">{item.detail || item.stage}</p>}
-          {running(item.status) && item.startedAt > 0 && <p className="mt-2 text-[11px] text-slate-500">{tr('已运行 {0} 秒', { 0: Math.max(0, Math.floor((now - item.startedAt) / 1000)) })}</p>}
+          {(item.stage || item.detail) && <p className={`mt-2 whitespace-pre-wrap break-words text-xs ${colors.muted}`}>{item.detail || item.stage}</p>}
+          {running(item.status) && item.startedAt > 0 && <p className={`mt-2 text-xs ${colors.muted}`}>{tr('已运行 {0} 秒', { 0: Math.max(0, Math.floor((now - item.startedAt) / 1000)) })}</p>}
           {Number.isFinite(item.progress) && <progress className="mt-2 h-1.5 w-full accent-emerald-500" value={item.progress} max={100} />}
         </div>)}
-        {(registry.olderCount > 0 || items.length > 60) && <p className="text-xs text-slate-400">{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
+        {(registry.olderCount > 0 || items.length > 60) && <p className={`text-xs ${colors.muted}`}>{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
         {error && <p role="alert" className="text-xs text-red-400">{tr(error)}</p>}
       </div>
     </dialog>

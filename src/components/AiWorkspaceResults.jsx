@@ -12,7 +12,7 @@ function ResultList({ title, items, theme }) {
   return <section><h4 className="mb-2 text-xs font-semibold">{title}</h4><ul className={`space-y-1.5 pl-4 text-sm leading-6 ${theme.textMuted}`}>{items.map((item, index) => <li key={index} className="list-disc whitespace-pre-wrap break-words">{item}</li>)}</ul></section>;
 }
 
-export function AiWorkspaceReport({ preview, result, usage, cached, theme, readOnly, busy, entitled, onAnalyze, onRegression, onPrepareVerification, checks }) {
+export function AiWorkspaceReport({ preview, result, usage, cached, theme, readOnly, busy, entitled, onAnalyze, onRegression, onPrepareVerification, checks, actions }) {
   const [highlight, setHighlight] = useState(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const citation = value => {
@@ -20,7 +20,7 @@ export function AiWorkspaceReport({ preview, result, usage, cached, theme, readO
     if (valid) { setEvidenceOpen(true); setHighlight(current => ({ ...valid, nonce: (current?.nonce || 0) + 1 })); }
   };
   return <>
-    {result && <AiWorkspaceAnalysis result={result} preview={preview} usage={usage} cached={cached} theme={theme} onCitation={citation} onRegression={onRegression} onPrepareVerification={onPrepareVerification} checks={checks} />}
+    {result && <AiWorkspaceAnalysis result={result} preview={preview} usage={usage} cached={cached} theme={theme} onCitation={citation} onRegression={onRegression} onPrepareVerification={onPrepareVerification} checks={checks} actions={actions} />}
     {result ? <details open={evidenceOpen} onToggle={event => setEvidenceOpen(event.currentTarget.open)} className={`rounded-xl border p-3 ${theme.card}`}>
       <summary className="cursor-pointer text-sm font-medium">{tr('核对原始证据与引用')}</summary>
       <div className="mt-3"><AiWorkspaceEvidence preview={preview} theme={theme} readOnly busy={busy} highlight={highlight} onCitation={citation} /></div>
@@ -28,13 +28,15 @@ export function AiWorkspaceReport({ preview, result, usage, cached, theme, readO
   </>;
 }
 
-export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onCitation, onRegression, onPrepareVerification, checks = [] }) {
+export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onCitation, onRegression, onPrepareVerification, checks = [], actions }) {
   useLocale();
   const verdicts = { improved: tr('有所改善'), unchanged: tr('未见明显变化'), regressed: tr('出现退化'), inconclusive: tr('无法判断') };
   return <section aria-label={tr('分析结果')} className={`space-y-4 rounded-xl border p-4 ${theme.card}`}>
     <div className="flex items-center gap-2"><CheckCircle2 size={19} className="text-emerald-500" /><h3 className="text-sm font-semibold">{tr('分析结果')}</h3></div>
     {result.verdict && <p className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-sm">{tr('对比结论：{0}', { 0: verdicts[result.verdict] || verdicts.inconclusive })}<span className={`mt-1 block text-xs leading-5 ${theme.textMuted}`}>{tr('变化不等于问题已经完全修复，仍需按验收条件验证。')}</span></p>}
     <p className="whitespace-pre-wrap break-words text-sm leading-6">{result.summary}</p>
+    <ResultList title={tr('建议的下一步')} items={result.nextSteps} theme={theme} />
+    {actions}
     {result.findings?.length > 0 && <section className="space-y-2"><h4 className="text-xs font-semibold">{tr('证据与发现')}</h4>{result.findings.map((finding, index) => <article key={index} className={`rounded-lg border p-3 ${theme.input}`}>
       <h5 className="text-sm font-medium">{finding.title}</h5><p className={`mt-1 whitespace-pre-wrap break-words text-sm leading-6 ${theme.textMuted}`}>{finding.detail}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">{finding.evidenceIds.map(id => <button key={id} type="button" onClick={() => onCitation?.({ evidenceId: id, startLine: 1, endLine: 1 })} aria-label={tr('查看证据 {0}', { 0: id })} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-300">[{id}]</button>)}
@@ -43,7 +45,6 @@ export function AiWorkspaceAnalysis({ result, preview, usage, cached, theme, onC
       </div>
     </article>)}</section>}
     <ResultList title={tr('待验证的推测')} items={result.hypotheses} theme={theme} />
-    <ResultList title={tr('建议的下一步')} items={result.nextSteps} theme={theme} />
     {result.verificationChecks?.length > 0 && <section className="space-y-2"><h4 className="text-xs font-semibold">{tr('可以准备的验证检查')}</h4>
       {result.verificationChecks.map((card, index) => <article key={index} className={`space-y-2 rounded-lg border p-3 ${theme.input}`}>
         <h5 className="text-sm font-medium">{card.title}</h5><p className={`whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{card.expectedObservation}</p>

@@ -25,3 +25,18 @@ test('wireless recents retain exact transport identities without host discovery 
   const rows = [{ type: 'wifi', deviceId: 'hdc:192.0.2.1:5555' }, { type: 'usb', deviceId: 'usb' }, { type: 'wifi', deviceId: '192.0.2.1:5555' }, { type: 'wifi', deviceId: 'hdc:192.0.2.1:5555' }, { type: 'wifi', deviceId: '192.0.2.2:5555' }];
   assert.deepEqual(recentWirelessEntries(rows).map(item => item.deviceId), ['hdc:192.0.2.1:5555', '192.0.2.1:5555', '192.0.2.2:5555']);
 });
+
+test('legacy workspace metadata migrates safely and remembers the last page without execution state', () => {
+  const disk = storage();
+  const legacy = { version: 1, density: 'compact', expandedDeviceIds: ['USB-A'], deviceQuery: 'Board', scrollPositions: { tasks: 360 } };
+  disk.values.set(UI_WORKSPACE_KEY, JSON.stringify(legacy));
+  const restored = readUiWorkspace(disk);
+  assert.equal(restored.version, 2); assert.equal(restored.lastPage, 'devices');
+  assert.deepEqual(restored.expandedDeviceIds, legacy.expandedDeviceIds); assert.deepEqual(restored.scrollPositions, legacy.scrollPositions);
+  assert.equal(disk.values.get(UI_WORKSPACE_KEY), JSON.stringify(legacy), 'A read does not rewrite the legacy bytes');
+  const next = { ...restored, lastPage: 'tasks' }; saveUiWorkspace(next, disk);
+  assert.deepEqual(readUiWorkspace(disk), next); assert.deepEqual(backend.normalizeUiWorkspace(next), next);
+  for (const invalid of [{ ...next, lastPage: 'execute' }, { ...next, run: true }]) {
+    assert.throws(() => normalizeUiWorkspace(invalid)); assert.throws(() => backend.normalizeUiWorkspace(invalid));
+  }
+});

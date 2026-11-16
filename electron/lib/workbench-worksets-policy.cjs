@@ -70,12 +70,15 @@ function normalizeSave(value) {
   return { ...(value.id ? { id: value.id } : {}), name: text(value.name, 80, false).trim(), deviceId: device(value.deviceId), packageName: packageName(value.packageName), page: value.page };
 }
 function normalizeUiWorkspace(value) {
-  shape(value, ['version', 'density', 'expandedDeviceIds', 'deviceQuery', 'scrollPositions']);
-  if (value.version !== 1 || !['full', 'compact'].includes(value.density) || !Array.isArray(value.expandedDeviceIds) || value.expandedDeviceIds.length > 100) fail();
+  const legacy = value?.version === 1;
+  shape(value, ['version', 'density', 'expandedDeviceIds', 'deviceQuery', 'scrollPositions', ...(legacy ? [] : ['lastPage'])]);
+  if (![1, 2].includes(value.version) || !['full', 'compact'].includes(value.density) || !Array.isArray(value.expandedDeviceIds) || value.expandedDeviceIds.length > 100) fail();
   const expandedDeviceIds = Array.from(value.expandedDeviceIds, id => { if (!device(id)) fail(); return id; });
   if (new Set(expandedDeviceIds).size !== expandedDeviceIds.length) fail();
   shape(value.scrollPositions, [], [...PAGES, 'history', 'settings', 'member', 'artifacts', 'ai-tools']);
   for (const offset of Object.values(value.scrollPositions)) if (!Number.isFinite(offset) || offset < 0 || offset > 10000000) fail();
-  return { version: 1, density: value.density, expandedDeviceIds, deviceQuery: text(value.deviceQuery, 300), scrollPositions: { ...value.scrollPositions } };
+  const pages = [...PAGES, 'history', 'settings', 'member', 'artifacts', 'ai-tools'];
+  if (!legacy && !pages.includes(value.lastPage)) fail();
+  return { version: 2, density: value.density, expandedDeviceIds, deviceQuery: text(value.deviceQuery, 300), scrollPositions: { ...value.scrollPositions }, lastPage: legacy ? 'devices' : value.lastPage };
 }
 module.exports = { FILE_NAME, MAX_BYTES, MAX_ITEMS, UI_WORKSPACE_KEY, PAGES, emptyStore, emptyContext, normalizePart, normalizeContext, normalizeWorkset, normalizeStore, normalizeSave, normalizeUiWorkspace };

@@ -6,7 +6,7 @@ export const workspaceCaseReview = () => ({ status: 'unverified', rootCause: '',
 
 export function createWorkspaceCase(mode, deviceId, caseId) {
   return { mode, caseId, revision: 0, pristine: true, preparing: true, question: '', deviceId: deviceId || '', checks: mode === 'diagnose' ? ['device_info', 'logcat_snapshot'] : [], sourceIds: [], text: '',
-    plan: null, planUsage: null, preview: null, result: null, draft: null, draftEdits: null, usage: null, cached: false, error: '', busy: '',
+    plan: null, planUsage: null, preview: null, result: null, draft: null, draftEdits: null, savedTask: null, usage: null, cached: false, error: '', busy: '',
     selection: workspaceSelection(), selectionChanged: false, requirements: workspaceRequirements(), turns: [], reportView: null,
     contextRef: null, context: null, findingIndex: null, baseline: '', diagnostic: { packageName: '', symptom: '' },
     handoffId: '', handoff: null, basketRevision: null, basketItems: [], targetSelection: { tokens: [] }, targets: [] };
@@ -76,7 +76,10 @@ export function workspaceLinePage(total, requested, size = 80) {
 export function editWorkspaceCase(current, changes) {
   if (current.busy) return current;
   const changedDevice = Object.hasOwn(changes, 'deviceId') && changes.deviceId !== current.deviceId;
-  return { ...current, ...changes, pristine: false, preparing: true, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, draftEdits: null, usage: null,
+  const clearInheritedApp = changedDevice && !Object.hasOwn(changes, 'requirements') && current.diagnostic.packageName
+    && current.requirements.application === current.diagnostic.packageName;
+  return { ...current, ...changes, pristine: false, preparing: true, ...(changedDevice ? { diagnostic: { packageName: '', symptom: '' }, targets: [], targetSelection: { tokens: [] } } : {}),
+    ...(clearInheritedApp ? { requirements: { ...current.requirements, application: '' } } : {}), revision: current.revision + 1, preview: null, result: null, draft: null, draftEdits: null, savedTask: null, usage: null,
     cached: false, error: '', ...(Object.hasOwn(changes, 'selection') ? { selectionChanged: changes.selectionChanged ?? true } : {}),
     ...(Object.hasOwn(changes, 'question') || Object.hasOwn(changes, 'deviceId') ? { plan: null, planUsage: null } : {}) };
 }

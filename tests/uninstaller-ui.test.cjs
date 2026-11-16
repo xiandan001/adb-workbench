@@ -36,7 +36,7 @@ test('uninstall state cannot edit install paths, request launch or override engi
   assert.match(source, /welcome && s\.custom && !s\.uninstall/);
   assert.match(source, /StringTrimmingEllipsisPath/);
   assert.equal((source.match(/s\.installPath, 282, (?:241|278),[^\n]*s\.uninstall/g) || []).length, 2);
-  assert.match(source, /EnableWindow\(s\.cancel, !s\.cancelOverlay && CanCancel\(\)\)/);
+  assert.match(source, /SetEnabled\(s\.cancel, !s\.cancelOverlay && CanCancel\(\)\)/);
   assert.doesNotMatch(source, /PBM_SETPOS|PBM_STEPIT|CreateProcess|ShellExecute|DeleteFile|RemoveDirectory/);
   const catalog = JSON.parse(read('build/installer-ui/strings.json'));
   const keys = [...source.matchAll(/L"(un[A-Z][^"]+)"/g)].map(match => match[1]);

@@ -1,18 +1,29 @@
-import { editWorkspaceCase, workspaceDeviceOnline } from './AiWorkspaceState.js';
+import { editWorkspaceCase, workspaceDeviceOnline, workspacePreviewFresh } from './AiWorkspaceState.js';
+import { validAiDiagnosticPackage } from '../shared/aiSelectionDraft.js';
+export { aiSelectionDraft, readAiSelectionDraft, saveAiSelectionDraft, restoreAiSelectionDraft } from '../shared/aiSelectionDraft.js';
 
 const UUID = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const CHECK_IDS = ['device_info', 'logcat_snapshot', 'performance_snapshot', 'app_package', 'app_process', 'app_memory', 'app_activity'];
 
-export function adoptWorkspaceDefaults(current, devices = [], activeDeviceId = '') {
-  if (!current.pristine || current.busy || current.handoffId || current.contextRef || current.reportView) return current;
+export function adoptWorkspaceDefaults(current, devices = [], activeDeviceId = '', applicationContext) {
+  if (!current.pristine || current.busy || current.handoffId || current.contextRef || current.reportView || current.preview || current.result || current.draft) return current;
   const deviceId = workspaceDeviceOnline(devices, activeDeviceId) ? activeDeviceId : workspaceDeviceOnline(devices, current.deviceId) ? current.deviceId : devices.find(device => device.status === 'device')?.id || '';
-  return deviceId === current.deviceId ? current : { ...current, deviceId, revision: current.revision + 1 };
+  const packageName = applicationContext?.deviceId === deviceId && validAiDiagnosticPackage(applicationContext.packageName)
+    ? applicationContext.packageName : deviceId === current.deviceId ? current.diagnostic.packageName : '';
+  if (deviceId === current.deviceId && packageName === current.diagnostic.packageName) return current;
+  return { ...current, deviceId, diagnostic: { ...current.diagnostic, packageName },
+    ...(current.mode === 'task' ? { requirements: { ...current.requirements, application: packageName } } : {}), revision: current.revision + 1 };
 }
 
 export function workspacePhase(current) {
   if (current.preparing) return 'prepare';
-  if (current.reportView || current.result || current.draft) return 'result';
+  if (current.reportView || current.result || current.draft || current.savedTask) return 'result';
   return current.preview ? 'review' : 'prepare';
+}
+
+export function collectedPreviewCanReview(current, token, previewId) {
+  return Boolean(current && current.caseId === token.caseId && current.revision === token.revision && !current.busy
+    && current.preview?.id === previewId && workspacePreviewFresh(current.preview));
 }
 
 export function workspacePrimaryBlock(current, { devices = [], sources = [], loading, entitled, reportBusy } = {}) {

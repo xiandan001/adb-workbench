@@ -58,7 +58,7 @@ function appDiscoveryHarness(initialRows = []) {
   const state = { devices: [], active: '', error: '' };
   const fetch = runInNewContext(`(${fetchCallback})`, {
     window: { electronAPI: { getDevices: async () => backendRows } }, tr, resolveActiveDeviceId,
-    worksetTargetRef: { current: '' }, setLoading() {},
+    worksetTargetRef: { current: '' }, devicesRef: { current: [] }, setLoading() {},
     setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); },
     setError: value => { state.error = value; },

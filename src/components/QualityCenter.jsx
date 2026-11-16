@@ -4,6 +4,8 @@ import { isDarkTheme } from '../shared/theme';
 import { getMatchingBaseline, getAcceptanceErrors, qualityErrorMessage, getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
 import { guardNavigationRequest, findGuardRecord } from '../shared/qualityNavigation';
+import { seedQualityApplication } from '../shared/qualityDraft';
+import ApplicationPicker from './ApplicationPicker';
 import {
   AlertCircle,
   CheckCircle2,
@@ -22,11 +24,12 @@ import {
   Trash2
 } from 'lucide-react';
 
-function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange, initialDraft = {}, onDraftChange, incomingGuardId, onOpenAnalysis, onGuardRequestHandled }) {
+function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showToast, activeDeviceId, onActiveDeviceChange, applicationContext, initialDraft = {}, onDraftChange, incomingGuardId, onOpenAnalysis, onGuardRequestHandled }) {
   const locale = useLocale();
   const isDark = isDarkTheme(theme);
   const onlineDevices = useMemo(() => { void locale; return devices.filter(device => device.status === 'device'); }, [devices, locale]);
   const [deviceId, setDeviceId] = useState('');
+  const selectedDeviceId = activeDeviceId ?? (deviceId || onlineDevices[0]?.id || '');
   const [baselines, setBaselines] = useState([]);
   const [selectedBaselinePath, setSelectedBaselinePath] = useState(initialDraft.selectedBaselinePath || '');
   const [baselineName, setBaselineName] = useState(initialDraft.baselineName || '');
@@ -39,7 +42,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const [suites, setSuites] = useState([]);
   const [suiteId, setSuiteId] = useState(initialDraft.suiteId || 'smoke');
   const [apkPath, setApkPath] = useState(initialDraft.apkPath || '');
-  const [packageName, setPackageName] = useState(initialDraft.packageName || '');
+  const [packageInput, setPackageName] = useState(initialDraft.packageName || '');
   const [baselineImagePath, setBaselineImagePath] = useState(initialDraft.baselineImagePath || '');
   const [rounds, setRounds] = useState(initialDraft.rounds ?? 5);
   const [launchWaitMs, setLaunchWaitMs] = useState(initialDraft.launchWaitMs ?? 5000);
@@ -50,6 +53,12 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   const [lastStoppedGuard, setLastStoppedGuard] = useState(null);
   const [qualityTab, setQualityTab] = useState(initialDraft.qualityTab || 'regression');
   const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const [advancedAcceptance, setAdvancedAcceptance] = useState(false);
+  const [applicationEdited, setApplicationEdited] = useState(false);
+  const packageName = applicationEdited || packageInput ? packageInput : seedQualityApplication(initialDraft, selectedDeviceId, applicationContext).packageName;
+  const markApplicationEdited = () => {
+    if (!applicationEdited) { setPackageName(packageName); setApplicationEdited(true); }
+  };
   const deviceContextRef = useRef({ deviceId: activeDeviceId || '', generation: 0 });
   const deviceOperationRef = useRef(null);
   const restoredTaskId = useRef(initialDraft.lastTaskId || '');
@@ -109,7 +118,6 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
     });
   }, []);
 
-  const selectedDeviceId = activeDeviceId ?? (deviceId || onlineDevices[0]?.id || '');
   useLayoutEffect(() => {
     deviceContextRef.current = { deviceId: selectedDeviceId, generation: deviceContextRef.current.generation + 1 };
     return () => { deviceContextRef.current = { deviceId: '', generation: deviceContextRef.current.generation + 1 }; };
@@ -256,11 +264,13 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   }
 
   async function runAcceptance() {
+    markApplicationEdited();
     if (!selectedDevice) {
       showToast?.(tr("请先选择在线设备"));
       return;
     }
     if (Object.keys(acceptanceErrors).length) {
+      if (acceptanceErrors.launchWaitMs || acceptanceErrors.rounds || acceptanceErrors.threshold) setAdvancedAcceptance(true);
       setError(Object.values(acceptanceErrors).join('；'));
       return;
     }
@@ -328,7 +338,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" onPointerDownCapture={markApplicationEdited} onChangeCapture={markApplicationEdited} onKeyDownCapture={event => { if (event.key !== 'Tab') markApplicationEdited(); }}>
       <section className={`rounded-xl border ${panel} overflow-hidden`}>
         <div className={`px-5 py-4 border-b flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
           <div>
@@ -516,16 +526,11 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
 
               <div className="grid lg:grid-cols-2 gap-3">
                 {(suiteId === 'install-launch' || suiteId === 'launch-stability') && (
-                  <label className="space-y-1">
-                    <span className={`text-xs ${muted}`}>{tr("应用包名")}</span>
-                    <input
-                      value={packageName}
-                      onChange={(event) => setPackageName(event.target.value)}
-                      placeholder="com.example.app"
-                      className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${input}`}
-                    />
+                  <div className="space-y-1">
+                    <ApplicationPicker device={devices.find(item => item.id === selectedDeviceId) || { id: selectedDeviceId, status: 'offline', generation: 0 }} value={packageName}
+                      onChange={value => { markApplicationEdited(); setPackageName(value); }} theme={theme} disabled={Boolean(busy)} label={tr('应用包名')} />
                     <FieldError message={acceptanceErrors.packageName} />
-                  </label>
+                  </div>
                 )}
 
                 {suiteId === 'install-launch' && (
@@ -562,6 +567,8 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                   </label>
                 )}
 
+                {['install-launch', 'launch-stability', 'visual-compare'].includes(suiteId) && <details open={advancedAcceptance} onToggle={event => setAdvancedAcceptance(event.currentTarget.open)} className={`rounded-lg border p-3 lg:col-span-2 ${soft}`}>
+                  <summary className={`cursor-pointer text-xs font-medium ${muted}`}>{tr('高级验收参数')}</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {(suiteId === 'install-launch' || suiteId === 'launch-stability') && (
                   <label className="space-y-1">
                     <span className={`text-xs ${muted}`}>{tr("首屏等待 ms")}</span>
@@ -607,6 +614,7 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
                     <FieldError message={acceptanceErrors.threshold} />
                   </label>
                 )}
+                  </div></details>}
               </div>
 
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">

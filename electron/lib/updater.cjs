@@ -42,6 +42,7 @@ let updaterStatus = {
   progress: null,        // { percent, transferred, total, bytesPerSecond }
   downloaded: false,
   installing: false,
+  installPhase: '',
   refreshing: false,
   error: null,
   info: null             // { version, releaseNotes, releaseName }
@@ -251,28 +252,28 @@ function beginUpdateInstall() {
   if (installLaunchFlight) return installLaunchFlight;
   if (process.platform !== 'win32') return Promise.resolve({ ok: true, code: 'READY' });
   const flight = Promise.resolve().then(async () => {
-    updateState({ installing: true, error: null }); recordInstall('launching');
+    updateState({ installing: true, installPhase: 'launching', error: null }); recordInstall('launching');
     let result;
     try {
       result = await launchUpdateInstaller({ installerPath: autoUpdater.installerPath, parentPid: process.pid,
         locale: updateInstallLocale, sha512: autoUpdater.downloadedUpdateHelper?.downloadedFileInfo?.sha512 });
     } catch { result = { ok: false, code: 'START_FAILED' }; }
     if (result?.ok === true && result.code === 'READY') {
-      installerReady = true; recordInstall('ready', result); return result;
+      installerReady = true; updateState({ installPhase: 'ready' }); recordInstall('ready', result); return result;
     }
     const code = typeof result?.code === 'string' ? result.code : 'PROTOCOL_ERROR';
     recordInstall('failed', { code });
     quitAndInstallInProgress = false; installerReady = false; updateInstallPrepared = false;
     const invalidPackage = ['CHECKSUM_MISMATCH', 'INVALID_INSTALLER'].includes(code);
     if (invalidPackage) { try { await autoUpdater.downloadedUpdateHelper?.clear?.(); } catch { /* The next explicit download can retry cache cleanup. */ } }
-    const error = installerFailureMessage(code); updateState({ installing: false, error, ...(invalidPackage ? { downloaded: false } : {}) });
+    const error = installerFailureMessage(code); updateState({ installing: false, installPhase: '', error, ...(invalidPackage ? { downloaded: false } : {}) });
     return { ok: false, code, error };
   }).finally(() => { if (installLaunchFlight === flight) installLaunchFlight = null; });
   installLaunchFlight = flight;
   return flight;
 }
 
-function noteUpdateInstallQuitting() { if (installerReady) recordInstall('quitting', { code: 'READY' }); }
+function noteUpdateInstallQuitting() { if (installerReady) { updateState({ installPhase: 'quitting' }); recordInstall('quitting', { code: 'READY' }); } }
 
 function quitAndInstallPreparedUpdate() {
   if (!updaterStatus.downloaded || refreshFlight) return false;

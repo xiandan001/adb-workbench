@@ -32,11 +32,13 @@ test('actual SSH restoration queues during a pending connection and selects only
 test('actual serial restoration selects the saved workspace/scheme without applying parameters or touching live COM state', () => {
   const calls = [], scope = { worksetRequest: { requestId: 'restore', serial: { workspace: 'terminal', schemeId: 'saved' } }, handledWorkset: { current: '' }, preferences: { schemes: [{ workspace: 'terminal', id: 'saved' }] }, tr,
     setWorksetNotice: value => calls.push(['notice', value]), setPersistenceError: value => calls.push(['error', value]), updateSerialWorkspace: value => calls.push(['workspace', value]),
-    setWorkspace: update => update({ mode: 'rs232', selectedPath: 'COM7' }), setTerminalOpened: value => calls.push(['terminal', value]), setSelectedSchemes: update => calls.push(['selection', update({ rs232: 'other', terminal: '' })]),
+    selectedSchemes: { rs232: 'other', terminal: '' }, saveSerialSchemeSelection: value => calls.push(['savedSelection', value]), setSchemeSelectionError: value => calls.push(['schemeError', value]),
+    setWorkspace: update => update({ mode: 'rs232', selectedPath: 'COM7' }), setTerminalOpened: value => calls.push(['terminal', value]), setSelectedSchemes: value => calls.push(['selection', value]),
     onWorksetContext: value => calls.push(['context', value]) };
   const restore = runInNewContext(`(${restoreEffect('SerialPanel.jsx')})`, scope); restore();
   assert.deepEqual(JSON.parse(JSON.stringify(calls.find(([kind]) => kind === 'workspace')[1])), { mode: 'terminal' });
   assert.deepEqual(JSON.parse(JSON.stringify(calls.find(([kind]) => kind === 'selection')[1])), { rs232: 'other', terminal: 'saved' });
+  assert.deepEqual(calls.find(([kind]) => kind === 'savedSelection')[1], calls.find(([kind]) => kind === 'selection')[1]);
   assert.ok(!JSON.stringify(calls).includes('baudRate')); assert.ok(!JSON.stringify(calls).includes('COM7'));
   scope.worksetRequest = { requestId: 'missing', serial: { workspace: 'rs232', schemeId: 'missing' } }; restore(); assert.match(calls.at(-1)[1], /请重新选择方案/);
 });

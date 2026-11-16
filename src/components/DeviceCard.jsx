@@ -8,6 +8,7 @@ import ControlButton from './ControlButton';
 import SelectMenu from './SelectMenu';
 import DeviceNavigationControls from './DeviceNavigationControls';
 import DeviceRecordingStatus from './DeviceRecordingStatus';
+import RecordingModeControl from './RecordingModeControl';
 import DeviceRecentMedia from './DeviceRecentMedia';
 import AiContextButton from './AiContextButton';
 import useDeviceRecording from './useDeviceRecording';
@@ -389,7 +390,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             />
             <ControlButton
               icon={recordButton.recording ? <div className="w-3 h-3 rounded-sm bg-white" /> : <Video size={16} />}
-              label={recordButton.label}
+              label={!recordingActive && !recordButton.busy && recording.loaded && recordWithLogs ? tr('录屏＋日志') : recordButton.label}
               onClick={recordButton.recording ? recording.stop : () => recording.start({ withLogs: recordWithLogs })}
               disabled={recordButton.disabled}
               loading={recordButton.busy}
@@ -440,9 +441,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               isOnline={isOnline}
             />}
           </div>
-          {showSecondaryTools && <label className={`device-record-options mt-2 text-xs ${t.textMuted}`} title={tr("默认关闭。随录屏开始和停止抓取日志，最多保存 100 MB，不会请求 AI 分析。")}>
-            <input type="checkbox" checked={recordingActive ? Boolean(recording.session?.withLogs) : recordWithLogs} disabled={recordingActive || recording.pending || !recording.loaded} onChange={event => setRecordWithLogs(event.target.checked)} className="accent-emerald-500" /><span className="device-record-options-label">{tr("录屏同时抓取日志")}</span><span className="device-record-options-note text-[11px] opacity-75">{tr("不调用 AI · 上限 100 MB")}</span>
-          </label>}
+          <RecordingModeControl recording={recording} preferredWithLogs={recordWithLogs} onChange={setRecordWithLogs} compact={compact} theme={t} />
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
         {showSecondaryTools && <section className="device-control-section" aria-label={tr("设备维护")}>

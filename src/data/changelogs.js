@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.27': {
+    title: 'v4.7.27',
+    date: '2026-11-16',
+    items: [
+      { type: 'feature', get text() { return tr('新增跨页面设备与应用选择、最近工作集快速恢复和已保存测试直接运行。'); } },
+      { type: 'feature', get text() { return tr('应用选择、AI 检查选项和产物筛选支持本机记忆及备份恢复。'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.7.26': {
     title: 'v4.7.26',
     date: '2026-11-13',

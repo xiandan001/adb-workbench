@@ -38,6 +38,7 @@ async function fetchState(api, previous = [], active = '', worksetTarget = '') {
     setActiveDeviceId: update => { state.active = update(state.active); },
     resolveActiveDeviceId,
     worksetTargetRef: { current: worksetTarget },
+    devicesRef: { current: previous },
     setError: value => { state.error = value; },
   });
   await callback();
@@ -120,7 +121,9 @@ test('empty current selection removes only its persistence key and keeps history
 });
 
 test('current-device UI never synthesizes an absent cached row or a disconnected warning', () => {
-  assert.match(source, /id="active-device"\s+value=\{activeDevice\?\.id \|\| ''\}/);
-  assert.doesNotMatch(source, /label: `\$\{activeDeviceId\} · 已断开`/);
-  assert.match(source, /\{activeDevice && activeDevice\.status !== 'device' &&/);
+  const context = readFileSync(new URL('../src/components/WorkbenchContextBar.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<WorkbenchContextBar[^>]*activeDevice=\{activeDevice\}/);
+  assert.match(context, /id="active-device"\s+value=\{activeDevice\?\.id \|\| ''\}/);
+  assert.doesNotMatch(source + context, /label: `\$\{activeDeviceId\} · 已断开`/);
+  assert.match(context, /\{activeDevice && activeDevice\.status !== 'device' &&/);
 });

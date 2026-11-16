@@ -1,11 +1,11 @@
 import { useId, useState } from 'react';
-import { Save, Trash2, X } from 'lucide-react';
+import { Plug, Save, Trash2, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { addSerialScheme, applySerialScheme, removeSerialScheme, updateSerialScheme } from '../shared/serialSchemes.js';
 import { confirmAppMessage } from '../shared/appMessageDialog.js';
 import SelectMenu from './SelectMenu';
 
-export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, selected = '', onSelect, theme, isDark }) {
+export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, selected = '', onSelect, onApplyAndConnect, canConnect = false, theme, isDark }) {
   useLocale();
   const id = useId();
   const [saving, setSaving] = useState(false);
@@ -19,6 +19,10 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
     updated: tr('所选方案已更新，当前 COM 和连接保持不变')
   };
   const schemes = (preferences.schemes || []).filter(item => item.workspace === workspace);
+  const selectedScheme = schemes.find(item => item.id === selected);
+  const selectedConfig = selectedScheme?.config || config;
+  const parity = { none: tr('无校验'), even: tr('偶校验'), odd: tr('奇校验'), mark: tr('标记校验'), space: tr('空格校验') };
+  const flow = { none: tr('无流控'), rtscts: tr('硬件 RTS/CTS'), xonxoff: tr('软件 XON/XOFF') };
   const locked = pending || !['disconnected', 'error'].includes(status);
   const button = 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs disabled:opacity-40 ' + theme.button.secondary;
   function run(operation, success) {
@@ -33,13 +37,16 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
     } catch (failure) { setError(failure.message); }
     return false;
   }
-  return <details className="rounded-lg border border-slate-400/20 p-2.5">
-    <summary className="cursor-pointer text-xs font-medium">{tr('连接方案')}<span className={'ml-2 font-normal ' + theme.textMuted}>{tr('已保存 {0} 个', { 0: schemes.length })}</span></summary>
-    <div className="mt-2 space-y-2">
+  return <div className="space-y-2 rounded-lg border border-slate-400/20 p-2.5">
     <div className="flex flex-wrap items-center gap-2">
       <label htmlFor={id} className="sr-only">{tr('连接方案')}</label>
       <SelectMenu id={id} value={selected} options={schemes.map(item => ({ value: item.id, label: item.name }))} onChange={onSelect} isDark={isDark} compact placeholder={tr('选择当前工作区的方案')} emptyText={tr('保存当前参数，下次直接套用')} className="min-w-40 flex-1" />
-      <button type="button" disabled={!selected || locked} onClick={() => run(() => applySerialScheme(preferences, selected, workspace, { status, pending }), 'applied')} className={button}>{tr('套用')}</button>
+      <button type="button" disabled={!selectedScheme || locked} onClick={() => run(() => applySerialScheme(preferences, selected, workspace, { status, pending }), 'applied')} className={button}>{tr('套用')}</button>
+      <button type="button" disabled={!selectedScheme || locked || !canConnect || !onApplyAndConnect} onClick={() => onApplyAndConnect?.()} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${theme.button.primary}`}><Plug size={14} />{tr('套用并连接')}</button>
+    </div>
+    {selectedScheme && <p className={`break-words text-xs ${theme.textMuted}`}>{tr('连接目标：{0} · {1}/{2}/{3} · {4} · {5}', { 0: selectedPath || tr('请选择串口'), 1: selectedConfig.baudRate, 2: selectedConfig.dataBits, 3: selectedConfig.stopBits, 4: parity[selectedConfig.parity], 5: flow[selectedConfig.flowControl] })}</p>}
+    <details><summary className="cursor-pointer text-xs font-medium">{tr('管理连接方案')}<span className={'ml-2 font-normal ' + theme.textMuted}>{tr('已保存 {0} 个', { 0: schemes.length })}</span></summary>
+    <div className="mt-2 space-y-2"><div className="flex flex-wrap items-center gap-2">
       <button type="button" onClick={() => { setName((selectedPath || tr('串口')) + ' · ' + config.baudRate); setSaving(true); setStatusMessage(''); setError(''); }} className={button}><Save size={13} />{tr('保存当前参数')}</button>
       <button type="button" disabled={!selected || pending} className={button} onClick={async () => {
         const scheme = schemes.find(item => item.id === selected);
@@ -59,9 +66,9 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
       <button type="submit" className={button}>{tr('保存')}</button>
       <button type="button" aria-label={tr('取消保存连接方案')} onClick={() => setSaving(false)} className={button}><X size={13} /></button>
     </form>}
-    <p className={'text-[11px] leading-5 ' + theme.textMuted}>{locked ? tr('连接期间不能套用方案；可以保存当前参数。') : workspace === 'terminal' ? tr('终端方案仅套用连接参数和回车格式，不改 RS232 设置。') : tr('方案包含连接参数、收发格式和换行符；套用后仍需点击连接。')}</p>
+    <p className={'text-[11px] leading-5 ' + theme.textMuted}>{locked ? tr('连接期间不能套用方案；可以保存当前参数。') : workspace === 'terminal' ? tr('终端方案仅套用连接参数和回车格式，不改 RS232 设置。') : tr('选择方案不会连接；“套用”只改参数，“套用并连接”才打开当前 COM。')}</p>
+    </div></details>
     {statusMessage && <p role="status" className={'text-xs ' + theme.textMuted}>{messages[statusMessage]}</p>}
     {error && <p role="alert" className="text-xs text-red-500">{tr(error)}</p>}
-    </div>
-  </details>;
+  </div>;
 }

@@ -3,7 +3,7 @@ import { Cable, Server } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { hasConnectionActivity, subscribeConnectionStatus } from '../shared/connectionStatus.js';
 
-export default function SidebarConnectionStatus({ onNavigate, onSummary }) {
+export default function SidebarConnectionStatus({ onNavigate, onSummary, isDark = true }) {
   useLocale();
   const [states, setStates] = useState({});
   const [errors, setErrors] = useState({});
@@ -19,7 +19,7 @@ export default function SidebarConnectionStatus({ onNavigate, onSummary }) {
       issues: Object.values(states).reduce((sum, value) => sum + (value?.failedCount || 0), 0) + Object.values(errors).filter(Boolean).length });
   }, [states, errors, onSummary]);
   if (!items.length) return null;
-  return <div aria-label={tr('后台连接状态')} className="space-y-1 border-t border-white/10 px-3 py-2">
+  return <div aria-label={tr('后台连接状态')} className={`space-y-1 border-t px-3 py-2 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
     {items.map(item => {
       const status = states[item.id];
       const Icon = item.icon;
@@ -30,7 +30,7 @@ export default function SidebarConnectionStatus({ onNavigate, onSummary }) {
         status.failedCount ? tr('异常 {0}', { 0: status.failedCount }) : '',
         status.transferCount ? tr('传输 {0}', { 0: status.transferCount }) : ''
       ].filter(Boolean).join(' · ');
-      return <button key={item.id} type="button" onClick={() => onNavigate(item.id)} title={item.name + ' · ' + summary + (status?.labels.length ? '\n' + status.labels.join('、') : '')} className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] leading-4 text-slate-300 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400">
+      return <button key={item.id} type="button" onClick={() => onNavigate(item.id)} title={item.name + ' · ' + summary + (status?.labels.length ? '\n' + status.labels.join('、') : '')} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs leading-5 focus-visible:outline focus-visible:outline-2 ${isDark ? 'text-slate-300 hover:bg-white/10 focus-visible:outline-emerald-400' : 'text-slate-600 hover:bg-slate-100 focus-visible:outline-emerald-600'}`}>
         <Icon size={13} className={errors[item.id] || status?.failedCount ? 'mt-0.5 shrink-0 text-amber-400' : 'mt-0.5 shrink-0 text-emerald-400'} />
         <span className="min-w-0"><span className="font-medium">{item.name}</span><span className="ml-1 break-words">{summary}</span></span>
       </button>;

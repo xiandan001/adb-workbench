@@ -28,6 +28,12 @@ export function recordingButtonState(session, { loaded, pending, isOnline }) {
   };
 }
 
+export function recordingModeSelection({ session, loaded, pending }, preferredWithLogs) {
+  const active = ['starting', 'recording', 'stopping', 'saving'].includes(session?.status);
+  return { active, withLogs: active ? session.withLogs === true : preferredWithLogs === true,
+    locked: !loaded || Boolean(pending) || active };
+}
+
 export function recordingDuration(session, now) {
   if (!session) return 0;
   if (session.status !== 'recording' && Number.isFinite(session.durationMs)) return Math.max(0, session.durationMs);

@@ -1,13 +1,14 @@
 import { tr } from './i18n.js';
 export const UI_WORKSPACE_KEY = 'adb-workbench.ui-workspace.v1';
 const PAGES = ['devices', 'serial', 'ssh', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'history', 'settings', 'member', 'artifacts', 'ai-tools'];
-export const defaultUiWorkspace = () => ({ version: 1, density: 'full', expandedDeviceIds: [], deviceQuery: '', scrollPositions: {} });
+export const defaultUiWorkspace = () => ({ version: 2, density: 'full', expandedDeviceIds: [], deviceQuery: '', scrollPositions: {}, lastPage: 'devices' });
 const fail = () => { throw new Error(tr('界面现场设置无效，原数据已保留。')); };
 const hasControl = value => Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 function plain(value) { return value && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value)); }
 export function normalizeUiWorkspace(value) {
-  const fields = ['version', 'density', 'expandedDeviceIds', 'deviceQuery', 'scrollPositions'];
-  if (!plain(value) || Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)) || value.version !== 1
+  const legacy = value?.version === 1;
+  const fields = ['version', 'density', 'expandedDeviceIds', 'deviceQuery', 'scrollPositions', ...(legacy ? [] : ['lastPage'])];
+  if (!plain(value) || Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)) || ![1, 2].includes(value.version)
     || !['full', 'compact'].includes(value.density) || !Array.isArray(value.expandedDeviceIds) || value.expandedDeviceIds.length > 100) fail();
   const expandedDeviceIds = Array.from(value.expandedDeviceIds, id => {
     if (typeof id !== 'string' || !id || id.length > 300 || /\s/u.test(id) || hasControl(id)) fail(); return id;
@@ -15,7 +16,13 @@ export function normalizeUiWorkspace(value) {
   if (new Set(expandedDeviceIds).size !== expandedDeviceIds.length || typeof value.deviceQuery !== 'string' || value.deviceQuery.length > 300 || hasControl(value.deviceQuery)
     || !plain(value.scrollPositions) || Object.keys(value.scrollPositions).some(key => !PAGES.includes(key))
     || Object.values(value.scrollPositions).some(offset => !Number.isFinite(offset) || offset < 0 || offset > 10000000)) fail();
-  return { version: 1, density: value.density, expandedDeviceIds, deviceQuery: value.deviceQuery, scrollPositions: { ...value.scrollPositions } };
+  if (!legacy && !PAGES.includes(value.lastPage)) fail();
+  return { version: 2, density: value.density, expandedDeviceIds, deviceQuery: value.deviceQuery, scrollPositions: { ...value.scrollPositions }, lastPage: legacy ? 'devices' : value.lastPage };
+}
+export function readInitialNavigation(storage = globalThis.localStorage) {
+  let page = 'devices';
+  try { page = readUiWorkspace(storage).lastPage; } catch { /* The workspace hook exposes the preserved storage error. */ }
+  return { activeTab: page, sshVisited: page === 'ssh', aiToolsVisited: page === 'ai-tools', aiVisited: page === 'ai-workspace' };
 }
 export function readUiWorkspace(storage = globalThis.localStorage) {
   const raw = storage.getItem(UI_WORKSPACE_KEY);

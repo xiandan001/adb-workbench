@@ -60,7 +60,9 @@ test('follow-up and task buttons transfer context without collecting, inferring,
   ui.edit({ question: 'regression goal', requirements: { application: 'fixture.app', target: 'known text', preconditions: '', expectedResult: 'visible' } });
   assert.equal(h.calls.length, before); await h.render().generate();
   assert.equal(h.calls.at(-1).args.contextRef.turnId, h.turn.id); assert.equal(h.calls.at(-1).args.requirements.application, 'fixture.app');
-  assert.deepEqual(h.opened, []); await h.render().save(); assert.deepEqual(h.opened, ['saved-task']);
+  assert.deepEqual(h.opened, []); await h.render().save(); assert.deepEqual(h.opened, []);
+  assert.equal(flowHelpers.workspacePhase(h.render().current), 'result', 'Saved-task success remains result-first without reopening the preparation form');
+  assert.equal(h.render().current.savedTask.id, 'saved-task'); h.render().openSavedTask(); assert.deepEqual(h.opened, ['saved-task']);
 });
 
 test('only an explicit follow-up filter change reselects prior frozen evidence', async () => {
@@ -243,4 +245,44 @@ test('superseded source or locale refresh cannot start a later stale basket requ
   sources[1]({ ok: true, sources: [], checks: [], entitled: true }); await second;
   sources[0]({ ok: true, sources: [], checks: [], entitled: true }); await first;
   assert.equal(h.calls.filter(call => call.name === 'aiHandoffList').length, 1); assert.equal(h.render().cases.analysis.basketRevision, 2);
+});
+
+test('collect-and-review opens the existing final outbound gate only after local collection succeeds', async () => {
+  let finishCollection;
+  const h = harness({ aiWorkspaceCollect: () => new Promise(resolve => { finishCollection = resolve; }),
+    // Production analyze uses the built-in outbound transport; this fixture represents cancelling its final review.
+    aiWorkspaceAnalyze: async () => ({ ok: true, cancelled: true }) });
+  await h.render().refresh(); h.render().setMode('analysis'); h.render().edit({ question: 'Explicit analysis', text: 'local evidence' });
+  const before = h.calls.length, pending = h.render().collectAndReview();
+  assert.deepEqual(h.calls.slice(before).map(call => call.name), ['aiWorkspaceCollect']);
+  finishCollection({ ok: true, preview: h.preview }); await pending;
+  assert.deepEqual(h.calls.slice(before).map(call => call.name), ['aiWorkspaceCollect', 'aiWorkspaceAnalyze']);
+  assert.equal(h.calls.at(-1).args.previewId, h.preview.id); assert.equal(h.render().current.turns.length, 0);
+  assert.equal(h.render().current.preview.id, h.preview.id); assert.deepEqual(h.opened, []);
+});
+
+test('changing a task device clears an inherited app before generating, without discarding a separately edited requirement', async () => {
+  const h = harness(); await h.render().refresh(); h.render().setMode('task');
+  h.render().edit({ deviceId: 'A' });
+  h.render().edit({ question: 'Check current app', diagnostic: { packageName: 'com.fixtureA', symptom: '' }, requirements: { ...stateHelpers.workspaceRequirements(), application: 'com.fixtureA' } });
+  h.render().edit({ deviceId: 'B' });
+  assert.equal(h.render().current.requirements.application, '');
+  await h.render().generate();
+  const request = h.calls.find(call => call.name === 'aiWorkspaceGenerateTask').args;
+  assert.equal(request.deviceId, 'B'); assert.equal(request.requirements.application, '');
+  h.render().edit({ diagnostic: { packageName: 'com.fixtureB', symptom: '' }, requirements: { ...stateHelpers.workspaceRequirements(), application: 'User supplied app description' } });
+  h.render().edit({ deviceId: 'C' });
+  assert.equal(h.render().current.requirements.application, 'User supplied app description');
+});
+
+for (const change of ['switch-mode', 'cancel', 'no-entitlement', 'expired']) test(`collect-and-review never starts a final review after ${change}`, async () => {
+  let finish;
+  const h = harness({ aiWorkspaceCollect: () => new Promise(resolve => { finish = resolve; }),
+    aiWorkspaceSources: async () => ({ ok: true, entitled: change !== 'no-entitlement', sources: [], checks: [] }) });
+  await h.render().refresh(); h.render().setMode('analysis'); h.render().edit({ question: 'Current problem', text: 'local evidence' });
+  const pending = h.render().collectAndReview();
+  if (change === 'switch-mode') h.render().setMode('task');
+  if (change === 'cancel') await h.render().cancel();
+  finish({ ok: true, preview: { ...h.preview, ...(change === 'expired' ? { expiresAt: new Date(0).toISOString() } : {}) } }); await pending;
+  assert.equal(h.calls.filter(call => call.name === 'aiWorkspaceAnalyze').length, 0); assert.deepEqual(h.opened, []);
 });

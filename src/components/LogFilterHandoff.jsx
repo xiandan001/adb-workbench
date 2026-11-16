@@ -20,7 +20,7 @@ export default function LogFilterHandoff({ rows, deviceId, sourceTruncated = fal
       question: `${describe(snapshot)}${partial}${tr('请仅分析这些局部内容，不要将其视为全部日志。')}` } };
   };
   return <div role="group" aria-label={tr('日志筛选上下文')} className="min-w-0 max-w-lg space-y-1">
-    <AiContextButton disabled={!rows.length} context={prepare} onCreated={() => setCreated(true)} label={compact ? tr('AI 分析') : undefined} />
+    <AiContextButton disabled={!rows.length} context={prepare} onCreated={() => setCreated(true)} primary={compact} label={compact ? tr('分析当前筛选') : undefined} />
     {!compact && <p className={`text-[11px] ${detailText}`}>{tr('仅带入最近最多 2,000 行 / 448 KiB；不会自动发送 AI。')}</p>}
     {prepared && <p role="status" className={`break-words text-[11px] leading-5 ${detailText}`}>
       {describe(prepared)}{prepared.partialEntries > 0 && tr('其中 {0} 条记录仅保留末尾片段。', { 0: prepared.partialEntries })}

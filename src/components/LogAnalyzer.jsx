@@ -151,6 +151,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [autoDiagnoseAlert, setAutoDiagnoseAlert] = useState(null); // { issues, summary, timestamp }
   // 日志诊断规则库弹窗状态
   const [ruleLibraryOpen, setRuleLibraryOpen] = useState(false);
+  const [logAdvancedOpen, setLogAdvancedOpen] = useState(false);
   const autoDiagnoseListenersRef = useRef([]);
   // 缓存最后一次检测到异常的 alert，用于"展开监控"时恢复显示（而非显示空状态）
   const lastAutoDiagnoseAlertRef = useRef(null);
@@ -1662,6 +1663,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           >
             <Sparkles size={14} />{tr('日志对话')}</button>
 
+          <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{tr('自动诊断: ')}{autoDiagnoseEnabled ? 'ON' : 'OFF'}</span>
+          <button type="button" aria-expanded={logAdvancedOpen} onClick={() => setLogAdvancedOpen(value => !value)} title={tr('自动诊断与 MCP 设置')}
+            className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs ${isDark ? 'border-slate-600 text-slate-300 hover:bg-[#3E4145]' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}>{tr('高级')}<ChevronDown size={13} className={logAdvancedOpen ? 'rotate-180' : ''} /></button>
+          {logAdvancedOpen && <div role="group" aria-label={tr('日志高级设置')} className={`flex flex-wrap items-center gap-2 rounded-lg border p-2 ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
           {/* AI 自动诊断开关 */}
           <button
             onClick={onToggleAutoDiagnose}
@@ -1678,6 +1683,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             title={tr("诊断规则库")}
           >
             <Layers size={14} />{tr("规则库")}</button>
+          {isVip && <>
+            <button type="button" onClick={() => setMcpHelpVisible(true)} title={tr('查看 MCP 使用说明')} aria-label={tr('查看 MCP 使用说明')} className={`rounded-lg border p-2 ${isDark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600'}`}><HelpCircle size={14} /></button>
+            <button type="button" onClick={onToggleMcp} title={mcpRunning ? tr('点击关闭 MCP 服务') : tr('点击开启 MCP 服务')}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs ${isDark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600'}`}><Radio size={14} />{tr('MCP:')}{mcpRunning ? 'ON' : 'OFF'}</button>
+          </>}
+          </div>}
 
           {/* 自动诊断已开启但监控窗口被隐藏时，显示"展开监控"按钮 */}
           {autoDiagnoseEnabled && !autoDiagnoseAlert && (
@@ -1711,23 +1722,6 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
           <div className="flex-1" />
 
-          {isVip ? (<>
-          <button
-            onClick={() => setMcpHelpVisible(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border transition-all ${isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-500 active:scale-95 shadow-sm'}`}
-            title={tr("查看 MCP 使用说明")}
-          >
-            <HelpCircle size={14} />
-          </button>
-
-          <button
-            onClick={onToggleMcp}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all ${mcpRunning ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : isDark ? 'border-slate-500 hover:bg-[#3E4145] text-slate-400 active:scale-95 shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-500 active:scale-95 shadow-sm'}`}
-            title={mcpRunning ? tr("点击关闭 MCP 服务") : tr("点击开启 MCP 服务")}
-          >
-            <Radio size={14} />{tr("MCP:")}{mcpRunning ? 'ON' : 'OFF'}
-          </button>
-          </>) : null}
         </div>
       </div>
 

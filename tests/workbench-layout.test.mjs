@@ -14,7 +14,7 @@ function declaration(selector, property, media = '') {
   });
   return result;
 }
-test('device and history grids retain the original desktop column counts without sacrificing shrinking boundaries', () => {
+test('device grids use available content width and retain original maximum columns and shrinking boundaries', () => {
   const app = read('src/App.jsx');
   assert.match(app, /import '\.\/styles\/workbenchLayout\.css'/);
   assert.match(app, /className="workbench-device-list"/);
@@ -22,7 +22,10 @@ test('device and history grids retain the original desktop column counts without
   for (const selector of ['.workbench-device-list', '.workbench-history-grid']) {
     assert.equal(declaration(selector, 'grid-template-columns'), 'minmax(0, 1fr)');
   }
-  assert.equal(declaration('.workbench-device-list', 'grid-template-columns', '(min-width: 1280px)'), 'repeat(2, minmax(0, 1fr))');
+  assert.match(app, /className="workbench-device-grid"/);
+  assert.equal(declaration('.workbench-device-grid', 'container'), 'device-grid / inline-size');
+  assert.equal(declaration('.workbench-device-list', 'grid-template-columns', 'device-grid (min-width: 1150px)'), 'repeat(2, minmax(0, 1fr))');
+  assert.equal(declaration('.workbench-device-list', 'grid-template-columns', '(min-width: 1280px)'), undefined);
   assert.equal(declaration('.workbench-history-grid', 'grid-template-columns', '(min-width: 640px)'), 'repeat(2, minmax(0, 1fr))');
   assert.equal(declaration('.workbench-history-grid', 'grid-template-columns', '(min-width: 1024px)'), 'repeat(3, minmax(0, 1fr))');
   assert.equal(declaration('.workbench-device-list', 'gap'), '1.5rem');

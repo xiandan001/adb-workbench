@@ -17,6 +17,8 @@ import {
 } from '../shared/taskCenterOnboarding';
 import TaskCenterOnboarding from './TaskCenterOnboarding';
 import TaskCenterQuickStart from './TaskCenterQuickStart';
+import TaskSavedRunDialog from './TaskSavedRunDialog';
+import { prepareSavedTaskRun } from '../shared/taskQuickRun';
 import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
 import TaskAiTargets from './TaskAiTargets';
@@ -156,6 +158,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const [pendingDraftAction, setPendingDraftAction] = useState(null);
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [starting, setStarting] = useState(false);
+  const [savedRun, setSavedRun] = useState(null);
+  const runInFlightRef = useRef(false);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState([]);
   const [activeTasks, setActiveTasks] = useState([]);
   const [history, setHistory] = useState([]);
@@ -543,6 +547,13 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     setWorkspaceView('editor');
   };
 
+  const previewSavedRun = script => {
+    if (runInFlightRef.current) return;
+    const targets = [...selectedDeviceIds];
+    const adapted = targets.length && targets.every(id => taskPlatformForDevice(id) === 'harmony') ? adaptPristineBuiltin(script, targets[0]) : null;
+    setSavedRun({ script: cloneScript(adapted || script), deviceIds: targets, error: '' });
+  };
+
   const startRecording = () => {
     applyQuickTemplate('record', () => {
       setRecordingTaskId('');
@@ -675,40 +686,41 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     }
   };
 
-  const runScript = async () => {
-    if (starting) return;
-    if (platformMismatch) { showToast?.(tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。')); return; }
-    if (selectedDeviceIds.length === 0) {
-      showToast?.(tr("请至少选择一台在线设备"));
-      return;
-    }
-    if (offlineTargets.length) {
-      showToast?.(tr("所选设备已离线，请重新连接或取消勾选离线设备"));
-      return;
-    }
+  const executeRun = async (script, deviceIds) => {
+    if (runInFlightRef.current) return null;
+    let request;
+    try { request = prepareSavedTaskRun({ script, deviceIds, devices, outputBaseDir: taskCenterPath }); }
+    catch (failure) { showToast?.(failure.message); return { ok: false, error: failure.message }; }
+    runInFlightRef.current = true;
     setStarting(true);
     try {
-      const res = await window.electronAPI?.taskRun?.({
-        script: draft,
-        deviceIds: selectedDeviceIds,
-        outputBaseDir: taskCenterPath,
-        continueOnError: draft.continueOnError,
-        concurrency: 1
-      });
+      const res = await window.electronAPI?.taskRun?.(request);
       if (res?.ok) {
         if (res.task) {
           setActiveTasks(prev => [res.task, ...prev.filter(item => item.id !== res.task.id)]);
           setSelectedTaskId(res.task.id);
         }
-        showToast?.(draft.mode === 'stress' ? tr("自动化压测已开始") : tr("任务已加入队列"));
+        showToast?.(request.script.mode === 'stress' ? tr("自动化压测已开始") : tr("任务已加入队列"));
+        return { ok: true };
       } else {
         showToast?.(tr("启动失败：{0}", { 0: res?.error || tr("未知错误") }));
+        return { ok: false, error: res?.error || tr('未知错误') };
       }
     } catch (error) {
       showToast?.(tr("启动失败：{0}", { 0: error.message || tr("未知错误") }));
+      return { ok: false, error: error.message || tr('未知错误') };
     } finally {
+      runInFlightRef.current = false;
       setStarting(false);
     }
+  };
+  const runScript = () => executeRun(draft, selectedDeviceIds);
+  const confirmSavedRun = async () => {
+    if (!savedRun) return;
+    const request = savedRun;
+    const result = await executeRun(request.script, request.deviceIds);
+    if (result?.ok) setSavedRun(null);
+    else if (result) setSavedRun(current => current === request ? { ...current, error: result.error } : current);
   };
 
   const refreshRecorderSnapshot = async ({ deviceId = recorder.deviceId, silent = false, background = false } = {}) => {
@@ -1132,6 +1144,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           onRecord={startRecording}
           onImport={importStressScript}
           onOpenScript={openScriptEditor}
+          onRunScript={previewSavedRun}
+          running={starting}
           onOpenAdvanced={openAdvancedEditor}
           onOpenTask={(task) => setSelectedTaskId(task.id)}
         />
@@ -1414,6 +1428,9 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         onOpenAnalysis={onOpenAnalysis}
         onCompareParent={task => { setComparisonSelection({ beforeId: task.parentTaskId, afterId: task.id }); setSelectedTaskId(''); setComparisonOpen(true); }}
         onRerun={task => { if (task) { setActiveTasks(items => [task, ...items.filter(item => item.id !== task.id)]); setSelectedTaskId(task.id); } }} />}
+      {savedRun && <TaskSavedRunDialog request={savedRun} devices={devices} busy={starting} error={savedRun.error} theme={t}
+        onCancel={() => { if (!runInFlightRef.current) setSavedRun(null); }} onConfirm={confirmSavedRun}
+        onTargetsChange={deviceIds => { if (runInFlightRef.current) return; setSelectedDeviceIds(deviceIds); setSavedRun(current => current ? { ...current, deviceIds, error: '' } : current); }} />}
       {comparisonOpen && <TaskRunComparisonDialog history={history} theme={t} initialAfterId={comparisonSelection.afterId} initialBeforeId={comparisonSelection.beforeId} onClose={() => setComparisonOpen(false)} onOpenPath={openTaskPath} />}
       {pendingDraftAction && (
         <TaskCenterDraftDialog
