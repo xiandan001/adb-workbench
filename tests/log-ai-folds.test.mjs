@@ -50,11 +50,11 @@ function componentHarness(file, name, initialProps = {}, api = {}) {
 const scope = Object.freeze({ label: 'A.log', retainedEntries: 2, totalEntries: 20, retainedLines: 4, bytes: 2048, partial: true, omittedOversized: 1 });
 test('actual scope disclosure preserves its frozen summary and partial warning while hiding only explanations', async t => {
   const h = componentHarness('LogInlineAnalysisScope.jsx', 'LogInlineAnalysisScope', { scope }); t.after(h.dispose); await h.drain();
-  assert.match(text(h.tree()), /2\/20/); assert.match(text(h.tree()), /只分析以上局部范围/); assert.doesNotMatch(text(h.tree()), /最终以完整发送确认预览为准/);
+  assert.match(text(h.tree()), /2\/20/); assert.match(text(h.tree()), /局部范围/); assert.doesNotMatch(text(h.tree()), /只分析以上局部范围/); assert.doesNotMatch(text(h.tree()), /最终以完整发送确认预览为准/);
   const toggle = button(h, '范围说明'); assert.ok(toggle); assert.equal(toggle.props.type, 'button'); assert.equal(toggle.props['aria-expanded'], false); assert.ok(toggle.props['aria-controls']);
   assert.equal(find(h.tree(), node => node.props?.id === toggle.props['aria-controls']).props.hidden, true);
   toggle.props.onClick(); await h.drain(); assert.equal(button(h, '范围说明').props['aria-expanded'], true); assert.match(text(h.tree()), /最终以完整发送确认预览为准/); assert.match(text(h.tree()), /1 条记录因单条超出/);
-  button(h, '范围说明').props.onClick(); await h.drain(); assert.equal(button(h, '范围说明').props['aria-expanded'], false); assert.match(text(h.tree()), /2\/20/); assert.match(text(h.tree()), /只分析以上局部范围/); assert.deepEqual(h.calls, []);
+  button(h, '范围说明').props.onClick(); await h.drain(); assert.equal(button(h, '范围说明').props['aria-expanded'], false); assert.match(text(h.tree()), /2\/20/); assert.match(text(h.tree()), /局部范围/); assert.deepEqual(h.calls, []);
 });
 test('controlled scope preference survives stream and locale refresh without expanding or running a query', async t => {
   let saved = true; const writes = []; let h;
@@ -102,4 +102,22 @@ test('actual log-window props persist only fold flags and keep exactly one conse
   assert.deepEqual(writes, [{ key: 'scopeExpanded', value: false }, { key: 'usageExpanded', value: true }]); assert.match(expression(scopeNode, 'expanded'), /viewPreferences.view.scopeExpanded/); assert.match(expression(hosts[0], 'usageExpanded'), /viewPreferences.view.usageExpanded/);
   assert.match(source, /ref=\{setUsageTarget\} className="[^"]*max-h-\[40%\][^"]*overflow-hidden/); assert.ok(source.indexOf('ref={setUsageTarget}') > source.indexOf('{/* AI Input Bar */}'));
   assert.ok(source.indexOf('<LogInlineAnalysisScope') > source.indexOf('{/* AI Content Area */}'), 'Explanations must share the scrollable analysis area, not force the composer below a 240px pane');
+});
+
+test('short AI panes can shrink the usage slot without scroll-area padding pushing controls outside the viewport', () => {
+  const source = fs.readFileSync(new URL('../src/components/LogAnalyzer.jsx', import.meta.url), 'utf8');
+  const start = source.indexOf('{/* AI Content Area */}'), end = source.indexOf('{/* AI Input Bar */}', start);
+  assert.ok(start > 0 && end > start);
+  const content = source.slice(start, end);
+  assert.match(content, /<div className="min-h-0 flex-1 overflow-y-auto">\s*<div className="px-4 py-3">/);
+  const slot = source.match(/ref=\{setUsageTarget\} className="([^"]+)"/)[1];
+  assert.match(slot, /min-h-0/); assert.match(slot, /max-h-\[40%\]/); assert.doesNotMatch(slot, /shrink-0/);
+});
+
+test('multiline composer height is bounded by its actual analysis pane, not only the viewport or saved height', () => {
+  const analyzer = fs.readFileSync(new URL('../src/components/LogAnalyzer.jsx', import.meta.url), 'utf8');
+  const composer = fs.readFileSync(new URL('../src/components/LogAnalysisComposer.jsx', import.meta.url), 'utf8');
+  assert.match(analyzer, /\[container-type:size\]/);
+  assert.match(composer, /max-h-\[min\(6rem,max\(2\.5rem,calc\(100cqh_-_10rem\)\)\)\]/);
+  assert.doesNotMatch(composer, /max-h-24/);
 });

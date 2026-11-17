@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.30': {
+    title: 'v4.7.30',
+    date: '2026-11-17',
+    items: [
+      { type: 'feature', get text() { return tr('新增 RS232 协议面板，支持参数生成、命令编辑及本机保存，填入后仍需手动发送。'); } },
+      { type: 'fix', get text() { return tr('修复普通退出应用时意外关闭共享 ADB 服务并断开网络连接的问题。'); } },
+      { type: 'improve', get text() { return tr('优化日志对话的范围摘要、分析状态和输入交互，取消或失败时保留补充要求。'); } },
+      { type: 'improve', get text() { return tr('移除科技未来主题，旧内置主题设置兼容中性深色，不覆盖自定义主题。'); } },
+    ],
+  },
   '4.7.29': {
     title: 'v4.7.29',
     date: '2026-11-17',

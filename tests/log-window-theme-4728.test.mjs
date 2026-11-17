@@ -8,6 +8,6 @@ test('standalone log window follows actual saved light/dark/custom theme without
   const custom = { key: 'my-log-theme', card: 'bg-black', isDark: true };
   assert.equal(resolveLogWindowTheme(custom.key, [custom]), custom);
   assert.equal(isDarkTheme(resolveLogWindowTheme('constructor')), true);
-  assert.equal(readLogWindowThemeKey({ getItem: () => '{invalid' }), 'tech');
-  assert.equal(readLogWindowThemeKey({ getItem: () => { throw Error('blocked'); } }), 'tech');
+  assert.equal(readLogWindowThemeKey({ getItem: () => '{invalid' }), 'graphite');
+  assert.equal(readLogWindowThemeKey({ getItem: () => { throw Error('blocked'); } }), 'graphite');
 });

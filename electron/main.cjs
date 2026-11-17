@@ -62,7 +62,6 @@ const environmentCheck = require('./lib/environment-check.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
 const acceptanceSuite = require('./lib/acceptance-suite.cjs');
 const deviceGuard = require('./lib/device-guard.cjs');
-const { cleanupAndroidToolProcesses } = require('./lib/android-tool-cleanup.cjs');
 
 function configureUserDataPath() {
   const appDataDir = app.getPath('appData');
@@ -313,8 +312,6 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
   });
   if (forUpdateInstall) {
     await updater.prepareForUpdateInstall();
-  } else {
-    await cleanupAndroidToolProcesses();
   }
 }
 

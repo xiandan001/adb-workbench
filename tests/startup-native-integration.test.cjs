@@ -154,7 +154,7 @@ test('quit flushes reproduction evidence before closing serial and SSH sources',
   assert.deepEqual(order, ['evidence-saved', 'serial', 'ssh']);
 });
 
-test('quit awaits owned Harmony media cleanup before clearing runtime resources or Android tools', async () => {
+test('normal quit awaits owned Harmony media cleanup before clearing runtime resources without sweeping shared Android tools', async () => {
   const h = harness(); h.create(); const order = []; let finish;
   Object.assign(h.context, { appMessageDialog: { cleanup() {} }, aiTools: { cleanup: async () => {} },
     serial: { cleanup: async () => order.push('serial') }, ssh: { cleanup: async () => order.push('ssh') },
@@ -164,7 +164,8 @@ test('quit awaits owned Harmony media cleanup before clearing runtime resources 
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(order, ['serial', 'ssh', 'harmony-start']);
   finish({ success: true }); await pending;
-  assert.deepEqual(order, ['serial', 'ssh', 'harmony-start', 'runtime', 'android']);
+  assert.deepEqual(order, ['serial', 'ssh', 'harmony-start', 'runtime']);
+  assert.equal(order.includes('android'), false, 'Ordinary quit preserves the shared ADB server and its transports');
 });
 
 test('a stalled optional diagnostic flush cannot block starting device cleanup or hold exit forever', async () => {
@@ -178,5 +179,6 @@ test('a stalled optional diagnostic flush cannot block starting device cleanup o
   const pending = vm.runInContext(beforeQuitSource, h.context)();
   await new Promise(resolve => setImmediate(resolve));
   assert.ok(cleaned.includes('serial') && cleaned.includes('ssh') && cleaned.includes('ai'));
-  assert.equal(typeof deadline, 'function'); deadline(); await pending; assert.ok(cleaned.includes('android'));
+  assert.equal(typeof deadline, 'function'); deadline(); await pending;
+  assert.equal(cleaned.includes('android'), false, 'Diagnostic timeout must not fall back to sweeping shared ADB processes');
 });

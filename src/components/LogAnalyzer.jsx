@@ -1,7 +1,7 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
 // H5: 导入 memo 用于 LogRow 性能优化
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
-import { Copy, Terminal, Radio, X, Sparkles, Loader2, Send, StopCircle, Maximize2, Minimize2, FileDown, Zap, Brain, ChevronDown, Lock, BookmarkPlus } from "lucide-react";
+import { Copy, Terminal, Radio, X, Sparkles, Loader2, Maximize2, Minimize2, FileDown, Brain, ChevronDown, Lock, BookmarkPlus } from "lucide-react";
 import { isDarkTheme } from '../shared/theme';
 import { fingerprintLogLines, normalizeLogBuffers, normalizeLogFilter } from '../shared/logWorkspace';
 import LogFilterPresets from './LogFilterPresets';
@@ -31,6 +31,9 @@ import { confirmAppMessage, showAppMessage } from '../shared/appMessageDialog.js
 import { applyLogRowFilter, logEntryTimestamp } from '../shared/logWorkbenchModel.js';
 import useLogCloseProtection from '../shared/useLogCloseProtection.js';
 import SelectMenu from './SelectMenu.jsx';
+import { isLogAnalysisAnswer, isLogAnalysisTerminal, logAnalysisAttemptMatches, logAnalysisPhase, retireLogAnalysisRequest, LOG_ANALYSIS_PROMPT_LIMIT } from '../shared/logAnalysisState.js';
+import LogAnalysisStatus from './LogAnalysisStatus.jsx';
+import LogAnalysisComposer from './LogAnalysisComposer.jsx';
 
 const emptyFilter = {};
 const LOG_ROW_HEIGHT = 28;
@@ -180,12 +183,15 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [contextUsage, setContextUsage] = useState(null); // { usedTokens, maxTokens, percent, messageCount }
   const [aiCustomPrompt, setAiCustomPrompt] = useState('');
   const [aiFullscreen, setAiFullscreen] = useState(false);
+  const hasAnalysisAnswer = useMemo(() => aiTurns.some(turn => isLogAnalysisAnswer(turn.content)), [aiTurns]);
   const aiPanelHeight = viewPreferences.view.aiPanelHeight;
   const setAiPanelHeight = useCallback(value => setViewField('aiPanelHeight', value), [setViewField]);
   const aiListenersRef = useRef([]);
   const aiContentRef = useRef('');
   const aiReasoningRef = useRef('');
   const aiTurnsRef = useRef([]); // 对话轮次 ref
+  const [analysisStates, setAnalysisStates] = useState([]);
+  const analysisAttemptRef = useRef(null), aiOperationsRef = useRef(new Map()), aiStopFlightRef = useRef(null);
   const aiStreamEpochRef = useRef(0);
   const aiHistoryReadOnlyRef = useRef(false);
   const aiResizingRef = useRef(false);
@@ -207,13 +213,53 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [searchViewId, setSearchViewId] = useState(0);
   const smartSearchListenersRef = useRef([]);
   const smartRequestRef = useRef({ active: false, id: '', retired: new Set() });
-  useEffect(() => window.electronAPI?.onAiOutboundChanged?.(payload => {
-    const operation = aiRequestRef.current, operations = payload?.operations || [];
-    const analysis = operations.find(item => item.id === operation.id);
-    if (operation.active && analysis && ['cancelled', 'failed'].includes(analysis.status)) {
-      operation.active = false; operation.retired.add(analysis.id); aiAnalyzingRef.current = false; setAiAnalyzing(false); setMapReduceProgress(null);
+  const isCurrentAnalysisAttempt = useCallback(attempt => mountedRef.current && analysisAttemptRef.current === attempt && !aiHistoryReadOnlyRef.current
+    && logAnalysisAttemptMatches(attempt, latestDocument.current?.documentId, captureSessionRef.current.sourceIdentity || ''), []);
+  const updateAnalysisAttempt = useCallback((attempt, patch) => {
+    if (!isCurrentAnalysisAttempt(attempt)) return false;
+    Object.assign(attempt, patch);
+    setAnalysisStates(previous => {
+      const state = { status: attempt.status, error: attempt.error || '', sentRequests: attempt.sentRequests || 0 }, old = previous[attempt.turnIndex];
+      if (old?.status === state.status && old?.error === state.error && old?.sentRequests === state.sentRequests) return previous;
+      const next = [...previous]; next[attempt.turnIndex] = state; return next;
+    });
+    return true;
+  }, [isCurrentAnalysisAttempt]);
+  const flushAnalysisAttempt = useCallback(attempt => {
+    if (!isCurrentAnalysisAttempt(attempt)) return;
+    const turns = [...aiTurnsRef.current], turn = turns[attempt.turnIndex];
+    if (turn) { turns[attempt.turnIndex] = { ...turn, content: aiContentRef.current, reasoning: aiReasoningRef.current,
+      ...(attempt.streamEnded && aiReasoningRef.current ? { reasoningExpanded: false } : {}) }; setAiTurns(turns); }
+  }, [isCurrentAnalysisAttempt, setAiTurns]);
+  const finishAnalysisAttempt = useCallback((attempt, status, error = '') => {
+    if (!isCurrentAnalysisAttempt(attempt)) return;
+    flushAnalysisAttempt(attempt);
+    if (status === 'completed' && attempt.streamEnded && isLogAnalysisAnswer(aiContentRef.current)) {
+      aiLastLogHashRef.current = attempt.fingerprint;
+      setAiCustomPrompt(previous => previous === attempt.composerDraft ? '' : previous);
+    } else { aiLastLogHashRef.current = ''; if (status === 'completed') status = 'empty'; }
+    updateAnalysisAttempt(attempt, { status, error });
+    const operation = aiRequestRef.current; operation.active = false;
+    retireLogAnalysisRequest(operation, operation.id);
+    aiAnalyzingRef.current = false; setAiAnalyzing(false); setMapReduceProgress(null);
+  }, [isCurrentAnalysisAttempt, flushAnalysisAttempt, updateAnalysisAttempt]);
+  const applyAnalysisOperation = useCallback(analysis => {
+    const attempt = analysisAttemptRef.current;
+    if (!analysis || !isCurrentAnalysisAttempt(attempt) || !logAnalysisAttemptMatches(attempt, latestDocument.current?.documentId, captureSessionRef.current.sourceIdentity || '', analysis.id)) return;
+    attempt.sentRequests = Math.max(attempt.sentRequests || 0, analysis.usage?.sentRequests || 0);
+    if (analysis.status === 'cancelled') { if (!['stopped', 'failed'].includes(attempt.status)) finishAnalysisAttempt(attempt, 'cancelled'); }
+    else if (analysis.status === 'failed') { if (!['cancelled', 'stopped'].includes(attempt.status)) finishAnalysisAttempt(attempt, 'failed', attempt.error || tr('本次分析未能完成，请重试。')); }
+    else if (analysis.status === 'completed') { if (!isLogAnalysisTerminal(attempt.status)) finishAnalysisAttempt(attempt, 'empty'); }
+    else if (!isLogAnalysisTerminal(attempt.status)) {
+      const phase = logAnalysisPhase(analysis.phase);
+      updateAnalysisAttempt(attempt, { status: phase === 'sending' && attempt.status === 'responding' ? 'responding' : phase });
     }
-  }), []);
+  }, [isCurrentAnalysisAttempt, finishAnalysisAttempt, updateAnalysisAttempt]);
+  useEffect(() => window.electronAPI?.onAiOutboundChanged?.(payload => {
+    const operations = Array.isArray(payload?.operations) ? payload.operations.slice(-12) : [];
+    aiOperationsRef.current = new Map(operations.map(operation => [operation.id, operation]));
+    applyAnalysisOperation(aiOperationsRef.current.get(aiRequestRef.current.id));
+  }), [applyAnalysisOperation]);
   useLayoutEffect(() => { smartSearchingRef.current = smartSearching; }, [smartSearching]);
   // 当前搜索会话 ID：用于过滤旧搜索会话的事件，防止"停止→重新搜索"时
   // 旧搜索的 complete/chunk/progress 事件污染新搜索状态
@@ -366,6 +412,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     setMarkerDraft(null);
     setLocatedMarkerIdentity('');
     aiTurnsRef.current = session.aiTurns;
+    analysisAttemptRef.current = null; setAnalysisStates([]);
     setAiTurns(session.aiTurns);
     aiContentRef.current = '';
     aiReasoningRef.current = '';
@@ -599,6 +646,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       setSmartSearchResult(null); setSmartSearchIncremental([]); setSmartSearchMatchedIds(new Set());
       setSmartSearchProgress(null); setMapReduceProgress(null); setAnalysisScope(null);
       aiContentRef.current = ''; aiReasoningRef.current = ''; aiLastLogHashRef.current = ''; setAiTurns([]);
+      analysisAttemptRef.current = null; setAnalysisStates([]);
       setEvidence([]); setMarkers([]); setMarkerDraft(null); setAiError(''); setAiPanelOpen(false);
       aiHistoryReadOnlyRef.current = false; setAiHistoryReadOnly(false); setRestoredSessionName('');
       conversationEpoch.current++; conversationBound.current = false; setConversationReady(true);
@@ -719,11 +767,16 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         if (!id) return false;
         if (!operation.active || aiHistoryReadOnlyRef.current || operation.documentId !== latestDocument.current?.documentId
           || operation.sourceIdentity !== (captureSessionRef.current.sourceIdentity || '')) {
-          operation.retired.add(id); while (operation.retired.size > 32) operation.retired.delete(operation.retired.values().next().value); return false;
+          retireLogAnalysisRequest(operation, id); return false;
         }
         if (operation.retired.has(id) || operation.id && operation.id !== id) return false;
-        if (!operation.id) { if (!bind) return false; operation.id = id; }
+        if (!operation.id) { if (!bind) return false; operation.id = id; if (analysisAttemptRef.current) analysisAttemptRef.current.requestId = id; }
         return true;
+      };
+      const acceptTerminal = payload => {
+        const attempt = analysisAttemptRef.current, id = payload?.requestId;
+        return isCurrentAnalysisAttempt(attempt) && aiRequestRef.current.id === id
+          && logAnalysisAttemptMatches(attempt, latestDocument.current?.documentId, captureSessionRef.current.sourceIdentity || '', id);
       };
       if (window.electronAPI && window.electronAPI.onAiStreamStart) {
         const offStart = window.electronAPI.onAiStreamStart((payload) => {
@@ -732,6 +785,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           setAiError('');
           // 重置思考内容（新一轮分析）
           aiReasoningRef.current = '';
+          applyAnalysisOperation(aiOperationsRef.current.get(payload.requestId));
         });
         listeners.push(offStart);
       }
@@ -739,9 +793,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         // 高频节流 + requestAnimationFrame：60ms 间隔刷新，配合 rAF 保证浏览器渲染帧对齐
         let aiFlushTimer = null;
         let aiRafPending = false;
+        let aiPendingFlush = null;
         const offChunk = window.electronAPI.onAiStreamChunk((payload) => {
           if (!accept(payload)) return;
           const streamEpoch = aiStreamEpochRef.current;
+          const attempt = analysisAttemptRef.current;
+          aiPendingFlush = { attempt, streamEpoch };
+          updateAnalysisAttempt(attempt, { status: 'responding' });
           // 收到首个 chunk 说明压缩/分块已完成，清除进度状态
           setMapReduceProgress(null);
           if (payload.type === 'reasoning') {
@@ -756,16 +814,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 aiRafPending = true;
                 requestAnimationFrame(() => {
                   aiRafPending = false;
-                  if (streamEpoch !== aiStreamEpochRef.current) return;
+                  const pending = aiPendingFlush; aiPendingFlush = null;
+                  if (!pending || pending.streamEpoch !== aiStreamEpochRef.current) return;
                   // 更新当前轮的 reasoning/content
-                  const turns = [...aiTurnsRef.current];
-                  const last = turns[turns.length - 1];
-                  if (last) {
-                    last.reasoning = aiReasoningRef.current;
-                    last.content = aiContentRef.current;
-                  }
-                  aiTurnsRef.current = turns;
-                  setAiTurns(turns);
+                  flushAnalysisAttempt(pending.attempt);
                 });
               }
             }, 60);
@@ -778,32 +830,20 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       }
       if (window.electronAPI && window.electronAPI.onAiStreamEnd) {
         const offEnd = window.electronAPI.onAiStreamEnd((payload) => {
-          if (!accept(payload)) return;
-          // 流结束时 flush 最终内容到当前轮
-          const turns = [...aiTurnsRef.current];
-          const last = turns[turns.length - 1];
-          if (last) {
-            last.reasoning = aiReasoningRef.current;
-            last.content = aiContentRef.current;
-            // 有思考内容则自动折叠
-            if (aiReasoningRef.current) last.reasoningExpanded = false;
-          }
-          aiTurnsRef.current = turns;
-          setAiTurns(turns);
-          setAiAnalyzing(false);
-          aiAnalyzingRef.current = false; aiRequestRef.current.active = false; aiRequestRef.current.retired.add(payload.requestId);
-          setMapReduceProgress(null);
+          if (!acceptTerminal(payload)) return;
+          const attempt = analysisAttemptRef.current;
+          if (['cancelled', 'stopped', 'stopping', 'failed'].includes(attempt.status)) return;
+          attempt.streamEnded = true; finishAnalysisAttempt(attempt, 'completed');
           refreshContextUsage();
         });
         listeners.push(offEnd);
       }
       if (window.electronAPI && window.electronAPI.onAiStreamError) {
         const offErr = window.electronAPI.onAiStreamError((payload) => {
-          if (!accept(payload)) return;
-          setAiError(payload.error || tr("分析失败"));
-          setAiAnalyzing(false);
-          aiAnalyzingRef.current = false; aiRequestRef.current.active = false; aiRequestRef.current.retired.add(payload.requestId);
-          setMapReduceProgress(null);
+          if (!acceptTerminal(payload)) return;
+          const attempt = analysisAttemptRef.current;
+          if (['cancelled', 'stopped', 'stopping'].includes(attempt.status)) return;
+          finishAnalysisAttempt(attempt, 'failed', payload.error || tr('分析失败'));
         });
         listeners.push(offErr);
       }
@@ -944,7 +984,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         noteTimerRef.current = null;
       }
     };
-  }, [applyRememberedFilter, readTargetView, setAiTurns, setTargetField]);
+  }, [applyRememberedFilter, readTargetView, setAiTurns, setTargetField, isCurrentAnalysisAttempt, applyAnalysisOperation, updateAnalysisAttempt, flushAnalysisAttempt, finishAnalysisAttempt]);
 
   function getSnapshot(scope = 'loaded') {
     const value = latestDocument.current;
@@ -1148,11 +1188,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   // One explicit local selection, the existing built-in IPC and its unchanged final outbound consent.
   async function onAiAnalyze(promptOverride, selectedRows, expectedDocumentId) {
     if (!isVip) { showVipBlock(tr('AI 深度分析')); return; }
-    if (aiAnalyzingRef.current || aiPreparing.current || latestDocument.current?.queryBlocked || !conversationReady) return;
+    if (aiAnalyzingRef.current || aiPreparing.current || aiStopFlightRef.current || latestDocument.current?.queryBlocked || !conversationReady) return;
     if (expectedDocumentId && expectedDocumentId !== latestDocument.current?.documentId) { setNote(tr('日志来源已变化，操作已取消，请重新核对。')); return; }
     if (aiHistoryReadOnly) { setAiPanelOpen(true); setNote(tr('恢复的 AI 对话为只读；请先选择“开始新的分析”')); return; }
     const rows = Array.isArray(selectedRows) ? selectedRows : filtered;
     if (!rows.length) { setNoteType('error'); setNote(tr('当前范围没有可分析的日志，请调整筛选条件。')); return; }
+    const customPrompt = typeof promptOverride === 'string' ? promptOverride.trim() : aiCustomPrompt.trim();
+    if (customPrompt.length > LOG_ANALYSIS_PROMPT_LIMIT) { setNoteType('error'); setNote(tr('补充要求最多 4,000 字，请缩短后再发送；未截断内容。')); return; }
     let prepared;
     try {
       prepared = prepareInlineLogAnalysis(rows, { deviceId: captureDeviceId, previousEvidence: evidence, sourceTruncated: snapshotTruncated,
@@ -1160,44 +1202,58 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       if (!prepared.selectedEntries.length) throw new Error(tr('所选记录均超过单次分析范围，请查看原文或改用导出。'));
       setAnalysisScope(prepared.scope); setAiPanelOpen(true);
     } catch (failure) { setNoteType('error'); setNote(failure.message); return; }
-    const reviewedDocument = latestDocument.current.documentId;
-    if (!conversationBound.current) {
-      aiPreparing.current = true;
-      try { if (!await resetBackendConversation() || latestDocument.current?.documentId !== reviewedDocument) return; conversationBound.current = true; }
-      finally { aiPreparing.current = false; }
-    }
-    setEvidence(prepared.evidence);
-    const customPrompt = typeof promptOverride === 'string' ? promptOverride : aiCustomPrompt.trim();
+    const attempt = { documentId: latestDocument.current.documentId, sourceIdentity: captureSessionRef.current.sourceIdentity || '',
+      requestId: '', turnIndex: aiTurnsRef.current.length, status: 'preparing', sentRequests: 0, prompt: customPrompt,
+      composerDraft: typeof promptOverride === 'string' ? undefined : aiCustomPrompt, fingerprint: fingerprintLogLines(prepared.lines) };
+    const operation = aiRequestRef.current;
+    retireLogAnalysisRequest(operation, operation.id);
+    operation.active = false; operation.id = ''; aiStreamEpochRef.current++;
+    analysisAttemptRef.current = attempt;
+    aiContentRef.current = ''; aiReasoningRef.current = '';
     const evidenceRefs = [...new Set([...aiTurnsRef.current.flatMap(turn => turn.evidenceRefs || []), ...prepared.evidenceRefs])];
     const currentTurn = { header: '[' + new Date().toLocaleTimeString(getLocale()) + '] ' + (customPrompt ? tr('追问') + '：' + customPrompt : tr('分析')),
       reasoning: '', content: '', reasoningExpanded: true, evidenceRefs };
-    aiContentRef.current = ''; aiReasoningRef.current = ''; setAiTurns([...aiTurnsRef.current, currentTurn]);
-    const operation = aiRequestRef.current;
-    operation.active = true; operation.id = ''; operation.documentId = latestDocument.current.documentId; operation.sourceIdentity = captureSessionRef.current.sourceIdentity || '';
+    setEvidence(prepared.evidence); setAiTurns([...aiTurnsRef.current, currentTurn]); updateAnalysisAttempt(attempt, { status: 'preparing' });
     aiAnalyzingRef.current = true; setAiAnalyzing(true); setAiError(''); setMapReduceProgress(null);
-    const fingerprint = fingerprintLogLines(prepared.lines), epoch = aiStreamEpochRef.current;
+    if (!conversationBound.current) {
+      aiPreparing.current = true;
+      try {
+        if (!await resetBackendConversation()) { finishAnalysisAttempt(attempt, 'failed', tr('分析上下文未能重置，请重试；未开始新的 AI 请求。')); return; }
+        if (!isCurrentAnalysisAttempt(attempt) || attempt.status !== 'preparing') return;
+        conversationBound.current = true;
+      } finally { aiPreparing.current = false; }
+    }
+    if (!isCurrentAnalysisAttempt(attempt) || isLogAnalysisTerminal(attempt.status)) return;
+    operation.active = true; operation.documentId = attempt.documentId; operation.sourceIdentity = attempt.sourceIdentity;
+    const epoch = aiStreamEpochRef.current;
     try {
       const response = await window.electronAPI.aiAnalyzeLog({ lines: [...prepared.lines], filterContext: { ...deferredFilter },
-        customPrompt: customPrompt || undefined, logChanged: aiLastLogHashRef.current !== fingerprint, thinkingMode: aiThinkingMode });
-      if (!mountedRef.current || epoch !== aiStreamEpochRef.current || operation.documentId !== latestDocument.current?.documentId) return;
-      if (!response?.ok) throw new Error(response?.error || tr('启动分析失败'));
-      aiLastLogHashRef.current = fingerprint;
-      setAiCustomPrompt(previous => previous.trim() === customPrompt ? '' : previous);
+        customPrompt: customPrompt || undefined, logChanged: aiLastLogHashRef.current !== attempt.fingerprint, thinkingMode: aiThinkingMode });
+      if (!isCurrentAnalysisAttempt(attempt) || epoch !== aiStreamEpochRef.current) return;
+      if (!response?.ok && !['cancelled', 'stopped'].includes(attempt.status)) {
+        finishAnalysisAttempt(attempt, response?.cancelled ? 'cancelled' : 'failed', response?.cancelled ? '' : response?.error || tr('启动分析失败'));
+      }
+      // The legacy response acknowledges local setup; only a usable matching stream end commits it.
     } catch (failure) {
-      if (mountedRef.current && epoch === aiStreamEpochRef.current) { setAiError(failure.message); operation.active = false; aiAnalyzingRef.current = false; setAiAnalyzing(false); }
+      if (isCurrentAnalysisAttempt(attempt) && epoch === aiStreamEpochRef.current && !['cancelled', 'stopped'].includes(attempt.status)) finishAnalysisAttempt(attempt, 'failed', failure.message);
     }
   }
   async function onAiStop() {
-    const operation = aiRequestRef.current, active = operation.active || aiAnalyzingRef.current;
-    if (operation.id) operation.retired.add(operation.id); operation.active = false;
-    while (operation.retired.size > 32) operation.retired.delete(operation.retired.values().next().value);
-    aiStreamEpochRef.current++; aiAnalyzingRef.current = false; setAiAnalyzing(false); setMapReduceProgress(null);
-    if (active) {
-      const turns = [...aiTurnsRef.current], last = turns.at(-1);
-      if (last) { last.content = aiContentRef.current; last.reasoning = aiReasoningRef.current; setAiTurns(turns); }
-      const response = await window.electronAPI?.aiStopAnalyze?.();
-      if (response?.ok === false) throw new Error(response.error || tr('停止分析失败，请重试。'));
-    }
+    if (aiStopFlightRef.current) return aiStopFlightRef.current;
+    const operation = aiRequestRef.current, attempt = analysisAttemptRef.current, active = operation.active || aiAnalyzingRef.current;
+    if (!active) return;
+    retireLogAnalysisRequest(operation, operation.id);
+    operation.active = false; aiStreamEpochRef.current++; aiLastLogHashRef.current = '';
+    flushAnalysisAttempt(attempt); updateAnalysisAttempt(attempt, { status: 'stopping' });
+    const flight = (async () => {
+      try {
+        const response = await window.electronAPI?.aiStopAnalyze?.();
+        if (response?.ok === false) throw new Error(response.error || tr('停止分析失败，请重试。'));
+        if (attempt?.status !== 'failed') finishAnalysisAttempt(attempt, 'stopped');
+      } catch (failure) { finishAnalysisAttempt(attempt, 'failed', failure.message); throw failure; }
+      finally { if (aiStopFlightRef.current === flight) aiStopFlightRef.current = null; }
+    })();
+    aiStopFlightRef.current = flight; return flight;
   }
   async function onAiClear() {
     if (!aiHistoryReadOnly && aiTurnsRef.current.length && !await confirmAppMessage({ type: 'warning', title: tr('清空分析对话'),
@@ -1208,6 +1264,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       conversationBound.current = true;
       aiHistoryReadOnlyRef.current = false; setAiHistoryReadOnly(false); setEvidence([]); setAnalysisScope(null);
       aiContentRef.current = ''; aiReasoningRef.current = ''; aiLastLogHashRef.current = ''; setAiTurns([]); setAiError('');
+      analysisAttemptRef.current = null; setAnalysisStates([]);
       refreshContextUsage();
     } catch (failure) { setAiError(failure.message); }
   }
@@ -1543,7 +1600,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           )}
 
           <div
-            className={`${aiFullscreen ? 'fixed inset-0 z-50' : 'relative'} flex min-h-0 flex-col ${aiFullscreen ? '' : 'border-t'} ${isDark ? 'bg-[#202124]/95 border-[#3E4145]' : 'bg-white border-slate-200'}`}
+            className={`${aiFullscreen ? 'fixed inset-0 z-50' : 'relative'} flex min-h-0 flex-col [container-type:size] ${aiFullscreen ? '' : 'border-t'} ${isDark ? 'bg-[#202124]/95 border-[#3E4145]' : 'bg-white border-slate-200'}`}
             style={aiFullscreen ? {} : { height: `${aiPanelHeight}px` }}
           >
             {/* 拖拽调整高度的把手 */}
@@ -1564,13 +1621,17 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                 {aiAnalyzing && (
                   <span className="flex items-center gap-1 text-xs text-purple-400 shrink-0">
                     <Loader2 size={12} className="animate-spin" />
-                    {mapReduceProgress
+                    {analysisStates.at(-1)?.status === 'awaiting-confirmation' ? tr('等待发送确认')
+                      : analysisStates.at(-1)?.status === 'preparing' ? tr('正在准备本次分析')
+                        : analysisStates.at(-1)?.status === 'stopping' ? tr('正在停止本次分析')
+                          : mapReduceProgress
                       ? mapReduceProgress.phase === 'map'
                         ? tr("分块分析 {0}/{1}{2}", { 0: mapReduceProgress.current, 1: mapReduceProgress.total, 2: mapReduceProgress.lineRange ? tr("（第 {0} 行）", { 0: mapReduceProgress.lineRange }) : '' })
                         : mapReduceProgress.phase === 'compress'
                           ? tr("正在压缩上下文…")
                           : tr("汇总分析中…")
-                      : tr("分析中…")}
+                      : analysisStates.at(-1)?.status === 'responding' ? tr('正在接收分析内容')
+                        : analysisStates.at(-1)?.status === 'sending' ? tr('已确认，等待 AI 回复') : tr('正在准备本次分析')}
                   </span>
                 )}
                 <span className={`text-xs shrink-0 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("({0} 条日志)", { 0: filtered.length.toLocaleString(getLocale()) })}</span>
@@ -1639,24 +1700,28 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             </div>
 
             {/* AI Content Area */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="px-4 py-3">
               {analysisScope && <div className="mb-3"><LogInlineAnalysisScope scope={analysisScope} isDark={isDark} expanded={viewPreferences.view.scopeExpanded} onExpandedChange={value => setViewField('scopeExpanded', value)} /></div>}
-              {aiError ? (
+              {aiError && (!conversationReady || !analysisStates.some(state => state?.error === aiError)) && (
                 <div className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
                   <span className="font-bold">{tr("错误：")}</span>{tr(aiError)}
                   {!conversationReady && <button type="button" onClick={resetBackendConversation} className="ml-2 rounded border border-current px-2 py-1 text-xs">{tr('重试重置分析上下文')}</button>}
                 </div>
-              ) : aiTurns.length > 0 ? (
+              )}
+              {aiTurns.length > 0 ? (
                 <div className="space-y-4">
                   {aiTurns.map((turn, idx) => {
                     const isLastTurn = idx === aiTurns.length - 1;
-                    const showThinking = isLastTurn ? aiAnalyzing : false;
+                    const showThinking = isLastTurn && aiAnalyzing && analysisStates[idx]?.status === 'responding';
                     return (
                       <div key={idx}>
                         {/* 轮次标题 */}
                         <div className={`text-xs font-bold mb-2 ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
                           {turn.header}
                         </div>
+                        <LogAnalysisStatus state={analysisStates[idx]} busy={isLastTurn && aiAnalyzing} hasAnswer={isLogAnalysisAnswer(turn.content)} hasReasoning={Boolean(turn.reasoning)}
+                          readOnly={aiHistoryReadOnly} isDark={isDark} onRetry={() => onAiAnalyze()} retryDisabled={aiAnalyzing || analysisBlocked || !filtered.length} />
                         {/* 本轮思考面板 */}
                         {turn.reasoning && (
                           <div className={`mb-2 rounded-lg border overflow-hidden ${isDark ? 'border-[#3E4145] bg-[#1A1B1D]' : 'border-slate-200 bg-slate-50'}`}>
@@ -1711,60 +1776,21 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               ) : (
                 <div className={`flex flex-col items-center justify-center h-full ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
                   <Sparkles size={28} className="mb-2 opacity-50" />
-                  <p className="text-sm">{tr("点击下方\"开始分析\"让 AI 帮你诊断日志")}</p>
+                  <p className="text-sm">{tr('点击“分析当前筛选”，检查完整发送预览后再开始。')}</p>
                   <p className="text-xs mt-1">{tr("将基于当前 {0} 条过滤后日志进行分析", { 0: filtered.length.toLocaleString(getLocale()) })}</p>
                 </div>
               )}
+              </div>
             </div>
 
             {/* AI Input Bar */}
             {aiHistoryReadOnly && <div className={`border-t px-4 py-3 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{tr("历史对话仅供查阅，不会作为新请求的上下文。开始新分析会清空当前对话视图，不影响已保存会话。")}<button type="button" onClick={onAiClear} className="ml-3 rounded border border-current px-2 py-1">{tr("开始新的分析")}</button>
             </div>}
-            <div className={`flex shrink-0 flex-wrap items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
-              {/* 快速/思考模式切换 */}
-              <button
-                onClick={() => setAiThinkingMode(!aiThinkingMode)}
-                disabled={aiAnalyzing}
-                className={`flex shrink-0 items-center gap-1 px-2.5 py-2 text-xs rounded-lg border transition-all disabled:opacity-50 ${
-                  aiThinkingMode
-                    ? (isDark ? 'border-purple-500/40 bg-purple-500/15 text-purple-400' : 'border-purple-300 bg-purple-50 text-purple-600')
-                    : (isDark ? 'border-[#5F6368] bg-[#3E4145] text-[#9AA0A6]' : 'border-slate-200 bg-white text-slate-500')
-                }`}
-                title={aiThinkingMode ? tr("思考模式：AI 会先进行推理再回答") : tr("快速模式：AI 直接回答，速度更快")}
-              >
-                {aiThinkingMode ? <Brain size={13} /> : <Zap size={13} />}
-                {aiThinkingMode ? tr("思考") : tr("快速")}
-              </button>
-              <input
-                type="text"
-                value={aiCustomPrompt}
-                disabled={aiHistoryReadOnly}
-                onChange={(e) => setAiCustomPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.isComposing && !aiAnalyzing && !analysisBlocked && filtered.length > 0) {
-                    e.preventDefault();
-                    onAiAnalyze();
-                  }
-                }}
-                placeholder={tr("附加分析要求（可选，如：重点关注内存泄漏）")}
-                className={`min-w-0 flex-[1_1_12rem] text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-purple-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
-              />
-              {aiAnalyzing ? (
-                <button
-                  onClick={onAiStop}
-                  className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
-                >
-                  <StopCircle size={14} />{tr("停止")}</button>
-              ) : (
-                <button
-                  onClick={() => onAiAnalyze()}
-                  disabled={filtered.length === 0 || aiHistoryReadOnly || analysisBlocked}
-                  className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
-                >
-                  <Send size={14} />{tr("开始分析")}</button>
-              )}
-            </div>
-            <div ref={setUsageTarget} className="flex min-h-0 max-h-[40%] shrink-0 flex-col overflow-hidden px-4 pb-2 empty:hidden" />
+            <LogAnalysisComposer value={aiCustomPrompt} onPromptChange={setAiCustomPrompt} thinking={aiThinkingMode} onThinkingChange={setAiThinkingMode}
+              busy={aiAnalyzing} state={analysisStates.at(-1)} hasAnswer={hasAnalysisAnswer} disabled={!filtered.length || analysisBlocked}
+              readOnly={aiHistoryReadOnly} onSubmit={() => onAiAnalyze()} onStop={() => onAiStop().catch(failure => setAiError(failure.message))}
+              theme={logTheme} isDark={isDark} />
+            <div ref={setUsageTarget} className="flex min-h-0 max-h-[40%] flex-col overflow-hidden px-4 pb-2 empty:hidden" />
           </div>
         </>
       )}

@@ -1,0 +1,2282 @@
+{
+  "sourceHashes": [
+    "4a025aaef44b5d1414c11eaf5f92fe1799edb9b1bd08be826e60a64b64384d72",
+    "c0f8dcdb2e615aa7935735f390171e08c8cee98bdf393d577838ebe3d5877298",
+    "51f72d602aabcfbc4774fcf47eee9a9785494d0860e829fe96afb3f4b831088d",
+    "706c57169b71d700360cbaf5c8aa6720c8c8d1356b47e254b826f424c841face"
+  ],
+  "workbookSha256": "76f3e3cb2486cf64037c6df0fc3295d93fa52b752127cba0284c29b57e891ba3",
+  "commands": [
+    {
+      "name": "开机",
+      "category": "整机管理",
+      "sourceIndex": 1,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 F0 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 F0 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 F0 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 F0 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 3,
+      "sourceName": "开机",
+      "sourceNote": "待机时串口唤醒",
+      "sourceCells": {
+        "A": "整机管理",
+        "B": "开机",
+        "C": "FE 08 58 42 48 43 4D 44 01 F0 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 F0 01 CF",
+        "E": "待机时串口唤醒"
+      }
+    },
+    {
+      "name": "关机",
+      "category": "整机管理",
+      "sourceIndex": 2,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 F1 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 F1 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 F1 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 F1 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 4,
+      "sourceName": "关机",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "关机",
+        "C": "FE 08 58 42 48 43 4D 44 01 F1 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 F1 01 CF"
+      }
+    },
+    {
+      "name": "休眠",
+      "category": "整机管理",
+      "sourceIndex": 3,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 F2 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 F2 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 F2 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 F2 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 5,
+      "sourceName": "休眠",
+      "sourceNote": "关闭显示及声音",
+      "sourceCells": {
+        "B": "休眠",
+        "C": "FE 08 58 42 48 43 4D 44 01 F2 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 F2 01 CF",
+        "E": "关闭显示及声音"
+      }
+    },
+    {
+      "name": "退出休眠",
+      "category": "整机管理",
+      "sourceIndex": 4,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 F3 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 F3 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 F3 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 F3 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 6,
+      "sourceName": "退出休眠",
+      "sourceNote": "打开显示及声音",
+      "sourceCells": {
+        "B": "退出休眠",
+        "C": "FE 08 58 42 48 43 4D 44 01 F3 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 F3 01 CF",
+        "E": "打开显示及声音"
+      }
+    },
+    {
+      "name": "获取电源状态",
+      "category": "整机管理",
+      "sourceIndex": 5,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 08 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 08 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 08 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 08 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 7,
+      "sourceName": "获取电源状态",
+      "sourceNote": "XX指的开关机状态：\n00：待机状态\n01:  开机状态\n02:  休眠状态",
+      "sourceCells": {
+        "B": "获取电源状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 08 CF",
+        "D": "FE 09 58 42 48 43 4D 44  02 08 XX CF",
+        "F": "XX指的开关机状态：\n00：待机状态\n01:  开机状态\n02:  休眠状态"
+      }
+    },
+    {
+      "name": "重启系统",
+      "category": "整机管理",
+      "sourceIndex": 6,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 43 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 43 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 43 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 43 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 8,
+      "sourceName": "重启系统",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "重启系统",
+        "C": "FE 08 58 42 48 43 4D 44 01 43 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 43 01 CF"
+      }
+    },
+    {
+      "name": "Android 系统还原（恢复出厂设置）",
+      "category": "整机管理",
+      "sourceIndex": 7,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 44 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 44 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 44 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 44 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 9,
+      "sourceName": "Android系统还原(恢复出厂设置)",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "Android系统还原(恢复出厂设置)",
+        "C": "FE 08 58 42 48 43 4D 44 01 44 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 44 01 CF"
+      }
+    },
+    {
+      "name": "Android 系统升级",
+      "category": "整机管理",
+      "sourceIndex": 8,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 45 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 45 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 45 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 45 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 10,
+      "sourceName": "Android系统升级",
+      "sourceNote": "XX：\n00 已是最新版本\n01 发现新版本",
+      "sourceCells": {
+        "B": "Android系统升级",
+        "C": "FE 08 58 42 48 43 4D 44 01 45 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 45 XX CF",
+        "F": "XX：\n00 已是最新版本\n01 发现新版本"
+      }
+    },
+    {
+      "name": "获取安卓系统版本",
+      "category": "整机管理",
+      "sourceIndex": 9,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 21 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 21 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 21 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 21 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 11,
+      "sourceName": "获取安卓系统版本",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取大屏安卓版本号：\nX1…Xn表示安卓版本号(Ascii码)包含编译时间（等同于系统设置里面的版本信息），如：V3.1.4_20180907.70824_8ff73a3",
+      "sourceCells": {
+        "B": "获取安卓系统版本",
+        "C": "FE 08 58 42 48 43 4D 44 02 21 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 21 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取大屏安卓版本号：\nX1…Xn表示安卓版本号(Ascii码)包含编译时间（等同于系统设置里面的版本信息），如：V3.1.4_20180907.70824_8ff73a3"
+      }
+    },
+    {
+      "name": "获取主板软件 model Name",
+      "category": "整机管理",
+      "sourceIndex": 10,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 27 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 27 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 27 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 27 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 12,
+      "sourceName": "获取主板软件model Name",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取软件model name信息：\nX1…Xn表示model name信息(Ascii码)",
+      "sourceCells": {
+        "B": "获取主板软件model Name",
+        "C": "FE 08 58 42 48 43 4D 44 02 27 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 27 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取软件model name信息：\nX1…Xn表示model name信息(Ascii码)"
+      }
+    },
+    {
+      "name": "获取机器序列号",
+      "category": "整机管理",
+      "sourceIndex": 11,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 28 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 28 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 28 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 28 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 13,
+      "sourceName": "获取机器序列号",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取机器序列号信息：\nX1…Xn表示序列号信息(Ascii码)",
+      "sourceCells": {
+        "B": "获取机器序列号",
+        "C": "FE 08 58 42 48 43 4D 44 02 28 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 28 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取机器序列号信息：\nX1…Xn表示序列号信息(Ascii码)"
+      }
+    },
+    {
+      "name": "获取主板板型名",
+      "category": "整机管理",
+      "sourceIndex": 12,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 29 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 29 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 29 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 29 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 14,
+      "sourceName": "获取主板板型名",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取机器序列号信息：\nX1…Xn表示主板板型名信息(Ascii码)",
+      "sourceCells": {
+        "B": "获取主板板型名",
+        "C": "FE 08 58 42 48 43 4D 44 02 29 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 29 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取机器序列号信息：\nX1…Xn表示主板板型名信息(Ascii码)"
+      }
+    },
+    {
+      "name": "获取大屏机器温度",
+      "category": "整机管理",
+      "sourceIndex": 13,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 33 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 33 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 33 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 33 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 15,
+      "sourceName": "获取大屏机器温度",
+      "sourceNote": "XX：温度 （16进制，单位：摄氏度）",
+      "sourceCells": {
+        "B": "获取大屏机器温度",
+        "C": "FE 08 58 42 48 43 4D 44 02 33 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 33 XX CF",
+        "F": "XX：温度 （16进制，单位：摄氏度）"
+      }
+    },
+    {
+      "name": "设置语言",
+      "category": "整机管理",
+      "sourceIndex": 14,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 0F XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 0F XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 0F XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 0F XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 16,
+      "sourceName": "设置语言",
+      "sourceNote": "XX:\n00: 简体中文\n01: English\n02: 繁体中文\n\nYY：设置判断\n00:失败\n01:成功",
+      "sourceCells": {
+        "B": "设置语言",
+        "C": "FE 09 58 42 48 43 4D 44 03 0F XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 0F XX YY CF",
+        "F": "XX:\n00: 简体中文\n01: English\n02: 繁体中文\n\nYY：设置判断\n00:失败\n01:成功"
+      }
+    },
+    {
+      "name": "获取语言",
+      "category": "整机管理",
+      "sourceIndex": 15,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0F CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 0F XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0F CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 0F XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 17,
+      "sourceName": "获取语言",
+      "sourceNote": "XX:\n00: 简体中文\n01: English\n02: 繁体中文",
+      "sourceCells": {
+        "B": "获取语言",
+        "C": "FE 08 58 42 48 43 4D 44 02 0F CF",
+        "D": "FE 09 58 42 48 43 4D 44  02 0F  XX CF",
+        "F": "XX:\n00: 简体中文\n01: English\n02: 繁体中文"
+      }
+    },
+    {
+      "name": "获取当前通道",
+      "category": "整机管理",
+      "sourceIndex": 16,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 39 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 39 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 39 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 39 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 18,
+      "sourceName": "获取当前通道",
+      "sourceNote": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2",
+      "sourceCells": {
+        "B": "获取当前通道",
+        "C": "FE 08 58 42 48 43 4D 44 02 39 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 39  XX CF",
+        "F": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2"
+      }
+    },
+    {
+      "name": "显示信号源列表",
+      "category": "信源管理",
+      "sourceIndex": 17,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 11 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 11 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 11 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 11 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 19,
+      "sourceName": "显示信号源列表",
+      "sourceNote": "—",
+      "sourceCells": {
+        "A": "信源管理",
+        "B": "显示信号源列表",
+        "C": "FE 08 58 42 48 43 4D 44 01 11 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 11 01 CF"
+      }
+    },
+    {
+      "name": "ATV",
+      "category": "信源管理",
+      "sourceIndex": 18,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 01 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 01 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 01 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 01 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 20,
+      "sourceName": "ATV",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "ATV",
+        "C": "FE 08 58 42 48 43 4D 44 01 01 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 01 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "DTV",
+      "category": "信源管理",
+      "sourceIndex": 19,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 02 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 02 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 02 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 02 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 21,
+      "sourceName": "DTV",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "DTV",
+        "C": "FE 08 58 42 48 43 4D 44 01 02 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 02 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "高清 1（HDMI1）",
+      "category": "信源管理",
+      "sourceIndex": 20,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 03 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 03 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 03 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 03 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 22,
+      "sourceName": "高清1（HDMI1)",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "高清1（HDMI1)",
+        "C": "FE 08 58 42 48 43 4D 44 01 03 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 03 01 CF"
+      }
+    },
+    {
+      "name": "高清 2（HDMI2）",
+      "category": "信源管理",
+      "sourceIndex": 21,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 04 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 04 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 04 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 04 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 23,
+      "sourceName": "高清2（HDMI2)",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "高清2（HDMI2)",
+        "C": "FE 08 58 42 48 43 4D 44 01 04 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 04 01 CF"
+      }
+    },
+    {
+      "name": "高清 3（HDMI3）",
+      "category": "信源管理",
+      "sourceIndex": 22,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 05 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 05 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 05 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 05 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 24,
+      "sourceName": "高清3（HDMI3)",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "高清3（HDMI3)",
+        "C": "FE 08 58 42 48 43 4D 44 01 05 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 05 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "高清 4（HDMI4）",
+      "category": "信源管理",
+      "sourceIndex": 23,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 06 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 06 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 06 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 06 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 25,
+      "sourceName": "高清4（HDMI4)",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "高清4（HDMI4)",
+        "C": "FE 08 58 42 48 43 4D 44 01 06 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 06 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "高清 5（HDMI5）",
+      "category": "信源管理",
+      "sourceIndex": 24,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 07 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 07 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 07 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 07 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 26,
+      "sourceName": "高清5（HDMI5)",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "高清5（HDMI5)",
+        "C": "FE 08 58 42 48 43 4D 44 01 07 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 07 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "OPS 电脑（HDMI6）",
+      "category": "信源管理",
+      "sourceIndex": 25,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 08 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 08 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 08 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 08 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 27,
+      "sourceName": "OPS电脑（HDMI6)",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "OPS电脑（HDMI6)",
+        "C": "FE 08 58 42 48 43 4D 44 01 08 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 08 01 CF"
+      }
+    },
+    {
+      "name": "DP",
+      "category": "信源管理",
+      "sourceIndex": 26,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 09 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 09 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 09 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 09 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 28,
+      "sourceName": "DP",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "DP",
+        "C": "FE 08 58 42 48 43 4D 44 01 09 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 09 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "电脑 VGA1",
+      "category": "信源管理",
+      "sourceIndex": 27,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 0A CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 0A 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 0A CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 0A 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 29,
+      "sourceName": "电脑VGA1",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "电脑VGA1",
+        "C": "FE 08 58 42 48 43 4D 44 01 0A CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 0A 01 CF"
+      }
+    },
+    {
+      "name": "电脑 VGA2",
+      "category": "信源管理",
+      "sourceIndex": 28,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 0B CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 0B 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 0B CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 0B 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 30,
+      "sourceName": "电脑VGA2",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "电脑VGA2",
+        "C": "FE 08 58 42 48 43 4D 44 01 0B CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 0B 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "分量",
+      "category": "信源管理",
+      "sourceIndex": 29,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 0C CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 0C 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 0C CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 0C 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 31,
+      "sourceName": "分量",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "分量",
+        "C": "FE 08 58 42 48 43 4D 44 01 0C CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 0C 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "视频",
+      "category": "信源管理",
+      "sourceIndex": 30,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 0D CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 0D 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 0D CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 0D 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 32,
+      "sourceName": "视频",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "视频",
+        "C": "FE 08 58 42 48 43 4D 44 01 0D CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 0D 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "分量 2",
+      "category": "信源管理",
+      "sourceIndex": 31,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 01 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 01 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 01 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 01 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 33,
+      "sourceName": "分量2",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "分量2",
+        "C": "FE 08 58 42 48 43 4D 44 05 01 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 01 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "前置 HDMI1",
+      "category": "信源管理",
+      "sourceIndex": 32,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 02 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 02 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 02 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 02 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 34,
+      "sourceName": "前置HDMI1",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "前置HDMI1",
+        "C": "FE 08 58 42 48 43 4D 44 05 02 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 02 01 CF"
+      }
+    },
+    {
+      "name": "前置 HDMI2",
+      "category": "信源管理",
+      "sourceIndex": 33,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 03 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 03 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 03 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 03 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 35,
+      "sourceName": "前置HDMI2",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "前置HDMI2",
+        "C": "FE 08 58 42 48 43 4D 44 05 03 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 03 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "DP2",
+      "category": "信源管理",
+      "sourceIndex": 34,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 04 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 04 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 04 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 04 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 36,
+      "sourceName": "DP2",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "DP2",
+        "C": "FE 08 58 42 48 43 4D 44 05 04 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 04 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "TYPEC",
+      "category": "信源管理",
+      "sourceIndex": 35,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 05 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 05 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 05 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 05 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 37,
+      "sourceName": "TYPEC",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "TYPEC",
+        "C": "FE 08 58 42 48 43 4D 44 05 05 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 05 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "TYPEC2",
+      "category": "信源管理",
+      "sourceIndex": 36,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 06 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 06 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 06 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 06 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 38,
+      "sourceName": "TYPEC2",
+      "sourceNote": "H560公版没有此通道",
+      "sourceCells": {
+        "B": "TYPEC2",
+        "C": "FE 08 58 42 48 43 4D 44 05 06 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 06 01 CF",
+        "E": "H560公版没有此通道"
+      }
+    },
+    {
+      "name": "设置开机默认通道",
+      "category": "信源管理",
+      "sourceIndex": 37,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 0B XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 0B XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 0B XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 0B XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 39,
+      "sourceName": "设置开机默认通道",
+      "sourceNote": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2\n                  \nYY:\n00 - 失败\n01 - 成功",
+      "sourceCells": {
+        "B": "设置开机默认通道",
+        "C": "FE 09 58 42 48 43 4D 44 03 0B XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 0B XX YY CF",
+        "F": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2\n                  \nYY:\n00 - 失败\n01 - 成功"
+      }
+    },
+    {
+      "name": "获取开机默认通道",
+      "category": "信源管理",
+      "sourceIndex": 38,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0B CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 0B XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0B CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 0B XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 40,
+      "sourceName": "获取开机默认通道",
+      "sourceNote": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2\n                  \nYY:\n00 - 失败\n01 - 成功",
+      "sourceCells": {
+        "B": "获取开机默认通道",
+        "C": "FE 08 58 42 48 43 4D 44 02 0B CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 0B XX CF",
+        "F": "XX：指的通道号\nFF：未知通道\n00：ATV\n01：DVBC\n02：DTMB \n03：CVBS1\n04：CVBS2\n05：VGA1\n06：VGA2     \n07：YPBPR1\n08：YPBPR2\n09：HDMI1     \n0A：HDMI2\n0B：HDMI3\n0C：HDMI4\n0D：HDMI5\n0E：HDMI6\n0F：F_HDMI1\n10：F_HDMI2\n11：DP1\n12：DP2\n13：OPS1 \n14：OPS2\n15：ANDROID\n16：MEDIA2\n17：SCART1\n18：SCART2\n19：DVBT\n1A：ATSC\n1B：DVBS\n1C：ISDBT\n1D：TYPEC\n1E：TYPEC2\n                  \nYY:\n00 - 失败\n01 - 成功"
+      }
+    },
+    {
+      "name": "设置静音 / 取消静音",
+      "category": "声音管理",
+      "sourceIndex": 39,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 12 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 12 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 12 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 12 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 43,
+      "sourceName": "设置静音/取消静音",
+      "sourceNote": "XX:\n00- 静音\n01- 取消静音\n\nYY\n00 - 失败\n01 - 成功",
+      "sourceCells": {
+        "A": "声音管理",
+        "B": "设置静音/取消静音",
+        "C": "FE 09 58 42 48 43 4D 44 03 12 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 12 XX YY CF",
+        "F": "XX:\n00- 静音\n01- 取消静音\n\nYY\n00 - 失败\n01 - 成功"
+      }
+    },
+    {
+      "name": "获取静音状态",
+      "category": "声音管理",
+      "sourceIndex": 40,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 12 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 12 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 12 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 12 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 44,
+      "sourceName": "获取静音状态",
+      "sourceNote": "XX:\n00- 静音\n01- 非静音",
+      "sourceCells": {
+        "B": "获取静音状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 12 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 12 XX CF",
+        "F": "XX:\n00- 静音\n01- 非静音"
+      }
+    },
+    {
+      "name": "静音（切换）",
+      "category": "声音管理",
+      "sourceIndex": 41,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 14 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 14 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 14 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 14 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 45,
+      "sourceName": "静音",
+      "sourceNote": "当前为非静音，将切换为静音；\n当前为静音时，将切换为非静音",
+      "sourceCells": {
+        "B": "静音",
+        "C": "FE 08 58 42 48 43 4D 44 01 14 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 14 01 CF",
+        "F": "当前为非静音，将切换为静音；\n当前为静音时，将切换为非静音"
+      }
+    },
+    {
+      "name": "设置音量",
+      "category": "声音管理",
+      "sourceIndex": 42,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 03 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 03 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 03 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 03 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 46,
+      "sourceName": "设置音量",
+      "sourceNote": "XX表示音量值（0-100）\n对应十六进制：00-64\n\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "设置音量",
+        "C": "FE 09 58 42 48 43 4D 44 03 03 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 03 XX YY CF",
+        "F": "XX表示音量值（0-100）\n对应十六进制：00-64\n\nYY:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取音量",
+      "category": "声音管理",
+      "sourceIndex": 43,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 03 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 03 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 03 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 03 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 47,
+      "sourceName": "获取音量",
+      "sourceNote": "XX表示音量值（0-100）\n对应十六进制：00-64",
+      "sourceCells": {
+        "B": "获取音量",
+        "C": "FE 08 58 42 48 43 4D 44 02 03 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 03 XX CF",
+        "F": "XX表示音量值（0-100）\n对应十六进制：00-64"
+      }
+    },
+    {
+      "name": "声音 -",
+      "category": "声音管理",
+      "sourceIndex": 44,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 18 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 18 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 18 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 18 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 48,
+      "sourceName": "声音-",
+      "sourceNote": "音量减小1个单位，当前已经是0时，返回失败\n\nXX:\n00:  失败\n01：成功",
+      "sourceCells": {
+        "B": "声音-",
+        "C": "FE 08 58 42 48 43 4D 44 01 18 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 18 XX CF",
+        "E": "音量减小1个单位，当前已经是0时，返回失败",
+        "F": "XX:\n00:  失败\n01：成功"
+      }
+    },
+    {
+      "name": "声音 +",
+      "category": "声音管理",
+      "sourceIndex": 45,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 21 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 19 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 21 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 19 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 49,
+      "sourceName": "声音+",
+      "sourceNote": "音量增加1个单位，当前已经是100时，返回失败\n\nXX:\n0x00:  失败\n0x01：成功",
+      "sourceCells": {
+        "B": "声音+",
+        "C": "FE 08 58 42 48 43 4D 44 02 21 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 19 XX CF",
+        "E": "音量增加1个单位，当前已经是100时，返回失败",
+        "F": "XX:\n0x00:  失败\n0x01：成功"
+      }
+    },
+    {
+      "name": "设置图像模式",
+      "category": "图像管理",
+      "sourceIndex": 46,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 02 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 02 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 02 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 02 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 51,
+      "sourceName": "设置图像模式",
+      "sourceNote": "视频信号源有效\n\nXX表示图像模式：\n00：标准\n01：明亮\n02：鲜艳\n03：自定义\n\nYY表示：\n00：失败\n01：成功",
+      "sourceCells": {
+        "A": "图像管理",
+        "B": "设置图像模式",
+        "C": "FE 09 58 42 48 43 4D 44 03 02 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 02 XX YY CF",
+        "E": "视频信号源有效",
+        "F": "XX表示图像模式：\n00：标准\n01：明亮\n02：鲜艳\n03：自定义\n\nYY表示：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取图像模式",
+      "category": "图像管理",
+      "sourceIndex": 47,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 02 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 02 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 02 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 02 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 52,
+      "sourceName": "获取图像模式",
+      "sourceNote": "XX表示各种模式：\n00：标准\n01：明亮\n02：鲜艳\n03：自定义",
+      "sourceCells": {
+        "B": "获取图像模式",
+        "C": "FE 08 58 42 48 43 4D 44 02 02 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 02 XX CF",
+        "F": "XX表示各种模式：\n00：标准\n01：明亮\n02：鲜艳\n03：自定义"
+      }
+    },
+    {
+      "name": "设置图像对比度",
+      "category": "图像管理",
+      "sourceIndex": 48,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 21 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 21 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 21 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 21 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 53,
+      "sourceName": "设置图像对比度",
+      "sourceNote": "XX：0x00~0x64\n\nYY表示：\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "设置图像对比度",
+        "C": "FE 09 58 42 48 43 4D 44 03 21 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 21 XX YY CF",
+        "F": "XX：0x00~0x64\n\nYY表示：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取图像对比度",
+      "category": "图像管理",
+      "sourceIndex": 49,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 34 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 34 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 34 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 34 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 54,
+      "sourceName": "获取图像对比度",
+      "sourceNote": "XX：0x00~0x64",
+      "sourceCells": {
+        "B": "获取图像对比度",
+        "C": "FE 08 58 42 48 43 4D 44 02 34 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 34 XX CF",
+        "F": "XX：0x00~0x64"
+      }
+    },
+    {
+      "name": "设置图像亮度",
+      "category": "图像管理",
+      "sourceIndex": 50,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 22 XX CF",
+      "sourceResponse": "FE 0A58 42 48 43 4D 44 03 22 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 22 XX CF`",
+      "sourceResponseCell": "`FE 0A58 42 48 43 4D 44 03 22 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 55,
+      "sourceName": "设置图像亮度",
+      "sourceNote": "XX：0x00~0x64\n\nYY表示：\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "设置图像亮度",
+        "C": "FE 09 58 42 48 43 4D 44 03 22 XX CF",
+        "D": "FE 0A58 42 48 43 4D 44 03 22 XX YY CF",
+        "F": "XX：0x00~0x64\n\nYY表示：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取图像亮度",
+      "category": "图像管理",
+      "sourceIndex": 51,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 35 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 35 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 35 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 35 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 56,
+      "sourceName": "获取图像亮度",
+      "sourceNote": "XX：0x00~0x64",
+      "sourceCells": {
+        "B": "获取图像亮度",
+        "C": "FE 08 58 42 48 43 4D 44 02 35 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 35 XX CF",
+        "F": "XX：0x00~0x64"
+      }
+    },
+    {
+      "name": "设置图像饱和度",
+      "category": "图像管理",
+      "sourceIndex": 52,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 24 XX CF",
+      "sourceResponse": "FE 0A58 42 48 43 4D 44 03 24 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 24 XX CF`",
+      "sourceResponseCell": "`FE 0A58 42 48 43 4D 44 03 24 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 57,
+      "sourceName": "设置图像饱和度",
+      "sourceNote": "XX：0x00~0x64",
+      "sourceCells": {
+        "B": "设置图像饱和度",
+        "C": "FE 09 58 42 48 43 4D 44 03 24 XX CF",
+        "D": "FE 0A58 42 48 43 4D 44 03 24 XX YY CF",
+        "F": "XX：0x00~0x64"
+      }
+    },
+    {
+      "name": "获取图像饱和度",
+      "category": "图像管理",
+      "sourceIndex": 53,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 40 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 40 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 40 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 40 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 58,
+      "sourceName": "获取图像饱和度",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "获取图像饱和度",
+        "C": "FE 08 58 42 48 43 4D 44 02 40 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 40 XX CF"
+      }
+    },
+    {
+      "name": "设置图像锐度",
+      "category": "图像管理",
+      "sourceIndex": 54,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 25 XX CF",
+      "sourceResponse": "FE 0A58 42 48 43 4D 44 03 25 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 25 XX CF`",
+      "sourceResponseCell": "`FE 0A58 42 48 43 4D 44 03 25 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 59,
+      "sourceName": "设置图像锐度",
+      "sourceNote": "XX：0x00~0x64",
+      "sourceCells": {
+        "B": "设置图像锐度",
+        "C": "FE 09 58 42 48 43 4D 44 03 25 XX CF",
+        "D": "FE 0A58 42 48 43 4D 44 03 25 XX YY CF",
+        "F": "XX：0x00~0x64"
+      }
+    },
+    {
+      "name": "获取图像锐度",
+      "category": "图像管理",
+      "sourceIndex": 55,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 41 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 41 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 41 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 41 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 60,
+      "sourceName": "获取图像锐度",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "获取图像锐度",
+        "C": "FE 08 58 42 48 43 4D 44 02 41 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 41 XX CF"
+      }
+    },
+    {
+      "name": "设置背光亮度",
+      "category": "背光管理",
+      "sourceIndex": 56,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 04 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 04 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 04 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 04 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 62,
+      "sourceName": "设置背光亮度",
+      "sourceNote": "XX表示亮度值（0-100），对应十六进制：00-64\n\nYY：\n00：失败\n02：成功",
+      "sourceCells": {
+        "A": "背光管理",
+        "B": "设置背光亮度",
+        "C": "FE 09 58 42 48 43 4D 44 03 04 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 04 XX YY CF",
+        "F": "XX表示亮度值（0-100），对应十六进制：00-64\n\nYY：\n00：失败\n02：成功"
+      }
+    },
+    {
+      "name": "获取背光亮度值",
+      "category": "背光管理",
+      "sourceIndex": 57,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 04 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 04 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 04 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 04 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 63,
+      "sourceName": "获取背光亮度值",
+      "sourceNote": "XX表示亮度值（0-100），对应十六进制：00-64",
+      "sourceCells": {
+        "B": "获取背光亮度值",
+        "C": "FE 08 58 42 48 43 4D 44 02 04 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 04 XX CF",
+        "F": "XX表示亮度值（0-100），对应十六进制：00-64"
+      }
+    },
+    {
+      "name": "设置背光模式",
+      "category": "背光管理",
+      "sourceIndex": 58,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 05 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 05 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 05 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 05 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 64,
+      "sourceName": "设置背光模式",
+      "sourceNote": "XX:\n00：手动\n01：自动\n\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "设置背光模式",
+        "C": "FE 09 58 42 48 43 4D 44 03 05 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 05 XX YY CF",
+        "F": "XX:\n00：手动\n01：自动\n\nYY:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取背光模式",
+      "category": "背光管理",
+      "sourceIndex": 59,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 05 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 05 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 05 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 05 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 65,
+      "sourceName": "获取背光模式",
+      "sourceNote": "XX:\n00：手动\n01：自动",
+      "sourceCells": {
+        "B": "获取背光模式",
+        "C": "FE 08 58 42 48 43 4D 44 02 05 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 05 XX CF",
+        "F": "XX:\n00：手动\n01：自动"
+      }
+    },
+    {
+      "name": "查询背光开关状态",
+      "category": "背光管理",
+      "sourceIndex": 60,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0A CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 0A XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0A CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 0A XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 66,
+      "sourceName": "查询背光开关状态",
+      "sourceNote": "XX：00 背光开关关闭\nXX：01 背光开关打开",
+      "sourceCells": {
+        "B": "查询背光开关状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 0A CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 0A XX CF",
+        "F": "XX：00 背光开关关闭\nXX：01 背光开关打开"
+      }
+    },
+    {
+      "name": "ECO",
+      "category": "背光管理",
+      "sourceIndex": 61,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 13 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 13 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 13 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 13 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 67,
+      "sourceName": "ECO",
+      "sourceNote": "执行背光模式切换到下一个模式，切换关系为：",
+      "sourceCells": {
+        "B": "ECO",
+        "C": "FE 08 58 42 48 43 4D 44 01 13 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 13 01 CF",
+        "E": "执行背光模式切换到下一个模式，切换关系为："
+      }
+    },
+    {
+      "name": "设置背光开关状态",
+      "category": "背光管理",
+      "sourceIndex": 62,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 0A XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 0A XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 0A XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 0A XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 68,
+      "sourceName": "设置背光开关状态",
+      "sourceNote": "标准->节能->自动->自定义->标准\n\nXX：00 背光开关关闭\nXX：01 背光开关打开\n\nYY：00 失败\nYY：01 成功",
+      "sourceCells": {
+        "B": "设置背光开关状态",
+        "C": "FE 09 58 42 48 43 4D 44 03 0A XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 0A XX YY CF",
+        "E": "标准->节能->自动->自定义->标准",
+        "F": "XX：00 背光开关关闭\nXX：01 背光开关打开\n\nYY：00 失败\nYY：01 成功"
+      }
+    },
+    {
+      "name": "设置光感开 / 关",
+      "category": "背光管理",
+      "sourceIndex": 63,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 23 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 23 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 23 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 23 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 69,
+      "sourceName": "设置光感开/关",
+      "sourceNote": "XX：00 光感关闭\nXX：01 光感开启\n\nYY：00 失败\nYY：01 成功",
+      "sourceCells": {
+        "B": "设置光感开/关",
+        "C": "FE 09 58 42 48 43 4D 44 03 23 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 23 XX  YY CF",
+        "F": "XX：00 光感关闭\nXX：01 光感开启\n\nYY：00 失败\nYY：01 成功"
+      }
+    },
+    {
+      "name": "获取光感开关状态",
+      "category": "背光管理",
+      "sourceIndex": 64,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 38 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 38 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 38 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 38 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 70,
+      "sourceName": "获取光感开关状态",
+      "sourceNote": "XX:\n00:：光感关闭\n01： 光感开启",
+      "sourceCells": {
+        "B": "获取光感开关状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 38 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 38 XX CF",
+        "F": "XX:\n00:：光感关闭\n01： 光感开启"
+      }
+    },
+    {
+      "name": "童锁模式开启",
+      "category": "控制权管理",
+      "sourceIndex": 65,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 07 01 CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 07 01 XX CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 07 01 CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 07 01 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 72,
+      "sourceName": "童锁模式开启",
+      "sourceNote": "1.关机记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关\n\nXX：00 失败\nXX：01 成功",
+      "sourceCells": {
+        "A": "控制权管理",
+        "B": "童锁模式开启",
+        "C": "FE 09 58 42 48 43 4D 44 03 07 01 CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 07 01 XX CF",
+        "E": "1.关机记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关",
+        "F": "XX：00 失败\nXX：01 成功"
+      }
+    },
+    {
+      "name": "童锁模式关闭",
+      "category": "控制权管理",
+      "sourceIndex": 66,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 07 00 CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 07 00 XX CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 07 00 CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 07 00 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 73,
+      "sourceName": "童锁模式关闭",
+      "sourceNote": "1.关机记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关\n\nXX：00 失败\nXX：01 成功",
+      "sourceCells": {
+        "B": "童锁模式关闭",
+        "C": "FE 09 58 42 48 43 4D 44 03 07 00 CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 07 00 XX CF",
+        "E": "1.关机记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关",
+        "F": "XX：00 失败\nXX：01 成功"
+      }
+    },
+    {
+      "name": "获取童锁模式状态",
+      "category": "控制权管理",
+      "sourceIndex": 67,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 07 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 07 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 07 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 07 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 74,
+      "sourceName": "获取童锁模式状态",
+      "sourceNote": "XX指童锁状态：\n00 童锁关闭\n01 童锁开启",
+      "sourceCells": {
+        "B": "获取童锁模式状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 07 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 07 XX CF",
+        "F": "XX指童锁状态：\n00 童锁关闭\n01 童锁开启"
+      }
+    },
+    {
+      "name": "按键板禁用 / 启用",
+      "category": "控制权管理",
+      "sourceIndex": 68,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 10 XX CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 03 10 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 10 XX CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 03 10 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 75,
+      "sourceName": "按键板禁用/启用",
+      "sourceNote": "XX：\n00：禁用\n01:  启用\n\nYY：\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "按键板禁用/启用",
+        "C": "FE 09 58 42 48 43 4D 44 03 10 XX CF",
+        "D": "FE 09 58 42 48 43 4D 44 03 10 XX YY CF",
+        "F": "XX：\n00：禁用\n01:  启用\n\nYY：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取遥控按键禁用 / 启用",
+      "category": "控制权管理",
+      "sourceIndex": 69,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 11 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 11 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 11 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 11 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 76,
+      "sourceName": "获取遥控按键禁用/启用",
+      "sourceNote": "XX：\n00：禁用\n01:  启用",
+      "sourceCells": {
+        "B": "获取遥控按键禁用/启用",
+        "C": "FE 08 58 42 48 43 4D 44 02 11 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 11 XX CF",
+        "F": "XX：\n00：禁用\n01:  启用"
+      }
+    },
+    {
+      "name": "设置锁屏状态",
+      "category": "屏幕管理",
+      "sourceIndex": 70,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 15 XX CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 03 15 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 15 XX CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 03 15 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 78,
+      "sourceName": "设置锁屏状态",
+      "sourceNote": "XX：\n00 非锁屏\n01 锁屏\nYY：\n00 失败\n01 成功",
+      "sourceCells": {
+        "A": "屏幕管理",
+        "B": "设置锁屏状态",
+        "C": "FE 09 58 42 48 43 4D 44 03 15 XX CF",
+        "D": "FE 09 58 42 48 43 4D 44 03 15 XX YY CF",
+        "F": "XX：\n00 非锁屏\n01 锁屏\nYY：\n00 失败\n01 成功"
+      }
+    },
+    {
+      "name": "获取锁屏状态",
+      "category": "屏幕管理",
+      "sourceIndex": 71,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 15 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 15 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 15 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 15 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 79,
+      "sourceName": "获取锁屏状态",
+      "sourceNote": "XX：\n00 非锁屏\n01 锁屏",
+      "sourceCells": {
+        "B": "获取锁屏状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 15 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 15 XX CF",
+        "F": "XX：\n00 非锁屏\n01 锁屏"
+      }
+    },
+    {
+      "name": "获取显示屏的宽高尺寸",
+      "category": "屏幕管理",
+      "sourceIndex": 72,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0C CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 02 0C WW HH CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0C CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 02 0C WW HH CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 80,
+      "sourceName": "获取显示屏的宽高尺寸",
+      "sourceNote": "WW：屏幕宽度值，单位CM\nHH： 屏幕高度值，单位CM ",
+      "sourceCells": {
+        "B": "获取显示屏的宽高尺寸",
+        "C": "FE 08 58 42 48 43 4D 44 02 0C CF",
+        "D": "FE 0A 58 42 48 43 4D 44 02 0C WW HH CF",
+        "F": "WW：屏幕宽度值，单位CM\nHH： 屏幕高度值，单位CM "
+      }
+    },
+    {
+      "name": "获取大屏分辨率",
+      "category": "屏幕管理",
+      "sourceIndex": 73,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0D CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 0D XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0D CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 0D XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 81,
+      "sourceName": "获取大屏分辨率",
+      "sourceNote": "XX：\n00: 1366X768\n01: 1920X1080\n02: 3840X2160",
+      "sourceCells": {
+        "B": "获取大屏分辨率",
+        "C": "FE 08 58 42 48 43 4D 44 02 0D CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 0D XX CF",
+        "F": "XX：\n00: 1366X768\n01: 1920X1080\n02: 3840X2160"
+      }
+    },
+    {
+      "name": "获取显示器序列号",
+      "category": "屏幕管理",
+      "sourceIndex": 74,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 0E CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 0E XX0 XX1 ... XXn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 0E CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 0E XX0 XX1 ... XXn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 82,
+      "sourceName": "获取显示器序列号",
+      "sourceNote": "XX0~XXn: 显示器序列号的字符Ascii码",
+      "sourceCells": {
+        "B": "获取显示器序列号",
+        "C": "FE 08 58 42 48 43 4D 44 02 0E CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 0E XX0 XX1 ... XXn CF",
+        "F": "XX0~XXn: 显示器序列号的字符Ascii码"
+      }
+    },
+    {
+      "name": "单独听",
+      "category": "功能快捷键",
+      "sourceIndex": 75,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 17 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 17 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 17 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 17 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 84,
+      "sourceName": "单独听",
+      "sourceNote": "开关背光",
+      "sourceCells": {
+        "A": "功能快捷键",
+        "B": "单独听",
+        "C": "FE 08 58 42 48 43 4D 44 01 17 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 17 01 CF",
+        "E": "开关背光"
+      }
+    },
+    {
+      "name": "显示",
+      "category": "功能快捷键",
+      "sourceIndex": 76,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 12 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 12 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 12 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 12 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 85,
+      "sourceName": "显示",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "显示",
+        "C": "FE 08 58 42 48 43 4D 44 01 12 CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 12 01 CF"
+      }
+    },
+    {
+      "name": "截屏",
+      "category": "功能快捷键",
+      "sourceIndex": 77,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 1E CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 1E 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 1E CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 1E 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 86,
+      "sourceName": "截屏",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "截屏",
+        "C": "FE 08 58 42 48 43 4D 44 01 1E CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 1E 01 CF"
+      }
+    },
+    {
+      "name": "自动调整",
+      "category": "功能快捷键",
+      "sourceIndex": 78,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 1F CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 01 1F XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 1F CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 01 1F XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 87,
+      "sourceName": "自动调整",
+      "sourceNote": "在VGA通道下才有效，其他通道下返回失败\nXX：\n00 失败\n01 成功",
+      "sourceCells": {
+        "B": "自动调整",
+        "C": "FE 08 58 42 48 43 4D 44 01 1F CF",
+        "D": "FE 09 58 42 48 43 4D 44 01 1F XX CF",
+        "F": "在VGA通道下才有效，其他通道下返回失败\nXX：\n00 失败\n01 成功"
+      }
+    },
+    {
+      "name": "缩放",
+      "category": "功能快捷键",
+      "sourceIndex": 79,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 20 CF",
+      "sourceResponse": "FE 08 58 42 48 43 4D 44 01 20 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 20 CF`",
+      "sourceResponseCell": "`FE 08 58 42 48 43 4D 44 01 20 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 88,
+      "sourceName": "缩放",
+      "sourceNote": "视频缩放比例：\n16:9->4:3->点对点->自动->16:9\nXX:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "缩放",
+        "C": "FE 08 58 42 48 43 4D 44 01 20 CF",
+        "D": "FE 08 58 42 48 43 4D 44 01 20 XX CF",
+        "F": "视频缩放比例：\n16:9->4:3->点对点->自动->16:9\nXX:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "自定义快捷键",
+      "category": "功能快捷键",
+      "sourceIndex": 80,
+      "sourceControl": "FE 0A 58 42 48 43 4D 44 04 21 XX XX CF",
+      "sourceResponse": "FE 08 58 42 48 43 4D 44 01 21 01 CF",
+      "sourceControlCell": "`FE 0A 58 42 48 43 4D 44 04 21 XX XX CF`",
+      "sourceResponseCell": "`FE 08 58 42 48 43 4D 44 01 21 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 89,
+      "sourceName": "自定义快捷键",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "自定义快捷键",
+        "C": "FE 0A 58 42 48 43 4D 44 04 21 XX XX CF",
+        "D": "FE 08 58 42 48 43 4D 44 01 21 01 CF"
+      }
+    },
+    {
+      "name": "获取 HDMI OUT 芯片固件版本",
+      "category": "外设管理",
+      "sourceIndex": 81,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 26 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 26 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 26 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 26 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 91,
+      "sourceName": "获取HDMI OUT芯片固件版本",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取HDMI OUT芯片固件版本信息：\nX1…Xn表示版本信息(Ascii码)",
+      "sourceCells": {
+        "A": "外设管理",
+        "B": "获取HDMI OUT芯片固件版本",
+        "C": "FE 08 58 42 48 43 4D 44 02 26 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 26 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取HDMI OUT芯片固件版本信息：\nX1…Xn表示版本信息(Ascii码)"
+      }
+    },
+    {
+      "name": "获取光感设备状态",
+      "category": "外设管理",
+      "sourceIndex": 82,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 31 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 31 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 31 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 31 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 92,
+      "sourceName": "获取光感设备状态",
+      "sourceNote": "XX：\n00：异常\n01：正常",
+      "sourceCells": {
+        "B": "获取光感设备状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 31 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 31 XX CF",
+        "F": "XX：\n00：异常\n01：正常"
+      }
+    },
+    {
+      "name": "获取 OPS 电源状态",
+      "category": "外设管理",
+      "sourceIndex": 83,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 13 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 13 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 13 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 13 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 93,
+      "sourceName": "获取OPS电源状态",
+      "sourceNote": "XX：\n00：待机\n01：开机",
+      "sourceCells": {
+        "B": "获取OPS电源状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 13 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 13  XX CF",
+        "F": "XX：\n00：待机\n01：开机"
+      }
+    },
+    {
+      "name": "设置阵列麦静音状态",
+      "category": "外设管理",
+      "sourceIndex": 84,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 1C XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 1C XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 1C XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 1C XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 94,
+      "sourceName": "设置阵列麦静音状态",
+      "sourceNote": "XX: 00解静音，01静音\nYY: 00失败，01成功 ",
+      "sourceCells": {
+        "B": "设置阵列麦静音状态",
+        "C": "FE 09 58 42 48 43 4D 44 03 1C XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 1C XX YY CF",
+        "F": "XX: 00解静音，01静音\nYY: 00失败，01成功 "
+      }
+    },
+    {
+      "name": "获取阵列麦静音状态",
+      "category": "外设管理",
+      "sourceIndex": 85,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 30 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 30 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 30 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 30 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 95,
+      "sourceName": "获取阵列麦静音状态",
+      "sourceNote": "XX: 00解静音，01静音",
+      "sourceCells": {
+        "B": "获取阵列麦静音状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 30 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 30 XX CF",
+        "F": "XX: 00解静音，01静音"
+      }
+    },
+    {
+      "name": "获取阵列麦固件版本",
+      "category": "外设管理",
+      "sourceIndex": 86,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 32 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 32 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 32 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 32 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 96,
+      "sourceName": "获取阵列麦固件版本",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\nX1...Xn: 版本号ascii码",
+      "sourceCells": {
+        "B": "获取阵列麦固件版本",
+        "C": "FE 08 58 42 48 43 4D 44 02 32 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 32 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\nX1...Xn: 版本号ascii码"
+      }
+    },
+    {
+      "name": "启动阵列麦输入音量检测",
+      "category": "外设管理",
+      "sourceIndex": 87,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 03 26 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 03 26 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 03 26 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 03 26 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 97,
+      "sourceName": "启动阵列麦输入音量检测",
+      "sourceNote": "XX: 00失败，01成功",
+      "sourceCells": {
+        "B": "启动阵列麦输入音量检测",
+        "C": "FE 08 58 42 48 43 4D 44 03 26 CF",
+        "D": "FE 09 58 42 48 43 4D 44 03 26 XX CF",
+        "F": "XX: 00失败，01成功"
+      }
+    },
+    {
+      "name": "停止阵列麦输入音量检测",
+      "category": "外设管理",
+      "sourceIndex": 88,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 03 27 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 03 27 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 03 27 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 03 27 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 98,
+      "sourceName": "停止阵列麦输入音量检测",
+      "sourceNote": "XX: 00失败，01成功",
+      "sourceCells": {
+        "B": "停止阵列麦输入音量检测",
+        "C": "FE 08 58 42 48 43 4D 44 03 27 CF",
+        "D": "FE 09 58 42 48 43 4D 44 03 27 XX CF",
+        "F": "XX: 00失败，01成功"
+      }
+    },
+    {
+      "name": "设置 U 盘禁用状态",
+      "category": "存储访问管理",
+      "sourceIndex": 89,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 14 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 14 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 14 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 14 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 100,
+      "sourceName": "设置U盘禁用状态",
+      "sourceNote": "XX：\n00：取消禁用\n01：禁用\nYY：\n00：失败\n01：成功",
+      "sourceCells": {
+        "A": "存储访问管理",
+        "B": "设置U盘禁用状态",
+        "C": "FE 09 58 42 48 43 4D 44 03 14 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 14 XX YY CF",
+        "F": "XX：\n00：取消禁用\n01：禁用\nYY：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取 U 盘禁用状态",
+      "category": "存储访问管理",
+      "sourceIndex": 90,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 14 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 14 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 14 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 14 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 101,
+      "sourceName": "获取U盘禁用状态",
+      "sourceNote": "XX：\n00：可用\n01：禁用",
+      "sourceCells": {
+        "B": "获取U盘禁用状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 14 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 14 XX CF",
+        "F": "XX：\n00：可用\n01：禁用"
+      }
+    },
+    {
+      "name": "打开 / 关闭有线网",
+      "category": "网络管理",
+      "sourceIndex": 91,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 16 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 16 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 16 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 16 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 103,
+      "sourceName": "打开/关闭有线网",
+      "sourceNote": "XX：\n00：关闭\n01：打开\n\nYY：\n00：失败\n01：成功",
+      "sourceCells": {
+        "A": "网络管理",
+        "B": "打开/关闭有线网",
+        "C": "FE 09 58 42 48 43 4D 44 03 16 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 16 XX YY CF",
+        "F": "XX：\n00：关闭\n01：打开\n\nYY：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取有线网开关状态",
+      "category": "网络管理",
+      "sourceIndex": 92,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 03 16 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 16 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 03 16 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 16 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 104,
+      "sourceName": "获取有线网开关状态",
+      "sourceNote": "XX：\n00：关闭\n01：打开",
+      "sourceCells": {
+        "B": "获取有线网开关状态",
+        "C": "FE 08 58 42 48 43 4D 44 03 16 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 16 XX CF",
+        "F": "XX：\n00：关闭\n01：打开"
+      }
+    },
+    {
+      "name": "打开 / 关闭无线网开关",
+      "category": "网络管理",
+      "sourceIndex": 93,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 17 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 17 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 17 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 17 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 105,
+      "sourceName": "打开/关闭无线网开关",
+      "sourceNote": "XX：\n00：关闭\n01：打开\n\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "打开/关闭无线网开关",
+        "C": "FE 09 58 42 48 43 4D 44 03 17 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 17 XX YY CF",
+        "F": "XX：\n00：关闭\n01：打开\n\nYY:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取无线网开关状态",
+      "category": "网络管理",
+      "sourceIndex": 94,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 17 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 17 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 17 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 17 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 106,
+      "sourceName": "获取无线网开关状态",
+      "sourceNote": "XX：\n00：关闭\n01：打开",
+      "sourceCells": {
+        "B": "获取无线网开关状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 17 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 17 XX CF",
+        "F": "XX：\n00：关闭\n01：打开"
+      }
+    },
+    {
+      "name": "热点开关",
+      "category": "网络管理",
+      "sourceIndex": 95,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 18 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 18 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 18 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 18 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 107,
+      "sourceName": "热点开关",
+      "sourceNote": "XX：\n00：关闭\n01：打开\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "热点开关",
+        "C": "FE 09 58 42 48 43 4D 44 03 18 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 18 XX YY CF",
+        "F": "XX：\n00：关闭\n01：打开\nYY:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取热点开关状态",
+      "category": "网络管理",
+      "sourceIndex": 96,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 18 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 18 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 18 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 18 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 108,
+      "sourceName": "获取热点开关状态",
+      "sourceNote": "XX：\n00：关闭\n01：打开",
+      "sourceCells": {
+        "B": "获取热点开关状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 18 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 18 XX CF",
+        "F": "XX：\n00：关闭\n01：打开"
+      }
+    },
+    {
+      "name": "获取 Android 系统有线 MAC 地址",
+      "category": "网络管理",
+      "sourceIndex": 97,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 09 CF",
+      "sourceResponse": "FE 0E 58 42 48 43 4D 44 02 09 X1 X2 X3 X4 X5 X6 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 09 CF`",
+      "sourceResponseCell": "`FE 0E 58 42 48 43 4D 44 02 09 X1 X2 X3 X4 X5 X6 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 109,
+      "sourceName": "获取Android系统有线MAC地址",
+      "sourceNote": "X1→X6:Android 系统的MAC地址\nX1:X2:X3:X4:X5:X6",
+      "sourceCells": {
+        "B": "获取Android系统有线MAC地址",
+        "C": "FE 08 58 42 48 43 4D 44 02 09 CF",
+        "D": "FE 0E 58 42 48 43 4D 44 02 09 X1 X2 X3 X4 X5 X6 CF",
+        "F": "X1→X6:Android 系统的MAC地址\nX1:X2:X3:X4:X5:X6"
+      }
+    },
+    {
+      "name": "获取计时器状态",
+      "category": "计时器",
+      "sourceIndex": 98,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 36 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 36 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 36 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 36 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 111,
+      "sourceName": "获取计时器状态",
+      "sourceNote": "XX:\n01：启动\n02：暂停\n03：重置\n04：结束",
+      "sourceCells": {
+        "B": "获取计时器状态",
+        "C": "FE 08 58 42 48 43 4D 44 02 36 CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 36 XX CF",
+        "F": "XX:\n01：启动\n02：暂停\n03：重置\n04：结束"
+      }
+    },
+    {
+      "name": "获取计时器时间",
+      "category": "计时器",
+      "sourceIndex": 99,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 37 CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 02 37 XX YY ZZ CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 37 CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 02 37 XX YY ZZ CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 112,
+      "sourceName": "获取计时器时间",
+      "sourceNote": "XX: 时，YY:分；ZZ：秒",
+      "sourceCells": {
+        "B": "获取计时器时间",
+        "C": "FE 08 58 42 48 43 4D 44 02 37 CF",
+        "D": "FE 0A 58 42 48 43 4D 44 02 37 XX YY ZZ CF",
+        "F": "XX: 时，YY:分；ZZ：秒"
+      }
+    },
+    {
+      "name": "触控锁定",
+      "category": "触摸管理",
+      "sourceIndex": 100,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 06 00 CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 06 00 XX CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 06 00 CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 06 00 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 114,
+      "sourceName": "触控锁定",
+      "sourceNote": "1.关机不记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关\n\nXX：\n00：失败\n01：成功",
+      "sourceCells": {
+        "A": "触摸管理",
+        "B": "触控锁定",
+        "C": "FE 09 58 42 48 43 4D 44 03 06 00 CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 06 00 XX CF",
+        "E": "1.关机不记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关",
+        "F": "XX：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "触控解锁",
+      "category": "触摸管理",
+      "sourceIndex": 101,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 06 01 CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 06 01 XX CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 06 01 CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 06 01 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 115,
+      "sourceName": "触控解锁",
+      "sourceNote": "1.关机不记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关\n\nXX：\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "触控解锁",
+        "C": "FE 09 58 42 48 43 4D 44 03 06 01 CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 06 01 XX CF",
+        "E": "1.关机不记忆\n2. 如果系统既有童锁功能又有触摸开关，童锁模式包含触摸状态，优先级高于触摸开关",
+        "F": "XX：\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "获取触控状态",
+      "category": "触摸管理",
+      "sourceIndex": 102,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 03 08 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 03 08 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 03 08 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 03 08 XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 116,
+      "sourceName": "获取触控状态",
+      "sourceNote": "XX指触控状态：\n00：触控关闭\n01：触控打开",
+      "sourceCells": {
+        "B": "获取触控状态",
+        "C": "FE 08 58 42 48 43 4D 44 03 08 CF",
+        "D": "FE 09 58 42 48 43 4D 44 03 08 XX CF",
+        "F": "XX指触控状态：\n00：触控关闭\n01：触控打开"
+      }
+    },
+    {
+      "name": "获取触摸 MCU 固件版本",
+      "category": "触摸管理",
+      "sourceIndex": 103,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 25 CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 02 25 X1 X2 ... Xn CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 25 CF`",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 02 25 X1 X2 ... Xn CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 117,
+      "sourceName": "获取触摸MCU固件版本",
+      "sourceNote": "LL：数据长度，不包含头尾和自身。\n获取触摸MCU固件版本信息：\nX1…Xn表示版本信息(Ascii码)",
+      "sourceCells": {
+        "B": "获取触摸MCU固件版本",
+        "C": "FE 08 58 42 48 43 4D 44 02 25 CF",
+        "D": "FE LL 58 42 48 43 4D 44 02 25 X1 X2 ... Xn CF",
+        "F": "LL：数据长度，不包含头尾和自身。\n获取触摸MCU固件版本信息：\nX1…Xn表示版本信息(Ascii码)"
+      }
+    },
+    {
+      "name": "设置粉尘传感器电源状态",
+      "category": "粉尘传感器",
+      "sourceIndex": 104,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 03 1B XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 03 1B XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 03 1B XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 03 1B XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 118,
+      "sourceName": "设置粉尘传感器电源状态",
+      "sourceNote": "XX=：00：关闭 01：打开\nYY=：00：失败 01：成功",
+      "sourceCells": {
+        "A": "粉尘传感器",
+        "B": "设置粉尘传感器电源状态",
+        "C": "FE 09 58 42 48 43 4D 44 03 1B XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 03 1B XX YY CF",
+        "F": "XX=：00：关闭 01：打开\nYY=：00：失败 01：成功"
+      }
+    },
+    {
+      "name": "获取粉尘传感器电源",
+      "category": "粉尘传感器",
+      "sourceIndex": 105,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 1B XX CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 1B XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 1B XX CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 1B XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 119,
+      "sourceName": "获取粉尘传感器电源",
+      "sourceNote": "XX：00 开关关闭\nXX：01 开关打开",
+      "sourceCells": {
+        "B": "获取粉尘传感器电源",
+        "C": "FE 08 58 42 48 43 4D 44 02 1B XX CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 1B XX CF",
+        "F": "XX：00 开关关闭\nXX：01 开关打开"
+      }
+    },
+    {
+      "name": "获取粉尘传感器数值",
+      "category": "粉尘传感器",
+      "sourceIndex": 106,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 02 1C CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 02 1C XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 02 1C CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 02 1C XX CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 120,
+      "sourceName": "获取粉尘传感器数值",
+      "sourceNote": "XX表示数值，对应十六进制",
+      "sourceCells": {
+        "B": "获取粉尘传感器数值",
+        "C": "FE 08 58 42 48 43 4D 44 02 1C CF",
+        "D": "FE 09 58 42 48 43 4D 44 02 1C XX CF",
+        "F": "XX表示数值，对应十六进制"
+      }
+    },
+    {
+      "name": "阵列麦左右麦克风实时输入音量大小原始数据",
+      "category": "外设实时输入数据",
+      "sourceIndex": 107,
+      "sourceControl": "FE LL 58 42 48 43 4D 44 04 01 XX YY CF",
+      "sourceResponse": "FE LL 58 42 48 43 4D 44 04 01 XX YY 01 CF",
+      "sourceControlCell": "`FE LL 58 42 48 43 4D 44 04 01 XX YY CF`（外设→主板，类型 `04`）",
+      "sourceResponseCell": "`FE LL 58 42 48 43 4D 44 04 01 XX YY 01 CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 121,
+      "sourceName": "阵列麦左右麦克风实时输入音量大小原始数据",
+      "sourceNote": "1. 阵列麦收到主板发送的启动阵列麦输入音量检测指令：FE 09 58 42 48 43 4D 44 05 A0 XX CF 后开始实时上报左右MIC输入声音大小，几十毫秒上报一次；\n2. 收到“停止阵列麦输入音量检测”指令FE 08 58 42 48 43 4D 44 05 A1 CF后，停止上报数据\n\nXX: 左边MIC输入音量大小数据值ASCII（多位小数）\nYY: 右边MIC输入音量大小数据值ASCII（多位小数）\n左右MIC中间加1个空格符分隔\nLL = 6+ 有效数据长度（ 04 01 XX ... YY ... 包尾前面）",
+      "sourceCells": {
+        "A": "外设实时输入数据",
+        "B": "阵列麦左右麦克风实时输入音量大小原始数据",
+        "C": "FE LL 58 42 48 43 4D 44 04 01 XX YY CF",
+        "D": "FE LL 58 42 48 43 4D 44 04 01 XX YY 01 CF",
+        "E": "1. 阵列麦收到主板发送的启动阵列麦输入音量检测指令：FE 09 58 42 48 43 4D 44 05 A0 XX CF 后开始实时上报左右MIC输入声音大小，几十毫秒上报一次；\n2. 收到“停止阵列麦输入音量检测”指令FE 08 58 42 48 43 4D 44 05 A1 CF后，停止上报数据",
+        "F": "XX: 左边MIC输入音量大小数据值ASCII（多位小数）\nYY: 右边MIC输入音量大小数据值ASCII（多位小数）\n左右MIC中间加1个空格符分隔\nLL = 6+ 有效数据长度（ 04 01 XX ... YY ... 包尾前面）"
+      }
+    },
+    {
+      "name": "按 C 键启动自定义功能",
+      "category": "C 键自定义功能",
+      "sourceIndex": 108,
+      "sourceControl": "FE 08 58 42 48 43 4D 44 01 1A CF",
+      "sourceResponse": "FE 08 58 42 48 43 4D 44 01 1A CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 01 1A CF`",
+      "sourceResponseCell": "`FE 08 58 42 48 43 4D 44 01 1A CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 122,
+      "sourceName": "按C键启动自定义功能",
+      "sourceNote": "—",
+      "sourceCells": {
+        "A": "C键自定义功能",
+        "B": "按C键启动自定义功能",
+        "C": "FE 08 58 42 48 43 4D 44 01 1A CF",
+        "D": "FE 08 58 42 48 43 4D 44 01 1A CF "
+      }
+    },
+    {
+      "name": "获取白板状态",
+      "category": "OPS 白板管理",
+      "sourceIndex": 109,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 06 00 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 06 00 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 06 00 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 06 00 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 123,
+      "sourceName": "获取白板状态",
+      "sourceNote": "XX表示开关：\n00：关闭\n01：打开\n\nYY表示笔颜色状态:\n00：黑\n01：红\n02：绿",
+      "sourceCells": {
+        "A": "OPS白板管理",
+        "B": "获取白板状态",
+        "C": "FE 09 58 42 48 43 4D 44 06 00 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 06 00 XX YY CF",
+        "F": "XX表示开关：\n00：关闭\n01：打开\n\nYY表示笔颜色状态:\n00：黑\n01：红\n02：绿"
+      }
+    },
+    {
+      "name": "唤醒白板",
+      "category": "OPS 白板管理",
+      "sourceIndex": 110,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 06 01 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 06 01 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 06 01 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 06 01 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 124,
+      "sourceName": "唤醒白板",
+      "sourceNote": "XX表示开关：\n00：关闭\n01：打开\n\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "唤醒白板",
+        "C": "FE 09 58 42 48 43 4D 44 06 01 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 06 01 XX YY CF",
+        "F": "XX表示开关：\n00：关闭\n01：打开\n\nYY:\n00：失败\n01：成功"
+      }
+    },
+    {
+      "name": "白板笔颜色控制",
+      "category": "OPS 白板管理",
+      "sourceIndex": 111,
+      "sourceControl": "FE 09 58 42 48 43 4D 44 06 02 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 06 02 XX YY CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 06 02 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 06 02 XX YY CF`",
+      "sourceSheet": "主板端控制码和返回码表",
+      "sourceRow": 125,
+      "sourceName": "白板笔颜色控制",
+      "sourceNote": "XX表示笔颜色：\n00：黑\n01：红\n02：绿\n\nYY:\n00：失败\n01：成功",
+      "sourceCells": {
+        "B": "白板笔颜色控制",
+        "C": "FE 09 58 42 48 43 4D 44 06 02 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 06 02 XX YY CF",
+        "F": "XX表示笔颜色：\n00：黑\n01：红\n02：绿\n\nYY:\n00：失败\n01：成功"
+      }
+    }
+  ],
+  "reports": [
+    {
+      "id": "lango-report-1",
+      "name": "计时器状态变化",
+      "category": "主板上报（参考）",
+      "template": "FE 09 58 42 48 43 4D 44 05 01 {XX} CF",
+      "note": "XX:\n01:启动；\n02:暂停\n03:重置\n04:结束",
+      "labels": {
+        "zh-CN": "计时器状态变化",
+        "en-US": "Timer state changed",
+        "zh-TW": "計時器狀態變化",
+        "ja-JP": "タイマー状態変更",
+        "ko-KR": "타이머 상태 변경"
+      },
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "参数值",
+          "labels": {
+            "zh-CN": "参数值",
+            "en-US": "Value",
+            "zh-TW": "參數值",
+            "ja-JP": "値",
+            "ko-KR": "값"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "reviewed": false,
+      "needsReview": false,
+      "referenceOnly": true,
+      "builtin": true,
+      "sourceIndex": 1,
+      "sourceSheet": "安卓主板上报命令",
+      "sourceRow": 2,
+      "sourceName": "计时器状态变化",
+      "sourceControl": "FE 09 58 42 48 43 4D 44 05 01 XX CF",
+      "sourceResponse": "FE 0A 58 42 48 43 4D 44 05 01 XX CF",
+      "sourceControlCell": "`FE 09 58 42 48 43 4D 44 05 01 XX CF`",
+      "sourceResponseCell": "`FE 0A 58 42 48 43 4D 44 05 01 XX CF`",
+      "sourceNote": "XX:\n01:启动；\n02:暂停\n03:重置\n04:结束",
+      "sourceCells": {
+        "B": "计时器状态变化",
+        "C": "FE 09 58 42 48 43 4D 44 05 01 XX CF",
+        "D": "FE 0A 58 42 48 43 4D 44 05 01 XX CF",
+        "F": "XX:\n01:启动；\n02:暂停\n03:重置\n04:结束"
+      }
+    },
+    {
+      "id": "lango-report-2",
+      "name": "前面板按键被按下",
+      "category": "主板上报（参考）",
+      "template": "FE 08 58 42 48 43 4D 44 05 02 CF",
+      "note": "—",
+      "labels": {
+        "zh-CN": "前面板按键被按下",
+        "en-US": "Front-panel button pressed",
+        "zh-TW": "前面板按鍵被按下",
+        "ja-JP": "前面パネルのボタン押下",
+        "ko-KR": "전면 패널 버튼 누름"
+      },
+      "parameters": [],
+      "reviewed": false,
+      "needsReview": false,
+      "referenceOnly": true,
+      "builtin": true,
+      "sourceIndex": 2,
+      "sourceSheet": "安卓主板上报命令",
+      "sourceRow": 3,
+      "sourceName": "前面板按键被按下",
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 02 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 02 01 CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 02 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 02 01 CF`",
+      "sourceNote": "—",
+      "sourceCells": {
+        "B": "前面板按键被按下",
+        "C": "FE 08 58 42 48 43 4D 44 05 02 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 02 01 CF"
+      }
+    },
+    {
+      "id": "lango-report-3",
+      "name": "启动阵列麦输入音量检测",
+      "category": "主板上报（参考）",
+      "template": "FE 08 58 42 48 43 4D 44 05 A0 CF",
+      "note": "XX: 00失败，01成功",
+      "labels": {
+        "zh-CN": "启动阵列麦输入音量检测",
+        "en-US": "Start array microphone level detection",
+        "zh-TW": "啟動陣列麥克風輸入音量偵測",
+        "ja-JP": "アレイマイクの音量検出を開始",
+        "ko-KR": "어레이 마이크 입력 레벨 감지 시작"
+      },
+      "parameters": [],
+      "reviewed": false,
+      "needsReview": false,
+      "referenceOnly": true,
+      "builtin": true,
+      "sourceIndex": 3,
+      "sourceSheet": "安卓主板上报命令",
+      "sourceRow": 4,
+      "sourceName": "启动阵列麦输入音量检测    ",
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 A0 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 A0 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 A0 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 A0 XX CF`",
+      "sourceNote": "XX: 00失败，01成功",
+      "sourceCells": {
+        "B": "启动阵列麦输入音量检测    ",
+        "C": "FE 08 58 42 48 43 4D 44 05 A0 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 A0 XX CF",
+        "F": "XX: 00失败，01成功"
+      }
+    },
+    {
+      "id": "lango-report-4",
+      "name": "停止阵列麦输入音量检测",
+      "category": "主板上报（参考）",
+      "template": "FE 08 58 42 48 43 4D 44 05 A1 CF",
+      "note": "XX: 00失败，01成功",
+      "labels": {
+        "zh-CN": "停止阵列麦输入音量检测",
+        "en-US": "Stop array microphone level detection",
+        "zh-TW": "停止陣列麥克風輸入音量偵測",
+        "ja-JP": "アレイマイクの音量検出を停止",
+        "ko-KR": "어레이 마이크 입력 레벨 감지 중지"
+      },
+      "parameters": [],
+      "reviewed": false,
+      "needsReview": false,
+      "referenceOnly": true,
+      "builtin": true,
+      "sourceIndex": 4,
+      "sourceSheet": "安卓主板上报命令",
+      "sourceRow": 5,
+      "sourceName": "停止阵列麦输入音量检测",
+      "sourceControl": "FE 08 58 42 48 43 4D 44 05 A1 CF",
+      "sourceResponse": "FE 09 58 42 48 43 4D 44 05 A1 XX CF",
+      "sourceControlCell": "`FE 08 58 42 48 43 4D 44 05 A1 CF`",
+      "sourceResponseCell": "`FE 09 58 42 48 43 4D 44 05 A1 XX CF`",
+      "sourceNote": "XX: 00失败，01成功",
+      "sourceCells": {
+        "B": "停止阵列麦输入音量检测",
+        "C": "FE 08 58 42 48 43 4D 44 05 A1 CF",
+        "D": "FE 09 58 42 48 43 4D 44 05 A1 XX CF",
+        "F": "XX: 00失败，01成功"
+      }
+    }
+  ]
+}

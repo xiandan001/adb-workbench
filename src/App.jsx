@@ -40,7 +40,7 @@ import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { searchDestinations } from './shared/workbenchSearch';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
-import { isDarkTheme } from './shared/theme';
+import { isDarkTheme, resolveThemeKey } from './shared/theme';
 import useThemeScope from './shared/useThemeScope.js';
 import { resolveActiveDeviceId, singleFlight } from './shared/deviceWorkflow';
 import { isHarmonyDevice, platformLabel, deviceRemoteRoot, applicationPackageExtensions } from './shared/devicePlatform';
@@ -348,7 +348,8 @@ function App() {
   }, []);
 
   const allThemes = { ...themes, ...Object.fromEntries(customThemes.map(t => [t.key, t])) };
-  const theme = allThemes[currentTheme] || themes.default;
+  const effectiveThemeKey = resolveThemeKey(currentTheme, customThemes);
+  const theme = allThemes[effectiveThemeKey] || themes.default;
   useThemeScope(theme);
 
   // 组件卸载时清理 Toast 定时器，避免窗口关闭后仍触发状态更新。
@@ -2808,7 +2809,7 @@ function App() {
                             data-theme-preserve
                             onClick={() => setCurrentTheme(key)}
                             className={`w-full p-3 rounded-xl border-2 transition-all ${
-                              currentTheme === key
+                              effectiveThemeKey === key
                                 ? 'border-emerald-500 shadow-lg scale-105'
                                 : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
                             } ${themeOption.preview}`}
@@ -2819,7 +2820,7 @@ function App() {
                               <div className={`w-4 h-4 rounded-full ${themeOption.button.secondary.split(' ')[0]}`} />
                               <div className={`w-4 h-4 rounded-full ${themeOption.button.outline.split(' ')[0]}`} />
                             </div>
-                            {currentTheme === key && (
+                            {effectiveThemeKey === key && (
                               <div className="absolute -top-2 -right-2 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center">
                                 <span className="text-white text-xs">✓</span>
                               </div>

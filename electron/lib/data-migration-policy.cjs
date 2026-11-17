@@ -9,13 +9,14 @@ const { UI_WORKSPACE_KEY, normalizeUiWorkspace } = require('./workbench-worksets
 const { SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, normalizeSshConnectionMemory, normalizeReproductionConfig } = require('./connection-preferences-policy.cjs');
 const { UX_METADATA_KEYS, normalizeUxMetadataPreference } = require('./ux-metadata-policy.cjs');
 const { LOG_VIEW_PREFS_KEY, LOG_VIEW_PREFS_LIMIT, normalizeLogViewPreferences } = require('./log-view-preferences.cjs');
+const { RS232_PROTOCOL_PREFS_KEY, RS232_PROTOCOL_PREFS_LIMIT, normalizeProtocolPreferences } = require('./rs232-protocol-preferences.cjs');
 
 const PORTABLE_PREF_KEYS = Object.freeze([
   'globalCommandSettings', 'autoUpdateEnabled', 'adb-workbench.favorite-packages.v1',
   'logFilterPresets.v1', 'adb-workbench.task-center.draft.v1', 'packageSearchVisible',
   'deviceNames', 'currentTheme', 'scrcpySettings', SHORTCUTS_KEY, 'adb-workbench.harmony-device-shortcuts.v1', DEVICE_SHORTCUTS_KEY, 'adb-workbench.pinned-devices.v1',
   'adb-workbench.serial-preferences.v1', 'adb-workbench.serial-terminal-style.v1', 'adb-workbench.ui-motion.v1',
-  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, ...UX_METADATA_KEYS, LOG_VIEW_PREFS_KEY
+  UI_WORKSPACE_KEY, SSH_CONNECTION_MEMORY_KEY, REPRODUCTION_CONFIG_KEY, ...UX_METADATA_KEYS, LOG_VIEW_PREFS_KEY, RS232_PROTOCOL_PREFS_KEY
 ]);
 const FILES = new Set([
   'settings.json', 'customThemes.json', 'connection_history.json', 'terminal_command_history.json', 'hdc_terminal_command_history.json',
@@ -167,6 +168,11 @@ function normalizeDraft(value) {
 }
 function normalizePreference(key, raw) {
   text(raw, 16 * 1024 * 1024, tr("偏好 {0}", { 0: key }));
+  if (key === RS232_PROTOCOL_PREFS_KEY) {
+    if (Buffer.byteLength(raw, 'utf8') > RS232_PROTOCOL_PREFS_LIMIT) throw new Error(tr('RS232 协议配置超过 512 KiB，原数据已保留。'));
+    let value; try { value = JSON.parse(raw); } catch { throw new Error(tr('RS232 协议配置无效，原数据已保留。')); }
+    return JSON.stringify(normalizeProtocolPreferences(value));
+  }
   if (key === LOG_VIEW_PREFS_KEY) {
     if (Buffer.byteLength(raw, 'utf8') > LOG_VIEW_PREFS_LIMIT) invalid(tr('本地偏好数据无效'));
     return JSON.stringify(normalizeLogViewPreferences(JSON.parse(raw)));

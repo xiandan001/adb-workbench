@@ -13,7 +13,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
       estimatedInputTokens: operation.estimated, complete: operation.sent > 0 && operation.observed === operation.sent };
   }
   function publicOperation(operation) {
-    return { id: operation.id, kind: operation.kind, title: operation.title, stage: operation.stage, status: operation.status,
+    return { id: operation.id, kind: operation.kind, title: operation.title, stage: operation.stage, phase: operation.phase, status: operation.status,
       startedAt: operation.startedAt, endedAt: operation.endedAt, usage: usage(operation) };
   }
   function maybeFinish(operation) {
@@ -29,7 +29,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
     if (closed) throw cancelled();
     if (!live(owner)) throw fail('AI_SEND_OWNER', tr('AI 发送窗口已关闭，未发送。'));
     if ([...operations.values()].filter(item => item.status === 'running').length >= 16) throw fail('AI_SEND_QUEUE', tr('待处理 AI 请求过多，请先取消或完成现有请求。'));
-    const operation = { id: randomUUID(), owner, title, kind, locale, contentFormat: contentFormat === 'workspace-json' ? contentFormat : undefined, startedAt: now(), status: 'running', stage: tr('准备发送预览'),
+    const operation = { id: randomUUID(), owner, title, kind, locale, contentFormat: contentFormat === 'workspace-json' ? contentFormat : undefined, startedAt: now(), status: 'running', stage: tr('准备发送预览'), phase: 'preparing',
       controller: new AbortController(), tasks: new Set(), batches: new Set(), producerDone: false, failed: false,
       actual: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, observed: 0, sent: 0, estimated: 0 };
     activity.begin?.({ id: operation.id, kind: 'ai', title, deviceId, target: { page: kind === 'summary' ? 'ai-workspace' : 'logs' }, cancel: () => cancel(operation) });
@@ -66,6 +66,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
       if (task.done) continue;
       task.started = true; value.active++; operation.sent++;
       operation.stage = tr('正在发送已确认的 AI 请求');
+      operation.phase = 'sending';
       activity.update?.(operation.id, { stage: operation.stage }); notice(operation.owner);
       Promise.resolve().then(() => {
         if (!live(operation.owner) || operation.controller.signal.aborted) throw cancelled();
@@ -101,6 +102,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
       operation.estimated += prepared.estimatedInputTokens;
       value.state = 'waiting'; value.expiresAt = now() + LIMITS.previewMs;
       operation.stage = tr('等待确认 AI 发送预览');
+      operation.phase = 'awaiting-confirmation';
       value.timer = setTimeout(() => rejectBatch(value, fail('AI_SEND_EXPIRED', tr('AI 发送预览已过期，请重新准备。'))), LIMITS.previewMs);
       value.timer.unref?.();
       activity.update?.(operation.id, { stage: operation.stage }); notice(operation.owner);

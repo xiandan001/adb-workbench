@@ -1,5 +1,5 @@
 import { tr } from '../shared/i18n.js';
-// 主题配置（7 套内置主题 + 字段说明）
+// 主题配置（6 套内置主题 + 字段说明）
 // 每套主题包含：name/preview/primary/card/header/button{textMuted/input/terminal 等
 
 const themes = {
@@ -43,27 +43,6 @@ const themes = {
       output: 'bg-pink-950/50',
       text: 'text-pink-100',
       accent: 'text-rose-300'
-    }
-  },
-  tech: {
-    get name() { return tr("科技未来"); },
-    preview: 'bg-[#202124] border-[#3E4145]',
-    primary: 'cyan',
-    card: 'bg-slate-800/80 border-[#3E4145]',
-    header: 'bg-[#202124]/90 border-b border-[#3E4145] backdrop-blur',
-    button: {
-      primary: 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white shadow-lg shadow-cyan-500/30',
-      secondary: 'bg-[#3E4145] hover:bg-slate-600 text-cyan-300 border border-[#5F6368]',
-      outline: 'border border-cyan-500/50 hover:border-cyan-400 text-cyan-400'
-    },
-    text: 'text-[#E8EAED]',
-    textMuted: 'text-slate-400',
-    input: 'border-[#5F6368] bg-[#2D2F33] text-[#E8EAED]',
-    terminal: {
-      bg: 'bg-black',
-      output: 'bg-[#0D0E10]',
-      text: 'text-cyan-300',
-      accent: 'text-cyan-400'
     }
   },
   ocean: {

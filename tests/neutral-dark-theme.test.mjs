@@ -19,7 +19,7 @@ test('neutral scope is opt-in to the actual built-in, releases on switch and nev
   const { applyThemeScope } = await scopeModule(), document = documentFixture();
   const release = applyThemeScope(themes.graphite, document); assert.equal(document.values.get('data-workbench-theme'), 'graphite');
   release(); assert.equal(document.values.has('data-workbench-theme'), false);
-  for (const theme of [themes.default, themes.tech, { ...themes.graphite, isCustom: true }]) {
+  for (const theme of [themes.default, themes.ocean, { ...themes.graphite, isCustom: true }]) {
     const stop = applyThemeScope(theme, document); assert.equal(document.values.has('data-workbench-theme'), false); stop();
   }
 });

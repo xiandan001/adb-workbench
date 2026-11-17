@@ -24,7 +24,8 @@ test('unknown content and repeated multiline parameters remain original', () => 
 });
 
 test('shared action labels cannot be overwritten by boolean switch wording', () => {
-  for (const [source, english] of [['关闭', 'Close'], ['取消', 'Cancel'], ['保存', 'Save'], ['刷新', 'Refresh'], ['删除', 'Delete'], ['已启用', 'Enabled'], ['已禁用', 'Disabled']]) {
+  for (const [source, english] of [['关闭', 'Close'], ['取消', 'Cancel'], ['保存', 'Save'], ['刷新', 'Refresh'], ['删除', 'Delete'], ['启用', 'Enable'], ['已启用', 'Enabled'], ['已禁用', 'Disabled']]) {
     assert.equal(applicationMessage(source, {}, 'en-US'), english);
   }
+  assert.equal(applicationMessage('启用', {}, 'ja-JP'), '有効にする');
 });

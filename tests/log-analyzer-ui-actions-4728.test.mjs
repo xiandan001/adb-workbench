@@ -12,6 +12,7 @@ import * as markers from '../src/shared/logMarkers.js';
 import * as stream from '../src/shared/logStream.js';
 import * as model from '../src/shared/logWorkbenchModel.js';
 import { prepareInlineLogAnalysis } from '../src/shared/logInlineAnalysis.js';
+import * as analysisHelpers from '../src/shared/logAnalysisState.js';
 
 test('same-length changed AI text, reasoning or evidence ref is dirty without putting the answer in uiRevision', () => {
   const turn = { header: 'same header', content: 'secret-A', reasoning: 'think-A', evidenceRefs: ['L1'] };
@@ -87,7 +88,7 @@ function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const cut = text.indexOf('  return (\n    <div className='); assert.ok(cut > 0);
   const prefix = text.slice(0, cut).replace(/^import .+;\r?\n/gm, '').replace('export default function LogAnalyzer', 'function LogAnalyzer');
   const component = vm.runInNewContext(prefix + '\nreturn { onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme }; }\nLogAnalyzer', {
-    ...snapshots, ...workspace, ...markers, ...stream, ...model, prepareInlineLogAnalysis,
+    ...snapshots, ...workspace, ...markers, ...stream, ...model, ...analysisHelpers, prepareInlineLogAnalysis,
     crypto: { randomUUID }, window: { electronAPI: api, addEventListener() {}, removeEventListener() {}, innerHeight: 900 },
     document: { addEventListener() {}, removeEventListener() {}, body: { style: {} } }, navigator: { clipboard: { writeText: async value => clipboard.push(value) } }, performance,
     setTimeout, clearTimeout, requestAnimationFrame: callback => { const timer = setTimeout(() => callback(performance.now()), 0); timers.add(timer); return timer; }, cancelAnimationFrame: clearTimeout,

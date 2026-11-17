@@ -1,3 +1,7 @@
+export function resolveThemeKey(key, customThemes = []) {
+  return key === 'tech' && !customThemes.some(theme => theme?.key === key) ? 'graphite' : key;
+}
+
 export function isDarkTheme(theme) {
   if (typeof theme?.isDark === 'boolean') return theme.isDark;
   if (theme?.mode === 'dark' || theme?.primary === 'tech') return true;
