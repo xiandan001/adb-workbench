@@ -55,6 +55,7 @@ function createLogCloseGuard({ getOwner, getActivity = () => false, getSourceIde
     settle(false); for (const remove of detach.splice(0)) remove(); owner = window; bypass = null;
     state = { documentId: '', revision: 0, dirty: false, ready: false, sourceIdentity: '' }; approvalGeneration++; quitReviewId = '';
     if (!usable(window)) return;
+    const contents = window.webContents;
     const closing = event => {
       if (bypass && current(bypass)) { bypass = null; return; }
       const unacknowledged = (!state.ready || state.sourceIdentity !== sourceIdentity()) && (state.dirty || activity() || getPendingContent());
@@ -66,9 +67,9 @@ function createLogCloseGuard({ getOwner, getActivity = () => false, getSourceIde
       state = { documentId: '', revision: 0, dirty: false, ready: false, sourceIdentity: '' }; };
     const navigation = (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) gone(); };
     window.on('close', closing); window.on('closed', gone);
-    window.webContents.on('render-process-gone', gone); window.webContents.on('did-start-navigation', navigation);
+    contents.on('render-process-gone', gone); contents.on('did-start-navigation', navigation);
     detach.push(() => { window.removeListener('close', closing); window.removeListener('closed', gone);
-      window.webContents.removeListener('render-process-gone', gone); window.webContents.removeListener('did-start-navigation', navigation); });
+      contents.removeListener('render-process-gone', gone); contents.removeListener('did-start-navigation', navigation); });
   }
   function update(event, value) {
     if (!authorized(event) || !value || !['dirty', 'documentId', 'revision'].every(key => Object.hasOwn(value, key))

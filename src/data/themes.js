@@ -1,5 +1,5 @@
 import { tr } from '../shared/i18n.js';
-// 主题配置（6 套内置主题 + 字段说明）
+// 主题配置（7 套内置主题 + 字段说明）
 // 每套主题包含：name/preview/primary/card/header/button{textMuted/input/terminal 等
 
 const themes = {
@@ -107,6 +107,23 @@ const themes = {
       text: 'text-green-100',
       accent: 'text-green-400'
     }
+  },
+  graphite: {
+    get name() { return tr('中性深色'); },
+    isDark: true,
+    preview: 'bg-[#212121] border-[#3a3a3a]',
+    primary: 'emerald',
+    card: 'bg-[#212121] border-[#3a3a3a]',
+    header: 'bg-[#212121] border-b border-[#3a3a3a]',
+    button: {
+      primary: 'bg-[#00ba83] hover:bg-[#11cf98] text-[#0b1511]',
+      secondary: 'bg-[#2c2c2c] hover:bg-[#343434] text-[#e5e5e5] border border-[#454545]',
+      outline: 'border border-[#454545] hover:border-[#00ba83] text-[#e5e5e5]'
+    },
+    text: 'text-[#e5e5e5]',
+    textMuted: 'text-[#a3a3a3]',
+    input: 'border-[#454545] bg-[#242424] text-[#e5e5e5] placeholder-[#8b8b8b]',
+    terminal: { bg: 'bg-[#181818]', output: 'bg-[#121212]', text: 'text-[#e5e5e5]', accent: 'text-emerald-400' }
   },
   sunset: {
     get name() { return tr("落日余晖"); },

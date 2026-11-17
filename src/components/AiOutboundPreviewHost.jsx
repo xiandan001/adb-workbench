@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Send, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Loader2, Send, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 
-export default function AiOutboundPreviewHost({ isDark = true }) {
+export default function AiOutboundPreviewHost({ isDark = true, usageTarget = null, usagePlacement = 'floating', usageExpanded, onUsageExpandedChange }) {
   useLocale();
   const [state, setState] = useState({ pending: [], operations: [] });
   const [preview, setPreview] = useState(null);
@@ -13,7 +14,9 @@ export default function AiOutboundPreviewHost({ isDark = true }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [usageOpen, setUsageOpen] = useState(false);
-  const dialog = useRef(null), epoch = useRef(0), listEpoch = useRef(0), alive = useRef(true);
+  const usageBodyId = useId(), showUsage = typeof usageExpanded === 'boolean' ? usageExpanded : usageOpen;
+  function changeUsage(value) { if (typeof usageExpanded !== 'boolean') setUsageOpen(value); onUsageExpandedChange?.(value); }
+  const usageToggle = useRef(null), dialog = useRef(null), epoch = useRef(0), listEpoch = useRef(0), alive = useRef(true);
   const selected = state.pending[0];
   const selectedId = selected?.id;
   const panel = isDark ? 'border-slate-600 bg-[#202124] text-slate-100' : 'border-slate-300 bg-white text-slate-800';
@@ -63,6 +66,11 @@ export default function AiOutboundPreviewHost({ isDark = true }) {
     finally { if (alive.current) setBusy(false); }
   }
 
+  const usageView = state.operations.length > 0 && <aside aria-label={tr('AI 发送与用量')} className={`${usageTarget || usagePlacement === 'inline' ? 'min-w-0 w-full' : 'fixed bottom-3 right-3 z-40 w-[min(24rem,calc(100vw-1.5rem))] shadow-lg'} flex min-h-0 flex-col rounded-xl border ${panel}`}>
+    <div className="flex min-w-0 shrink-0 items-center"><button ref={usageToggle} type="button" aria-expanded={showUsage} aria-controls={usageBodyId} onClick={() => changeUsage(!showUsage)} className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-2"><span className="min-w-0 break-words">{tr('AI 发送与用量')}</span><ChevronDown size={14} aria-hidden="true" className={`shrink-0 ${showUsage ? 'rotate-180' : ''}`} /></button>
+      {showUsage && <button type="button" aria-label={tr('收起 AI 发送与用量')} onClick={() => { changeUsage(false); usageToggle.current?.focus({ preventScroll: true }); }} className="mr-1 shrink-0 rounded-lg p-2 focus-visible:outline-2 focus-visible:outline-offset-2"><X size={14} /></button>}</div>
+    <div id={usageBodyId} hidden={!showUsage} className="min-h-0 max-h-[min(15rem,25vh)] space-y-3 overflow-y-auto break-words border-t border-slate-500/25 p-3">{showUsage && state.operations.slice(-6).reverse().map(item => <OutboundUsage key={item.id} item={item} />)}</div>
+  </aside>;
   return <>
     <dialog ref={dialog} aria-labelledby="ai-outbound-title" onCancel={event => { event.preventDefault(); void decide('cancel'); }}
       className={`m-auto w-[min(1000px,94vw)] max-h-[92vh] overflow-hidden rounded-xl border p-0 shadow-2xl backdrop:bg-black/60 ${panel}`}>
@@ -83,7 +91,7 @@ export default function AiOutboundPreviewHost({ isDark = true }) {
         <footer className="shrink-0 border-t border-slate-500/30 p-4 space-y-3"><label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmed === selectedId} disabled={visited.size !== selected.requestCount || busy || preview?.id !== selectedId} onChange={event => setConfirmed(event.target.checked ? selectedId : null)} />{tr('我已检查本批次的所有请求，同意发送上述完整脱敏内容。')}</label><div className="flex justify-end gap-2"><button type="button" className={button} disabled={busy} onClick={() => decide('cancel')}>{tr('取消，不发送')}</button><button type="button" className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-40" disabled={busy || loading || confirmed !== selectedId || visited.size !== selected.requestCount || preview?.id !== selectedId} onClick={() => decide('send')}><Send size={15} />{tr('明确发送本批次')}</button></div></footer>
       </div>}
     </dialog>
-    {state.operations.length > 0 && <aside className={`fixed bottom-3 right-3 z-40 max-w-sm rounded-xl border shadow-lg ${panel}`}><button type="button" aria-expanded={usageOpen} onClick={() => setUsageOpen(value => !value)} className="px-3 py-2 text-xs">{tr('AI 发送与用量')}</button>{usageOpen && <div className="max-h-60 overflow-auto border-t border-slate-500/25 p-3 space-y-3">{state.operations.slice(-6).reverse().map(item => <OutboundUsage key={item.id} item={item} />)}</div>}</aside>}
+    {usageTarget ? createPortal(usageView, usageTarget) : usageView}
   </>;
 }
 

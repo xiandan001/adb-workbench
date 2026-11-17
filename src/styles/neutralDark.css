@@ -1,0 +1,54 @@
+html[data-workbench-theme="graphite"] {
+  color-scheme: dark;
+  --graphite-page: #181818;
+  --graphite-panel: #212121;
+  --graphite-input: #242424;
+  --graphite-raised: #2c2c2c;
+  --graphite-hover: #343434;
+  --graphite-border: #3a3a3a;
+  --graphite-border-strong: #454545;
+  --graphite-text: #e5e5e5;
+  --graphite-muted: #a3a3a3;
+  --graphite-placeholder: #8b8b8b;
+  background-color: var(--graphite-page);
+  color: var(--graphite-text);
+}
+
+html[data-workbench-theme="graphite"] body { background-color: var(--graphite-page); color: var(--graphite-text); }
+
+/* Limit neutral substitutions to this optional theme. Preview swatches, media pixels
+   and independently chosen classic terminal surfaces remain outside the scope. */
+@layer utilities {
+  @scope (html[data-workbench-theme="graphite"]) to ([data-theme-preserve], .xterm, [class~="bg-[#0d1117]"], [class~="bg-black"], canvas, img, video) {
+    :is([class~="bg-[#202124]"], [class~="bg-[#0D0E10]"], [class~="bg-[#161b22]"], [class~="bg-slate-900"], [class~="bg-slate-950"]) {
+      background-color: var(--graphite-page);
+    }
+    :is([class~="bg-white"], [class~="bg-slate-50"], [class~="bg-[#2D2F33]"], [class~="bg-slate-800"], [class~="bg-slate-800/80"], [class~="bg-slate-900/80"], [class~="bg-slate-900/50"]) {
+      background-color: var(--graphite-panel);
+    }
+    :is([class~="bg-[#3E4145]"], [class~="bg-[#3E4145]/50"], [class~="bg-slate-100"], [class~="bg-slate-200"], [class~="bg-slate-600"], [class~="bg-slate-700"], [class~="bg-slate-700/50"]) {
+      background-color: var(--graphite-raised);
+    }
+    [class~="bg-[#202124]/50"] { background-color: color-mix(in srgb, var(--graphite-page) 50%, transparent); }
+    [class~="bg-[#202124]/90"] { background-color: color-mix(in srgb, var(--graphite-page) 90%, transparent); }
+    [class~="bg-[#202124]/95"] { background-color: color-mix(in srgb, var(--graphite-page) 95%, transparent); }
+    :is(input, textarea, select):is([class~="bg-[#2D2F33]"], [class~="bg-[#202124]"], [class~="bg-slate-50"], [class~="bg-white"], [class~="bg-slate-800"]) {
+      background-color: var(--graphite-input);
+    }
+    :is([class~="border-[#3E4145]"], [class~="border-slate-100"], [class~="border-slate-200"], [class~="border-slate-300"], [class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) {
+      border-color: var(--graphite-border);
+    }
+    :is([class~="border-[#5F6368]"], [class~="border-slate-400"], [class~="border-slate-500"]) { border-color: var(--graphite-border-strong); }
+    :is([class~="text-[#E8EAED]"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"], [class~="text-slate-700"], [class~="text-slate-800"], [class~="text-slate-900"]) {
+      color: var(--graphite-text);
+    }
+    :is([class~="text-[#9AA0A6]"], [class~="text-[#80868B]"], [class~="text-[#BDC1C6]"], [class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"]) { color: var(--graphite-muted); }
+    :is(input, textarea)::placeholder { color: var(--graphite-placeholder); }
+    :is([class~="hover:bg-[#2D2F33]"], [class~="hover:bg-[#3E4145]"], [class~="hover:bg-[#25272B]"], [class~="hover:bg-slate-50"], [class~="hover:bg-slate-100"], [class~="hover:bg-slate-200"], [class~="hover:bg-slate-600"]):hover {
+      background-color: var(--graphite-hover);
+    }
+    :is([class~="focus:bg-[#3E4145]"], [class~="focus:bg-slate-100"]):focus { background-color: var(--graphite-hover); }
+    ::-webkit-scrollbar-thumb { background-color: var(--graphite-border-strong); }
+    ::-webkit-scrollbar-thumb:hover { background-color: #626262; }
+  }
+}

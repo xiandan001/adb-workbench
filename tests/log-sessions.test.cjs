@@ -198,7 +198,7 @@ test('logger context changes never start capture or AI; session restore uses loc
   let aiClears = 0;
   let currentWindow = {
     isDestroyed: () => false, focus() {},
-    webContents: { isLoading: () => false, send: (channel, payload) => events.push({ channel, payload }) }
+    webContents: { isDestroyed: () => false, isLoading: () => false, send: (channel, payload) => events.push({ channel, payload }) }
   };
   const ctx = {
     isDev: false, getLogAnalyzerWindow: () => currentWindow, setLogAnalyzerWindow: value => { currentWindow = value; },

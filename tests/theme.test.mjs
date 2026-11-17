@@ -16,3 +16,10 @@ test('custom surfaces and explicit overrides keep independent accent colors', ()
   assert.equal(isDarkTheme({ card: 'bg-black' }), true);
   assert.equal(isDarkTheme({ isDark: false, card: 'bg-slate-800' }), false);
 });
+
+test('graphite is an additional explicitly dark green-accented theme without changing existing built-ins', () => {
+  assert.deepEqual(Object.keys(themes).sort(), ['default', 'cute', 'tech', 'ocean', 'forest', 'sunset', 'graphite'].sort());
+  assert.equal(themes.graphite.isDark, true); assert.equal(themes.graphite.primary, 'emerald'); assert.equal(isDarkTheme(themes.graphite), true);
+  assert.equal(themes.graphite.name, '中性深色'); assert.equal(themes.default.card, 'bg-white border-slate-200');
+  assert.equal(themes.tech.primary, 'cyan'); assert.equal(themes.tech.card, 'bg-slate-800/80 border-[#3E4145]');
+});

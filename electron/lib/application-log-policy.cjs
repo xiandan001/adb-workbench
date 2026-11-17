@@ -36,9 +36,10 @@ function normalizeApplicationLogEvent(value) {
   }
   const control = get('source') === 'media' && ['control-request', 'control-stage', 'control-result'].includes(get('event'));
   if (get('channel') !== undefined) row.channel = safeDiagnosticChannel(get('channel'));
+  const logWindow = get('source') === 'app' && get('component') === 'log-window';
   const enums = { level: ['info', 'warn', 'error'], mode: ['hardware', 'software', 'default'],
-    reason: control ? CONTROL_REASONS : [...REASONS], stage: [...STAGES], errorName: [...ERROR_NAMES], errorCode: [...ERROR_CODES],
-    component: ['app', 'startup', 'updater', 'mcp', 'renderer', 'ipc', 'media', 'other'],
+    reason: control ? CONTROL_REASONS : [...REASONS], stage: logWindow ? ['loading', 'document-loaded', 'renderer-ready', 'renderer-failed'] : [...STAGES], errorName: [...ERROR_NAMES], errorCode: [...ERROR_CODES],
+    component: ['app', 'startup', 'updater', 'mcp', 'renderer', 'ipc', 'media', 'other', ...(get('source') === 'app' ? ['log-window'] : [])],
     platform: ['win32', 'darwin', 'linux'], architecture: ['x64', 'arm64', 'ia32'],
     acceleration: ['enabled', 'disabled', 'unavailable', 'unknown'] };
   for (const [key, allowed] of Object.entries(enums)) if (allowed.includes(get(key))) row[key] = get(key);

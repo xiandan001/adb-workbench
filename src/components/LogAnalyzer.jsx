@@ -163,6 +163,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const [mcpConfigTab, setMcpConfigTab] = useState('trae');
   // AI 分析状态
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [usageTarget, setUsageTarget] = useState(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const aiAnalyzingRef = useRef(false);
   const [aiError, setAiError] = useState('');
@@ -1542,7 +1543,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           )}
 
           <div
-            className={`${aiFullscreen ? 'fixed inset-0 z-50' : 'relative'} flex flex-col ${aiFullscreen ? '' : 'border-t'} ${isDark ? 'bg-[#202124]/95 border-[#3E4145]' : 'bg-white border-slate-200'}`}
+            className={`${aiFullscreen ? 'fixed inset-0 z-50' : 'relative'} flex min-h-0 flex-col ${aiFullscreen ? '' : 'border-t'} ${isDark ? 'bg-[#202124]/95 border-[#3E4145]' : 'bg-white border-slate-200'}`}
             style={aiFullscreen ? {} : { height: `${aiPanelHeight}px` }}
           >
             {/* 拖拽调整高度的把手 */}
@@ -1556,8 +1557,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             )}
 
             {/* AI Panel Header */}
-            <div className={`flex items-center justify-between px-4 py-2 border-b ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
-              <div className="flex items-center gap-2 min-w-0">
+            <div className={`flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 py-2 border-b ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <Sparkles size={16} className={`shrink-0 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
                 <span className={`text-sm font-bold shrink-0 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr('日志对话')}</span>
                 {aiAnalyzing && (
@@ -1637,9 +1638,9 @@ export default function LogAnalyzer({ theme, vipStatus }) {
               </div>
             </div>
 
-            {analysisScope && <div className="shrink-0 px-4 pt-2"><LogInlineAnalysisScope scope={analysisScope} isDark={isDark} /></div>}
             {/* AI Content Area */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {analysisScope && <div className="mb-3"><LogInlineAnalysisScope scope={analysisScope} isDark={isDark} expanded={viewPreferences.view.scopeExpanded} onExpandedChange={value => setViewField('scopeExpanded', value)} /></div>}
               {aiError ? (
                 <div className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
                   <span className="font-bold">{tr("错误：")}</span>{tr(aiError)}
@@ -1719,12 +1720,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
             {/* AI Input Bar */}
             {aiHistoryReadOnly && <div className={`border-t px-4 py-3 text-xs ${isDark ? 'border-[#3E4145] bg-amber-500/10 text-amber-300' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{tr("历史对话仅供查阅，不会作为新请求的上下文。开始新分析会清空当前对话视图，不影响已保存会话。")}<button type="button" onClick={onAiClear} className="ml-3 rounded border border-current px-2 py-1">{tr("开始新的分析")}</button>
             </div>}
-            <div className={`flex items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
+            <div className={`flex shrink-0 flex-wrap items-center gap-2 px-4 py-2 border-t ${isDark ? 'border-[#3E4145] bg-[#2A2C2F]' : 'border-slate-200 bg-slate-50'}`}>
               {/* 快速/思考模式切换 */}
               <button
                 onClick={() => setAiThinkingMode(!aiThinkingMode)}
                 disabled={aiAnalyzing}
-                className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-lg border transition-all disabled:opacity-50 ${
+                className={`flex shrink-0 items-center gap-1 px-2.5 py-2 text-xs rounded-lg border transition-all disabled:opacity-50 ${
                   aiThinkingMode
                     ? (isDark ? 'border-purple-500/40 bg-purple-500/15 text-purple-400' : 'border-purple-300 bg-purple-50 text-purple-600')
                     : (isDark ? 'border-[#5F6368] bg-[#3E4145] text-[#9AA0A6]' : 'border-slate-200 bg-white text-slate-500')
@@ -1746,23 +1747,24 @@ export default function LogAnalyzer({ theme, vipStatus }) {
                   }
                 }}
                 placeholder={tr("附加分析要求（可选，如：重点关注内存泄漏）")}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-purple-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                className={`min-w-0 flex-[1_1_12rem] text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-purple-500 ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
               />
               {aiAnalyzing ? (
                 <button
                   onClick={onAiStop}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
+                  className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
                 >
                   <StopCircle size={14} />{tr("停止")}</button>
               ) : (
                 <button
                   onClick={() => onAiAnalyze()}
                   disabled={filtered.length === 0 || aiHistoryReadOnly || analysisBlocked}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
+                  className="flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:opacity-50"
                 >
                   <Send size={14} />{tr("开始分析")}</button>
               )}
             </div>
+            <div ref={setUsageTarget} className="flex min-h-0 max-h-[40%] shrink-0 flex-col overflow-hidden px-4 pb-2 empty:hidden" />
           </div>
         </>
       )}
@@ -2016,7 +2018,7 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
           </div>
         </div>
       )}
-      <AiOutboundPreviewHost isDark={isDark} />
+      <AiOutboundPreviewHost isDark={isDark} usageTarget={usageTarget} usagePlacement="inline" usageExpanded={viewPreferences.view.usageExpanded} onUsageExpandedChange={value => setViewField('usageExpanded', value)} />
     </div>
   );
 }

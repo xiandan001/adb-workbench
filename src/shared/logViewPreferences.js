@@ -3,10 +3,12 @@ import { tr } from './i18n.js';
 export const LOG_VIEW_PREFS_KEY = 'adb-workbench.log-view.v1';
 export const LOG_VIEW_PREFS_LIMIT = 128 * 1024;
 const quotas = [128, 256, 512, 1024].map(value => value * 1024 * 1024);
-const exact = (value, fields) => value && typeof value === 'object' && !Array.isArray(value)
-  && [Object.prototype, null].includes(Object.getPrototypeOf(value)) && Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key));
+const exact = (value, fields, optional = []) => value && typeof value === 'object' && !Array.isArray(value)
+  && [Object.prototype, null].includes(Object.getPrototypeOf(value)) && fields.every(key => Object.hasOwn(value, key))
+  && Object.keys(value).every(key => fields.includes(key) || optional.includes(key));
+const foldFields = ['scopeExpanded', 'usageExpanded'];
 const invalid = () => { throw new Error(tr('本地偏好数据无效')); };
-export const defaultLogView = () => ({ sidebarOpen: false, aiPanelHeight: 440, detailWrap: true, colWidths: { ts: 140, pkg: 100, tag: 100 }, filter: {}, buffers: ['main'] });
+export const defaultLogView = () => ({ sidebarOpen: false, aiPanelHeight: 440, detailWrap: true, colWidths: { ts: 140, pkg: 100, tag: 100 }, filter: {}, buffers: ['main'], scopeExpanded: false, usageExpanded: false });
 export const defaultLogViewPreferences = () => ({ version: 1, archive: { enabled: false, maxBytes: 512 * 1024 * 1024 }, views: [] });
 export function normalizeLogViewFilter(value) {
   const fields = ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel', 'pid'];
@@ -33,8 +35,9 @@ export function normalizeLogViewPreferences(value) {
     || typeof value.archive.enabled !== 'boolean' || !quotas.includes(value.archive.maxBytes) || !Array.isArray(value.views) || value.views.length > 20) invalid();
   const seen = new Set();
   const views = value.views.map(view => {
-    const legacy = exact(view, ['deviceId', 'source', 'sidebarOpen', 'aiPanelHeight', 'detailWrap', 'colWidths']);
-    if ((!legacy && !exact(view, ['deviceId', 'source', 'sidebarOpen', 'aiPanelHeight', 'detailWrap', 'colWidths', 'filter', 'buffers'])) || typeof view.deviceId !== 'string'
+    const legacy = exact(view, ['deviceId', 'source', 'sidebarOpen', 'aiPanelHeight', 'detailWrap', 'colWidths'], foldFields);
+    if ((!legacy && !exact(view, ['deviceId', 'source', 'sidebarOpen', 'aiPanelHeight', 'detailWrap', 'colWidths', 'filter', 'buffers'], foldFields))
+      || foldFields.some(key => Object.hasOwn(view, key) && typeof view[key] !== 'boolean') || typeof view.deviceId !== 'string'
       || view.deviceId.length > 300 || /\s/u.test(view.deviceId) || [...view.deviceId].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
       || !['realtime', 'file'].includes(view.source) || typeof view.sidebarOpen !== 'boolean' || typeof view.detailWrap !== 'boolean'
       || !Number.isInteger(view.aiPanelHeight) || view.aiPanelHeight < 240 || view.aiPanelHeight > 800 || !exact(view.colWidths, ['ts', 'pkg', 'tag'])) invalid();
@@ -43,7 +46,8 @@ export function normalizeLogViewPreferences(value) {
     }
     const key = JSON.stringify([view.deviceId, view.source]); if (seen.has(key)) invalid(); seen.add(key);
     return { deviceId: view.deviceId, source: view.source, sidebarOpen: view.sidebarOpen, aiPanelHeight: view.aiPanelHeight,
-      detailWrap: view.detailWrap, colWidths: { ...view.colWidths }, filter: normalizeLogViewFilter(legacy ? {} : view.filter), buffers: normalizeBuffers(legacy ? ['main'] : view.buffers) };
+      detailWrap: view.detailWrap, colWidths: { ...view.colWidths }, filter: normalizeLogViewFilter(legacy ? {} : view.filter), buffers: normalizeBuffers(legacy ? ['main'] : view.buffers),
+      scopeExpanded: view.scopeExpanded ?? false, usageExpanded: view.usageExpanded ?? false };
   });
   return { version: 1, archive: { ...value.archive }, views };
 }
@@ -63,8 +67,8 @@ export function saveLogViewPreferences(value, storage = globalThis.localStorage)
 export function logViewFor(value, deviceId, source) {
   const view = normalizeLogViewPreferences(value).views.find(item => item.deviceId === deviceId && item.source === source);
   if (!view) return defaultLogView();
-  const { sidebarOpen, aiPanelHeight, detailWrap, colWidths, filter, buffers } = view;
-  return { sidebarOpen, aiPanelHeight, detailWrap, colWidths: { ...colWidths }, filter: { ...filter }, buffers: [...buffers] };
+  const { sidebarOpen, aiPanelHeight, detailWrap, colWidths, filter, buffers, scopeExpanded, usageExpanded } = view;
+  return { sidebarOpen, aiPanelHeight, detailWrap, colWidths: { ...colWidths }, filter: { ...filter }, buffers: [...buffers], scopeExpanded, usageExpanded };
 }
 export function updateLogView(value, deviceId, source, changes) {
   const previous = normalizeLogViewPreferences(value), view = { ...logViewFor(previous, deviceId, source), ...changes };

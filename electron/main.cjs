@@ -155,7 +155,8 @@ function createWindow() {
     if (!currentUrl || url !== currentUrl) event.preventDefault();
   });
   mainWindow.on('close', event => {
-    if (!quitCleanupFinished && (updater.shouldInstallDownloadedUpdateOnQuit() || screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
+    const logWindow = ctx.getLogAnalyzerWindow();
+    if (!quitCleanupFinished && (logWindow && !logWindow.isDestroyed() || updater.shouldInstallDownloadedUpdateOnQuit() || screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
       event.preventDefault();
       app.quit();
     }
@@ -326,6 +327,7 @@ app.on('before-quit', async (event) => {
   const cancelQuit = () => { logCloseGuard.revokeQuit(); logSessions.resumeAfterQuit(); };
   let logQuitPermit;
   try {
+    if (await logAnalyzer.reviewFailedLogWindowForQuit?.() === false) { cancelQuit(); quitCleanupRunning = false; return; }
     logQuitPermit = await logCloseGuard.confirmQuit();
     if (!logQuitPermit?.proceed) { cancelQuit(); quitCleanupRunning = false; return; }
     const owner = ctx.getMainWindow();

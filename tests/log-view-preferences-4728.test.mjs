@@ -49,3 +49,34 @@ test('log metadata survives backup with identical limits and rejects private fie
   }
   assert.equal(restored.getItem(LOG_VIEW_PREFS_KEY), storage.getItem(LOG_VIEW_PREFS_KEY));
 });
+
+test('AI scope and usage folds persist as booleans without storing content or consent', () => {
+  const backend = require('../electron/lib/log-view-preferences.cjs'), storage = memory();
+  const value = updateLogView(defaultLogViewPreferences(), 'device-A', 'realtime', { scopeExpanded: true, usageExpanded: true });
+  saveLogViewPreferences(value, storage);
+  assert.equal(logViewFor(readLogViewPreferences(storage), 'device-A', 'realtime').scopeExpanded, true);
+  assert.equal(logViewFor(readLogViewPreferences(storage), 'device-A', 'realtime').usageExpanded, true);
+  assert.equal(logViewFor(value, 'device-B', 'realtime').scopeExpanded, false);
+  assert.deepEqual(normalizeLogViewPreferences(value), backend.normalizeLogViewPreferences(value));
+  const migrated = memory(), policy = require('../electron/lib/data-migration-policy.cjs');
+  applyMigrationPreferences(policy.normalizePreferences(collectMigrationPreferences(storage)), migrated);
+  assert.deepEqual(readLogViewPreferences(migrated), readLogViewPreferences(storage));
+  for (const patch of [{ scopeExpanded: 1 }, { usageExpanded: null }, { usageExpanded: 'true' }, { previewId: 'not-a-preference' }, { confirmed: true }]) {
+    const invalid = { ...value, views: [{ ...value.views[0], ...patch }] };
+    assert.throws(() => normalizeLogViewPreferences(invalid)); assert.throws(() => backend.normalizeLogViewPreferences(invalid));
+  }
+});
+
+test('both legacy view shapes load collapsed and are not rewritten during reads', () => {
+  const backend = require('../electron/lib/log-view-preferences.cjs');
+  const current = updateLogView(defaultLogViewPreferences(), 'device-A', 'realtime', {});
+  for (const oldLayout of [false, true]) {
+    const legacy = structuredClone(current); delete legacy.views[0].scopeExpanded; delete legacy.views[0].usageExpanded;
+    if (oldLayout) { delete legacy.views[0].filter; delete legacy.views[0].buffers; }
+    const raw = JSON.stringify(legacy), storage = memory(); storage.setItem(LOG_VIEW_PREFS_KEY, raw);
+    const loaded = readLogViewPreferences(storage);
+    assert.equal(loaded.views[0].scopeExpanded, false); assert.equal(loaded.views[0].usageExpanded, false);
+    assert.equal(storage.getItem(LOG_VIEW_PREFS_KEY), raw);
+    assert.deepEqual(loaded, backend.normalizeLogViewPreferences(legacy));
+  }
+});

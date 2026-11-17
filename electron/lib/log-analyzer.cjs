@@ -184,8 +184,11 @@ function createLogAnalyzerWindow() {
   if (require('./log-window-close.cjs').isQuitting?.()) throw new Error(tr('应用正在退出，请稍后重试。'));
   const { BrowserWindow } = require('electron');
   let logAnalyzerWindow = ctx.getLogAnalyzerWindow();
-  if (logAnalyzerWindow && !logAnalyzerWindow.isDestroyed()) {
-    logAnalyzerWindow.focus();
+  const lifecycle = require('./log-window-lifecycle.cjs');
+  if (logAnalyzerWindow && !logAnalyzerWindow.isDestroyed() && !logAnalyzerWindow.webContents.isDestroyed()) {
+    const controller = lifecycle.getLogWindowLifecycle(logAnalyzerWindow);
+    if (controller) controller.open();
+    else { if (logAnalyzerWindow.isMinimized?.()) logAnalyzerWindow.restore(); logAnalyzerWindow.show?.(); logAnalyzerWindow.focus(); }
     return logAnalyzerWindow;
   }
 
@@ -196,11 +199,13 @@ function createLogAnalyzerWindow() {
     minHeight: 680,
     icon: path.join(__dirname, '../../icon.png'),
     title: tr('AI 日志助手'),
+    backgroundColor: '#181818',
     webPreferences: {
       preload: path.join(__dirname, '../preload.cjs'),
       additionalArguments: windowArguments(),
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
     }
   });
 
@@ -213,13 +218,18 @@ function createLogAnalyzerWindow() {
   ctx.setLogAnalyzerWindow(logAnalyzerWindow);
   require('./log-window-close.cjs').attach(logAnalyzerWindow);
 
-  if (isDev) {
-    logAnalyzerWindow.loadURL('http://localhost:5173/log-analyzer.html');
-  } else {
-    logAnalyzerWindow.loadFile(path.join(__dirname, '../../dist/log-analyzer.html'));
-  }
+  lifecycle.attachLogWindowLifecycle(logAnalyzerWindow, {
+    isCurrent: () => ctx.getLogAnalyzerWindow() === logAnalyzerWindow, getSourceIdentity,
+    record: value => require('./application-log.cjs').record(value), focusReviewHost: () => {
+      const main = ctx.getMainWindow?.();
+      if (main && !main.isDestroyed()) { if (main.isMinimized?.()) main.restore(); main.show(); main.focus(); }
+    },
+    ask: options => require('./app-message-dialog.cjs').ask(options),
+    load: () => isDev ? logAnalyzerWindow.loadURL('http://localhost:5173/log-analyzer.html') : logAnalyzerWindow.loadFile(path.join(__dirname, '../../dist/log-analyzer.html')),
+  }).load();
 
   logAnalyzerWindow.on('closed', () => {
+    if (ctx.getLogAnalyzerWindow() !== logAnalyzerWindow) return;
     captureEpoch++;
     cancelPendingImport('owner-lost');
     require('./auto-diagnose.cjs').resetAutoDiagnoseLastFire?.();
@@ -249,6 +259,11 @@ function createLogAnalyzerWindow() {
 // ============ IPC handlers ============
 
 function register(ipcMain) {
+  for (const [channel, method] of [['startup:ready', 'ready'], ['startup:failed', 'failure']]) ipcMain.on?.(channel, event => {
+    const owner = ctx.getLogAnalyzerWindow();
+    if (!owner || owner.isDestroyed() || owner.webContents.isDestroyed() || event?.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame) return;
+    require('./log-window-lifecycle.cjs').getLogWindowLifecycle(owner)?.[method]();
+  });
   const logOwner = event => {
     const windows = [ctx.getLogAnalyzerWindow?.(), ctx.getMainWindow?.()].filter(Boolean);
     if (!windows.some(window => !window.isDestroyed() && window.webContents === event?.sender && event.senderFrame === window.webContents.mainFrame)) {
@@ -683,6 +698,10 @@ function setLogStoreFileEntries(entries) {
 }
 
 module.exports = {
+  reviewFailedLogWindowForQuit: () => {
+    const owner = ctx.getLogAnalyzerWindow(), controller = owner && require('./log-window-lifecycle.cjs').getLogWindowLifecycle(owner);
+    return controller?.failed() ? controller.review() : Promise.resolve(true);
+  },
   getSourceIdentity,
   hasCaptureActivity: () => Boolean(logcatProc || captureStarting || archiveSession?.info().status === 'recording' || archiveSession?.info().pendingBytes),
   getArchiveState: () => archiveSession?.info() || { ...archiveState },

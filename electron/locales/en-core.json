@@ -1259,5 +1259,17 @@
   "最近30秒": "Last 30 seconds",
   "最近5分钟": "Last 5 minutes",
   "所选日志前后30秒": "30 seconds around selected log",
-  "时间基准": "Time basis"
+  "时间基准": "Time basis",
+  "展开范围说明": "Expand scope details",
+  "收起范围说明": "Collapse scope details",
+  "收起 AI 发送与用量": "Collapse AI sending and usage",
+  "中性深色": "Neutral dark",
+  "日志助手未能显示": "Log assistant could not be displayed",
+  "日志窗口未能正常显示，可以重新加载。不会自动开始采集或调用 AI。": "The log window could not be displayed. You can reload it. Capture and AI will not start automatically.",
+  "重试会保留已加载的日志。放弃并关闭会停止本次采集，并丢弃此窗口未保存的内容；已保存的文件不受影响。": "Retrying keeps the loaded logs. Discarding and closing stops this capture and discards unsaved content in this window. Saved files are not affected.",
+  "重试加载": "Reload",
+  "保留窗口": "Keep window",
+  "放弃未保存日志并关闭": "Discard unsaved logs and close",
+  "新增中性深色主题，可在外观设置中切换。": "Added an optional neutral dark theme in Appearance settings.",
+  "日志分析范围说明和 AI 发送用量支持折叠并记住状态。": "Log analysis scope details and AI sending usage can be collapsed, with their state remembered."
 }

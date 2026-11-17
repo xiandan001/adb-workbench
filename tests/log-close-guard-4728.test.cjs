@@ -79,6 +79,20 @@ test('a previously closed log window cannot block quitting the remaining main ap
   const f = fixture(); f.owner.isDestroyed = () => true; f.ownerRef.current = null; f.owner.emit('closed');
   const permit = await f.guard.confirmQuit(); assert.equal(permit.proceed, true); assert.equal(f.guard.allowQuit(permit), true); f.guard.dispose();
 });
+
+test('a second real-style owner attaches after destroyed window.webContents starts throwing', () => {
+  const f = fixture(); let destroyed = false;
+  Object.defineProperty(f.owner, 'webContents', { get() { if (destroyed) throw Error('Object has been destroyed'); return f.contents; } });
+  f.owner.isDestroyed = () => destroyed;
+  destroyed = true; f.ownerRef.current = null; f.owner.emit('closed');
+  const contents = new EventEmitter(); contents.mainFrame = {}; contents.isDestroyed = () => false; contents.send = () => {};
+  const next = new EventEmitter(); next.isDestroyed = () => false; next.webContents = contents;
+  f.ownerRef.current = next;
+  assert.doesNotThrow(() => f.guard.attach(next));
+  assert.equal(f.contents.listenerCount('render-process-gone'), 0); assert.equal(f.contents.listenerCount('did-start-navigation'), 0);
+  assert.equal(f.guard.update({ sender: contents, senderFrame: contents.mainFrame }, { documentId: 'second', revision: 1, dirty: false }).accepted, true);
+  f.guard.dispose();
+});
 test('committed application quit disables the owned log window and cancellation restores its original input state', async () => {
   const f = fixture(); let enabled = true; f.owner.isEnabled = () => enabled; f.owner.setEnabled = value => { enabled = value; };
   f.guard.update(f.event, { documentId: 'source-A', revision: 2, dirty: false });
