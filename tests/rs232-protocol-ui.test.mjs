@@ -42,9 +42,9 @@ function environment({ manualFrames = false } = {}) {
     useCallback(callback, deps) { const owner = active, index = owner.cursor++, slot = owner.slots[index]; if (slot && same(slot.deps, deps)) return slot.value; owner.slots[index] = { deps, value: callback }; return callback; },
     useEffect: hookEffect('effects'), useLayoutEffect: hookEffect('layouts'),
   };
-  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Code2', 'Pencil', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
+  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Code2', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
   const context = vm.createContext(runtime), components = {};
-  for (const name of ['Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'SerialSendPanel']) {
+  for (const name of ['Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'SerialSendPanel', 'SerialSchemeControls']) {
     const source = fs.readFileSync(new URL('../src/components/' + name + '.jsx', import.meta.url), 'utf8').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
     components[name] = vm.runInContext('(function(){' + transformSync(name + '.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx', pragmaFrag: 'Fragment' } }).code + ';return ' + name + ';})()', context); runtime[name] = components[name];
   }
@@ -142,4 +142,54 @@ test('post-confirmation remove/restore focus waits for commit, preserves inside 
   e.focusOutside(); const restorationFrame = e.queuedFrames(); assert.equal(restorationFrame.length, 1); e.flushFrames(); assert.equal(e.document.activeElement.kind, 'title');
   e.choices.push(true); await find(h, '删除').props.onClick(); await h.drain(); const search = h.tree().props.ref.current.querySelector('input[aria-label]'); search.focus(); const alreadyInside = e.document.activeElement; e.flushFrames(); assert.equal(e.document.activeElement, alreadyInside, 'An existing user focus is not stolen');
   find(h, '已删除的内置命令（1）').props.onClick(); await h.drain(); e.choices.push(true); await find(h, '获取电源状态').props.onClick(); await h.drain(); const late = e.queuedFrames(); h.dispose(); const before = e.focus.length; for (const callback of late) callback(0); assert.equal(e.focus.length, before, 'A queued callback cannot focus after unmount');
+});
+
+test('category picker reuses canonical values and keeps new categories inside the unsaved command draft', async t => {
+  const e = environment(); t.after(e.dispose); const saved = [], dirty = [];
+  const initial = { id: 'custom-' + randomUUID(), name: 'New command', category: '常用功能', template: 'FE 08 58 42 48 43 4D 44 02 08 CF', note: '', reviewed: false };
+  const h = e.mount('Rs232ProtocolCommandEditor', { initial, theme, isDark: false, categoryOptions: [{ value: '常用功能', label: 'Common functions' }, { value: '已有分类', label: 'Existing category' }], onCancel() {}, onDirtyChange: value => dirty.push(value), onSave: value => saved.push(structuredClone(value)) }); await h.drain();
+  const category = () => nodes(h.tree()).find(node => node.type === 'SelectMenu' && node.props.ariaLabel === '命令分类');
+  assert.ok(category(), 'The category is an accessible picker, not an unstructured text field');
+  assert.equal(category().props.options.find(item => item.value === '常用功能').label, 'Common functions');
+  category().props.onChange('已有分类'); await h.drain(); assert.equal(category().props.value, '已有分类'); assert.equal(e.writes.length, 0);
+  find(h, '新增分类').props.onClick(); await h.drain(); const input = () => nodes(h.tree()).find(node => node.type === 'input' && node.props['aria-label'] === '新分类名称');
+  input().props.onChange({ target: { value: '我的现场分类' } }); await h.drain(); assert.equal(find(h, '保存命令').props.disabled, true);
+  find(h, '确认分类').props.onClick(); await h.drain(); assert.equal(category().props.value, '我的现场分类'); assert.equal(category().props.options.find(item => item.value === '我的现场分类').label, '我的现场分类'); assert.equal(e.writes.length, 0);
+  find(h, '新增分类').props.onClick(); await h.drain(); input().props.onChange({ target: { value: '已有分类' } }); await h.drain(); find(h, '确认分类').props.onClick(); await h.drain();
+  assert.equal(category().props.options.filter(item => item.value === '已有分类').length, 1);
+  find(h, '新增分类').props.onClick(); await h.drain(); input().props.onChange({ target: { value: 'X'.repeat(41) } }); await h.drain(); find(h, '确认分类').props.onClick(); await h.drain(); assert.match(text(h.tree()), /分类名称/); assert.ok(input());
+  input().props.onChange({ target: { value: 'Bad\nCategory' } }); await h.drain(); find(h, '确认分类').props.onClick(); await h.drain(); assert.ok(input());
+  find(h, '取消新增分类').props.onClick(); await h.drain(); await find(h, '保存命令').props.onClick(); await h.drain(); assert.equal(saved.length, 1); assert.equal(saved[0].category, '已有分类'); assert.equal(e.writes.length, 0); assert.ok(dirty.includes(true));
+});
+
+test('the only protocol entry sits at the start of the send action row and opening it never sends', async t => {
+  const e = environment(); t.after(e.dispose); let sends = 0;
+  const h = e.mount('SerialSendPanel', { theme, preferences: { sendMode: 'hex', lineEnding: 'none', favorites: [] }, draft: 'FE 08', onDraft() {}, onPreferences() {}, connected: true, sending: false, busy: false, commandsOpen: false, onCommandsOpen() {}, history: [], onSend: () => sends++ }); await h.drain();
+  const entry = find(h, 'RS232 协议面板'), send = nodes(h.tree()).find(node => node.type === 'button' && text(node).includes('Ctrl+Enter'));
+  assert.equal(nodes(h.tree()).filter(node => node.type === 'button' && text(node).trim() === 'RS232 协议面板').length, 1);
+  const row = nodes(h.tree()).find(node => node.props?.['data-serial-send-actions']); assert.ok(row); assert.equal(nodes(row).filter(node => node.type === 'button')[0], entry); assert.equal(nodes(row).filter(node => node.type === 'button').at(-1), send);
+  entry.props.onClick(); await h.drain(); assert.equal(sends, 0); assert.ok(nodes(h.tree()).find(node => node.type?.lazy));
+});
+
+test('new category persistence follows command save/reload while cancelling a dirty category leaves no independent data', async t => {
+  const e = environment(); t.after(e.dispose); let sends = 0;
+  const props = { theme, isDark: false, onClose() {}, onUse: () => sends++ }, panel = e.mount('Rs232ProtocolPanel', props); await panel.drain(); await find(panel, '添加命令').props.onClick(); await panel.drain();
+  const child = e.mount('Rs232ProtocolCommandEditor', editorNode(panel).props); await child.drain();
+  nodes(child.tree()).find(node => node.type === 'input').props.onChange({ target: { value: 'Stored category command' } }); await child.drain();
+  nodes(child.tree()).find(node => node.type === 'textarea').props.onChange({ target: { value: 'FE 08 58 42 48 43 4D 44 02 08 CF' } }); await child.drain();
+  find(child, '新增分类').props.onClick(); await child.drain(); nodes(child.tree()).find(node => node.props?.['aria-label'] === '新分类名称').props.onChange({ target: { value: 'Custom 原样分类' } }); await child.drain(); find(child, '确认分类').props.onClick(); await child.drain();
+  assert.equal(e.writes.length, 0); await find(child, '保存命令').props.onClick(); await child.drain(); await panel.drain(); assert.equal(e.writes.length, 1); const stored = e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY); assert.equal(JSON.parse(stored).overrides[0].category, 'Custom 原样分类');
+  const restored = e.mount('Rs232ProtocolPanel', props); await restored.drain(); const picker = nodes(restored.tree()).find(node => node.type === 'SelectMenu' && node.props.ariaLabel === '协议分类'); assert.equal(picker.props.options.find(item => item.value === 'Custom 原样分类').label, 'Custom 原样分类');
+  await find(restored, '添加命令').props.onClick(); await restored.drain(); const cancelled = e.mount('Rs232ProtocolCommandEditor', editorNode(restored).props); await cancelled.drain(); find(cancelled, '新增分类').props.onClick(); await cancelled.drain(); nodes(cancelled.tree()).find(node => node.props?.['aria-label'] === '新分类名称').props.onChange({ target: { value: 'Never persist this category' } }); await cancelled.drain();
+  await editorNode(restored).props.onCancel(); await restored.drain(); assert.ok(editorNode(restored)); assert.equal(e.confirms.at(-1).title, '放弃未保存的命令修改？'); e.choices.push(true); await editorNode(restored).props.onCancel(); await restored.drain(); assert.equal(editorNode(restored), undefined); assert.equal(e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY), stored); assert.equal(e.writes.length, 1); assert.equal(sends, 0);
+});
+
+test('the whole scheme disclosure is controlled, summarized and never applies or connects when toggled', async t => {
+  const e = environment(); t.after(e.dispose); const expanded = [], mutations = [];
+  const h = e.mount('SerialSchemeControls', { preferences: { schemes: [{ id: 'one', name: 'Existing scheme', workspace: 'rs232', config: { baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' } }] }, workspace: 'rs232', config: {}, selected: 'one', status: 'disconnected', theme, isDark: false, expanded: false, onExpandedChange: value => expanded.push(value), onSelect: value => mutations.push(value), onCommit: value => mutations.push(value), onApplyAndConnect: value => mutations.push(value) }); await h.drain();
+  const toggle = () => nodes(h.tree()).find(node => node.type === 'button' && node.props['aria-expanded'] !== undefined);
+  assert.ok(toggle()); assert.equal(toggle().props['aria-expanded'], false); assert.match(text(toggle()), /Existing scheme/); assert.match(text(toggle()), /1/); assert.equal(nodes(h.tree()).filter(node => node.type === 'SelectMenu').length, 0);
+  toggle().props.onClick(); assert.deepEqual(expanded, [true]); assert.deepEqual(mutations, []);
+  h.setProps({ expanded: true }); await h.drain(); assert.equal(toggle().props['aria-expanded'], true); assert.equal(nodes(h.tree()).filter(node => node.type === 'SelectMenu').length, 1);
+  toggle().props.onClick(); assert.deepEqual(expanded, [true, false]); assert.deepEqual(mutations, []);
 });

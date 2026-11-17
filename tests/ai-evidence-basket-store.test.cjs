@@ -81,7 +81,7 @@ test('basket aggregate bytes and nested capability fields are rejected without e
     await assert.rejects(() => f.store.append({ ...f.item(), entries: [entry] }));
     assert.deepEqual(await fs.readFile(f.filename), before);
   }
-  const long = await computeWorkspaceJob('freeze', { sources: [{ kind: 'text', label: 'Large', text: `${'fixture '.repeat(30)}\n`.repeat(2000) }], now: 1000000 });
+  const long = await computeWorkspaceJob('freeze', { sources: [{ kind: 'text', label: 'Large', text: 'x'.repeat(Math.ceil(BASKET_LIMITS.bytes / 3) + 1024) }], now: 1000000 });
   await f.store.append({ ...f.item(), entries: long.entries }); await f.store.append({ ...f.item(), entries: long.entries });
   const full = await fs.readFile(f.filename);
   await assert.rejects(() => f.store.append({ ...f.item(), entries: long.entries }), { code: 'AI_BASKET_LIMIT' });

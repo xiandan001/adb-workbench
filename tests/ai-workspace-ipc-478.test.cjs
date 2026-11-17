@@ -40,11 +40,16 @@ function fixture(t) {
     if (name === 'electron') return { app: { getPath: () => directory }, dialog: { showSaveDialog: async (window, options) => { assert.equal(window, owner); state.asks.push(options); return state.answer; } } };
     if (name === './app-context.cjs') return { getMainWindow: () => owner };
     if (name === './ai-workspace-service.cjs') return { createAiWorkspaceService: deps => { captured = deps; return { call: async () => ({}), dispose() {} }; } };
-    if (name === './ai-workspace-client.cjs') return { createBuiltinClient: () => async () => { throw new Error('forbidden real AI'); } };
+    if (name === './ai-workspace-client.cjs') return { createBuiltinClient: () => async () => { throw new Error('forbidden real AI'); },
+      createBuiltinBatchClient: () => async () => { throw new Error('forbidden real AI'); } };
     if (name === './ssh.cjs') return { getAnalysisSources: () => [], readAnalysisTerminal: () => ({}) };
     if (name === './log-analyzer.cjs') return { getAnalysisSnapshots: () => [] };
     if (name === './serial.cjs') return { snapshots: () => ({}) };
     if (name === './adb-runtime.cjs') return { runAdb: () => { throw new Error('forbidden real ADB'); } };
+    if (name === './ai-workspace-processor.cjs') {
+      const processor = originalRequire(name);
+      return { ...processor, runWorkspaceJob: (command, args, options) => processor.runWorkspaceJob(command, structuredClone(args), options) };
+    }
     return originalRequire(name);
   } }, { filename });
   guardedModule.exports.register({ handle: (name, handler) => handlers.set(name, handler) });

@@ -74,7 +74,7 @@ test('TTL, owner changes, navigation and queue bounds fail closed', async () => 
   f.replaceOwner(); assert.throws(() => f.broker.get(second.handoffId));
   assert.ok((await f.broker.createFromRenderer({ view })).handoffId, 'Replacing the owner releases old owner slots');
   const oversized = fixture();
-  await assert.rejects(() => oversized.broker.createFromRenderer({ view: { ...view, text: '中'.repeat(200000) } }));
+  await assert.rejects(() => oversized.broker.createFromRenderer({ view: { ...view, text: '中'.repeat(Math.ceil(LIMITS.sourceBytes / 3) + 1) } }));
 });
 
 test('concurrent freeze and window disposal cannot exceed aggregate budget or resurrect tokens', async () => {
@@ -83,9 +83,15 @@ test('concurrent freeze and window disposal cannot exceed aggregate budget or re
   const pending = f.broker.createFromRenderer({ view });
   f.broker.cleanup(); resume(); await assert.rejects(() => pending);
   assert.equal(f.published.length, 0);
-  const large = fixture({ freeze: async ({ sources }) => ({ entries: [{ label: sources[0].label, text: '[L1] fixture', lineCount: 1 }], bytes: 500000 }) });
+  const large = fixture({ freeze: async ({ sources }) => {
+    const entries = [{ label: sources[0].label, text: sources[0].kind === 'log' ? 'x'.repeat(3 * 1024 * 1024) : 'question', lineCount: 1 }];
+    return { entries, bytes: Buffer.byteLength(JSON.stringify(entries)) };
+  } });
   const attempts = await Promise.allSettled(Array.from({ length: 8 }, () => large.broker.createFromRenderer({ view })));
-  assert.ok(attempts.filter(result => result.status === 'fulfilled').length <= 4);
+  assert.ok(attempts.filter(result => result.status === 'fulfilled').length <= Math.floor(LIMITS.totalBytes / (3 * 1024 * 1024)));
+  const retainedBytes = attempts.filter(result => result.status === 'fulfilled').reduce((sum, result) => sum + large.broker.get(result.value.handoffId).bytes, 0);
+  assert.ok(retainedBytes <= LIMITS.totalBytes);
+  large.broker.cleanup(); f.broker.cleanup();
 });
 
 test('actual worker maintains renderer provenance and masks credentials in typed handoff content', async t => {
@@ -117,7 +123,7 @@ test('renderer truncation is strictly boolean, remains untrusted and survives ac
   assert.equal(context.entries[0].lineCount, 2000); assert.match(context.entries[0].text, /^\[L1\] selected-14669 /);
   assert.ok(context.entries[0].text.endsWith(before)); assert.equal(rows.at(-1).raw, before);
   assert.equal(f.reads.length, 0); assert.equal(context.question, 'Only the recent filtered portion is included.');
-  await assert.rejects(() => f.broker.createFromRenderer({ view: { ...view, text: '中'.repeat(200000), truncated: true } }));
+  await assert.rejects(() => f.broker.createFromRenderer({ view: { ...view, text: '中'.repeat(Math.ceil(LIMITS.sourceBytes / 3) + 1), truncated: true } }));
   const complete = await f.broker.createFromRenderer({ view: { ...view, text: 'one complete row', truncated: false } });
   assert.equal(f.broker.get(complete.handoffId).truncated, false);
   const ansi = prepareLogHandoffContext([{ raw: '\x1b[32mnormal 中文😀\x1b[0m\t--password private-ansi\x00' }]);
@@ -134,8 +140,11 @@ test('actual artifact handoff strips private task scripts before the final outbo
   let truncated = false;
   const read = vm.runInNewContext(`(${source.slice(start, end)})`, { tr: text => text,
     listArtifacts: async () => [{ id: 'known-artifact', title: 'Owned run', deviceId: 'fixture-device' }],
-    previewArtifact: async () => ({ kind: 'text', content: original, truncated }),
-    require: name => { assert.equal(name, './ai-outbound-processor.cjs'); return require('../electron/lib/ai-outbound-processor.cjs'); } });
+    require: name => {
+      if (name === './artifact-export.cjs') return { collectArtifactFiles: async () => ({ files: [{ name: 'run-result.json', source: 'owned-fixture' }] }) };
+      assert.equal(name, './ai-outbound-processor.cjs');
+      return { readAiArtifactFile: async () => ({ kind: 'text', content: await require('../electron/lib/ai-outbound-processor.cjs').sanitizeTaskArtifact({ text: original, truncated }), truncated }) };
+    } });
   const input = await read('known-artifact', 'run-result.json');
   const f = fixture(); const { handoffId } = await f.broker.createInternal(input);
   const context = await f.broker.resolveForWorkspace(handoffId);

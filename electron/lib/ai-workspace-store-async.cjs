@@ -69,13 +69,13 @@ function createAsyncReportStore({ directory, casebook = false, io = fs, now = Da
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.size > max || opened.dev !== stat.dev || opened.ino !== stat.ino) throw fail();
-      const buffer = Buffer.allocUnsafe(max + 1); let offset = 0;
+      const buffer = Buffer.allocUnsafe(opened.size + 1); let offset = 0;
       while (offset < buffer.length) {
         const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
         if (!bytesRead) break;
         offset += bytesRead;
       }
-      if (offset > max) throw fail();
+      if (offset > opened.size) throw fail();
       return JSON.parse(buffer.subarray(0, offset).toString('utf8'));
     } finally { await handle.close(); }
   }

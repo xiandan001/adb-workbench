@@ -97,6 +97,17 @@ test('actual serial scheme selection persists only metadata without applying, co
   assert.deepEqual(saved, selected); assert.equal(calls, 0);
 });
 
+test('actual scheme fold callback persists only the active disclosure and preserves both selections', () => {
+  let selected, saved, error = '', mutations = 0;
+  const initial = { version: 1, rs232: 'one', terminal: 'two', rs232Expanded: true, terminalExpanded: false };
+  const fold = instantiate(serial.changeSchemeExpanded, { mode: 'terminal', selectedSchemes: initial, setSelectedSchemes: value => { selected = value; },
+    saveSerialSchemeSelection: value => { saved = structuredClone(value); }, setSchemeSelectionError: value => { error = value; }, onWorksetContext: () => mutations++,
+    window: { electronAPI: { serialConnect: () => mutations++, serialSend: () => mutations++, serialDisconnect: () => mutations++ } } });
+  fold(true); assert.deepEqual(saved, { ...initial, terminalExpanded: true }); assert.deepEqual(selected, saved); assert.equal(error, ''); assert.equal(mutations, 0);
+  const failed = instantiate(serial.changeSchemeExpanded, { mode: 'rs232', selectedSchemes: selected, setSelectedSchemes: value => { selected = value; }, saveSerialSchemeSelection: () => { throw Error('quota'); }, setSchemeSelectionError: value => { error = value; } });
+  failed(false); assert.equal(selected.rs232Expanded, false); assert.equal(selected.terminalExpanded, true); assert.equal(error, 'quota'); assert.equal(mutations, 0);
+});
+
 test('actual workset restore selects and persists a scheme without applying it, connecting or changing COM', () => {
   const source = readFileSync(new URL('../src/components/SerialPanel.jsx', import.meta.url), 'utf8');
   let expression;

@@ -233,82 +233,18 @@ function truncateUserContentToFit(userContent, systemBytes, historyBytes, reason
  * @returns {Promise<{systemPrompt: string, userContent: string, totalChunks: number}>}
  */
 async function mapReduceAnalyze(lines, filterContext, customPrompt, sender) {
-  return https.withBatch(tr('确认发送固定日志分块'), async () => {
-  const totalLines = lines.length;
-  // 计算分块大小：行数 / 最大块数 与固定块长取较大值，避免块过多
-  const desiredChunks = Math.min(Math.ceil(totalLines / AI_CHUNK_LINES), AI_MAPREDUCE_MAX_CHUNKS);
-  const chunkSize = Math.ceil(totalLines / desiredChunks);
-  const totalChunks = Math.ceil(totalLines / chunkSize);
-
-  // 通知前端开始 Map 阶段
-  const sendProgress = (phase, current, total, extra = {}) => {
-    if (sender && !sender.isDestroyed()) {
-      sender.send('ai:mapReduceProgress', { phase, current, total, ...extra });
-    }
-  };
-  sendProgress('map', 0, totalChunks);
-
-  // 并行完成的分块计数（用于进度展示）
-  let completedCount = 0;
-
-  // Map：并行分析所有分块，提取关键问题
-  const chunkPromises = [];
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * chunkSize;
-    const end = Math.min(start + chunkSize, totalLines);
-    const chunk = lines.slice(start, end);
-    const chunkIndex = i;
-
-    const chunkSystemPrompt = [
-      tr('你是 Android/鸿蒙日志分析专家。以下是完整日志的第 {0}/{1} 块（第 {2}-{3} 行，共 {4} 行）。保留原生平台、Domain、进程和 Tag 语义，未知平台不要猜测。', { 0: i + 1, 1: totalChunks, 2: start + 1, 3: end, 4: totalLines }),
-      tr("请提取这块日志中的关键问题："),
-      tr("1. Error/Fatal 级别异常及完整堆栈信息"),
-      tr("2. 重要 Warning（ANR、GC、超时等）"),
-      tr("3. 可疑的重复模式或生命周期异常"),
-      tr("4. 其他值得关注的线索"),
-      '',
-      tr("每个问题请包含：严重程度、简要描述、可能的根因。"),
-      tr("日志若带有 [L数字] 编号，必须保留问题对应的原始编号。不要重新编号或捏造编号；合并报告也必须保留这些编号。"),
-      tr("如果本块日志无明显异常，回复\"本块未发现明显问题\"。"),
-      tr("请使用简洁的 Markdown 格式输出。")
-    ].join('\n');
-
-    chunkPromises.push(
-      generateAiSummary({
-        systemPrompt: chunkSystemPrompt,
-        userContent: chunk.join('\n'),
-        timeoutMs: 90000,
-        temperature: 0.2
-      }).then(result => {
-        if (result.cancelled || result.code?.startsWith('AI_SEND_')) throw Object.assign(new Error(result.error), { code: result.code, name: result.cancelled ? 'AbortError' : 'Error' });
-        // 单块完成后发送进度（并行完成顺序不确定，进度按完成数递增）
-        completedCount++;
-        sendProgress('map', completedCount, totalChunks, { lineRange: `${start + 1}-${end}` });
-        const summary = result.ok ? result.summary : tr("(本块分析失败，请参考其他块结果)");
-        return { index: chunkIndex, text: tr("### 日志块 {0}/{1}（第 {2}-{3} 行）\n\n{4}", { 0: chunkIndex + 1, 1: totalChunks, 2: start + 1, 3: end, 4: summary }) };
-      })
-    );
-  }
-
-  // 等待所有分块完成，按原始顺序排列结果
-  const settled = await Promise.all(chunkPromises);
-  settled.sort((a, b) => a.index - b.index);
-  const chunkResults = settled.map(s => s.text);
-
-  // Reduce：构建合并分析的 userContent，交由调用方流式输出
-  sendProgress('reduce', totalChunks, totalChunks);
-
+  const desiredChunks = Math.min(Math.ceil(lines.length / AI_CHUNK_LINES), AI_MAPREDUCE_MAX_CHUNKS);
+  const maxLines = Math.ceil(lines.length / desiredChunks);
   const systemPrompt = buildAiSystemPrompt(filterContext);
-  const reduceIntro = customPrompt
-    ? tr("{0}\n\n以下是对 {1} 行日志的分块分析结果，请综合所有信息给出完整的分析报告：", { 0: customPrompt, 1: totalLines })
-    : tr("以下是对 {0} 行日志的分块分析结果，请综合所有信息给出完整的分析报告。请重点关注各块之间的关联性、根因推测和优先修复建议：", { 0: totalLines });
-
-  const userContent = tr("{0}\n\n--- 分块分析结果 ---\n\n{1}", { 0: reduceIntro, 1: chunkResults.join('\n\n---\n\n') });
-
-  return { systemPrompt, userContent, totalChunks };
+  const intro = customPrompt || tr('请分析以下设备日志：');
+  return require('./ai-legacy-request-plan.cjs').runLegacyRequestPlan({ lines, maxLines, intro,
+    prompt: systemPrompt + '\nPreserve original [Lnumber] references and native platform fields. Report observations only for this complete chunk; never invent absent evidence.',
+    reducePrompt: systemPrompt + '\nMerge every supplied mapped observation. Preserve original evidence references; distinguish hypotheses from verified facts.',
+    plan: args => require('./ai-workspace-processor.cjs').runWorkspaceJob('markdown-plan', args),
+    send: generateAiSummary, withBatch: (title, action) => https.withBatch(title, action),
+    onProgress: (phase, current, total) => { if (sender && !sender.isDestroyed()) sender.send('ai:mapReduceProgress', { phase, current, total }); }
   });
 }
-
 function register(rawIpcMain) {
   const ipcMain = https.protectIpc(rawIpcMain);
   ipcMain.handle('ai:analyzeLog', async (event, args) => {
@@ -325,7 +261,7 @@ function register(rawIpcMain) {
       const isFollowUp = aiConversationMessages.length > 0;
       const skipLogContent = isFollowUp && logChanged === false;
 
-      let systemPrompt, userContent;
+      let systemPrompt, userContent, plannedMaxTokens;
       let truncated = false;
 
       if (skipLogContent) {
@@ -344,13 +280,14 @@ function register(rawIpcMain) {
 
         // 判断是否需要 Map-Reduce：日志字节数超过阈值且行数足够分块
         const logBytes = Buffer.byteLength(effectiveLines.join('\n'), 'utf8');
-        const needMapReduce = logBytes > AI_MAPREDUCE_THRESHOLD_BYTES && effectiveLines.length > AI_CHUNK_LINES;
+        const needMapReduce = logBytes > AI_MAPREDUCE_THRESHOLD_BYTES;
 
         if (needMapReduce) {
           // Map-Reduce 路径：先分块分析，再合并为完整报告
           const mrResult = await mapReduceAnalyze(effectiveLines, filterContext, customPrompt, sender);
           systemPrompt = mrResult.systemPrompt;
           userContent = mrResult.userContent;
+          plannedMaxTokens = mrResult.maxTokens;
 
           if (!sender.isDestroyed()) {
             sender.send('ai:streamStart', { totalLines: lines.length, truncated, mapReduce: true });
@@ -396,7 +333,7 @@ function register(rawIpcMain) {
       }
 
       // 安全检查：确保 system + history + userContent 总字节数不超过模型 token 上限
-      // 超限时自动截断 userContent（优先截断日志尾部），防止 400 ContextWindowExceededError
+      // An oversized follow-up needs a new explicit context, never silent loss.
       {
         const systemBytes = Buffer.byteLength(systemPrompt || '', 'utf8');
         const historyBytes = messages.reduce(
@@ -405,20 +342,13 @@ function register(rawIpcMain) {
         );
         const totalBytes = systemBytes + historyBytes + Buffer.byteLength(userContent || '', 'utf8');
         // 使用 2.5 bytes/token 预检查（比估算用的 3 更保守，提前触发截断）
-        const maxBytes = Math.floor(AI_MODEL_MAX_CONTEXT_TOKENS * 2.5);
+        const maxBytes = AI_MODEL_MAX_CONTEXT_TOKENS - (plannedMaxTokens || 4096) - 128;
         if (totalBytes > maxBytes) {
           // 通知前端正在截断
           if (!sender.isDestroyed()) {
             sender.send('ai:mapReduceProgress', { phase: 'compress', current: 0, total: 0 });
           }
-          userContent = truncateUserContentToFit(userContent, systemBytes, historyBytes, tr("上下文超限自动截断"));
-          // 更新 messages 中的 userContent
-          const lastMsg = messages[messages.length - 1];
-          if (lastMsg && lastMsg.role === 'user') {
-            lastMsg.content = userContent;
-          }
-          // 更新 pending bytes
-          aiPendingUserContentBytes = Buffer.byteLength(userContent || '', 'utf8');
+          throw Object.assign(new Error(tr('当前对话与完整材料超过单次模型容量，请新建分析或缩小范围；未静默截断或发送。')), { code: 'AI_SEND_LIMIT' });
         }
       }
 
@@ -433,6 +363,7 @@ function register(rawIpcMain) {
         stream: true,
         stream_options: { include_usage: true },
         temperature: 0.3,
+        ...(plannedMaxTokens ? { max_tokens: plannedMaxTokens } : {}),
         // 思考模式仅在 thinkingMode 为 true 时启用
         ...(thinkingMode ? { chat_template_kwargs: { enable_thinking: true } } : {})
       });
@@ -823,7 +754,7 @@ function clearAiConversation() {
   aiLastResult = '';
 }
 
-function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, temperature = 0.2, signal }) {
+function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, temperature = 0.2, signal, maxTokens }) {
   if (signal?.aborted) return Promise.resolve({ ok: false, code: 'AI_SEND_CANCELLED', cancelled: true, error: tr('AI 发送已取消。') });
   return new Promise((resolve) => {
     if (!AGNES_API_KEYS || AGNES_API_KEYS.length === 0) {
@@ -836,7 +767,8 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
       model: AGNES_MODEL,
       messages: analysisMessages(systemPrompt, [], userContent),
       stream: false,
-      temperature
+      temperature,
+      ...(maxTokens ? { max_tokens: maxTokens } : {})
     });
     const maxRetries = 0;
     let retryCount = 0;

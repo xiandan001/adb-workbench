@@ -10,6 +10,7 @@ const { resolveDeviceRef } = require('./device-registry.cjs');
 const { shellQuote } = require('./device-platform.cjs');
 const { captureScreenshot } = require('./harmony-media.cjs');
 const { sessionPaths, createAgentConfig, parseReady, parseUiTestVersion, createFrameParser } = require('./harmony-media-protocol.cjs');
+const { mirrorFailureReason } = require('./mirror-diagnostics.cjs');
 
 const LIVE = new Set(['starting', 'awaiting-consent', 'streaming', 'stopping']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -85,7 +86,8 @@ function createHarmonyMediaSessions({
   const entries = new Map();
   const publicState = entry => ({ id: entry.id, deviceId: entry.deviceId, status: entry.status, error: entry.error || '',
     width: entry.config?.width || 0, height: entry.config?.height || 0, sourceWidth: entry.sourceSize?.width || 0,
-    sourceHeight: entry.sourceSize?.height || 0, fps: entry.config?.fps || 20, frames: entry.frames || 0, startedAt: entry.startedAt });
+    sourceHeight: entry.sourceSize?.height || 0, fps: entry.config?.fps || 20, frames: entry.frames || 0, startedAt: entry.startedAt,
+    diagnosticReason: entry.diagnosticReason || 'NONE', toolVersion: entry.version || '' });
   const publish = entry => { try { onState(publicState(entry)); } catch { /* Window lifetime cannot break cleanup. */ } };
   const execute = async (entry, args, options = {}) => {
     entry.binding.assertCurrent?.();
@@ -134,9 +136,10 @@ function createHarmonyMediaSessions({
         } else if (packet.kind === 'error' || packet.state.includes('error') || packet.state === 'stream-backpressure'
           || packet.state === 'capture-state' && [1, 2, 3, 4].includes(packet.code) || packet.code === -1) {
           const error = failure('CAPTURE_DENIED', packet.state === 'capture-state' ? tr('设备或用户中止了屏幕录制授权。') : tr('原生视频采集未能继续，请检查设备系统能力与授权。'));
+          entry.diagnosticReason = packet.state === 'stream-backpressure' ? 'BACKPRESSURE' : packet.state.startsWith('encoder-') ? 'VIDEO_ENCODER' : packet.state === 'capture-state' ? 'AUTHORIZATION' : 'UNKNOWN';
           failFirst(error); entry.error = error.message; entry.status = 'failed'; publish(entry); void stop(entry.id);
         } else if (packet.state === 'awaiting-consent') { entry.status = 'awaiting-consent'; publish(entry); }
-        else if (['stopped', 'ended'].includes(packet.state)) { failFirst(failure('CAPTURE_ENDED', tr('设备已停止视频采集。'))); void stop(entry.id); }
+        else if (['stopped', 'ended'].includes(packet.state)) { entry.diagnosticReason = 'CLEAN_EXIT'; failFirst(failure('CAPTURE_ENDED', tr('设备已停止视频采集。'))); void stop(entry.id); }
       });
       entry.socket = connect({ host: '127.0.0.1', port: entry.localPort });
       entry.socket.setNoDelay?.(true);
@@ -146,12 +149,19 @@ function createHarmonyMediaSessions({
         entry.heartbeat = setInterval(() => { if (!entry.socket.destroyed) entry.socket.write('PING\n'); }, 5000);
         entry.heartbeat.unref?.();
       });
-      entry.socket.on('data', data => { try { parser.push(data); } catch { const error = failure('MEDIA_PROTOCOL', tr('媒体连接返回了无效数据，采集已停止。')); failFirst(error); entry.error = error.message; void stop(entry.id); } });
-      entry.socket.on('error', () => { failFirst(failure('MEDIA_SOCKET', tr('媒体回环连接失败。'))); if (!entry.closing) { entry.error = tr('媒体回环连接失败。'); void stop(entry.id); } });
+      entry.socket.on('data', data => {
+        try { parser.push(data); }
+        catch (problem) {
+          const backpressure = problem?.code === 'MEDIA_BACKPRESSURE';
+          const error = failure(backpressure ? 'MEDIA_BACKPRESSURE' : 'MEDIA_PROTOCOL', backpressure ? tr('投屏窗口处理速度不足，已停止继续堆积视频帧。') : tr('媒体连接返回了无效数据，采集已停止。'));
+          entry.diagnosticReason = backpressure ? 'BACKPRESSURE' : 'PROTOCOL_INVALID'; failFirst(error); entry.error = error.message; void stop(entry.id);
+        }
+      });
+      entry.socket.on('error', () => { failFirst(failure('MEDIA_SOCKET', tr('媒体回环连接失败。'))); if (!entry.closing) { entry.diagnosticReason = 'TRANSPORT'; entry.error = tr('媒体回环连接失败。'); void stop(entry.id); } });
       entry.socket.once('close', () => {
         clearInterval(entry.heartbeat);
         failFirst(failure('MEDIA_CLOSED', tr('媒体连接在首帧到达前已关闭。')));
-        if (!entry.closing) { entry.error ||= tr('媒体连接已断开。'); void stop(entry.id); }
+        if (!entry.closing) { entry.diagnosticReason = 'TRANSPORT'; entry.error ||= tr('媒体连接已断开。'); void stop(entry.id); }
       });
       entry.abort.signal.addEventListener('abort', () => failFirst(failure('CANCELLED', tr('用户取消'))), { once: true });
     });
@@ -201,16 +211,18 @@ function createHarmonyMediaSessions({
       const session = await receive(entry);
       const result = { success: true, session }; entry.resolveResult(result); return result;
     } catch (error) {
+      entry.diagnosticReason ||= mirrorFailureReason(error.code);
       entry.error = error.safe ? error.message : tr('原生媒体组件未能安全启动；设备与现有服务未被替换。');
       await stop(id);
       const result = { success: false, error: entry.error, code: error.code, session: publicState(entry) };
       entry.resolveResult(result); return result;
     }
   }
-  async function stop(id) {
+  async function stop(id, reason = 'USER_STOP') {
     const entry = entries.get(id);
     if (!entry) return { success: true };
     if (entry.stopPromise) return entry.stopPromise;
+    entry.diagnosticReason ||= reason === 'WINDOW_CLOSED' ? 'WINDOW_CLOSED' : 'USER_STOP';
     entry.closing = true; entry.abort.abort(); clearTimeout(entry.firstTimer); clearInterval(entry.heartbeat);
     entry.status = 'stopping'; publish(entry);
     entry.stopPromise = (async () => {

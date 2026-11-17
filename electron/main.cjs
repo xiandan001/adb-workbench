@@ -7,6 +7,8 @@ const fs = require('fs');
 
 require('./lib/installer-startup-guard.cjs').runUnlessInstalling({ app }, () => {
 configureUserDataPath();
+const applicationLog = require('./lib/application-log.cjs');
+applicationLog.installEarlyHooks?.();
 
 const ctx = require('./lib/app-context.cjs');
 const { isDev } = ctx;
@@ -52,7 +54,6 @@ const aiTools = require('./lib/ai-tools.cjs');
 const appMessageDialog = require('./lib/app-message-dialog.cjs');
 const startupSettings = require('./lib/startup-settings.cjs');
 const feedback = require('./lib/feedback.cjs');
-const applicationLog = require('./lib/application-log.cjs');
 const { createStartupPresentation } = require('./lib/startup-presentation.cjs');
 const { attachWindowRenderContinuity } = require('./lib/window-render-continuity.cjs');
 const { getMainWindowBounds } = require('./lib/main-window-bounds.cjs');
@@ -200,7 +201,8 @@ app.whenReady().then(async () => {
   // 顺序无依赖（每个模块独立注册自己的 ipcMain.handle/on）
   feedback.register(ipcMain);
   applicationLog.register(localization.scopeIpc(ipcMain));
-  const diagnosticIpc = localization.scopeIpc(feedback.observedIpc(ipcMain));
+  const observedIpc = feedback.observedIpc(ipcMain);
+  const diagnosticIpc = localization.scopeIpc(applicationLog.observeIpc ? applicationLog.observeIpc(observedIpc) : observedIpc);
   feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
   version.register(diagnosticIpc);
   updater.register(diagnosticIpc);

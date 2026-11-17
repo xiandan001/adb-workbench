@@ -1,10 +1,12 @@
 const { randomUUID, createHash } = require('node:crypto');
 const { tr, getLocale } = require('./localization.cjs');
-const { boundedText } = require('./ai-workspace-evidence.cjs');
+const { selectSerialEvidenceInput } = require('./serial-ai-evidence.cjs');
 const { runWorkspaceJob } = require('./ai-workspace-processor.cjs');
 const { sanitize } = require('./ai-outbound-policy.cjs');
+const capacity = require('./ai-context-limits.json');
+const { createByteBudget, residentBudget } = require('./ai-context-budget.cjs');
 
-const LIMITS = Object.freeze({ ttl: 10 * 60 * 1000, contexts: 8, totalBytes: 4 * 1024 * 1024, sourceBytes: 512 * 1024 });
+const LIMITS = Object.freeze({ ttl: 10 * 60 * 1000, contexts: 8, totalBytes: capacity.contentBytes, sourceBytes: capacity.contentBytes });
 const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const fail = message => Object.assign(new Error(message), { code: 'AI_HANDOFF' });
 function field(value, maximum, optional = false) {
@@ -28,20 +30,25 @@ function targetMetadata(values) {
     return { token: value.token, label: sanitize(field(value.label, 240)), deviceId: field(value.deviceId, 160), capturedAt: value.capturedAt, expiresAt: value.expiresAt };
   });
 }
-function createHandoffBroker({ getOwner, freeze, publish, readReference, basket, now = Date.now }) {
+function createHandoffBroker({ getOwner, freeze, publish, readReference, basket, now = Date.now,
+  freezeCarrier = (value, options) => runWorkspaceJob('freeze-preview', { value }, options) }) {
   const contexts = new Map(), watched = new WeakSet(), generations = new WeakMap(); let preparing = 0, lifecycle = 0;
+  const queued = createByteBudget(capacity.queuedBytes), releases = new Map(); let readingReference = false;
+  const active = new Set(); let stagedBytes = 0;
+  const discardEntry = id => { contexts.delete(id); releases.get(id)?.(); releases.delete(id); };
   function watch(owner) {
     if (watched.has(owner)) return;
     watched.add(owner); generations.set(owner, 0);
     const discard = () => {
       generations.set(owner, (generations.get(owner) || 0) + 1);
-      for (const [id, entry] of contexts) if (entry.owner === owner) contexts.delete(id);
+      for (const item of active) if (item.owner === owner) item.controller.abort();
+      for (const [id, entry] of contexts) if (entry.owner === owner) discardEntry(id);
     };
     owner.once?.('destroyed', discard);
     owner.on?.('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) discard(); });
   }
   function purge() {
-    for (const [id, entry] of contexts) if (entry.expiresAt <= now() || entry.owner !== getOwner() || entry.owner.isDestroyed()) contexts.delete(id);
+    for (const [id, entry] of contexts) if (entry.expiresAt <= now() || entry.owner !== getOwner() || entry.owner.isDestroyed()) discardEntry(id);
   }
   function metadata(entry) {
     const { entries: _entries, owner: _owner, generation: _generation, ...visible } = entry;
@@ -57,43 +64,52 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
     purge();
     if (contexts.size + preparing >= LIMITS.contexts) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
     const origin = field(input?.origin, 40), title = field(input?.title, 240), question = field(input?.question, 4000, true);
-    const text = field(input?.text, LIMITS.sourceBytes, true), deviceId = field(input?.deviceId, 160, true);
-    if (Buffer.byteLength(text) > LIMITS.sourceBytes) throw fail(tr('AI 上下文超过 512 KiB，请缩小选段；未静默截断。'));
+    const text = field(input?.text, Number.MAX_SAFE_INTEGER, true), deviceId = field(input?.deviceId, 160, true);
+    if (Buffer.byteLength(text) > LIMITS.sourceBytes) throw fail(tr('完整 AI 上下文（含来源元数据）超过 20 MiB，请缩小范围；未发送或截断。'));
     const contextRef = trust === 'server-snapshot' ? contextReference(input.contextRef) : undefined;
     const taskTargets = trust === 'server-snapshot' ? targetMetadata(input.taskTargets) : undefined;
     if (!text.trim() && !taskTargets?.length) throw fail(tr('没有可带入 AI 工作区的上下文。'));
     const capturedAt = now(), provenance = { trust, origin, ...(binding ? { binding } : {}) };
+    const releaseQueued = queued.reserve(Buffer.byteLength(text));
+    const operation = { owner, controller: new AbortController() }; active.add(operation);
+    const signal = operation.controller.signal;
+    let releaseResident, staged = 0;
     preparing++;
     try {
       const result = await freeze({ sources: [{ kind: origin.startsWith('log-') ? 'log' : origin, label: title,
         target: trust === 'server-snapshot' ? deviceId : '', deviceId: trust === 'server-snapshot' ? deviceId : '',
         text: text || taskTargets.map(target => target.label).join('\n'), capturedAt, provenance,
         truncated: input.truncated === true, timeBasis: trust === 'server-snapshot' && input.timeBasis || tr('冻结上下文；来源时钟与设备事实需按来源说明核对') }],
-        selection: { maxLines: 2000, contextLines: 0 }, now: capturedAt }, { locale: getLocale() });
+        selection: { maxLines: 2000, contextLines: 0 }, now: capturedAt }, { locale: getLocale(), signal });
       if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
       purge();
-      if (result.bytes > 1024 * 1024 || [...contexts.values()].reduce((sum, entry) => sum + entry.bytes, result.bytes) > LIMITS.totalBytes) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
+      if (result.bytes > LIMITS.sourceBytes || [...contexts.values()].reduce((sum, entry) => sum + entry.bytes, result.bytes) > LIMITS.totalBytes) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
       // Label/question redaction shares the worker, without promoting view metadata into device facts.
       const labels = await freeze({ sources: [{ kind: 'text', label: title, target: '', text: question || title, capturedAt, provenance }],
-        selection: { maxLines: 2000, contextLines: 0 }, now: capturedAt }, { locale: getLocale() });
+        selection: { maxLines: 2000, contextLines: 0 }, now: capturedAt }, { locale: getLocale(), signal });
       if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
-      const storedBytes = result.bytes + labels.bytes + Buffer.byteLength(JSON.stringify(taskTargets || [])) + 4096;
-      if ([...contexts.values()].reduce((sum, entry) => sum + entry.bytes, storedBytes) > LIMITS.totalBytes) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
       const id = randomUUID();
-      const entry = { id, owner, generation, origin, title: labels.entries[0].label,
+      const frozen = await freezeCarrier({ id, origin, title: labels.entries[0].label,
         question: labels.entries[0].text.replace(/^\[L\d+\] /gm, ''), deviceId: sanitize(deviceId),
         ...(contextRef ? { contextRef } : {}), ...(taskTargets ? { taskTargets } : {}), entries: result.entries,
         provenance, createdAt: new Date(capturedAt).toISOString(), expiresAt: capturedAt + LIMITS.ttl,
-        bytes: storedBytes, lineCount: result.entries.reduce((sum, item) => sum + item.lineCount, 0), truncated: result.truncated };
+        lineCount: result.entries.reduce((sum, item) => sum + item.lineCount, 0), truncated: result.truncated }, { signal, locale: getLocale() });
+      if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
+      if ([...contexts.values()].reduce((sum, entry) => sum + entry.bytes, stagedBytes + frozen.bytes) > LIMITS.totalBytes) throw fail(tr('AI 上下文暂存已满，请稍后重试。'));
+      staged = frozen.bytes; stagedBytes += staged;
+      releaseResident = residentBudget.reserve(frozen.bytes);
+      const entry = { ...frozen.preview, owner, generation, bytes: frozen.bytes };
       if (basket && !taskTargets?.length) {
         const { id, origin, title, question, deviceId, createdAt, provenance, truncated, entries } = entry;
-        const saved = await basket.append({ id, origin, title, question, deviceId, createdAt, provenance, truncated: Boolean(truncated), entries });
+        const saved = await basket.append({ id, origin, title, question, deviceId, createdAt, provenance, truncated: Boolean(truncated), entries }, { signal });
         entry.basketItem = true; entry.basketRevision = saved.revision;
         if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
       }
-      contexts.set(id, entry); publish(owner, { handoffId: id }, { foreground });
+      contexts.set(id, entry); releases.set(id, releaseResident); releaseResident = null;
+      stagedBytes -= staged; staged = 0;
+      publish(owner, { handoffId: id }, { foreground });
       return { handoffId: id };
-    } finally { preparing--; }
+    } finally { preparing--; stagedBytes -= staged; active.delete(operation); releaseQueued(); releaseResident?.(); }
   }
   function resolve(id) {
     purge(); const entry = contexts.get(id);
@@ -108,7 +124,17 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
         const shapes = { serial: ['kind', 'workspace', 'sessionId'], ssh: ['kind', 'sessionId', 'terminalId'], artifact: ['kind', 'artifactId', 'name'], 'task-run': ['kind', 'taskId'] };
         const reference = args.reference, keys = shapes[reference.kind];
         if (!keys || Object.keys(reference).length !== keys.length || keys.some(key => typeof reference[key] !== 'string' || !reference[key] || reference[key].length > (key === 'artifactId' ? 2048 : 512))) throw fail(tr('AI 上下文引用无效。'));
-        return create(await readReference(reference), 'server-snapshot', createHash('sha256').update(JSON.stringify(reference)).digest('hex'), true);
+        if (readingReference) throw fail(tr('正在读取一份 AI 来源，请稍后重试。'));
+        const owner = getOwner();
+        if (!owner || owner.isDestroyed()) throw fail(tr('AI 工作区窗口不可用。'));
+        watch(owner);
+        const generation = generations.get(owner), initialLifecycle = lifecycle;
+        const operation = { owner, controller: new AbortController() }; active.add(operation); readingReference = true;
+        try {
+          const input = await readReference(reference, { signal: operation.controller.signal });
+          if (owner.isDestroyed() || owner !== getOwner() || generations.get(owner) !== generation || lifecycle !== initialLifecycle) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
+          return await create(input, 'server-snapshot', createHash('sha256').update(JSON.stringify(reference)).digest('hex'), true);
+        } finally { active.delete(operation); readingReference = false; }
       }
       const view = args.view;
       if (!view || Object.keys(view).some(key => !['origin', 'title', 'question', 'text', 'deviceId', 'truncated'].includes(key))
@@ -120,12 +146,12 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
     list: () => basket ? basket.list() : { revision: 0, items: [], bytes: 0 },
     async remove(id) {
       if (!basket) throw fail(tr('AI 工作区暂不可用。'));
-      const result = await basket.remove(id); contexts.delete(id); return result;
+      const result = await basket.remove(id); discardEntry(id); return result;
     },
     async clear() {
       if (!basket) throw fail(tr('AI 工作区暂不可用。'));
       const result = await basket.clear();
-      for (const [id, entry] of contexts) if (entry.basketItem) contexts.delete(id);
+      for (const [id, entry] of contexts) if (entry.basketItem) discardEntry(id);
       return result;
     },
     resolveBasket: revision => basket ? basket.resolve(revision) : { revision: 0, items: [], entries: [] },
@@ -135,29 +161,22 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
         windowInfo: item.windowInfo ? { ...item.windowInfo } : undefined,
         originalLineNumbers: item.originalLineNumbers?.slice(), events: item.events?.map(event => ({ ...event })) })) };
     },
-    cleanup: () => { lifecycle++; contexts.clear(); },
+    cleanup: () => { lifecycle++; for (const item of active) item.controller.abort(); for (const id of contexts.keys()) discardEntry(id); },
   };
 }
-function captureSerialRows(rows) {
-  const parts = []; let bytes = 0, truncated = rows.length > 2000;
-  for (let index = rows.length - 1; index >= 0 && parts.length < 2000; index--) {
-    const row = rows[index], remaining = LIMITS.sourceBytes - bytes - 1;
-    if (remaining <= 0) { truncated = true; break; }
-    const part = boundedText(`[${row.time}] ${row.direction}: ${row.text || row.hex || ''}`, remaining);
-    parts.push(part.text); bytes += Buffer.byteLength(part.text) + 1;
-    if (part.truncated) { truncated = true; break; }
-  }
-  return { text: parts.reverse().join('\n'), truncated: truncated || parts.length < rows.length };
-}
-async function readReference(reference) {
+async function readReference(reference, options) {
   if (!reference || typeof reference !== 'object') throw fail(tr('AI 上下文引用无效。'));
   if (reference.kind === 'serial') {
     if (!['rs232', 'terminal'].includes(reference.workspace)) throw fail(tr('AI 上下文引用无效。'));
-    const state = require('./serial.cjs').snapshots()[reference.workspace];
+    const serial = require('./serial.cjs');
+    const snapshot = () => serial.snapshot ? serial.snapshot(reference.workspace) : serial.snapshots()[reference.workspace];
+    const state = snapshot();
     if (!state?.sessionId || state.sessionId !== reference.sessionId) throw fail(tr('所选会话已变化，请重新选择上下文。'));
+    const captured = await runWorkspaceJob('serial-snapshot', selectSerialEvidenceInput((state.entries || []).filter(row => row.sessionId === state.sessionId), { maxBytes: LIMITS.sourceBytes }), options);
+    if (snapshot()?.sessionId !== reference.sessionId) throw fail(tr('所选会话已变化，请重新选择上下文。'));
     return { origin: 'serial', title: `${tr('串口会话快照')} · ${reference.workspace === 'terminal' ? tr('串口终端') : tr('RS232调试')} · ${state.path || ''}`,
       timeBasis: tr('每行前缀为本机接收或发送时间，非设备事件时间'), question: tr('请分析这段已选择的串口上下文。'), deviceId: '',
-      ...captureSerialRows((state.entries || []).filter(row => row.sessionId === state.sessionId)) };
+      ...captured };
   }
   if (reference.kind === 'ssh') {
     const ssh = require('./ssh.cjs');
@@ -166,7 +185,7 @@ async function readReference(reference) {
     return { origin: 'ssh', title: `${tr('SSH 终端快照')} · ${source.name} · ${source.title}`.slice(0, 240),
       timeBasis: tr('终端缓冲快照；无可靠逐行时间，不可据此确定跨源先后顺序'), question: tr('请分析这段已选择的 SSH 上下文。'), deviceId: '', ...ssh.readAnalysisTerminal(source) };
   }
-  if (reference.kind === 'artifact') return require('./artifact-center.cjs').readAnalysisArtifact(reference.artifactId, reference.name);
+  if (reference.kind === 'artifact') return require('./artifact-center.cjs').readAnalysisArtifact(reference.artifactId, reference.name, options);
   if (reference.kind === 'task-run') return require('./task-center.cjs').getRunEvidence(reference.taskId);
   throw fail(tr('AI 上下文引用无效。'));
 }

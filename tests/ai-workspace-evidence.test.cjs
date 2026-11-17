@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createEvidenceAdapter, sanitize, boundedText } = require('../electron/lib/ai-workspace-evidence.cjs');
+const { createEvidenceAdapter, sanitize, boundedText, MAX_SOURCE_BYTES } = require('../electron/lib/ai-workspace-evidence.cjs');
 
 test('local evidence masks common secrets, paths, terminal controls and private key blocks', () => {
   const text = '\x1b[31mpassword="secret123"\nBearer secretbearer\n--api-key secretcli\nC:\\Users\\real\\project\n10.2.3.4\n'
@@ -16,7 +16,7 @@ test('source selection is explicit and freezes only the selected session', async
   let sshReads = 0; let sessionId = 'one';
   const adapter = createEvidenceAdapter({
     getLogs: () => [{ source: 'file', identity: 'a', entries: [{ raw: 'file-log' }] }],
-    getSerial: () => ({ terminal: { path: 'COM4', sessionId, entries: [{ sessionId: 'old', text: 'old-secret' }, { sessionId: 'one', text: 'new-data', time: 100, direction: 'RX' }] } }),
+    getSerial: () => ({ terminal: { path: 'COM4', sessionId, entries: [{ sessionId: 'old', text: 'old-secret' }, { sessionId: 'one', text: 'new-data', hex: Buffer.from('new-data').toString('hex'), bytes: 8, time: 100, direction: 'RX' }] } }),
     getSsh: () => [{ sessionId: 'ssh1', terminalId: 't1', title: 'shell', name: 'fixture', host: '127.0.0.1' }],
     readSsh: () => { sshReads++; return { text: 'ssh-text' }; }, now: () => 123,
   });
@@ -62,7 +62,7 @@ test('cancelling diagnostics kills only the child owned by this collection', asy
 test('empty, oversized and missing buffered sources cannot produce a misleading preview', async () => {
   const adapter = createEvidenceAdapter({});
   await assert.rejects(adapter.collect({}), error => error.code === 'AI_EVIDENCE_EMPTY');
-  await assert.rejects(adapter.collect({ text: 'x'.repeat(512 * 1024 + 1) }), error => error.code === 'AI_EVIDENCE_INPUT');
+  await assert.rejects(adapter.collect({ text: 'x'.repeat(MAX_SOURCE_BYTES + 1) }), error => error.code === 'AI_EVIDENCE_LIMIT' && error.safe && error.message.includes('20 MiB'));
   await assert.rejects(adapter.collect({ sourceIds: ['unknown'] }), error => error.code === 'AI_SOURCE_CHANGED');
   const result = await adapter.collect({ text: 'x'.repeat(10000) });
   assert.equal(result.truncated, false); assert.equal(result.entries[0].text, '[L1] ' + 'x'.repeat(10000));

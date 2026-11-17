@@ -80,3 +80,46 @@ test('both legacy view shapes load collapsed and are not rewritten during reads'
     assert.deepEqual(loaded, backend.normalizeLogViewPreferences(legacy));
   }
 });
+
+test('information disclosure is isolated, restartable metadata with exact backup and main parity', () => {
+  const backend = require('../electron/lib/log-view-preferences.cjs'), policy = require('../electron/lib/data-migration-policy.cjs'), storage = memory();
+  const value = updateLogView(defaultLogViewPreferences(), 'device-A', 'realtime', { infoExpanded: true, scopeExpanded: true,
+    filter: { tag: 'RetainedTag' }, buffers: ['main', 'system'] });
+  saveLogViewPreferences(value, storage);
+  const restarted = readLogViewPreferences(storage);
+  assert.equal(logViewFor(restarted, 'device-A', 'realtime').infoExpanded, true);
+  assert.equal(logViewFor(restarted, 'device-B', 'realtime').infoExpanded, false);
+  assert.equal(logViewFor(restarted, 'device-A', 'file').infoExpanded, false);
+  assert.equal(logViewFor(restarted, 'device-A', 'realtime').scopeExpanded, true);
+  assert.deepEqual(logViewFor(restarted, 'device-A', 'realtime').filter, { tag: 'RetainedTag' });
+  assert.deepEqual(normalizeLogViewPreferences(value), backend.normalizeLogViewPreferences(value));
+  const restored = memory(); applyMigrationPreferences(policy.normalizePreferences(collectMigrationPreferences(storage)), restored);
+  assert.deepEqual(readLogViewPreferences(restored), restarted);
+  const raw = storage.getItem(LOG_VIEW_PREFS_KEY); storage.setItem = () => { throw Error('quota'); };
+  assert.throws(() => saveLogViewPreferences(updateLogView(restarted, 'device-A', 'realtime', { infoExpanded: false }), storage), /quota/);
+  assert.equal(storage.getItem(LOG_VIEW_PREFS_KEY), raw);
+  assert.equal(logViewFor(readLogViewPreferences(storage), 'device-A', 'realtime').infoExpanded, true);
+  for (const infoExpanded of [1, 0, null, 'true', [], {}]) {
+    const invalid = { ...value, views: [{ ...value.views[0], infoExpanded }] };
+    assert.throws(() => normalizeLogViewPreferences(invalid)); assert.throws(() => backend.normalizeLogViewPreferences(invalid));
+  }
+});
+
+test('missing information disclosure defaults false without rewriting either legacy view or corrupt source bytes', () => {
+  const backend = require('../electron/lib/log-view-preferences.cjs');
+  const current = updateLogView(defaultLogViewPreferences(), 'device-A', 'realtime', { infoExpanded: true });
+  for (const oldLayout of [false, true]) {
+    const legacy = structuredClone(current); delete legacy.views[0].infoExpanded;
+    if (oldLayout) { delete legacy.views[0].filter; delete legacy.views[0].buffers; delete legacy.views[0].scopeExpanded; delete legacy.views[0].usageExpanded; }
+    const raw = JSON.stringify(legacy), storage = memory(); storage.setItem(LOG_VIEW_PREFS_KEY, raw);
+    assert.equal(logViewFor(readLogViewPreferences(storage), 'device-A', 'realtime').infoExpanded, false);
+    assert.deepEqual(readLogViewPreferences(storage), backend.normalizeLogViewPreferences(legacy));
+    assert.equal(storage.getItem(LOG_VIEW_PREFS_KEY), raw);
+  }
+  const corrupt = memory(); corrupt.setItem(LOG_VIEW_PREFS_KEY, '{original invalid bytes');
+  assert.throws(() => saveLogViewPreferences(current, corrupt)); assert.equal(corrupt.getItem(LOG_VIEW_PREFS_KEY), '{original invalid bytes');
+  const quota = memory(); quota.setItem(LOG_VIEW_PREFS_KEY, JSON.stringify(current)); const previous = quota.getItem(LOG_VIEW_PREFS_KEY);
+  quota.setItem = () => { throw Error('quota'); };
+  assert.throws(() => saveLogViewPreferences(updateLogView(current, 'device-A', 'realtime', { infoExpanded: false }), quota), /quota/);
+  assert.equal(quota.getItem(LOG_VIEW_PREFS_KEY), previous);
+});

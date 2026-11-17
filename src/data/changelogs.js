@@ -3,6 +3,20 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.7.31': {
+    title: 'v4.7.31',
+    date: '2026-11-17',
+    items: [
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+      { type: 'improve', get text() { return tr('AI 上下文本地准备和预览支持 20 MiB，大内容按请求能力分批确认发送，保留完整原文。'); } },
+      { type: 'improve', get text() { return tr('日志信息和连接方案支持折叠记忆，RS232 命令分类支持选择及新增，协议入口更醒目。'); } },
+      { type: 'feature', get text() { return tr('后台活动支持移除单条或全部已结束记录，返回设备列表时自动刷新。'); } },
+      { type: 'feature', get text() { return tr('包含代码消息、错误堆栈、操作结果和允许的工具文本输出；不记录画面、输入值、二进制流或完整 AI 请求。'); } },
+      { type: 'improve', get text() { return tr('随安装包更新 scrcpy 至 5.0.1。'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.7.30': {
     title: 'v4.7.30',
     date: '2026-11-17',

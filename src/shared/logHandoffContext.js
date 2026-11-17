@@ -1,14 +1,15 @@
 import { tr } from './i18n.js';
+import { AI_CONTEXT_BYTES } from './aiContextTextWindow.js';
 
 export const LOG_HANDOFF_LINES = 2000;
-export const LOG_HANDOFF_BYTES = 448 * 1024;
+export const LOG_HANDOFF_BYTES = AI_CONTEXT_BYTES;
 const encoder = new TextEncoder();
 const byteLength = value => encoder.encode(value).byteLength;
 
 // Walk backward by Unicode scalar, counting normalized line breaks. Work stops
 // at the remaining budget, even when a single entry contains megabytes of text.
-function suffix(raw, maximumBytes, maximumLines) {
-  let start = raw.length, bytes = 0, lines = 1;
+function* suffix(raw, maximumBytes, maximumLines) {
+  let start = raw.length, bytes = 0, lines = 1, work = 0;
   while (start > 0) {
     const code = raw.charCodeAt(start - 1);
     let units = 1, size = code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
@@ -21,6 +22,7 @@ function suffix(raw, maximumBytes, maximumLines) {
     if (bytes + size > maximumBytes || (newline && lines === maximumLines)) break;
     bytes += size; start -= units;
     if (newline) lines++;
+    if (++work === 65536) { work = 0; yield; }
   }
   return { start, lines };
 }
@@ -37,7 +39,7 @@ function cleanDisplayControls(text) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 }
 
-export function prepareLogHandoffContext(rows, sourceTruncated = false) {
+function* prepare(rows, sourceTruncated) {
   const parts = [], marker = tr('此记录仅保留末尾片段：'), markerBytes = byteLength(marker);
   let bytes = 0, retainedLines = 0, partialEntries = 0;
   for (let index = rows.length - 1; index >= 0 && retainedLines < LOG_HANDOFF_LINES; index--) {
@@ -46,11 +48,11 @@ export function prepareLogHandoffContext(rows, sourceTruncated = false) {
     const value = rows[index]?.raw;
     const raw = typeof value === 'string' ? value : '';
     const availableLines = LOG_HANDOFF_LINES - retainedLines;
-    let selected = suffix(raw, remaining, availableLines), text;
+    let selected = yield* suffix(raw, remaining, availableLines), text;
     const partial = selected.start > 0;
     if (partial) {
       if (remaining <= markerBytes) break;
-      selected = suffix(raw, remaining - markerBytes, availableLines);
+      selected = yield* suffix(raw, remaining - markerBytes, availableLines);
       text = materialize(raw, selected.start);
       if (selected.start > 0 && !/[\r\n]/.test(raw[selected.start - 1])) {
         const boundary = text.indexOf('\n');
@@ -72,4 +74,19 @@ export function prepareLogHandoffContext(rows, sourceTruncated = false) {
   return { text, bytes: byteLength(text), totalEntries: rows.length, retainedEntries: parts.length, retainedLines: outputLines,
     totalLines: truncated ? null : retainedLines, firstEntry: parts.length ? rows.length - parts.length + 1 : 0,
     lastEntry: parts.length ? rows.length : 0, partialEntries, truncated };
+}
+
+export function prepareLogHandoffContext(rows, sourceTruncated = false) {
+  const iterator = prepare(rows, sourceTruncated); let step;
+  do { step = iterator.next(); } while (!step.done);
+  return step.value;
+}
+
+export async function prepareLogHandoffContextAsync(rows, sourceTruncated = false) {
+  const iterator = prepare(rows, sourceTruncated); let step;
+  do {
+    step = iterator.next();
+    if (!step.done) await new Promise(resolve => setTimeout(resolve, 0));
+  } while (!step.done);
+  return step.value;
 }

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { tr } from '../src/shared/i18n.js';
-import { prepareLogHandoffContext, LOG_HANDOFF_BYTES, LOG_HANDOFF_LINES } from '../src/shared/logHandoffContext.js';
+import { prepareLogHandoffContext, prepareLogHandoffContextAsync, LOG_HANDOFF_BYTES, LOG_HANDOFF_LINES } from '../src/shared/logHandoffContext.js';
 
 const bytes = text => Buffer.byteLength(text, 'utf8');
 const lines = text => text ? text.split('\n').length : 0;
@@ -51,7 +51,7 @@ test('UTF-8 budget preserves Chinese and emoji boundaries and prefers whole phys
 });
 
 test('a giant single row is bounded before encoding and marks its partial suffix without splitting Unicode', () => {
-  const raw = 'early-do-not-materialize '.repeat(500000) + '中文😀'.repeat(100000);
+  const raw = 'early-do-not-materialize '.repeat(Math.ceil(LOG_HANDOFF_BYTES / 12)) + '中文😀'.repeat(100000);
   const result = prepareLogHandoffContext([{ raw }]);
   assert.equal(result.retainedEntries, 1); assert.equal(result.retainedLines, 1); assert.equal(result.partialEntries, 1);
   assert.equal(result.totalLines, null); assert.equal(result.truncated, true);
@@ -77,7 +77,7 @@ test('50k large rows only access a bounded suffix and never encode the entire ba
   let reads = 0; const raw = '中😀'.repeat(20000);
   const rows = Array.from({ length: 50000 }, () => ({ get raw() { reads++; return raw; } }));
   const start = performance.now(), result = prepareLogHandoffContext(rows), elapsed = performance.now() - start;
-  assert.ok(reads <= 5, `Read ${reads} large rows instead of a bounded suffix`);
+  assert.ok(reads <= Math.ceil(LOG_HANDOFF_BYTES / bytes(raw)) + 1, `Read ${reads} large rows instead of a byte-bounded suffix`);
   assert.equal(result.totalEntries, 50000); assert.ok(result.retainedEntries >= 2);
   assert.ok(result.bytes <= LOG_HANDOFF_BYTES); assert.equal(result.bytes, bytes(result.text));
   assert.ok(elapsed < 2000, `Bounded snapshot took ${elapsed}ms`);
@@ -94,11 +94,11 @@ test('format cleanup cannot reopen the raw scan budget and amplify work across t
   let reads = 0; const raw = '\x1b[32m'.repeat(30000);
   const rows = Array.from({ length: 50000 }, () => ({ get raw() { reads++; return raw; } }));
   const result = prepareLogHandoffContext(rows);
-  assert.ok(reads <= 4, `Cleaned display bytes must not allow ${reads} huge input rows to be scanned`);
-  assert.ok(result.bytes < 100); assert.equal(result.bytes, bytes(result.text)); assert.equal(result.truncated, true);
+  assert.ok(reads <= Math.ceil(LOG_HANDOFF_BYTES / bytes(raw)) + 1, `Cleaned display bytes must not allow ${reads} huge input rows to reopen the raw budget`);
+  assert.equal(result.bytes, result.retainedEntries - 1, 'Only separators remain after cleaning whole ANSI-only records'); assert.equal(result.bytes, bytes(result.text)); assert.equal(result.truncated, true);
 });
 
-test('the component prepares only on click, propagates upstream clipping and exposes accurate range without storing raw text', () => {
+test('the component prepares only on click, propagates upstream clipping and exposes accurate range without storing raw text', async () => {
   const require = createRequire(import.meta.url), parser = require('@babel/parser'), traverse = require('@babel/traverse').default;
   const source = fs.readFileSync(new URL('../src/components/LogFilterHandoff.jsx', import.meta.url), 'utf8');
   const ast = parser.parse(source, { sourceType: 'module', plugins: ['jsx'] }); let prepare;
@@ -106,11 +106,11 @@ test('the component prepares only on click, propagates upstream clipping and exp
   assert.ok(prepare); assert.match(source, /context=\{prepare\}/); assert.doesNotMatch(source, /useEffect|useMemo/);
   let accesses = 0, range, created;
   const rows = [{ get raw() { accesses++; return 'fixture row'; } }];
-  const action = new Function('prepareLogHandoffContext', 'tr', 'rows', 'sourceTruncated', 'deviceId', 'setPrepared', 'setCreated', 'describe', `return (${prepare});`)(
-    prepareLogHandoffContext, tr, rows, true, 'clicked-device', value => { range = value; }, value => { created = value; },
+  const action = new Function('prepareLogHandoffContextAsync', 'tr', 'rows', 'sourceTruncated', 'deviceId', 'setPrepared', 'setCreated', 'describe', `return (${prepare});`)(
+    prepareLogHandoffContextAsync, tr, rows, true, 'clicked-device', value => { range = value; }, value => { created = value; },
     value => `${value.retainedEntries}/${value.totalEntries}; ${value.retainedLines} lines; ${value.bytes} bytes. `);
   assert.equal(accesses, 0);
-  const payload = action(); assert.equal(accesses, 1); assert.equal(payload.view.deviceId, 'clicked-device');
+  const payload = await action(); assert.equal(accesses, 1); assert.equal(payload.view.deviceId, 'clicked-device');
   assert.equal(payload.view.origin, 'log-filter'); assert.equal(payload.view.truncated, true);
   assert.equal(payload.view.text, 'fixture row'); assert.equal(payload.view.trust, undefined);
   assert.equal(range.text, undefined); assert.equal(range.bytes, bytes(payload.view.text)); assert.equal(created, false);

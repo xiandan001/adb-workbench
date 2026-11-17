@@ -13,7 +13,7 @@ function runOutboundJob(data, { locale, signal } = {}) {
   if (signal?.aborted) return Promise.reject(Object.assign(new Error(tr('AI 发送已取消。')), { code: 'AI_SEND_CANCELLED', name: 'AbortError' }));
   return new Promise((resolve, reject) => {
     let settled = false;
-    const worker = new Worker(outboundWorkerPath(), { workerData: { ...data, locale }, resourceLimits: { maxOldGenerationSizeMb: 128 } });
+    const worker = new Worker(outboundWorkerPath(), { workerData: { ...data, locale }, resourceLimits: { maxOldGenerationSizeMb: require('./ai-context-limits.json').outboundWorkerHeapMb } });
     const finish = (error, value) => {
       if (settled) return; settled = true;
       clearTimeout(timer); signal?.removeEventListener('abort', abort);
@@ -31,7 +31,8 @@ function runOutboundJob(data, { locale, signal } = {}) {
 }
 const prepareOutbound = (bodies, options) => runOutboundJob({ operation: 'requests', bodies, contentFormat: options?.contentFormat }, options);
 function sanitizeTaskArtifact(artifact, options) {
-  if (typeof artifact?.text !== 'string' || artifact.text.length > 512 * 1024) return Promise.reject(Object.assign(new Error(tr('任务结果文件不完整或格式无效，不能安全排除私有脚本；请使用任务结果分析入口。')), { code: 'AI_HANDOFF_PRIVATE_REPORT' }));
+  if (typeof artifact?.text !== 'string' || artifact.text.length > require('./ai-context-limits.json').contentBytes) return Promise.reject(Object.assign(new Error(tr('任务结果文件不完整或格式无效，不能安全排除私有脚本；请使用任务结果分析入口。')), { code: 'AI_HANDOFF_PRIVATE_REPORT' }));
   return runOutboundJob({ operation: 'artifact', artifact }, options);
 }
-module.exports = { prepareOutbound, outboundWorkerPath, sanitizeTaskArtifact };
+const readAiArtifactFile = (artifact, options) => runOutboundJob({ operation: 'artifact-file', artifact }, options);
+module.exports = { prepareOutbound, outboundWorkerPath, sanitizeTaskArtifact, readAiArtifactFile };

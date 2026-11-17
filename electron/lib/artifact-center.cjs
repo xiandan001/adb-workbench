@@ -439,15 +439,18 @@ function parseDeviceFromPerformanceName(name) {
     .replace(/-\d{4}-\d{2}-\d{2}T.*$/i, '');
 }
 
-async function readAnalysisArtifact(artifactId, name) {
+async function readAnalysisArtifact(artifactId, name, options) {
   if (typeof artifactId !== 'string' || artifactId.length > 2048 || typeof name !== 'string' || name.length > 512
     || !/\.(?:md|json|txt|log|csv)$/i.test(name)) throw new Error(tr('请选择已知产物中的文本文件带入 AI。'));
   const item = (await listArtifacts()).find(entry => entry.id === artifactId);
   if (!item) throw new Error(tr('产物已不存在，请刷新列表后重试'));
-  const preview = await previewArtifact(item, name);
-  if (preview.kind !== 'text') throw new Error(tr('请选择已知产物中的文本文件带入 AI。'));
+  const selected = await require('./artifact-export.cjs').collectArtifactFiles(item);
+  const file = selected.files.find(entry => entry.name === name);
+  if (!file) throw new Error(tr('该文件不在当前产物中，或不支持预览'));
   const taskResult = /(?:^|[\\/])run-result\.json$/i.test(name);
-  const text = taskResult ? await require('./ai-outbound-processor.cjs').sanitizeTaskArtifact({ text: preview.content, truncated: preview.truncated }) : preview.content;
+  const preview = await require('./ai-outbound-processor.cjs').readAiArtifactFile({ filename: file.source, privateTaskResult: taskResult }, options);
+  if (preview.kind !== 'text') throw new Error(tr('请选择已知产物中的文本文件带入 AI。'));
+  const text = preview.content;
   return { origin: 'artifact', title: String(item.title || name).slice(0, 240), deviceId: item.deviceId || '',
     question: tr('请基于这份已选择的产物分析问题与验证方向。'),
     text: taskResult ? `${tr('本机私有重跑脚本未包含在 AI 上下文中。')}\n${text}` : text, truncated: preview.truncated };

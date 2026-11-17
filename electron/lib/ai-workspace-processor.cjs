@@ -1,32 +1,41 @@
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { getLocale, tr } = require('./localization.cjs');
+const policy = require('./ai-context-limits.json');
+const { workspaceReservation } = require('./ai-workspace-memory.cjs');
 const error = (code, message) => Object.assign(new Error(message), { code, safe: true });
 
 function createWorkspaceProcessor({ workerFactory, timeoutMs = 30000 } = {}) {
-  let worker, sequence = 0, disposed = false;
+  let worker, sequence = 0, disposed = false, queuedBytes = 0;
   const pending = new Map();
-  const inflight = new Set();
+  const inflight = new Map();
+  function acknowledge(id) { const bytes = inflight.get(id); if (bytes === undefined) return; queuedBytes -= bytes; inflight.delete(id); }
   function finish(id, result, failure) {
     const entry = pending.get(id); if (!entry) return;
     pending.delete(id); clearTimeout(entry.timer); entry.signal?.removeEventListener('abort', entry.abort);
     if (!pending.size) worker?.unref();
     failure ? entry.reject(failure) : entry.resolve(result);
   }
-  function rejectAll(failure) { inflight.clear(); for (const id of [...pending.keys()]) finish(id, null, failure); }
+  function rejectAll(failure) { inflight.clear(); queuedBytes = 0; for (const id of [...pending.keys()]) finish(id, null, failure); }
   function ensureWorker() {
     if (worker) return;
     const filename = path.join(__dirname, 'ai-workspace-worker.cjs').replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
-    const instance = workerFactory ? workerFactory(filename) : new Worker(filename, { resourceLimits: { maxOldGenerationSizeMb: 192 } });
+    const options = { resourceLimits: { maxOldGenerationSizeMb: policy.workspaceWorkerHeapMb } };
+    const instance = workerFactory ? workerFactory(filename, options) : new Worker(filename, options);
     worker = instance;
-    instance.on('message', response => { if (worker === instance) { inflight.delete(response.id); finish(response.id, response.result, response.error ? error(response.error.code, response.error.message) : null); } });
+    instance.on('message', response => { if (worker === instance) { acknowledge(response.id); finish(response.id, response.result, response.error ? error(response.error.code, response.error.message) : null); } });
     const failed = () => { if (worker === instance) { worker = null; rejectAll(error('AI_WORKER_FAILED', tr('AI 本机后台操作未完成，请重试。'))); } };
     instance.on('error', failed); instance.on('exit', failed); instance.unref();
   }
   function run(command, args, { signal, locale = getLocale() } = {}) {
     if (disposed || signal?.aborted) return Promise.reject(error('CANCELLED', tr('操作已取消')));
     if (inflight.size >= 8) return Promise.reject(error('AI_WORKER_BUSY', tr('AI 本机后台队列已满，请稍后重试。')));
-    ensureWorker(); worker.ref();
+    let reservation;
+    try { reservation = workspaceReservation(args); }
+    catch { return Promise.reject(error('AI_WORKER_BUSY', tr('AI 本机后台队列已满，请稍后重试。'))); }
+    if (queuedBytes + reservation > policy.queuedBytes) return Promise.reject(error('AI_WORKER_BUSY', tr('AI 本机后台队列已满，请稍后重试。')));
+    try { ensureWorker(); worker.ref(); }
+    catch { return Promise.reject(error('AI_WORKER_FAILED', tr('AI 本机后台操作未完成，请重试。'))); }
     return new Promise((resolve, reject) => {
       const id = ++sequence, cancelBuffer = new SharedArrayBuffer(4), flag = new Int32Array(cancelBuffer);
       const abort = () => { Atomics.store(flag, 0, 1); finish(id, null, error('CANCELLED', tr('操作已取消'))); };
@@ -35,9 +44,9 @@ function createWorkspaceProcessor({ workerFactory, timeoutMs = 30000 } = {}) {
         const old = worker; worker = null;
         rejectAll(error('AI_WORKER_TIMEOUT', tr('AI 本机后台处理超时，请缩小范围后重试。'))); void old?.terminate();
       }, timeoutMs);
-      inflight.add(id);
+      inflight.set(id, reservation); queuedBytes += reservation;
       pending.set(id, { resolve, reject, signal, abort, timer, flag }); signal?.addEventListener('abort', abort, { once: true });
-      try { worker.postMessage({ id, command, args, locale, cancelBuffer }); } catch { inflight.delete(id); finish(id, null, error('AI_WORKER_FAILED', tr('AI 本机后台操作未完成，请重试。'))); }
+      try { worker.postMessage({ id, command, args, locale, cancelBuffer }); } catch { acknowledge(id); finish(id, null, error('AI_WORKER_FAILED', tr('AI 本机后台操作未完成，请重试。'))); }
       if (signal?.aborted) abort();
     });
   }

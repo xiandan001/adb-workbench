@@ -48,6 +48,10 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
     './harmony-media-diagnostics.cjs': require('../electron/lib/harmony-media-diagnostics.cjs'),
     './application-log.cjs': { record: event => logs.push(event) },
     './application-log-policy.cjs': require('../electron/lib/application-log-policy.cjs'),
+    './mirror-diagnostics.cjs': { ...require('../electron/lib/mirror-diagnostics.cjs'), createMirrorDiagnostics: options => {
+      const monitor = require('../electron/lib/mirror-diagnostics.cjs').createMirrorDiagnostics({ ...options });
+      return { ...monitor, event: (name, data) => monitor.event(name, data && structuredClone(data)), finish: (name, data) => monitor.finish(name, data && structuredClone(data)) };
+    } },
     './harmony-media-session.cjs': { createHarmonyMediaSessions: options => { callbacks = options; return streams; } },
     './harmony-recording.cjs': { createHarmonyRecordingService: () => recordings },
     './device-registry.cjs': { resolveDeviceRef: id => ({ id, transport: 'hdc', generation, targetKey: id.slice(4) }) },
@@ -66,7 +70,7 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
   const invoke = (name, window, args, senderFrame = window.webContents.mainFrame) => handlers.get('harmony-media:' + name)(
     { sender: window.webContents, senderFrame }, args);
   t.after(() => api.shutdownAll());
-  return { api, windows, starts, stops, inputs, logs, invoke, releaseLoad, timers,
+  return { api, windows, starts, stops, inputs, logs, invoke, releaseLoad, timers, callbacks: () => callbacks,
     replaceDevice: () => { generation++; }, locale: () => localeCallback() };
 }
 async function readyWindow(h) {
@@ -100,6 +104,19 @@ test('normal ACK followed by decoded ACK permits first-frame readiness without r
   assert.equal(h.starts.length, 1);
   assert.equal(window.sent.filter(item => item.channel === 'harmony-media:locale').length, 2);
   assert.equal((await h.invoke('ack', window, { sessionId: 'other', sequence: 0, decoded: true })).success, false);
+});
+
+test('mirror lifecycle never reports readiness from transport alone and fixed backpressure is preserved', async t => {
+  const h = fixture(t), { opening, window } = await readyWindow(h);
+  assert.equal(h.logs.some(row => row.source === 'mirror' && row.event === 'ready'), false);
+  const frame = window.sent.find(item => item.channel === 'harmony-media:frame').data;
+  for (let index = 1; index < 12; index++) h.callbacks().onFrame(frame.sessionId, { timestamp: index, flags: 1, data: Buffer.from([0x65]) });
+  assert.throws(() => h.callbacks().onFrame(frame.sessionId, { timestamp: 13, flags: 1, data: Buffer.from([0x65]) }), error => error.code === 'MEDIA_BACKPRESSURE');
+  await ackDecoded(h, window); assert.equal((await opening).success, true);
+  assert.equal(h.logs.filter(row => row.source === 'mirror' && row.event === 'ready').length, 1);
+  assert.equal(h.logs.find(row => row.source === 'mirror' && row.event === 'ready').readiness, 'decoded-frame');
+  h.callbacks().onState({ id: frame.sessionId, deviceId: 'hdc:A', status: 'failed', diagnosticReason: 'BACKPRESSURE', error: 'private error', toolVersion: '5.1.1.2' });
+  const terminal = h.logs.find(row => row.source === 'mirror' && row.event === 'failure'); assert.equal(terminal.reason, 'BACKPRESSURE'); assert.equal(terminal.transport, 'hdc'); assert.doesNotMatch(JSON.stringify(terminal), /private|hdc:A|stream-/);
 });
 
 test('first-frame timeout uses bounded decoder stage metadata instead of losing missing-parameter evidence', async t => {

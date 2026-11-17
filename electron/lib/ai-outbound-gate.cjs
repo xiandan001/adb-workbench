@@ -1,11 +1,13 @@
 const { randomUUID } = require('node:crypto');
 const { tr } = require('./localization.cjs');
 const { LIMITS, fail } = require('./ai-outbound-policy.cjs');
+const { pendingReviewBytes } = require('./ai-context-limits.json');
 
 const cancelled = () => Object.assign(fail('AI_SEND_CANCELLED', tr('AI 发送已取消。')), { name: 'AbortError', cancelled: true });
 function createOutboundGate({ prepare, membership, publish = () => {}, activity = {}, now = Date.now } = {}) {
   const operations = new Map(), previews = new Map();
-  let closed = false;
+  let closed = false, reviewBytes = 0;
+  function releaseReview(value) { reviewBytes -= value.reviewBytes || 0; value.reviewBytes = 0; }
   const live = owner => owner && !owner.isDestroyed();
   function notice(owner) { if (live(owner)) { try { publish(owner); } catch { /* Closed windows never authorize sends. */ } } }
   function usage(operation) {
@@ -51,7 +53,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
   }
   function rejectBatch(value, error) {
     if (value.state === 'rejected' || value.state === 'completed') return;
-    value.state = 'rejected'; clearTimeout(value.timer); previews.delete(value.id);
+    value.state = 'rejected'; clearTimeout(value.timer); previews.delete(value.id); releaseReview(value);
     value.operation.failed = error.code !== 'AI_SEND_CANCELLED';
     value.operation.error = error.message;
     for (const task of value.tasks) if (!task.started) { task.body = null; task.prepared = null; settle(task, error); }
@@ -97,6 +99,8 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
       previews.set(value.id, value);
       const prepared = await prepare(value.tasks.map(task => task.body), { locale: operation.locale, signal: operation.controller.signal, contentFormat: operation.contentFormat });
       if (operation.controller.signal.aborted || !live(operation.owner)) throw cancelled();
+      if (reviewBytes - (value.reviewBytes || 0) + prepared.bytes > pendingReviewBytes) throw fail('AI_SEND_QUEUE', tr('待确认 AI 预览总量超过 64 MiB，请先确认或取消现有预览；未发送。'));
+      reviewBytes += prepared.bytes - (value.reviewBytes || 0); value.reviewBytes = prepared.bytes;
       value.prepared = prepared;
       value.tasks.forEach((task, index) => { task.prepared = prepared.requests[index]; task.body = null; });
       operation.estimated += prepared.estimatedInputTokens;
@@ -114,10 +118,16 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
     if (value.operation !== operation || value.sealed || value.state !== 'preparing') return Promise.reject(fail('AI_SEND_CHANGED', tr('AI 请求批次已冻结，新增内容需要新的预览。')));
     if (typeof body !== 'string' || Buffer.byteLength(body) > LIMITS.requestBytes || value.tasks.length >= LIMITS.requests
       || value.tasks.reduce((bytes, task) => bytes + Buffer.byteLength(task.body || ''), Buffer.byteLength(body)) > LIMITS.batchBytes) {
-      const error = fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、8 MiB，请缩小筛选范围；未发送。'));
+      const error = fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、20 MiB，请缩小筛选范围；未发送。'));
       rejectBatch(value, error); operation.failed = true; operation.error = error.message;
       return Promise.reject(error);
     }
+    const size = Buffer.byteLength(body);
+    if (reviewBytes + size > pendingReviewBytes) {
+      const error = fail('AI_SEND_QUEUE', tr('待确认 AI 预览总量超过 64 MiB，请先确认或取消现有预览；未发送。'));
+      rejectBatch(value, error); return Promise.reject(error);
+    }
+    reviewBytes += size; value.reviewBytes = (value.reviewBytes || 0) + size;
     const promise = new Promise((resolve, reject) => {
       const task = { body, run, resolve, reject, batch: value, done: false, started: false };
       value.tasks.push(task); operation.tasks.add(task);
@@ -160,7 +170,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
       const entitled = await membership();
       if (!entitled?.activated || entitled.scope !== 'vip') throw fail('AI_SEND_VIP', tr('AI 分析需要有效会员授权。'));
       if (value.operation.controller.signal.aborted || !live(owner) || now() >= value.expiresAt) throw cancelled();
-      value.state = 'authorized'; previews.delete(value.id); clearTimeout(value.timer);
+      value.state = 'authorized'; previews.delete(value.id); clearTimeout(value.timer); releaseReview(value);
       drain(value); notice(owner); return { ok: true, operationId: value.operation.id };
     } catch (error) { rejectBatch(value, error); return { ok: false, code: error.code, error: error.message }; }
   }

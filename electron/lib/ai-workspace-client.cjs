@@ -65,19 +65,23 @@ function prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, def
   } catch { return { error: failure('unavailable') }; }
 }
 
-function createBuiltinClient({ request = https.request, getConfig = builtinConfig, serializeBody, deferTimeoutUntilAuthorized = false } = {}) {
-  return async ({ systemPrompt, userContent, signal, maxTokens = 2200 } = {}) => {
-    if (signal?.aborted) return failure('cancelled');
+function createClientMethods({ request = https.request, getConfig = builtinConfig, serializeBody, deferTimeoutUntilAuthorized = false } = {}) {
+  async function prepare({ systemPrompt, userContent, signal, maxTokens = 2200 } = {}) {
+    if (signal?.aborted) return { error: failure('cancelled') };
     const prepared = prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, Boolean(serializeBody));
-    if (prepared.error) return prepared.error;
+    if (prepared.error) return { error: prepared.error };
     if (serializeBody) {
       try {
         prepared.body = await serializeBody(prepared.payload, { signal });
-        if (signal?.aborted) return failure('cancelled');
-        if (typeof prepared.body !== 'string' || Buffer.byteLength(prepared.body) > LIMITS.inputBytes * 2 + 65536) return failure('invalid_input');
+        if (signal?.aborted) return { error: failure('cancelled') };
+        if (typeof prepared.body !== 'string' || Buffer.byteLength(prepared.body) > LIMITS.inputBytes) return { error: failure('invalid_input') };
         prepared.options.headers['Content-Length'] = Buffer.byteLength(prepared.body);
-      } catch { return failure(signal?.aborted ? 'cancelled' : 'invalid_input'); }
+      } catch { return { error: failure(signal?.aborted ? 'cancelled' : 'invalid_input') }; }
     }
+    return prepared;
+  }
+  function send(prepared, signal) {
+    if (signal?.aborted) return Promise.resolve(failure('cancelled'));
     return new Promise(resolve => {
       let settled = false;
       let req;
@@ -133,7 +137,32 @@ function createBuiltinClient({ request = https.request, getConfig = builtinConfi
         req.end(prepared.body);
       } catch (error) { onError(error); }
     });
+  }
+  return { prepare, send };
+}
+
+function createBuiltinClient(options) {
+  const { prepare, send } = createClientMethods(options);
+  return async args => {
+    const prepared = await prepare(args);
+    return prepared.error || send(prepared, args?.signal);
   };
 }
 
-module.exports = { createBuiltinClient, LIMITS };
+function createBuiltinBatchClient(options) {
+  const { prepare, send } = createClientMethods(options);
+  return async (requests, { signal, run }) => {
+    // Finish all asynchronous worker serialization before the gate freezes this
+    // immutable batch. No partially prepared batch can authorize a first send.
+    const prepared = [];
+    for (const value of requests) {
+      const item = await prepare({ ...value, signal }); prepared.push(item);
+      if (item.error) break;
+    }
+    const failed = prepared.find(value => value.error);
+    if (failed || signal?.aborted) return requests.map(() => failed?.error || failure('cancelled'));
+    return run(() => Promise.all(prepared.map(value => send(value, signal))));
+  };
+}
+
+module.exports = { createBuiltinClient, createBuiltinBatchClient, LIMITS };

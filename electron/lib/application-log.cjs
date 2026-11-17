@@ -5,6 +5,11 @@ const { randomUUID } = require('node:crypto');
 const { tr } = require('./localization.cjs');
 const { createApplicationLogSession } = require('./application-log-session.cjs');
 const { classifyApplicationError } = require('./application-log-policy.cjs');
+const { normalizeCodeArguments, own } = require('./application-log-text.cjs');
+const { createToolObserver } = require('./application-log-tools.cjs');
+const { installCodeHooks, createApplicationIpc } = require('./application-log-hooks.cjs');
+const { observeRenderer, trustedSource } = require('./application-log-renderer.cjs');
+const { installWorkerObservation } = require('./application-log-workers.cjs');
 
 async function writeApplicationLogExport(file, text, { io = fs.promises } = {}) {
   if (typeof file !== 'string' || !path.isAbsolute(file) || file.includes('\0')) throw Error('Invalid export path');
@@ -66,29 +71,45 @@ function createApplicationLogController({ session, getOwner, showSaveDialog, wri
   }
   return { register(ipcMain) { for (const kind of ['status', 'start', 'stop', 'export']) ipcMain.handle('app-log:' + kind, (event, value) => invoke(event, kind, value)); } };
 }
-let session;
+let session, earlyCleanup, rendererOptions;
 const removers = [];
+const fatalWorkerErrors = new WeakSet();
 function record(value) { return session?.record(value) || false; }
-function observeWebContents(contents, recordEvent = record) {
+const isEnabled = () => session?.isRecording() || false;
+const tools = createToolObserver({ record, isEnabled, noteLoss: (reason, count) => session?.noteLoss(reason, count),
+  recordFatal(value, error) { const accepted = session?.recordFatal(value) || false; if (accepted && error && typeof error === 'object') fatalWorkerErrors.add(error); return accepted; } });
+function installEarlyHooks({ consoleObject = console, childProcess = require('node:child_process'), workerThreads = require('node:worker_threads'), appRoot = require('electron').app.getAppPath() } = {}) {
+  if (earlyCleanup) return;
+  const removeCode = installCodeHooks({ consoleObject, childProcess, record, isEnabled, observeToolProcess: tools.observe });
+  const removeWorkers = installWorkerObservation({ workerThreads, appRoot, observeToolProcess: tools.observe });
+  earlyCleanup = () => { removeWorkers(); removeCode(); };
+}
+function observeWebContents(contents, recordEvent = record, options) {
+  if (options) return observeRenderer(contents, { ...options, record: recordEvent, isEnabled, noteLoss: (reason, count) => session?.noteLoss(reason, count) });
   const onConsole = details => {
-    if (!details || typeof details !== 'object' || !['warning', 'error'].includes(details.level)) return;
-    recordEvent({ source: 'app', event: 'console', component: 'renderer', level: details.level === 'warning' ? 'warn' : 'error', ...classifyApplicationError(details.message) });
+    const level = own(details, 'level');
+    if (!['warning', 'error'].includes(level)) return;
+    recordEvent({ source: 'app', event: 'console', component: 'renderer', level: level === 'warning' ? 'warn' : 'error', ...classifyApplicationError(own(details, 'message')) });
   };
-  const onGone = (_event, details) => recordEvent({ source: 'app', event: 'renderer-gone', component: 'renderer', errorNumber: Math.abs(details?.exitCode || 0) });
+  const onGone = (_event, details) => { const code = own(details, 'exitCode'); recordEvent({ source: 'app', event: 'renderer-gone', component: 'renderer', errorNumber: typeof code === 'number' ? Math.abs(code) : 0 }); };
   contents.on('console-message', onConsole); contents.on('render-process-gone', onGone);
+  return () => { contents.removeListener('console-message', onConsole); contents.removeListener('render-process-gone', onGone); };
 }
 function register(ipcMain) {
   const { app, dialog, webContents } = require('electron');
   const status = app.getGPUFeatureStatus?.() || {};
   session = createApplicationLogSession({ directory: path.join(app.getPath('userData'), 'application-logs'),
+    onBeforeStop: () => tools.flush(), onRecordingChanged: () => tools.reset(),
     metadata: { version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome,
       platform: process.platform, architecture: process.arch, osRelease: os.release(),
       acceleration: status.video_decode === 'enabled' ? 'enabled' : status.video_decode ? 'disabled' : 'unknown' } });
   const controller = createApplicationLogController({ session, getOwner: () => require('./app-context.cjs').getMainWindow(), showSaveDialog: (owner, options) => dialog.showSaveDialog(owner, options) });
   controller.register(ipcMain);
-  for (const contents of webContents.getAllWebContents()) observeWebContents(contents);
-  const onContents = (_event, contents) => observeWebContents(contents);
-  const onUncaught = error => record({ source: 'app', event: 'failure', level: 'error', ...classifyApplicationError(error) });
+  rendererOptions = { appRoot: app.getAppPath(), isDev: require('./app-context.cjs').isDev === true };
+  const onContents = (_event, contents) => removers.push(observeWebContents(contents, record, rendererOptions));
+  for (const contents of webContents.getAllWebContents()) onContents(null, contents);
+  const onUncaught = (error, failureOrigin) => { try { if (isEnabled() && (!error || typeof error !== 'object' || !fatalWorkerErrors.has(error))) session.recordFatal({ source: 'code', event: 'exception', origin: 'main', level: 'error', failureOrigin,
+    ...normalizeCodeArguments([error]), ...classifyApplicationError(error) }); } catch { /* Never replace the original fatal exception. */ } };
   app.on('web-contents-created', onContents); process.on('uncaughtExceptionMonitor', onUncaught);
   removers.push(() => app.removeListener('web-contents-created', onContents), () => process.removeListener('uncaughtExceptionMonitor', onUncaught));
   const { autoUpdater } = require('electron-updater');
@@ -99,5 +120,11 @@ function register(ipcMain) {
     autoUpdater.on(name, listener); removers.push(() => autoUpdater.removeListener(name, listener));
   }
 }
-module.exports = { createApplicationLogController, writeApplicationLogExport, observeWebContents, register, record,
-  async cleanup() { for (const remove of removers.splice(0)) remove(); await session?.dispose(); } };
+module.exports = { createApplicationLogController, writeApplicationLogExport, observeWebContents, register, record, installEarlyHooks,
+  observeToolProcess: (...args) => { try { return tools.observe(...args); } catch { return () => {}; } },
+  observeIpc: ipcMain => createApplicationIpc(ipcMain, { record, isEnabled, isTrustedEvent: event => {
+    const contents = event?.sender;
+    return contents && !contents.isDestroyed() && event.senderFrame === contents.mainFrame
+      && trustedSource(contents.getURL(), rendererOptions.appRoot, rendererOptions.isDev);
+  } }),
+  async cleanup() { const ending = session?.dispose(); earlyCleanup?.(); earlyCleanup = null; tools.cleanup(); for (const remove of removers.splice(0)) remove(); await ending; } };

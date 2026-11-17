@@ -63,7 +63,7 @@ test('time filters preserve local/source clock basis and reject invalid or rever
 });
 
 test('yearless device times remain explicitly yearless; unknown serial receipt times are not promoted to event times', async () => {
-  const adapter = createEvidenceAdapter({ getSerial: () => ({ terminal: { sessionId: 's', path: 'COM-fixture', entries: [{ sessionId: 's', time: '2026-10-26T10:00:00Z', direction: 'RX', text: 'fixture' }] } }) });
+  const adapter = createEvidenceAdapter({ getSerial: () => ({ terminal: { sessionId: 's', path: 'COM-fixture', entries: [{ sessionId: 's', time: '2026-10-26T10:00:00Z', direction: 'RX', text: 'fixture', hex: Buffer.from('fixture').toString('hex'), bytes: 7 }] } }) });
   const source = adapter.list()[0];
   const receipt = (await adapter.collect({ sourceIds: [source.id] })).entries[0];
   assert.deepEqual(receipt.events, []); assert.ok(receipt.timeWarning);
@@ -72,12 +72,14 @@ test('yearless device times remain explicitly yearless; unknown serial receipt t
   assert.equal(yearless.lineCount, 1); assert.equal(yearless.events[0].clockBasis, 'device-local-year-unknown');
 });
 
-test('multiline secret redaction retains stable line numbering; exceptional rows explicitly truncate within UTF-8 budget', async () => {
+test('multiline redaction retains stable numbering and large Unicode lines stay complete or fail the full payload budget', async () => {
   const adapter = createEvidenceAdapter({});
   const entry = (await adapter.collect({ text: 'begin\n-----BEGIN PRIVATE KEY-----\nprivate-data\n-----END PRIVATE KEY-----\nend' })).entries[0];
   assert.equal(entry.lineCount, 5); assert.deepEqual(entry.originalLineNumbers, [1, 2, 3, 4, 5]); assert.doesNotMatch(entry.text, /private-data/);
-  const long = (await adapter.collect({ text: '中'.repeat(Math.floor(MAX_SOURCE_BYTES / 3)) })).entries[0];
-  assert.equal(long.truncated, true); assert.ok(Buffer.byteLength(long.text) <= MAX_SOURCE_BYTES); assert.doesNotMatch(long.text, /\ufffd/);
+  const text = '中'.repeat(Math.floor((MAX_SOURCE_BYTES - 64 * 1024) / 3));
+  const long = (await adapter.collect({ text })).entries[0];
+  assert.equal(long.truncated, false); assert.equal(long.text, '[L1] ' + text); assert.doesNotMatch(long.text, /\ufffd/);
+  await assert.rejects(adapter.collect({ text: '中'.repeat(Math.floor(MAX_SOURCE_BYTES / 3)) }), { code: 'AI_EVIDENCE_LIMIT' });
 });
 
 test('line citations reject unknown IDs, missing source membership, reversed, fractional and out-of-bounds positions', () => {
@@ -91,12 +93,12 @@ test('line citations reject unknown IDs, missing source membership, reversed, fr
 });
 
 test('50k log records and 10k serial records only access the bounded recent window, not every payload', async t => {
-  const payload = 'fixture '.repeat(512);
+  const payload = 'fixture '.repeat(512), hex = Buffer.from(payload).toString('hex');
   for (const kind of ['log', 'serial']) {
     let reads = 0;
     const count = kind === 'log' ? 50000 : 10000;
-    const rows = Array.from({ length: count }, (_, i) => ({ sessionId: 'fixture-session', time: i, direction: 'RX',
-      get raw() { reads++; return payload; }, get text() { reads++; return payload; } }));
+    const rows = Array.from({ length: count }, (_, i) => ({ sessionId: 'fixture-session', time: i, direction: 'RX', bytes: Buffer.byteLength(payload),
+      get raw() { reads++; return payload; }, get hex() { reads++; return hex; }, get text() { throw Error('AI must derive serial evidence from exact bytes, not decoded controls'); } }));
     const adapter = createEvidenceAdapter(kind === 'log'
       ? { getLogs: () => [{ source: 'file', identity: 'fixture-large', entries: rows }] }
       : { getSerial: () => ({ terminal: { sessionId: 'fixture-session', path: 'COM-fixture', entries: rows } }) });

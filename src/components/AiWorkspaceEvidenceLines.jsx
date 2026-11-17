@@ -2,17 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatDateTime, formatNumber, tr, useLocale } from '../shared/i18n';
 import { workspaceLinePage } from './AiWorkspaceState';
+import { evidenceLineIndex, evidenceTextWindow, evidencePartForLine } from '../shared/aiContextTextWindow.js';
 
 export default function AiWorkspaceEvidenceLines({ entry, first, highlight, theme }) {
   useLocale();
   const [expanded, setExpanded] = useState(first);
   const [position, setPosition] = useState({ page: 0, focusKey: '' });
+  const [fragment, setFragment] = useState({ page: 0, part: 0, focusKey: '' });
   const container = useRef(null);
-  const lines = useMemo(() => entry.text ? entry.text.split('\n') : [], [entry.text]);
+  const index = useMemo(() => evidenceLineIndex(entry.text || ''), [entry.text]);
   const focused = highlight?.evidenceId === entry.id;
   const focusKey = focused ? `${highlight.startLine}:${highlight.endLine}:${highlight.nonce}` : '';
   const requested = focused && focusKey !== position.focusKey ? Math.floor((highlight.startLine - 1) / 80) : position.page;
-  const page = workspaceLinePage(lines.length, requested);
+  const page = workspaceLinePage(index.count, requested);
+  const part = focused && focusKey !== fragment.focusKey ? evidencePartForLine(index, page.start, highlight.startLine, entry.numbered)
+    : fragment.page === page.page ? fragment.part : 0;
+  const visible = evidenceTextWindow(index, { start: page.start, end: page.end, part, numbered: entry.numbered });
   useEffect(() => {
     if (focused) {
       const element = container.current?.querySelector('[data-highlight="true"]');
@@ -20,13 +25,13 @@ export default function AiWorkspaceEvidenceLines({ entry, first, highlight, them
       container.current?.focus({ preventScroll: true });
     }
   }, [focused, focusKey]);
-  const changePage = next => setPosition({ page: next, focusKey });
+  const changePage = next => { setPosition({ page: next, focusKey }); setFragment({ page: next, part: 0, focusKey }); };
   return <details ref={container} open={expanded || focused} onToggle={event => setExpanded(event.currentTarget.open)} tabIndex={-1} className={`rounded-lg border outline-none focus:ring-2 focus:ring-emerald-500/50 ${theme.input}`}>
     <summary className="cursor-pointer px-3 py-2.5 text-xs"><span className="mr-1 font-semibold text-emerald-500">[{entry.id}]</span><span className="font-medium">{entry.label || entry.source}</span>{entry.target && <span className={`ml-2 break-all ${theme.textMuted}`}>{entry.target}</span>}</summary>
     {(expanded || focused) && <div className="space-y-2 border-t border-slate-400/15 p-3">
       <div className={`flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5 ${theme.textMuted}`}>
         <span>{tr('采集于 {0}', { 0: formatDateTime(entry.capturedAt) })}</span><span>{entry.timeBasis}</span>
-        <span>{tr('原始 {0} 行 · 选中 {1} 行 · 保留 {2} 行', { 0: formatNumber(entry.originalLineCount ?? lines.length), 1: formatNumber(entry.selectedLineCount ?? lines.length), 2: formatNumber(entry.retainedLineCount ?? lines.length) })}</span>
+        <span>{tr('原始 {0} 行 · 选中 {1} 行 · 保留 {2} 行', { 0: formatNumber(entry.originalLineCount ?? index.count), 1: formatNumber(entry.selectedLineCount ?? index.count), 2: formatNumber(entry.retainedLineCount ?? index.count) })}</span>
         {entry.redactions > 0 && <span>{tr('已脱敏 {0} 行', { 0: formatNumber(entry.redactions) })}</span>}
         {entry.truncated && <span className="text-amber-500">{tr('内容已截断')}</span>}
       </div>
@@ -34,20 +39,26 @@ export default function AiWorkspaceEvidenceLines({ entry, first, highlight, them
       {entry.selectionWarning && <p className="text-[11px] leading-5 text-amber-600 dark:text-amber-400">{entry.selectionWarning}</p>}
       {entry.timeWarning && <p className="text-[11px] leading-5 text-amber-600 dark:text-amber-400">{entry.timeWarning}</p>}
       <div className="max-h-72 overflow-auto font-mono text-xs leading-5">
-        {lines.slice(page.start, page.end).map((line, index) => {
-          const number = page.start + index + 1;
+        {visible.rows.map((row) => {
+          const number = row.line;
           const marked = focused && number >= highlight.startLine && number <= highlight.endLine;
           const original = entry.originalLineNumbers?.[number - 1];
           return <div key={number} data-highlight={marked ? 'true' : undefined} className={`flex min-w-0 gap-3 px-1 ${marked ? 'bg-amber-400/20 ring-1 ring-inset ring-amber-500/30' : ''}`}>
             <span className={`w-10 shrink-0 select-none text-right ${theme.textMuted}`} title={original ? tr('来源原始第 {0} 行', { 0: original }) : undefined}>{number}</span>
-            <span className="min-w-0 whitespace-pre-wrap break-all [tab-size:2]">{(entry.numbered ? line.replace(/^\[L\d+\] ?/, '') : line) || ' '}</span>
+            <span className="min-w-0 whitespace-pre-wrap break-all [tab-size:2]">{row.continuedBefore && <span className="mr-1 text-amber-600">{tr('原行续段')}</span>}{row.text || ' '}{row.continuedAfter && <span className="ml-1 text-amber-600">{tr('本行后续内容见下一文本片段')}</span>}</span>
           </div>;
         })}
       </div>
       <div className={`flex flex-wrap items-center justify-between gap-2 text-[11px] ${theme.textMuted}`}>
-        <span>{tr('显示第 {0}–{1} 行 / 共 {2} 行；页码只影响显示，不改变发送内容。', { 0: lines.length ? page.start + 1 : 0, 1: page.end, 2: lines.length })}</span>
+        <span>{tr('显示第 {0}–{1} 行 / 共 {2} 行；页码只影响显示，不改变发送内容。', { 0: visible.rows[0]?.line || 0, 1: visible.rows.at(-1)?.line || 0, 2: index.count })}</span>
         <div className="flex items-center gap-2"><button type="button" aria-label={tr('上一页证据')} disabled={page.page === 0} onClick={() => changePage(page.page - 1)} className={`rounded p-1 disabled:opacity-30 ${theme.button.secondary}`}><ChevronLeft size={14} /></button><span>{page.page + 1} / {page.count}</span><button type="button" aria-label={tr('下一页证据')} disabled={page.page + 1 >= page.count} onClick={() => changePage(page.page + 1)} className={`rounded p-1 disabled:opacity-30 ${theme.button.secondary}`}><ChevronRight size={14} /></button></div>
       </div>
+      {visible.count > 1 && <div className={`flex flex-wrap items-center gap-2 text-[11px] ${theme.textMuted}`}>
+        <button type="button" aria-label={tr('上一段证据文本')} disabled={visible.part === 0} onClick={() => setFragment({ page: page.page, part: visible.part - 1, focusKey })} className="rounded border border-current/20 px-2 py-1 disabled:opacity-30">{tr('上一段文本')}</button>
+        <span>{tr('显示片段 {0}/{1}；不是原文行号。', { 0: visible.part + 1, 1: visible.count })}</span>
+        <button type="button" aria-label={tr('下一段证据文本')} disabled={visible.part + 1 >= visible.count} onClick={() => setFragment({ page: page.page, part: visible.part + 1, focusKey })} className="rounded border border-current/20 px-2 py-1 disabled:opacity-30">{tr('下一段文本')}</button>
+        <span>{tr('显示分页不改变已保留的冻结证据；来源窗口限制仍以提示为准。')}</span>
+      </div>}
     </div>}
   </details>;
 }

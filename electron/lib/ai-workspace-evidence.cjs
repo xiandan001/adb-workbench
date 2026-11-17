@@ -1,10 +1,11 @@
 const { createHash } = require('node:crypto');
 const { tr } = require('./localization.cjs');
-const { redactText } = require('./feedback-policy.cjs');
+const { redactWorkspaceText } = require('./ai-workspace-redaction.cjs');
 const limits = require('./ai-workspace-limits.cjs');
 const { normalizeSelection, selectLines } = require('./ai-workspace-selection.cjs');
 const { APP_CHECKS, diagnosticChecks, diagnosticCommand, normalizeDiagnostic } = require('./ai-workspace-diagnostics.cjs');
 const { isHarmonyDevice } = require('./device-platform.cjs');
+const { selectSerialEvidenceInput } = require('./serial-ai-evidence.cjs');
 
 const MAX_SOURCE_BYTES = limits.sourceBytes;
 const MAX_EVIDENCE_BYTES = limits.evidenceBytes;
@@ -21,7 +22,7 @@ function stripControls(text) {
 }
 
 function sanitize(value) {
-  return redactText(stripControls(value)).replace(/((?:--)?(?:password|passwd|api[_-]?key|access[_-]?token|secret)\s+)[^\s]+/gi, '$1[REDACTED]');
+  return redactWorkspaceText(stripControls(value)).replace(/((?:--)?(?:password|passwd|api[_-]?key|access[_-]?token|secret)\s+)[^\s]+/gi, '$1[REDACTED]');
 }
 
 function boundedText(value, bytes = 8 * 1024) {
@@ -53,28 +54,20 @@ function captureRows(rows, read) {
 function freezeEntry(source, index, now, selection = normalizeSelection()) {
   // Bound both bytes and line objects before regex/split work. A single buffered
   // record can contain many lines, so the record limit alone is insufficient.
-  const capture = boundedText(source.text, limits.logcatBufferBytes);
-  let recent = capture.text, cut = recent.length, lines = 0;
+  if (typeof source.text !== 'string') throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
+  if (Buffer.byteLength(source.text) > MAX_SOURCE_BYTES) throw Object.assign(fail('AI_EVIDENCE_LIMIT', tr('完整证据及来源信息超过 20 MiB，请减少材料或缩小选段后重试；未截断内容。')), { safe: true });
+  let recent = source.text, cut = recent.length, lines = 0;
   while (cut > 0 && lines < limits.captureRecords) { cut = recent.lastIndexOf('\n', cut - 1); if (cut < 0) break; lines++; }
   const lineWindowed = lines === limits.captureRecords && cut >= 0;
   if (lineWindowed) recent = recent.slice(cut + 1);
-  const windowed = Boolean(source.windowInfo || capture.truncated || lineWindowed);
+  const windowed = Boolean(source.windowInfo || lineWindowed);
   const original = stripControls(recent);
   const selected = selectLines(original, source.kind, selection);
   // Preserve one-to-one line positions even when a multiline key is redacted.
   const mask = block => block.split(/\r\n?|\n/).map(() => '[REDACTED]').join('\n');
   const protectedLines = original.replace(/-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\n]*PRIVATE KEY-----|$)/g, mask)
     .replace(/^[\s\S]*?-----END [^-\n]*PRIVATE KEY-----/, mask).replace(/\r\n?/g, '\n').split('\n');
-  let rows = selected.indexes.map(position => ({ position, text: sanitize(protectedLines[position]) }));
-  const textBudget = MAX_SOURCE_BYTES - selection.maxLines * 10;
-  let bytes = rows.reduce((total, row) => total + Buffer.byteLength(row.text) + 1, -1);
-  let first = 0;
-  while (bytes > textBudget && first < rows.length - 1) bytes -= Buffer.byteLength(rows[first++].text) + 1;
-  rows = rows.slice(first);
-  let cutLine = false;
-  if (rows.length === 1 && Buffer.byteLength(rows[0].text) > textBudget) {
-    rows[0].text = boundedText(rows[0].text, textBudget).text; cutLine = true;
-  }
+  const rows = selected.indexes.map(position => ({ position, text: sanitize(protectedLines[position]) }));
   const events = [];
   rows.forEach((row, line) => {
     const event = selected.observations[row.position];
@@ -90,7 +83,7 @@ function freezeEntry(source, index, now, selection = normalizeSelection()) {
     ...(source.kind === 'hdc' || source.platform === 'harmony' ? { platform: 'harmony' } : {}),
     targetKey: ['adb', 'hdc'].includes(source.kind) || source.deviceId ? digest(`device:${source.deviceId || source.target}`)
       : source.target && source.kind !== 'text' && source.target !== tr('文件来源') ? digest(`${source.kind}:${source.target}`) : null,
-    truncated: Boolean(source.truncated || windowed || cutLine || rows.length < selected.selectedLineCount),
+    truncated: Boolean(source.truncated || windowed || rows.length < selected.selectedLineCount),
     redactions: rows.filter(row => row.text !== selected.lines[row.position]).length,
     lineCount: rows.length, originalLineCount: selected.originalLineCount,
     selectedLineCount: selected.selectedLineCount, retainedLineCount: rows.length,
@@ -117,10 +110,13 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
       if (!rows.length || !state.sessionId) continue;
       const label = workspace === 'terminal' ? tr('串口终端') : tr('RS232 调试');
       result.push({ id: `serial:${workspace}:${digest(state.sessionId)}`, kind: 'serial', label, detail: state.path,
-        read: () => ({ kind: 'serial', label, target: `${state.path} · ${workspace}`,
-          timeBasis: tr('每行前缀为本机接收或发送时间，非设备事件时间'),
-          ...captureRows(rows, row => `[${row.time}] ${row.direction}: ${boundedText(row.text || row.hex || '', limits.logcatBufferBytes).text}`),
-          ...(Number(state.evicted) > 0 ? { truncated: true } : {}) }) });
+        read: async signal => {
+          const process = processor || require('./ai-workspace-compute.cjs').computeWorkspaceJob;
+          const captured = await process('serial-snapshot', selectSerialEvidenceInput(rows, { maxRecords: limits.captureRecords, maxBytes: limits.logcatBufferBytes }), { signal });
+          return { kind: 'serial', label, target: `${state.path} · ${workspace}`,
+            timeBasis: tr('每行前缀为本机接收或发送时间，非设备事件时间'), ...captured,
+            ...(Number(state.evicted) > 0 ? { truncated: true } : {}) };
+        } });
     }
     for (const item of getSsh()) {
       result.push({ id: `ssh:${digest(`${item.sessionId}:${item.terminalId}`)}`, kind: 'ssh', label: item.title,
@@ -150,17 +146,20 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     const diagnostic = normalizeDiagnostic(requestedDiagnostic);
     if (!Array.isArray(selectedChecks) || selectedChecks.length > 7 || selectedChecks.some(id => !checks().some(check => check.id === id))
       || new Set(selectedChecks).size !== selectedChecks.length || !Array.isArray(sourceIds) || sourceIds.length > 8 || new Set(sourceIds).size !== sourceIds.length
-      || typeof text !== 'string' || Buffer.byteLength(text) > MAX_SOURCE_BYTES) throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
+      || typeof text !== 'string') throw fail('AI_EVIDENCE_INPUT', tr('证据选择无效或内容过长。'));
+    if (Buffer.byteLength(text) > MAX_SOURCE_BYTES) throw Object.assign(fail('AI_EVIDENCE_LIMIT', tr('完整证据及来源信息超过 20 MiB，请减少材料或缩小选段后重试；未截断内容。')), { safe: true });
     if (selectedChecks.length && (typeof deviceId !== 'string' || !/^[A-Za-z0-9_.:[\]-]{1,160}$/.test(deviceId))) throw fail('AI_DEVICE_REQUIRED', tr('请选择有效的目标设备。'));
     for (const id of selectedChecks) if (APP_CHECKS.includes(id)) diagnosticCommand(id, diagnostic);
     // Snapshot buffered sources before awaiting any device read. Re-listing also
     // rejects a source whose session/file changed after the selection was shown.
     const available = descriptors();
-    const raw = sourceIds.map(id => {
+    const selectedSources = sourceIds.map(id => {
       const item = available.find(source => source.id === id);
       if (!item) throw fail('AI_SOURCE_CHANGED', tr('所选来源已变化，请刷新来源后重新选择。'));
-      return { ...item.read(), capturedAt: now() };
+      return item;
     });
+    const snapshots = selectedSources.length ? await Promise.all(selectedSources.map(item => Promise.resolve().then(() => item.read(signal)))) : [];
+    const raw = snapshots.map(capture => ({ ...capture, capturedAt: now() }));
     if (text.trim()) raw.push({ kind: 'text', label: tr('手动补充'), target: '', text, capturedAt: now(), timeBasis: tr('用户提供内容，事件时间未经验证') });
     if (selectedChecks.length) {
       if (isHarmonyDevice(deviceId)) {
@@ -205,7 +204,7 @@ function createEvidenceAdapter({ getLogs = () => [], getSerial = () => ({}), get
     const entries = frozen.entries;
     if (entries.every(entry => !entry.text.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
     const bytes = frozen.bytes;
-    if (bytes > MAX_EVIDENCE_BYTES) throw fail('AI_EVIDENCE_LIMIT', tr('证据总量超过 1 MiB，请减少来源或缩小选段后重新生成预览。'));
+    if (bytes > MAX_EVIDENCE_BYTES) throw fail('AI_EVIDENCE_LIMIT', tr('完整证据及来源信息超过 20 MiB，请减少材料或缩小选段后重试；未截断内容。'));
     return { entries, bytes, selection, truncated: entries.some(item => item.truncated) };
   }
   return { list: () => descriptors().map(({ read: _read, ...item }) => item), collect,

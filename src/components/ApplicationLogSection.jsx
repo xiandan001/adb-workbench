@@ -31,12 +31,18 @@ export default function ApplicationLogSection({ theme }) {
     <div className="flex items-start gap-3"><FileText size={19} className="mt-0.5 shrink-0 text-emerald-500" /><div className="min-w-0 flex-1">
       <h3 className={`text-sm font-semibold ${theme.text}`}>{tr('应用日志')}</h3>
       <p className={`mt-1 text-xs leading-5 ${muted}`}>{tr('记录卓控台的运行状态和错误，仅保存到本机，不会自动上传。')}</p>
-      <p className={`text-xs leading-5 ${muted}`}>{tr('不采集设备日志、画面、终端命令、AI 内容、密钥或网址。')}</p>
+      <p className={`text-xs leading-5 ${muted}`}>{tr('包含代码消息、错误堆栈、操作结果和允许的工具文本输出；不记录画面、输入值、二进制流或完整 AI 请求。')}</p>
+      <p className={`text-xs leading-5 ${muted}`}>{tr('自动脱敏为尽力处理，编码后的敏感信息仍可能保留。导出后请先人工检查，再分享。')}</p>
     </div></div>
     <div className="mt-3 space-y-1">
       <p role="status" className={`text-sm ${warning ? 'text-amber-500' : state?.recording ? 'text-emerald-500' : theme.text}`}>{captureStatus(state, view.loading)}</p>
       {state && (state.recording || state.available) && <p className={`text-xs ${muted}`}>{tr('{0} 条记录 · {1} KiB', { 0: formatNumber(state.records), 1: formatNumber(state.bytes / 1024, { maximumFractionDigits: 1 }) })}{state.startedAt !== null && <span>{tr(' · 开始于 {0}', { 0: formatDateTime(state.startedAt) })}</span>}</p>}
       {state?.dropped > 0 && <p className="text-xs text-amber-500">{tr('有 {0} 条事件因限流或写入限制未保存，日志并非完整记录。', { 0: formatNumber(state.dropped) })}</p>}
+      {state?.captureVersion && <p className={`text-xs ${muted}`}>{tr('此份记录来自 {0} 版本。', { 0: state.captureVersion })}</p>}
+      {state?.losses && Object.values(state.losses).some(value => value > 0) && <details className="text-xs text-amber-500"><summary className="cursor-pointer py-1">{tr('部分内容已排除或未完整记录，查看原因')}</summary><div className="space-y-1 py-1 leading-5">
+        <p>{tr('文本裁剪 {0} · 敏感或非文本排除 {1} · 行数限制 {2}', { 0: formatNumber(state.losses.textTruncated), 1: formatNumber(state.losses.sensitiveOutput), 2: formatNumber(state.losses.lineLimited) })}</p>
+        <p>{tr('限流 {0} · 队列 {1} · 容量 {2} · 读取恢复 {3} · 写入失败 {4} · 无效事件 {5}', { 0: formatNumber(state.losses.rateLimited), 1: formatNumber(state.losses.queueLimited), 2: formatNumber(state.losses.sizeLimited), 3: formatNumber(state.losses.recovery), 4: formatNumber(state.losses.io), 5: formatNumber(state.losses.invalid) })}</p>
+      </div></details>}
       <p className={`text-xs leading-5 ${muted}`}>{tr('最多记录 15 分钟或 20 MiB；切换页面不会停止记录。')}</p>
       {state?.available && !state.recording && <p className={`text-xs leading-5 ${muted}`}>{tr('开始新记录会替换上次本地日志，请先导出需要保留的内容。')}</p>}
     </div>

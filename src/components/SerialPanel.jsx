@@ -25,7 +25,7 @@ function initialSettings() {
   let terminalStyleError = '';
   let schemeSelectionError = '';
   const errors = [];
-  let selectedSchemes = { version: 1, rs232: '', terminal: '' };
+  let selectedSchemes = { version: 1, rs232: '', terminal: '', rs232Expanded: false, terminalExpanded: false };
   try { preferences = readSerialPreferences(); } catch (error) { errors.push(error.message); }
   try { history = readSerialHistory(); } catch (error) { errors.push(error.message); }
   try { selectedSchemes = readSerialSchemeSelection(); } catch (error) { schemeSelectionError = error.message; }
@@ -103,6 +103,12 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
   };
   const retrySchemeSelection = () => {
     try { saveSerialSchemeSelection(selectedSchemes); setSchemeSelectionError(''); }
+    catch (failure) { setSchemeSelectionError(failure.message); }
+  };
+  const changeSchemeExpanded = expanded => {
+    const next = { ...selectedSchemes, [`${mode}Expanded`]: expanded };
+    setSelectedSchemes(next);
+    try { saveSerialSchemeSelection(next); setSchemeSelectionError(''); }
     catch (failure) { setSchemeSelectionError(failure.message); }
   };
   const resetSchemeSelection = async () => {
@@ -311,11 +317,11 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
     </div>
     <div className="space-y-4 border-t border-slate-400/20 p-4">
       <AiContextButton disabled={!snapshot.sessionId || !snapshot.entries?.length} context={{ reference: { kind: 'serial', workspace: mode, sessionId: snapshot.sessionId || '' } }} />
-      <SerialSchemeControls key={mode} preferences={preferences} workspace={mode} config={connected ? snapshot.config : config} selectedPath={connected ? snapshot.path : selectedPath} terminalEnter={workspace.terminal.enter} status={snapshot.status} pending={snapshot.revision < 0 || Boolean(currentPending)} onCommit={commitScheme} selected={selectedSchemes[mode]} onSelect={selectScheme} onApplyAndConnect={applySchemeAndConnect} canConnect={ports.some(port => port.path === selectedPath) && !selectedOccupied} theme={theme} isDark={isDark} />
+      <SerialSchemeControls key={`scheme-${mode}`} preferences={preferences} workspace={mode} config={connected ? snapshot.config : config} selectedPath={connected ? snapshot.path : selectedPath} terminalEnter={workspace.terminal.enter} status={snapshot.status} pending={snapshot.revision < 0 || Boolean(currentPending)} onCommit={commitScheme} selected={selectedSchemes[mode]} expanded={selectedSchemes[`${mode}Expanded`] === true} onExpandedChange={changeSchemeExpanded} onSelect={selectScheme} onApplyAndConnect={applySchemeAndConnect} canConnect={ports.some(port => port.path === selectedPath) && !selectedOccupied} theme={theme} isDark={isDark} />
       {schemeSelectionError && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-amber-500"><span className="break-words">{tr(schemeSelectionError)}</span><button type="button" onClick={retrySchemeSelection} className="underline">{tr('重试保存选择')}</button><button type="button" onClick={resetSchemeSelection} className="underline">{tr('重置连接方案选择')}</button></div>}
       {worksetNotice && <p role="status" className={`text-xs ${theme.textMuted}`}>{worksetNotice}</p>}
       <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr("两路独立，可同时连接不同 COM。切换只改变界面，不会断开另一侧连接或停止后台接收。")}{mode === 'terminal' ? tr("连接后点击终端，用键盘操作设备 Shell。") : tr("连接后选择格式，查看或发送数据。")}</p>
-      <SerialConnectionSettings key={mode} theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : selectedPath} onSelectPath={value => updateWorkspace({ [mode === 'terminal' ? 'terminalSelectedPath' : 'selectedPath']: value })} config={connected ? snapshot.config : config} onConfig={value => changePreferences({ [mode === 'terminal' ? 'terminalConfig' : 'config']: value })} status={snapshot.status} activePath={snapshot.path} pending={snapshot.revision < 0 || (Boolean(currentPending) && currentPending !== 'send')} connectingRequest={currentPending === 'connect'} cancelling={currentPending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act(mode, 'connect', () => window.electronAPI.serialConnect({ workspace: mode, path: selectedPath, config }))} onDisconnect={() => act(mode, 'disconnect', () => window.electronAPI.serialDisconnect({ workspace: mode }))} advanced={mode === 'terminal' ? workspace.terminalAdvanced : workspace.advanced} onAdvanced={advanced => updateWorkspace({ [mode === 'terminal' ? 'terminalAdvanced' : 'advanced']: advanced })} />
+      <SerialConnectionSettings key={`connection-${mode}`} theme={theme} isDark={isDark} ports={ports} selectedPath={connected ? snapshot.path : selectedPath} onSelectPath={value => updateWorkspace({ [mode === 'terminal' ? 'terminalSelectedPath' : 'selectedPath']: value })} config={connected ? snapshot.config : config} onConfig={value => changePreferences({ [mode === 'terminal' ? 'terminalConfig' : 'config']: value })} status={snapshot.status} activePath={snapshot.path} pending={snapshot.revision < 0 || (Boolean(currentPending) && currentPending !== 'send')} connectingRequest={currentPending === 'connect'} cancelling={currentPending === 'disconnect'} refreshing={refreshing} onRefresh={() => refreshRef.current?.(true)} onConnect={() => act(mode, 'connect', () => window.electronAPI.serialConnect({ workspace: mode, path: selectedPath, config }))} onDisconnect={() => act(mode, 'disconnect', () => window.electronAPI.serialDisconnect({ workspace: mode }))} advanced={mode === 'terminal' ? workspace.terminalAdvanced : workspace.advanced} onAdvanced={advanced => updateWorkspace({ [mode === 'terminal' ? 'terminalAdvanced' : 'advanced']: advanced })} />
       {selectedOccupied && <p role="status" className="text-xs text-amber-500">{tr("{0} 正由{1}使用，请为当前界面选择另一个串口。", { 0: selectedPath, 1: WORKSPACE_LABELS()[otherMode] })}</p>}
       {discoveryError ? <p role="alert" className="text-xs text-amber-500">{tr("{0}。已保留上次列表，可点击刷新重试。", { 0: discoveryError })}</p> : !ports.length && <p className={`text-xs ${theme.textMuted}`}>{tr("未发现串口，请连接串口线并检查驱动。串口工具独立于 ADB 设备连接。")}</p>}
       {(error || snapshot.error) && <p role="alert" className="break-words rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{error || snapshot.error}</p>}

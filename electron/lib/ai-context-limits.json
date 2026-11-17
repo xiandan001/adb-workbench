@@ -1,0 +1,10 @@
+{
+  "contentBytes": 20971520,
+  "carrierBytes": 25165824,
+  "historyBytes": 536870912,
+  "queuedBytes": 67108864,
+  "residentBytes": 134217728,
+  "pendingReviewBytes": 67108864,
+  "workspaceWorkerHeapMb": 384,
+  "outboundWorkerHeapMb": 256
+}

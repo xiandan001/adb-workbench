@@ -34,6 +34,7 @@ import SelectMenu from './SelectMenu.jsx';
 import { isLogAnalysisAnswer, isLogAnalysisTerminal, logAnalysisAttemptMatches, logAnalysisPhase, retireLogAnalysisRequest, LOG_ANALYSIS_PROMPT_LIMIT } from '../shared/logAnalysisState.js';
 import LogAnalysisStatus from './LogAnalysisStatus.jsx';
 import LogAnalysisComposer from './LogAnalysisComposer.jsx';
+import LogDisplayInfo from './LogDisplayInfo.jsx';
 
 const emptyFilter = {};
 const LOG_ROW_HEIGHT = 28;
@@ -1428,17 +1429,34 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           {isVip && <><button type="button" onClick={onToggleMcp} className="rounded-lg border border-current/20 px-3 py-2">{tr('MCP:')}{mcpRunning ? 'ON' : 'OFF'}</button><button type="button" onClick={() => setMcpHelpVisible(true)} className="rounded-lg border border-current/20 px-3 py-2">{tr('查看 MCP 使用说明')}</button></>}
           <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={snapshotTruncated} isDark={isDark} label={tr('在完整 AI 工作区继续')} />
         </>} />
-      <div className={`flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 text-xs ${isDark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600'}`}>
-        <span className="min-w-0 flex-1 break-all">{tr('当前显示来源：{0}', { 0: [sourceLabel || tr('尚未加载日志'), captureDeviceId].filter(Boolean).join(' · ') })}</span>
-        {captureDeviceId && deviceId && captureDeviceId !== deviceId && <span className="text-amber-500">{tr('采集设备已更改，当前显示仍属于原来源；开始新抓取前会提示保存。')}</span>}
+      <LogDisplayInfo expanded={viewPreferences.view.infoExpanded} onExpandedChange={() => setViewField('infoExpanded', value => !value)} isDark={isDark}
+        sourceIdentity={source === 'file' ? sourceLabel || tr('尚未加载日志') : captureDeviceId || sourceLabel || tr('尚未加载日志')}
+        captureState={source === 'realtime' ? running ? 'running' : 'stopped' : undefined} paused={paused}
+        diagnosticIssue={Boolean(diagnosticError)} sourceMismatch={Boolean(captureDeviceId && deviceId && captureDeviceId !== deviceId)}
+        notice={note && noteType !== 'error' && note !== tr('已停止抓取') ? note : undefined}
+        timeWarningCount={viewEngine.timeWarnings.length} filterCount={Object.values(filter).filter(value => value !== undefined && value !== '').length}
+        title={smartSearching && smartSearchIncremental.length > 0
+          ? <span className="flex min-w-0 items-center gap-2"><Loader2 size={14} className="shrink-0 animate-spin text-violet-500" />{tr('搜索中…已匹配 ')}{smartSearchIncremental.length}{tr(' 条')}</span>
+          : smartSearchResult && !smartSearching
+            ? <span className="flex min-w-0 items-center gap-2"><Brain size={14} className="shrink-0 text-violet-500" /><span className="truncate">{tr('搜索结果："')}{smartSearchResult.query}"（{smartSearchResult.matchedCount}{tr(' 条）')}</span></span>
+            : source === 'realtime' ? tr('实时日志') : tr('文件日志')}
+        controls={<>
         <SelectMenu ariaLabel={tr('时间范围')} compact value={timeRange.kind === 'recent' ? String(timeRange.durationMs) : timeRange.kind} onChange={value => { if (value !== 'around') setTimeRange(value === 'all' ? { kind: 'all' } : { kind: 'recent', durationMs: Number(value), basis: timeRange.basis || 'source' }); }} isDark={isDark} className="w-36"
           options={[{ value: 'all', label: tr('全部时间') }, { value: '30000', label: tr('最近30秒') }, { value: '300000', label: tr('最近5分钟') }, ...(timeRange.kind === 'around' ? [{ value: 'around', label: tr('所选日志前后30秒') }] : [])]} />
         {timeRange.kind !== 'all' && <SelectMenu ariaLabel={tr('时间基准')} compact value={timeRange.basis || 'source'} onChange={basis => setTimeRange(previous => ({ ...previous, basis }))} isDark={isDark} className="w-40"
           options={[{ value: 'source', label: tr('日志源时间') }, { value: 'received', label: tr('本机接收时间') }]} />}
-        {Object.entries(filter).filter(([, value]) => value !== undefined && value !== '').map(([field, value]) => <button key={field} type="button" title={String(value)} onClick={() => { setFilter(previous => { const next = { ...previous }; delete next[field]; return next; }); if (field === 'text') { clearTimeout(filterDebounceRef.current); setFilterTextInput(''); } }}
-          className="max-w-56 truncate rounded-full border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-1 text-emerald-600">{field}: {String(value)} ×</button>)}
         {(Object.values(filter).some(value => value !== undefined && value !== '') || timeRange.kind !== 'all') && <button type="button" onClick={resetFilters} className="rounded px-2 py-1 underline">{tr('重置')}</button>}
-      </div>
+        </>}>
+        <p className="break-all">{tr('当前显示来源：{0}', { 0: [sourceLabel || tr('尚未加载日志'), captureDeviceId].filter(Boolean).join(' · ') })}</p>
+        {captureDeviceId && deviceId && captureDeviceId !== deviceId && <p className="text-amber-500">{tr('采集设备已更改，当前显示仍属于原来源；开始新抓取前会提示保存。')}</p>}
+        {viewEngine.timeWarnings.map(code => <p key={code} role="status" className="text-amber-500">{logTimeWarningText(code)}</p>)}
+        {diagnosticError && <p role="status" className="text-amber-500">{tr(diagnosticError)}</p>}
+        {note && noteType !== 'error' && <p role="status" className={`break-words ${logTheme.textMuted}`}>{note}</p>}
+        <div className="flex flex-wrap items-center gap-2">{Object.entries(filter).filter(([, value]) => value !== undefined && value !== '').map(([field, value]) => <button key={field} type="button" title={String(value)} onClick={() => { setFilter(previous => { const next = { ...previous }; delete next[field]; return next; }); if (field === 'text') { clearTimeout(filterDebounceRef.current); setFilterTextInput(''); } }}
+          className="max-w-56 truncate rounded-full border border-emerald-500/25 bg-emerald-500/5 px-2.5 py-1 text-emerald-600">{field}: {String(value)} ×</button>)}
+        </div>
+        <p className={logTheme.textMuted}>{tr('单击日志查看原文；点击包名或 Tag 快速筛选。')}</p>
+      </LogDisplayInfo>
       {hydrateError && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-red-500/25 p-3 text-xs text-red-500"><span className="min-w-0 flex-1">{tr(hydrateError)}</span><button type="button" onClick={() => refreshLogStateRef.current?.()} className="underline">{tr('重试读取日志状态')}</button></div>}
       {viewPreferences.error && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 p-2 text-xs text-amber-500"><span>{tr(viewPreferences.error)}</span><button type="button" onClick={viewPreferences.retry} className="underline">{tr('重试保存偏好')}</button></div>}
       {(importState?.status === 'reading' || importState?.status === 'failed' || importState?.status === 'cancelled' || importState?.omittedLines > 0) && <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-400/20 px-4 py-2 text-xs">
@@ -1447,9 +1465,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       </div>}
       {viewEngine.selectionPending && <p role="status" className="shrink-0 px-4 py-1 text-xs text-emerald-500">{tr('正在更新筛选范围，旧视图暂时保留。')}</p>}
       {viewEngine.error && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2 text-xs text-amber-500"><span className="min-w-0 flex-1">{viewEngine.error}</span><button type="button" onClick={viewEngine.retry} className="underline">{tr('重试')}</button></div>}
-      {viewEngine.timeWarnings.map(code => <p key={code} role="status" className="shrink-0 px-4 py-1 text-xs text-amber-500">{logTimeWarningText(code)}</p>)}
-      {diagnosticError && <p role="status" className="shrink-0 px-4 py-1 text-xs text-amber-500">{tr(diagnosticError)}</p>}
-      {note && <p role="status" className={`shrink-0 break-words px-4 py-2 text-xs ${noteType === 'error' ? 'text-red-500' : logTheme.textMuted}`}>{note}</p>}
+      {note && noteType === 'error' && <p role="status" className="shrink-0 break-words px-4 py-2 text-xs text-red-500">{note}</p>}
 
       {/* Main Content */}
       {worksetMemory.error && <div role="alert" className={`flex flex-wrap items-center gap-3 border-b px-4 py-2 text-xs ${isDark ? 'border-red-500/25 bg-red-500/10 text-red-300' : 'border-red-200 bg-red-50 text-red-700'}`}><span className="min-w-0 flex-1 break-words">{tr(worksetMemory.error)}</span><button type="button" disabled={worksetMemory.saving} onClick={worksetMemory.retry} className="inline-flex items-center gap-2 rounded border border-current px-2 py-1 disabled:opacity-40">{worksetMemory.saving && <Loader2 size={12} className="animate-spin" />}{tr('重试保存日志配置')}</button></div>}
@@ -1484,20 +1500,6 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
         {/* Right Panel - Log Viewer */}
         <div className={`min-w-0 min-h-0 flex-1 flex flex-col ${isDark ? 'bg-[#202124]' : 'bg-white'}`}>
-          <div className={`flex items-center justify-between px-4 py-2 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-            <span className={`text-sm font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {smartSearching && smartSearchIncremental.length > 0
-                ? <span className="flex items-center gap-2">
-                    <Loader2 size={14} className="text-violet-500 animate-spin" />{tr("搜索中…已匹配 ")}{smartSearchIncremental.length}{tr(" 条")}</span>
-                : (smartSearchResult && !smartSearching
-                  ? <span className="flex items-center gap-2">
-                      <Brain size={14} className="text-violet-500" />{tr("搜索结果：\"")}{smartSearchResult.query}"（{smartSearchResult.matchedCount}{tr(" 条）")}</span>
-                  : (source === 'realtime' ? tr("实时日志") : tr("文件日志")))
-              }
-            </span>
-            <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr('单击日志查看原文；点击包名或 Tag 快速筛选。')}</span>
-          </div>
-
           <div
             className={`flex items-center px-4 py-1.5 border-b text-xs font-bold ${isDark ? 'bg-[#2A2C2F] border-[#3E4145] text-[#9AA0A6]' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
             style={{ display: 'grid', gridTemplateColumns: `${colWidths.ts}px ${colWidths.level}px ${colWidths.pkg}px ${colWidths.tag}px 1fr`, gap: '8px' }}

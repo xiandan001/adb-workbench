@@ -7,8 +7,17 @@ export function normalizeApplicationLogState(value) {
     || !REASONS.has(value.reason) || typeof value.error !== 'string' || value.error.length > 2000) throw invalid();
   for (const key of ['bytes', 'records', 'dropped']) if (!Number.isSafeInteger(value[key]) || value[key] < 0) throw invalid();
   for (const key of ['startedAt', 'stoppedAt']) if (value[key] !== null && (!Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 8640000000000000)) throw invalid();
+  const losses = {};
+  if (value.losses && typeof value.losses === 'object' && !Array.isArray(value.losses)) {
+    for (const key of ['rateLimited', 'queueLimited', 'sizeLimited', 'invalid', 'textTruncated', 'sensitiveOutput', 'lineLimited', 'recovery', 'io']) {
+      if (!Number.isSafeInteger(value.losses[key]) || value.losses[key] < 0 || value.losses[key] > 1e12) throw invalid();
+      losses[key] = value.losses[key];
+    }
+  }
   return { recording: value.recording, available: value.available, startedAt: value.startedAt, stoppedAt: value.stoppedAt,
-    bytes: value.bytes, records: value.records, dropped: value.dropped, reason: value.reason, error: value.error };
+    bytes: value.bytes, records: value.records, dropped: value.dropped, reason: value.reason, error: value.error,
+    ...(Object.keys(losses).length ? { losses } : {}),
+    ...(typeof value.captureVersion === 'string' && /^\d[\d.]{0,48}$/.test(value.captureVersion) ? { captureVersion: value.captureVersion } : {}) };
 }
 
 export function createApplicationLogUi({ api, onChange, clock = globalThis }) {

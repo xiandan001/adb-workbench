@@ -1,11 +1,11 @@
 import { useId, useState } from 'react';
-import { Plug, Save, Trash2, X } from 'lucide-react';
+import { ChevronDown, Plug, Save, Trash2, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { addSerialScheme, applySerialScheme, removeSerialScheme, updateSerialScheme } from '../shared/serialSchemes.js';
 import { confirmAppMessage } from '../shared/appMessageDialog.js';
 import SelectMenu from './SelectMenu';
 
-export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, selected = '', onSelect, onApplyAndConnect, canConnect = false, theme, isDark }) {
+export default function SerialSchemeControls({ preferences, workspace, config, selectedPath, terminalEnter, status, pending, onCommit, selected = '', expanded = false, onExpandedChange, onSelect, onApplyAndConnect, canConnect = false, theme, isDark }) {
   useLocale();
   const id = useId();
   const [saving, setSaving] = useState(false);
@@ -37,7 +37,9 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
     } catch (failure) { setError(failure.message); }
     return false;
   }
-  return <div className="space-y-2 rounded-lg border border-slate-400/20 p-2.5">
+  return <div data-serial-schemes className="space-y-2 rounded-lg border border-slate-400/20 p-2.5">
+    <button type="button" aria-expanded={expanded} aria-controls={`${id}-content`} onClick={() => onExpandedChange?.(!expanded)} className="flex w-full min-w-0 flex-wrap items-center gap-2 text-left text-xs"><ChevronDown size={14} className={`shrink-0 ${expanded ? '' : '-rotate-90'}`} /><span className="font-medium">{tr('连接方案')}</span><span className={`min-w-0 flex-1 break-words ${theme.textMuted}`}>{selectedScheme?.name || tr('未选择方案')}</span><span className={`shrink-0 ${theme.textMuted}`}>{tr('已保存 {0} 个', { 0: schemes.length })}</span></button>
+    {expanded && <div id={`${id}-content`} className="space-y-2">
     <div className="flex flex-wrap items-center gap-2">
       <label htmlFor={id} className="sr-only">{tr('连接方案')}</label>
       <SelectMenu id={id} value={selected} options={schemes.map(item => ({ value: item.id, label: item.name }))} onChange={onSelect} isDark={isDark} compact placeholder={tr('选择当前工作区的方案')} emptyText={tr('保存当前参数，下次直接套用')} className="min-w-40 flex-1" />
@@ -68,6 +70,7 @@ export default function SerialSchemeControls({ preferences, workspace, config, s
     </form>}
     <p className={'text-[11px] leading-5 ' + theme.textMuted}>{locked ? tr('连接期间不能套用方案；可以保存当前参数。') : workspace === 'terminal' ? tr('终端方案仅套用连接参数和回车格式，不改 RS232 设置。') : tr('选择方案不会连接；“套用”只改参数，“套用并连接”才打开当前 COM。')}</p>
     </div></details>
+    </div>}
     {statusMessage && <p role="status" className={'text-xs ' + theme.textMuted}>{messages[statusMessage]}</p>}
     {error && <p role="alert" className="text-xs text-red-500">{tr(error)}</p>}
   </div>;

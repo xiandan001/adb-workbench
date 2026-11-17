@@ -55,7 +55,7 @@ export default function LogWorkbenchToolbar({ theme, isDark, devices, deviceId, 
       <button type="button" onClick={onLatest} className="rounded border border-current/20 px-2 py-1">{pendingCount ? tr('回到最新（新增 {0} 条）', { 0: pendingCount }) : tr('跟随最新')}</button>
       <button type="button" onClick={() => setAdvanced(value => !value)} aria-expanded={advanced} className="inline-flex items-center gap-1 rounded px-2 py-1">{tr('高级')}<ChevronDown size={12} /></button>
     </div>
-    {advanced && <div role="group" aria-label={tr('日志高级设置')} className={`flex flex-wrap items-center gap-3 rounded-lg border p-3 text-xs ${theme.input}`}>
+    {advanced && <div role="group" aria-label={tr('日志高级设置')} className={`flex max-h-[min(12rem,15vh)] flex-wrap items-center gap-3 overflow-y-auto rounded-lg border p-3 text-xs ${theme.input}`}>
       <SelectMenu ariaLabel={tr('本机归档总配额')} compact value={String(archive.maxBytes)} onChange={value => onArchiveChange({ ...archive, maxBytes: Number(value) })} disabled={running || busy} isDark={isDark} className="w-36" options={[128, 256, 512, 1024].map(value => ({ value: String(value * 1024 * 1024), label: tr('{0} MiB', { 0: value }) }))} />
       <button type="button" onClick={onArchiveFolder} className={secondary}>{tr('打开归档目录')}</button>
       <span className="w-full text-[11px] opacity-70">{tr('达到配额将停止归档并提示，不自动删除旧日志；不调用 AI。')}</span>

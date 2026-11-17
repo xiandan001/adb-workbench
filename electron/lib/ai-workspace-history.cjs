@@ -21,7 +21,8 @@ function validateReport(report) {
     || (report.preview.platform !== undefined && !['android', 'harmony', 'mixed'].includes(report.preview.platform))
     || (report.turnId !== undefined && !UUID.test(report.turnId))
     || (report.preview.targetFingerprint != null && !/^[a-f\d]{24,64}$/.test(report.preview.targetFingerprint))
-    || Buffer.byteLength(JSON.stringify(report)) > limits.reportBytes) throw fail();
+    || Buffer.byteLength(JSON.stringify(report)) > limits.reportBytes
+    || Buffer.byteLength(JSON.stringify(report.preview)) > limits.evidenceBytes) throw fail();
   if (report.preview.context && (!string(report.preview.context.question, 4000) || !string(report.preview.context.summary, 4000))) throw fail();
   const review = report.review === undefined ? undefined : require('./ai-workspace-store-async.cjs').normalizeReview(report.review);
   if (report.preview.context?.caseReview) require('./ai-workspace-store-async.cjs').normalizeReview(report.preview.context.caseReview);

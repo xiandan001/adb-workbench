@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { randomUUID, createHash } = require('node:crypto');
 const { EventEmitter } = require('node:events');
-const { createBuiltinClient, LIMITS } = require('../electron/lib/ai-workspace-client.cjs');
+const { createBuiltinClient, createBuiltinBatchClient, LIMITS } = require('../electron/lib/ai-workspace-client.cjs');
 const { createOutboundTransport } = require('../electron/lib/ai-outbound-transport.cjs');
 const { prepareBatch } = require('../electron/lib/ai-outbound-policy.cjs');
 const { prepareOutbound } = require('../electron/lib/ai-outbound-processor.cjs');
@@ -47,7 +47,8 @@ function fixture({ method = 'plan', holdResponse = false } = {}) {
   const overrides = {
     './app-context.cjs': { getMainWindow: () => window }, './ssh.cjs': {}, './serial.cjs': {}, './log-analyzer.cjs': {}, './adb-runtime.cjs': {},
     './ai-outbound-transport.cjs': transport, './vip.cjs': { getStatusAsync: membership },
-    './ai-workspace-client.cjs': { createBuiltinClient: options => createBuiltinClient({ ...options, getConfig: () => config }) },
+    './ai-workspace-client.cjs': { createBuiltinClient: options => createBuiltinClient({ ...options, getConfig: () => config }),
+      createBuiltinBatchClient: options => createBuiltinBatchClient({ ...options, getConfig: () => config }) },
     './ai-workspace-processor.cjs': { runWorkspaceJob: computeWorkspaceJob, cleanupWorkspaceProcessor() {}, createWorkerReportStore: () => ({}) },
     './ai-workspace-evidence.cjs': { createEvidenceAdapter: () => ({ list: () => [], collect: ({ text }) => computeWorkspaceJob('freeze', { sources: [{ kind: 'text', label: 'Synthetic selected evidence', text }] }) }) },
     electron: { app: { getPath: () => path.join(__dirname, 'never-created-fixture-profile') }, dialog: {} },

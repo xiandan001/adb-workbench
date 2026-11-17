@@ -143,7 +143,7 @@ test('rejected batch cannot accept later producer tasks or strand cancellation p
   const gate = createOutboundGate({ prepare: async bodies => prepareBatch(bodies), membership: async () => ({ activated: true, scope: 'vip' }) });
   const operation = gate.begin(owner), batch = gate.batch(operation, 'oversized fixture');
   let sent = 0;
-  const promises = Array.from({ length: 10 }, () => gate.submit(operation, batch, body('x'.repeat(1024 * 1024)), async () => { sent++; }));
+  const promises = Array.from({ length: LIMITS.requests + 1 }, () => gate.submit(operation, batch, body('x'.repeat(1024 * 1024)), async () => { sent++; }));
   gate.finishProducer(operation);
   const results = await Promise.allSettled(promises);
   assert.ok(results.every(result => result.status === 'rejected'));

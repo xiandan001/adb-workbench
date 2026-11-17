@@ -63,13 +63,13 @@ test('quality defaults reuse only same-device application in an untouched empty 
 test('serial scheme selections persist independently without storing connections or overwriting corrupt values', () => {
   let raw = null, writes = 0;
   const storage = { getItem: () => raw, setItem: (_key, value) => { raw = value; writes++; } };
-  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '' });
+  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '', rs232Expanded: false, terminalExpanded: false });
   saveSerialSchemeSelection({ version: 1, rs232: 'one', terminal: 'two' }, storage);
-  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: 'one', terminal: 'two' });
+  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: 'one', terminal: 'two', rs232Expanded: false, terminalExpanded: false });
   raw = '{broken'; assert.throws(() => saveSerialSchemeSelection({ version: 1, rs232: '', terminal: '' }, storage));
   assert.equal(raw, '{broken'); assert.equal(writes, 1);
-  assert.deepEqual(resetSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '' });
-  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '' });
+  assert.deepEqual(resetSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '', rs232Expanded: false, terminalExpanded: false });
+  assert.deepEqual(readSerialSchemeSelection(storage), { version: 1, rs232: '', terminal: '', rs232Expanded: false, terminalExpanded: false });
   for (const invalid of [{ version: 2, rs232: '', terminal: '' }, { version: 1, rs232: '', terminal: '', port: 'COM1' },
     { version: 1, rs232: ' ', terminal: '' }, { version: 1, rs232: 'a'.repeat(201), terminal: '' },
     { version: 1, rs232: 'a\n', terminal: '' }]) assert.throws(() => normalizeSerialSchemeSelection(invalid));

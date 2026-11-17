@@ -5,16 +5,49 @@ const { shapeDiagnosticSource } = require('./ai-workspace-diagnostics.cjs');
 const limits = require('./ai-workspace-limits.cjs');
 const { tr } = require('./localization.cjs');
 const copy = value => structuredClone(value);
+const evidenceLimit = () => Object.assign(new Error(tr('完整证据及来源信息超过 20 MiB，请减少材料或缩小选段后重试；未截断内容。')), { code: 'AI_EVIDENCE_LIMIT', safe: true });
+function contentBytes(value) {
+  const bytes = Buffer.byteLength(JSON.stringify(value));
+  if (bytes > limits.evidenceBytes) throw evidenceLimit();
+  return bytes;
+}
 function boundedBundle(entries) {
+  if (!Array.isArray(entries) || entries.length > 32) throw evidenceLimit();
   const result = entries.map((entry, index) => ({ ...copy(entry), id: `E${index + 1}` }));
-  const bytes = Buffer.byteLength(JSON.stringify(result));
-  if (result.length > 32 || bytes > limits.evidenceBytes) throw Object.assign(new Error(tr('证据总量超过 1 MiB，请减少来源或缩小选段后重新生成预览。')), { code: 'AI_EVIDENCE_LIMIT', safe: true });
+  const bytes = contentBytes(result);
   return { entries: result, bytes, truncated: result.some(entry => entry.truncated) };
 }
-async function computeWorkspaceJob(command, args) {
+async function computeWorkspaceJob(command, args, { flag } = {}) {
+  const checkCancelled = () => require('./ai-workspace-store-async.cjs').cancelled(flag);
   if (command === 'clone') return copy(args.value);
+  if (command === 'freeze-preview') { const bytes = contentBytes(args.value); return { preview: copy(args.value), bytes }; }
+  if (command === 'fingerprints') {
+    if (!Array.isArray(args.entries) || args.entries.length > 32) throw evidenceLimit();
+    contentBytes(args.entries);
+    return args.entries.map(({ id: _id, ...entry }) => createHash('sha256').update(JSON.stringify(entry)).digest('hex'));
+  }
+  if (command === 'request-plan') {
+    if (!args || Object.keys(args).some(key => !['prompt', 'payload', 'locale', 'maxTokens', 'phase'].includes(key))) throw evidenceLimit();
+    return require('./ai-workspace-request-plan.cjs').buildRequestPlan(args, { checkCancelled });
+  }
+  if (command === 'markdown-plan') {
+    if (!args || Object.keys(args).some(key => !['prompt', 'lines', 'intro', 'maxTokens', 'maxLines'].includes(key))) throw evidenceLimit();
+    return require('./ai-workspace-request-plan.cjs').buildMarkdownPlan(args, { checkCancelled });
+  }
+  if (command === 'serial-snapshot') {
+    if (!args || Object.keys(args).some(key => !['rows', 'maxRecords', 'maxBytes', 'originalRecords'].includes(key))
+      || !Array.isArray(args.rows) || !Number.isSafeInteger(args.maxRecords) || args.maxRecords < 1 || args.maxRecords > 10000
+      || !Number.isSafeInteger(args.maxBytes) || args.maxBytes < 1 || args.maxBytes > limits.sourceBytes
+      || !Number.isSafeInteger(args.originalRecords) || args.originalRecords < args.rows.length || args.originalRecords > 10000) throw evidenceLimit();
+    const result = require('./serial-ai-evidence.cjs').captureSerialEvidenceRows(args.rows, args);
+    const retainedRecords = result.windowInfo?.retainedRecords ?? args.rows.length;
+    return args.originalRecords > retainedRecords ? { ...result, truncated: true,
+      windowInfo: { originalRecords: args.originalRecords, retainedRecords, byteLimit: args.maxBytes } } : result;
+  }
   if (command === 'transportBody') return JSON.stringify(args.payload);
   if (command === 'freeze') {
+    if (!Array.isArray(args.sources) || args.sources.length > 32) throw evidenceLimit();
+    contentBytes(args.sources);
     const selection = normalizeSelection(args.selection);
     const entries = args.sources.map((raw, index) => {
       const source = shapeDiagnosticSource({ ...raw, kind: ['adb', 'hdc', 'log', 'serial', 'ssh', 'text'].includes(raw.kind) ? raw.kind : 'text' });
@@ -30,7 +63,7 @@ async function computeWorkspaceJob(command, args) {
   if (command === 'bundle') return boundedBundle(args.entries);
   if (command === 'request') {
     const content = JSON.stringify(args.payload);
-    if (Buffer.byteLength(args.prompt) + Buffer.byteLength(content) > limits.inputBytes) throw Object.assign(new Error(tr('证据总量超过 1 MiB，请减少来源或缩小选段后重新生成预览。')), { code: 'AI_EVIDENCE_LIMIT', safe: true });
+    if (Buffer.byteLength(args.prompt) + Buffer.byteLength(content) > limits.inputBytes) throw Object.assign(new Error(tr('单次模型请求超过安全上限，请使用分批分析；未截断内容。')), { code: 'AI_EVIDENCE_LIMIT', safe: true });
     return { content, key: createHash('sha256').update(args.locale || '').update(content).digest('hex') };
   }
   if (command === 'refilter') {

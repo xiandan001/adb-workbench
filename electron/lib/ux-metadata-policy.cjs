@@ -1,11 +1,12 @@
 const { tr } = require('./localization.cjs');
+const { ACTIVITY_DISMISSALS_KEY, ACTIVITY_DISMISSALS_BYTES, normalizeActivityDismissals } = require('./activity-dismissal-policy.cjs');
 
 const APPLICATION_CONTEXT_KEY = 'adb-workbench.application-context.v1';
 const APPLICATION_RECENTS_KEY = 'adb-workbench.application-recents.v1';
 const AI_DRAFT_KEY = 'adb-workbench.ai-selection-draft.v1';
 const ARTIFACT_VIEW_KEY = 'adb-workbench.artifact-view.v1';
 const SERIAL_SCHEME_SELECTION_KEY = 'adb-workbench.serial-scheme-selection.v1';
-const UX_METADATA_KEYS = Object.freeze([APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY]);
+const UX_METADATA_KEYS = Object.freeze([APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY, ACTIVITY_DISMISSALS_KEY]);
 const MODES = ['diagnose', 'analysis', 'task'];
 const CHECKS = ['device_info', 'logcat_snapshot', 'performance_snapshot', 'app_package', 'app_process', 'app_memory', 'app_activity'];
 const TYPES = ['all', 'troubleshooting', 'inspection', 'regression', 'deviceGuard', 'performance', 'task', 'reproduction'];
@@ -64,9 +65,11 @@ function normalizeArtifactViewState(value) {
   return result;
 }
 function normalizeSerialSchemeSelection(value) {
-  if (!shape(value, ['version', 'rs232', 'terminal']) || value.version !== 1
+  const folds = ['rs232Expanded', 'terminalExpanded'];
+  if (!value || !shape(value, ['version', 'rs232', 'terminal', ...folds.filter(key => Object.hasOwn(value, key))]) || value.version !== 1
+    || folds.some(key => Object.hasOwn(value, key) && typeof value[key] !== 'boolean')
     || ['rs232', 'terminal'].some(key => !clean(value[key], 200) || value[key] && !value[key].trim())) fail();
-  return { version: 1, rs232: value.rs232, terminal: value.terminal };
+  return { version: 1, rs232: value.rs232, terminal: value.terminal, rs232Expanded: value.rs232Expanded ?? false, terminalExpanded: value.terminalExpanded ?? false };
 }
 
 const RULES = new Map([
@@ -74,7 +77,8 @@ const RULES = new Map([
   [APPLICATION_RECENTS_KEY, { limit: 65536, normalize: normalizeApplicationRecents }],
   [AI_DRAFT_KEY, { limit: 16384, normalize: normalizeAiSelectionDraft }],
   [ARTIFACT_VIEW_KEY, { limit: 131072, normalize: normalizeArtifactViewState }],
-  [SERIAL_SCHEME_SELECTION_KEY, { limit: 2048, characters: true, normalize: normalizeSerialSchemeSelection }]
+  [SERIAL_SCHEME_SELECTION_KEY, { limit: 2048, characters: true, normalize: normalizeSerialSchemeSelection }],
+  [ACTIVITY_DISMISSALS_KEY, { limit: ACTIVITY_DISMISSALS_BYTES, normalize: normalizeActivityDismissals }]
 ]);
 function normalizeUxMetadataPreference(key, raw) {
   const rule = RULES.get(key);

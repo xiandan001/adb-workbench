@@ -1,7 +1,7 @@
 const { tr } = require('./localization.cjs');
 const { createAiWorkspaceService } = require('./ai-workspace-service.cjs');
 const { createEvidenceAdapter } = require('./ai-workspace-evidence.cjs');
-const { createBuiltinClient } = require('./ai-workspace-client.cjs');
+const { createBuiltinClient, createBuiltinBatchClient } = require('./ai-workspace-client.cjs');
 const { createWorkerReportStore, runWorkspaceJob, cleanupWorkspaceProcessor } = require('./ai-workspace-processor.cjs');
 
 const instances = new Map();
@@ -14,7 +14,11 @@ function register(ipcMain) {
   const outbound = require('./ai-outbound-transport.cjs');
   const client = createBuiltinClient({ request: outbound.request, deferTimeoutUntilAuthorized: true,
     serializeBody: (payload, options) => runWorkspaceJob('transportBody', { payload }, options) });
+  const plannedClient = createBuiltinBatchClient({ request: outbound.request, deferTimeoutUntilAuthorized: true,
+    serializeBody: (payload, options) => runWorkspaceJob('transportBody', { payload }, options) });
   const factory = sender => createAiWorkspaceService({ client: args => outbound.withOperation({ title: tr('AI 工作区'), kind: 'summary', contentFormat: 'workspace-json', signal: args.signal }, () => client(args), sender), processor: runWorkspaceJob,
+    batchClient: (requests, { signal }) => outbound.withOperation({ title: tr('AI 工作区'), kind: 'summary', contentFormat: 'workspace-json', signal },
+      () => plannedClient(requests, { signal, run: action => outbound.withBatch(tr('AI 工作区'), action, 1) }), sender),
     evidence: createEvidenceAdapter({ getLogs: require('./log-analyzer.cjs').getAnalysisSnapshots,
       getSerial: require('./serial.cjs').snapshots, getSsh: ssh.getAnalysisSources, readSsh: ssh.readAnalysisTerminal,
       runAdb: require('./adb-runtime.cjs').runAdb, processor: runWorkspaceJob }),

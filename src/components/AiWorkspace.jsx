@@ -13,6 +13,7 @@ import AiWorkspaceHandoff from './AiWorkspaceHandoff';
 import AiWorkspaceRelated from './AiWorkspaceRelated';
 import { workspacePhase, workspacePrimaryBlock } from './AiWorkspaceFlow';
 import SelectMenu from './SelectMenu';
+import AiContextTextInput from './AiContextTextInput';
 
 function WorkspaceRules({ theme }) {
   return <details className={`rounded-xl border px-4 py-3 ${theme.card}`}>
@@ -119,7 +120,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
             {current.contextRef && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('不选择新来源时复用所选报告的冻结证据；只有主动选择的来源或补充文本会加入新预览。')}</p>}
             <div className="space-y-2"><h4 className="text-xs font-medium">{tr('选择已有证据来源')}</h4><SelectionCards items={sources.sources || []} selected={current.sourceIds} onToggle={id => state.edit({ sourceIds: toggleWorkspaceSelection(current.sourceIds, id) })} disabled={busy} theme={theme} empty={tr('暂无可用来源。可先打开日志、串口或 SSH 终端，再刷新；也可粘贴文本分析。')} /></div>
             {staleSources && <div className="space-y-2 rounded-lg border border-amber-500/25 p-3"><p className="text-xs text-amber-600">{tr('部分所选来源已不可用，请移除后重新采集。')}</p><button type="button" disabled={busy} onClick={() => state.edit({ sourceIds: current.sourceIds.filter(id => availableSources.has(id)) })} className={button}>{tr('移除不可用来源')}</button></div>}
-            <label className="block space-y-2"><span className="text-xs font-medium">{tr('补充文本（可选）')}</span><textarea value={current.text} onChange={event => state.edit({ text: event.target.value })} disabled={busy} rows={4} maxLength={12000} className={`${input} resize-y font-mono text-xs leading-5`} placeholder={tr('仅粘贴本次需要分析的片段；采集后会显示脱敏预览。')} /></label>
+            <AiContextTextInput key={current.caseId} value={current.text} onChange={text => state.edit({ text })} disabled={busy} className={input} label={tr('补充文本（可选）')} placeholder={tr('仅粘贴本次需要分析的片段；采集后会显示脱敏预览。')} />
           </>}
           {mode === 'task' ? <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('补充测试参数（可选）')}</summary><div className="mt-3"><AiWorkspaceRequirements requirements={current.requirements} onChange={requirements => state.edit({ requirements })} disabled={busy} theme={theme} /></div></details> : <AiWorkspaceSelection selection={current.selection} onChange={selection => state.edit({ selection })} disabled={busy} theme={theme} />}
           {blocked && <p role="status" className={`text-xs leading-5 ${theme.textMuted}`}>{blockedReasons[blocked]}</p>}

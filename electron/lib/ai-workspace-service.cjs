@@ -9,8 +9,11 @@ const { isHarmonyDevice, devicePlatform } = require('./device-platform.cjs');
 const { UUID } = require('./ai-workspace-history.cjs');
 const { requirements, validateInteractions } = require('./ai-workspace-task.cjs');
 const limits = require('./ai-workspace-limits.cjs');
+const { residentBudget } = require('./ai-context-budget.cjs');
+const { PLAN_REQUESTS, REDUCE_LEVELS, validatePlannedCitations } = require('./ai-workspace-request-plan.cjs');
 
 const TTL = 15 * 60 * 1000;
+let activeAi = 0;
 const fail = (code, message) => Object.assign(new Error(message), { code, safe: true });
 const clone = value => structuredClone(value);
 const deviceKey = value => createHash('sha256').update(`device:${value}`).digest('hex').slice(0, 24);
@@ -23,22 +26,24 @@ function targetKey(entries, deviceId) {
   if (deviceId && entries.every(entry => entry.targetKey === deviceKey(deviceId))) return deviceKey(deviceId);
   return keys.length === entries.length && new Set(keys).size === 1 ? keys[0] : null;
 }
-function frozenEntryKey({ id: _id, ...entry }) {
-  return createHash('sha256').update(JSON.stringify(entry)).digest('hex');
-}
-
-function createAiWorkspaceService({ client, evidence, membership, saveTask, confirmSave, history, casebook,
+function createAiWorkspaceService({ client, batchClient, evidence, membership, saveTask, confirmSave, history, casebook,
   processor = computeWorkspaceJob, resolveHandoff, resolveBasket, resolveTaskTargets, activity,
   confirmDelete = async () => false, exportReport = async () => ({ cancelled: true }), now = Date.now }) {
   const cases = new Map();
   const lifetime = new AbortController();
   const process = (command, args, signal) => processor(command, args, { signal: signal || lifetime.signal, locale: getLocale() });
-  let activeAi = 0, disposed = false;
+  let disposed = false;
+  const retained = new Map();
+  function releaseUnused() {
+    const live = new Set([...cases.values()].flatMap(state => [state.preview, ...state.turns.map(turn => turn.preview)]).filter(Boolean));
+    for (const [preview, release] of retained) if (!live.has(preview)) { release(); retained.delete(preview); }
+  }
   const assertLive = () => { if (disposed) throw fail('CANCELLED', tr('操作已取消')); };
   function getCase(id) {
     assertLive();
     if (!UUID.test(id || '')) throw fail('AI_CASE', tr('分析会话无效，请重新打开 AI 工作区。'));
     for (const [key, value] of cases) if (!value.operation && now() - value.touched > TTL) cases.delete(key);
+    releaseUnused();
     if (!cases.has(id)) {
       if (cases.size >= 12) throw fail('AI_CASE_LIMIT', tr('分析会话过多，请关闭不用的分析后重试。'));
       cases.set(id, { touched: now(), turns: [] });
@@ -81,7 +86,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       const result = await action(state, controller.signal, assertCurrent); if (activityId) activity.finish(activityId, { status: result?.cancelled ? 'cancelled' : 'completed' }); return result;
     }
     catch (error) { if (activityId) activity.finish(activityId, { status: error.code === 'CANCELLED' || controller.signal.aborted ? 'cancelled' : 'failed', detail: error.safe ? error.message : tr('AI 本机后台操作未完成，请重试。') }); throw error; }
-    finally { if (state.operation === controller) state.operation = null; state.touched = now(); }
+    finally { if (state.operation === controller) state.operation = null; state.touched = now(); releaseUnused(); }
   }
   async function infer(prompt, payload, signal, assertCurrent, prepared) {
     await entitled(); assertCurrent();
@@ -98,9 +103,51 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
     } finally { activeAi--; }
   }
   async function freezePreview(state, value, signal) {
-    const preview = { ...await process('clone', { value }, signal), id: randomUUID(), expiresAt: new Date(now() + TTL).toISOString() };
+    const frozen = await process('freeze-preview', { value: { ...value, id: randomUUID(), expiresAt: new Date(now() + TTL).toISOString() } }, signal);
+    assertLive();
+    if (signal?.aborted) throw fail('CANCELLED', tr('操作已取消'));
+    releaseUnused();
+    const preview = frozen.preview, release = residentBudget.reserve(frozen.bytes);
+    retained.set(preview, release);
     state.preview = preview; state.cache = null;
     return { preview };
+  }
+  async function inferPlanned(initial, prompt, payload, preview, validationEntries, signal, assertCurrent) {
+    await entitled(); assertCurrent();
+    if (activeAi >= 2) throw fail('AI_CONCURRENCY', tr('已有两个 AI 请求正在运行，请稍后重试。'));
+    activeAi++; let planned = initial, count = 0, levels = 0;
+    let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    try {
+      while (true) {
+        count += planned.requests.length;
+        if (count + Number(planned.requests.length > 1) > PLAN_REQUESTS) throw fail('AI_CONTEXT_PLAN_LIMIT', tr('AI 分块计划超过 64 个请求，请缩小范围；未把部分结果标记为完整分析。'));
+        const release = residentBudget.reserve(planned.requests.reduce((sum, request) => sum + request.bytes, 0));
+        const partialResults = [];
+        try {
+          for (let start = 0; start < planned.requests.length; start += 16) {
+            assertCurrent(); await entitled(); assertCurrent();
+            const requests = planned.requests.slice(start, start + 16);
+            const answers = [];
+            if (batchClient) answers.push(...await batchClient(requests, { signal }));
+            else for (const request of requests) { assertCurrent(); answers.push(await client({ ...request, signal })); }
+            assertCurrent();
+            if (answers.length !== requests.length) throw fail('AI_CONTEXT_INCOMPLETE', tr('AI 分块结果不完整，未生成最终结论。'));
+            for (let index = 0; index < answers.length; index++) {
+              const answer = answers[index];
+              if (!answer.ok) throw fail(answer.code === 'cancelled' || answer.cancelled ? 'CANCELLED' : answer.code || 'AI_REQUEST', answer.error || tr('AI 请求未完成，请稍后手动重试。'));
+              if (usage && answer.usage) for (const key of Object.keys(usage)) usage[key] += answer.usage[key]; else usage = null;
+              const result = await process('analysis', { text: answer.text, entries: validationEntries, comparison: preview.comparison }, signal);
+              validatePlannedCitations(result, requests[index].mapping);
+              partialResults.push({ mapping: requests[index].mapping, result });
+            }
+          }
+        } finally { release(); }
+        if (planned.requests.length === 1) return { text: JSON.stringify(partialResults[0].result), usage };
+        if (++levels > REDUCE_LEVELS) throw fail('AI_CONTEXT_PLAN_LIMIT', tr('AI 汇总层数超过 4 层，请缩小范围；未把部分结果标记为完整分析。'));
+        planned = await process('request-plan', { prompt, phase: 'reduce', payload: { question: payload.question, partialResults }, locale: getLocale() }, signal);
+        assertCurrent();
+      }
+    } finally { activeAi--; }
   }
   const methods = {
     async sources(args = {}) {
@@ -137,8 +184,9 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       assertCurrent();
       let old = prior?.preview.entries || [];
       if (prior && !hasNew && args.selection) old = await process('refilter', { entries: old, selection, now: now() }, signal);
-      const priorEntries = new Set((prior?.preview.entries || []).map(frozenEntryKey));
-      const imported = [...(handoff?.entries || []), ...(basket?.entries || []).filter(entry => !priorEntries.has(frozenEntryKey(entry)))];
+      const priorEntries = new Set(await process('fingerprints', { entries: prior?.preview.entries || [] }, signal));
+      const basketEntries = basket?.entries || [], basketKeys = await process('fingerprints', { entries: basketEntries }, signal);
+      const imported = [...(handoff?.entries || []), ...basketEntries.filter((_entry, index) => !priorEntries.has(basketKeys[index]))];
       const data = await process('bundle', { entries: [...old, ...imported, ...(collected?.entries || [])] }, signal);
       if (!data.entries.some(entry => entry.text?.trim())) throw fail('AI_EVIDENCE_EMPTY', tr('没有可分析的证据，请选择来源或补充文本。'));
       const fingerprint = collected ? targetKey(collected.entries, args.deviceId) : prior?.preview.targetFingerprint;
@@ -179,12 +227,15 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       const payload = { question: preview.question, evidence: preview.entries,
         ...(preview.context ? { context: preview.context } : {}), ...(preview.comparison ? { comparison: preview.comparison } : {}),
         ...(preview.diagnostic ? { diagnostic: preview.diagnostic } : {}), ...(preview.handoff ? { handoff: preview.handoff } : {}) };
-      const analysisPrompt = promptForPlatform('analysis', preview.platform === 'harmony' ? 'harmony' : 'android') + (preview.platform === 'mixed' ? ' Evidence contains multiple platforms; never assume Android and Harmony tools or metrics are interchangeable.' : '') + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly. You may add optional verificationChecks (at most 6): each has exactly title (<=200 characters), checkIds (1-3 unique identifiers selected ONLY from the following host allowlist), expectedObservation (<=1000 characters). These are human-reviewed read-only checks, not actions or commands; no deviceId, package or command fields. Explain what observation would support or weaken a hypothesis, never promise a successful check proves a fix. If no relevant available check exists omit verificationChecks. Allowed check identifiers: ' + JSON.stringify(availableVerificationChecks);
-      const locale = getLocale(), prepared = await process('request', { prompt: analysisPrompt, payload, locale }, signal), key = prepared.key;
+      const analysisPrompt = promptForPlatform('analysis', preview.platform === 'harmony' ? 'harmony' : 'android') + (preview.platform === 'mixed' ? ' Evidence contains multiple platforms; never assume Android and Harmony tools or metrics are interchangeable.' : '') + ' Entries marked unavailable document a missing check, not a healthy app or proven fault. A caseReview is a human review only for its stated package/version, never proof for this run. State applicability gaps explicitly. A chunkRange marks only the included original frozen lines: use original [Lnumber] citations, never renumber or cite outside supplied mappings. Partial results are unverified observations, not new source evidence. You may add optional verificationChecks (at most 6): each has exactly title (<=200 characters), checkIds (1-3 unique identifiers selected ONLY from the following host allowlist), expectedObservation (<=1000 characters). These are human-reviewed read-only checks, not actions or commands; no deviceId, package or command fields. Explain what observation would support or weaken a hypothesis, never promise a successful check proves a fix. If no relevant available check exists omit verificationChecks. Allowed check identifiers: ' + JSON.stringify(availableVerificationChecks);
+      const locale = getLocale(), prepared = await process('request-plan', { prompt: analysisPrompt, payload, locale }, signal), key = prepared.key;
+      const validationEntries = preview.entries.map(entry => ({ id: entry.id, lineCount: entry.lineCount ?? entry.text.split('\n').length }));
       await entitled(); assertCurrent();
       if (state.cache?.key === key && now() - state.cache.at < 5 * 60 * 1000) return { ...state.cache.value, cached: true };
-      const answer = await withLocale(locale, () => infer(analysisPrompt, payload, signal, assertCurrent, prepared));
-      const result = await process('analysis', { text: answer.text, entries: preview.entries, comparison: preview.comparison }, signal);
+      const answer = await withLocale(locale, () => prepared.kind === 'single'
+        ? infer(analysisPrompt, payload, signal, assertCurrent, { content: prepared.requests[0].userContent, key })
+        : inferPlanned(prepared, analysisPrompt, payload, preview, validationEntries, signal, assertCurrent));
+      const result = await process('analysis', { text: answer.text, entries: validationEntries, comparison: preview.comparison }, signal);
       if (result.verificationChecks) {
         const available = result.verificationChecks.filter(card => card.checkIds.every(id => availableVerificationChecks.includes(id)));
         if (available.length !== result.verificationChecks.length) result.limitations = [...result.limitations.slice(0, 11), tr('部分验证建议缺少应用目标，未提供准备操作。')];
@@ -306,7 +357,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
       return { items: await casebook.similar(await resolveReport(args.reportRef), args.limit, { signal: lifetime.signal }) };
     },
     async cancel(args) { getCase(args.caseId).operation?.abort(); return { cancelled: true }; },
-    async close(args) { const state = cases.get(args.caseId); state?.operation?.abort(); cases.delete(args.caseId); return {}; },
+    async close(args) { const state = cases.get(args.caseId); state?.operation?.abort(); cases.delete(args.caseId); releaseUnused(); return {}; },
   };
   return {
     async call(method, args = {}) {
@@ -320,7 +371,7 @@ function createAiWorkspaceService({ client, evidence, membership, saveTask, conf
           error: error.safe || String(error.code || '').startsWith('AI_') || error.code === 'CANCELLED' ? error.message : tr('AI 操作未完成，请检查输入后重试。') };
       }
     },
-    dispose() { disposed = true; lifetime.abort(); for (const state of cases.values()) state.operation?.abort(); cases.clear(); },
+    dispose() { disposed = true; lifetime.abort(); for (const state of cases.values()) state.operation?.abort(); cases.clear(); releaseUnused(); },
   };
 }
 

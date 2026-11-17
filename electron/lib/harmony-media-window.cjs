@@ -11,6 +11,7 @@ const { createHarmonyMediaInput } = require('./harmony-media-input.cjs');
 const { normalizeDecoderDiagnostic, normalizeDecoderEvent, firstFrameFailure } = require('./harmony-media-diagnostics.cjs');
 const applicationLog = require('./application-log.cjs');
 const { classifyApplicationError } = require('./application-log-policy.cjs');
+const { createMirrorDiagnostics, mirrorFailureReason } = require('./mirror-diagnostics.cjs');
 
 const ACTIVE_RECORDINGS = new Set(['starting', 'recording', 'stopping', 'saving']);
 let singleton;
@@ -30,7 +31,7 @@ function getManager() {
     onFrame: (id, frame) => {
       const view = forSession(id);
       if (!view || view.window.isDestroyed() || !view.rendererReady) throw new Error(tr('投屏窗口已关闭。'));
-      if (view.inFlight.size >= 12) throw new Error(tr('投屏窗口处理速度不足，已停止继续堆积视频帧。'));
+      if (view.inFlight.size >= 12) throw Object.assign(new Error(tr('投屏窗口处理速度不足，已停止继续堆积视频帧。')), { code: 'MEDIA_BACKPRESSURE' });
       const sequence = view.sequence++;
       view.inFlight.add(sequence);
       const session = streams.get(id);
@@ -44,6 +45,9 @@ function getManager() {
       if (!view || view.sessionId && view.sessionId !== state.id) return;
       if (!view.sessionId && state.status !== 'starting') return;
       view.sessionId = state.id;
+      const phase = { starting: 'validation', 'awaiting-consent': 'awaiting-consent', streaming: view.decoded ? 'streaming' : 'awaiting-first-frame', stopping: 'stopping' }[state.status];
+      if (phase) view.monitor.event('startup-check', { phase, toolVersion: state.toolVersion, width: state.width, height: state.height });
+      if (['stopped', 'failed'].includes(state.status)) view.monitor.finish(state.status === 'failed' ? 'failure' : 'stop', { reason: state.diagnosticReason || 'UNKNOWN', toolVersion: state.toolVersion });
       send(view, 'state', { ...state, error: state.error ? tr(state.error) : '' });
       if (['stopped', 'failed'].includes(state.status)) {
         view.decodedReject?.(new Error(state.error || tr('投屏已停止')));
@@ -99,6 +103,8 @@ function getManager() {
       webPreferences: { preload: path.join(__dirname, '../harmony-media-preload.cjs'), nodeIntegration: false,
         contextIsolation: true, sandbox: true, backgroundThrottling: false } });
     const view = { deviceId, ref, window, ordinal: ++viewCounter, sessionId: '', rendererReady: false, sequence: 0, inFlight: new Set(), inputBusy: false, allowClose: false };
+    view.monitor = createMirrorDiagnostics({ transport: 'hdc', mirrorNumber: view.ordinal, attemptNumber: 1, phase: 'validation', videoCodec: 'h264', audioMode: 'disabled', record: applicationLog.record });
+    view.monitor.event('opening');
     let readyResolve;
     const ready = new Promise(resolve => { readyResolve = resolve; });
     view.readyResolve = readyResolve;
@@ -108,7 +114,7 @@ function getManager() {
     views.set(deviceId, view);
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
-    window.webContents.on('render-process-gone', () => { if (view.sessionId) void streams.stop(view.sessionId); view.decodedReject(new Error(tr('投屏窗口进程已结束。'))); });
+    window.webContents.on('render-process-gone', () => { view.monitor.finish('failure', { reason: 'WINDOW_CLOSED' }); if (view.sessionId) void streams.stop(view.sessionId, 'WINDOW_CLOSED'); view.decodedReject(new Error(tr('投屏窗口进程已结束。'))); });
     window.on('close', event => {
       if (view.allowClose) return;
       event.preventDefault();
@@ -123,15 +129,16 @@ function getManager() {
             if (response.response !== 1) return;
           }
         }
-        if (view.sessionId) await streams.stop(view.sessionId);
+        if (view.sessionId) await streams.stop(view.sessionId, 'WINDOW_CLOSED');
         view.allowClose = true;
         if (!window.isDestroyed()) window.close();
       })().finally(() => { view.closing = null; });
     });
     window.on('closed', () => {
+      view.monitor.finish('stop', { reason: 'WINDOW_CLOSED' });
       if (views.get(deviceId) === view) views.delete(deviceId);
       view.decodedReject(new Error(tr('投屏窗口已关闭。')));
-      if (view.sessionId) void streams.stop(view.sessionId);
+      if (view.sessionId) void streams.stop(view.sessionId, 'WINDOW_CLOSED');
       for (const [id, pending] of recordRequests) if (pending.view === view) {
         clearTimeout(pending.timer); pending.resolve({ success: false, error: tr('投屏窗口已关闭，录像片段已保留。') }); recordRequests.delete(id);
       }
@@ -143,16 +150,17 @@ function getManager() {
         await Promise.race([ready, new Promise((_, reject) => { readyTimer = setTimeout(() => reject(new Error(tr('投屏界面未能准备就绪。'))), 15000); })]);
         if (window.isDestroyed()) throw new Error(tr('投屏窗口已关闭。'));
         const current = resolveDeviceRef(deviceId);
-        if (current.generation !== view.ref.generation || current.targetKey !== view.ref.targetKey) throw new Error(tr('窗口准备期间设备连接已变化，未部署媒体组件。'));
+        if (current.generation !== view.ref.generation || current.targetKey !== view.ref.targetKey) throw Object.assign(new Error(tr('窗口准备期间设备连接已变化，未部署媒体组件。')), { code: 'DEVICE_CHANGED' });
         const result = await streams.start(deviceId);
-        if (!result.success) throw new Error(result.error);
+        if (!result.success) throw Object.assign(new Error(result.error), { code: result.code, mirrorReason: result.session?.diagnosticReason });
         view.sessionId = result.session.id;
         await Promise.race([decoded, new Promise((_, reject) => { decodedTimer = setTimeout(() => {
           applicationLog.record({ ...view.decoderDiagnostic, source: 'media', event: 'first-frame-timeout', errorCode: 'TIMEOUT' });
-          reject(new Error(firstFrameFailure(view.decoderDiagnostic)));
+          reject(Object.assign(new Error(firstFrameFailure(view.decoderDiagnostic)), { code: 'CAPTURE_TIMEOUT' }));
         }, 15000); })]);
         return { success: true, session: streams.get(view.sessionId) };
       } catch (error) {
+        view.monitor.finish('failure', { reason: error.mirrorReason || mirrorFailureReason(error.code) });
         applicationLog.record({ source: 'media', event: 'transport-error', ...classifyApplicationError(error) });
         if (view.sessionId) await streams.stop(view.sessionId);
         send(view, 'state', { id: view.sessionId, deviceId, status: 'failed', error: error.message || tr('原生投屏未能启动。') });
@@ -218,10 +226,17 @@ function register(ipcMain) {
         view.lastLogStage = diagnostic.stage;
         applicationLog.record({ ...diagnostic, source: 'media', event: 'decode-summary' });
       }
-      if (diagnostic.stage === 'decoder-error' && !view.decoded) view.decodedReject(new Error(tr('当前主机无法解码此视频流。')));
+      if (diagnostic.stage === 'decoder-error') {
+        view.monitor.finish('failure', { reason: 'VIDEO_DECODER' });
+        if (!view.decoded) view.decodedReject(new Error(tr('当前主机无法解码此视频流。')));
+      }
     }
     view.inFlight.delete(args.sequence);
-    if (args.decoded === true) { manager.streams.confirmDecoded?.(view.sessionId); view.decoded = true; view.decodedResolve(); }
+    if (args.decoded === true) {
+      manager.streams.confirmDecoded?.(view.sessionId);
+      if (!view.decoded) view.monitor.event('ready', { phase: 'streaming', readiness: 'decoded-frame' });
+      view.decoded = true; view.decodedResolve();
+    }
     return { success: true };
   });
   handle('stop', async view => {

@@ -12,6 +12,8 @@ const { createScreenshotActions } = require('./screenshot-actions.cjs');
 const screenRecording = require('./screen-recording.cjs');
 const { recordMedia } = require('./device-media.cjs');
 const { isHarmonyDevice, unsupportedDeviceOperation } = require('./device-platform.cjs');
+const applicationLog = require('./application-log.cjs');
+const { createMirrorDiagnostics } = require('./mirror-diagnostics.cjs');
 
 // 终端 shell 执行：记录运行中的进程，支持主动中断
 // key: requestId, value: { proc, deviceId, timer, settle }
@@ -25,6 +27,7 @@ const SCRCPY_STARTUP_WATCH_MS = 10000;
 const SCRCPY_READY_GRACE_MS = 800;
 const SCRCPY_AUDIO_PROBE_MS = 7000;
 const scrcpyAudioModeCache = new Map();
+let scrcpyMirrorSequence = 0;
 
 function buildScrcpyArgs(deviceId, settings, extraArgs = []) {
   const args = ['-s', deviceId, '--window-title', `Scrcpy - ${deviceId}`];
@@ -46,16 +49,6 @@ function buildScrcpyArgs(deviceId, settings, extraArgs = []) {
   }
 
   return args.concat(extraArgs);
-}
-
-function isScrcpyAudioStartupError(output) {
-  return output.includes('Cannot create AudioRecord')
-    || output.includes("Demuxer 'audio': stream configuration error")
-    || (output.includes('Demuxer error') && output.toLowerCase().includes('audio'));
-}
-
-function isScrcpyVideoReady(output) {
-  return /INFO:\s+(?:Texture|New texture|Initial texture):/i.test(output);
 }
 
 function quoteWindowsCommandArg(value) {
@@ -91,7 +84,7 @@ function buildScrcpySpawn(scrcpyPath, args) {
 
 function stopScrcpyStartupProcess(proc) {
   return new Promise((resolve) => {
-    if (!proc || !proc.pid || proc.killed) {
+    if (!proc || !proc.pid || proc.killed || proc.exitCode != null || proc.signalCode != null) {
       resolve();
       return;
     }
@@ -110,159 +103,103 @@ function stopScrcpyStartupProcess(proc) {
   });
 }
 
-function probeScrcpyAudio(deviceId, scrcpyPath, args) {
+function probeScrcpyAudio(deviceId, scrcpyPath, args, options = {}) {
   return new Promise((resolve) => {
-    let settled = false;
-    let output = '';
-    let timer = null;
-    const probeArgs = args
-      .filter(arg => arg !== '--no-audio')
-      .concat('--no-window', '--require-audio');
+    let settled = false, timer = null, audioFailed = false;
+    const mirrorNumber = options.mirrorNumber || ++scrcpyMirrorSequence;
+    const monitor = createMirrorDiagnostics({ transport: 'adb', mirrorNumber, attemptNumber: 0, phase: 'audio-probe', audioMode: 'required-probe', record: applicationLog.record });
+    monitor.event('probe');
+    const probeArgs = args.filter(arg => arg !== '--no-audio').concat('--no-window', '--require-audio');
     const scrcpySpawn = buildScrcpySpawn(scrcpyPath, probeArgs);
-    const proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options);
-
-    const finish = (result) => {
+    let proc;
+    try { proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
+    catch { monitor.finish('failure', { reason: 'SPAWN_FAILED' }); resolve(true); return; }
+    try { applicationLog.observeToolProcess?.(proc, { tool: 'scrcpy', operation: 'audio-probe', stdout: 'text', stderr: 'text', mirrorNumber, attemptNumber: 0 }); }
+    catch { /* Optional capture cannot change probing. */ }
+    const detach = () => {
+      proc.stdout?.removeListener('data', handleStdout); proc.stderr?.removeListener('data', handleStderr);
+      proc.removeListener('close', handleClose); proc.removeListener('error', handleError); proc.removeListener('spawn', handleSpawn);
+      monitor.dispose();
+    };
+    const finish = (result, shouldStop = true) => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      proc.stdout?.removeListener('data', handleOutput);
-      proc.stderr?.removeListener('data', handleOutput);
-      proc.removeListener('close', handleClose);
-      proc.removeListener('error', handleError);
-      stopScrcpyStartupProcess(proc).then(() => resolve(result));
+      settled = true; clearTimeout(timer);
+      if (shouldStop) { monitor.event('stop', { phase: 'stopping', reason: audioFailed ? 'AUDIO_CAPTURE' : 'NONE' }); stopScrcpyStartupProcess(proc).then(() => resolve(result)); }
+      else resolve(result);
     };
-
-    const handleOutput = (data) => {
-      output += data.toString();
-      if (isScrcpyAudioStartupError(output)) {
-        console.warn(`[Scrcpy] Audio probe failed for ${deviceId}`);
-        finish(false);
-      }
-    };
-
-    const handleClose = () => {
-      finish(!isScrcpyAudioStartupError(output));
-    };
-
-    const handleError = (error) => {
-      console.warn(`[Scrcpy] Audio probe failed to start for ${deviceId}:`, error.message);
-      finish(true);
-    };
-
-    proc.stdout?.on('data', handleOutput);
-    proc.stderr?.on('data', handleOutput);
-    proc.on('close', handleClose);
-    proc.on('error', handleError);
-
-    timer = setTimeout(() => {
-      finish(true);
-    }, SCRCPY_AUDIO_PROBE_MS);
+    const handleOutput = (data, channel) => { if (!settled && monitor.output(data, channel).audioStartupFailure) { audioFailed = true; finish(false); } };
+    const handleStdout = data => handleOutput(data, 'stdout'), handleStderr = data => handleOutput(data, 'stderr');
+    const handleClose = (code, signal) => { monitor.finish('exit', { exitCode: code, signal, reason: audioFailed ? 'AUDIO_CAPTURE' : code === 0 ? 'CLEAN_EXIT' : 'EARLY_EXIT' }); detach(); finish(!audioFailed, false); };
+    const handleError = () => { monitor.finish('failure', { reason: 'SPAWN_FAILED' }); finish(true, false); };
+    const handleSpawn = () => monitor.event('spawn');
+    proc.stdout?.on('data', handleStdout); proc.stderr?.on('data', handleStderr);
+    proc.on('close', handleClose); proc.on('error', handleError); proc.on('spawn', handleSpawn);
+    timer = setTimeout(() => finish(true), SCRCPY_AUDIO_PROBE_MS);
   });
 }
 
 function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
-  const { retryWithoutAudio = true, retriedWithoutAudio = false } = options;
-
+  const { retryWithoutAudio = true, retriedWithoutAudio = false, mirrorNumber = ++scrcpyMirrorSequence, attemptNumber = 1 } = options;
   return new Promise((resolve, reject) => {
-    let settled = false;
-    let output = '';
-    let startupTimer = null;
-    let readyTimer = null;
-
-    console.log(`Starting scrcpy with device: ${deviceId}, args: ${args.join(' ')}`);
-
+    let settled = false, ended = false, stoppingForAudio = false, reportedReady = false;
+    let startupTimer = null, readyTimer = null, flags = { audioStartupFailure: false, videoReady: false };
+    const monitor = createMirrorDiagnostics({ transport: 'adb', mirrorNumber, attemptNumber, phase: 'launch',
+      audioMode: args.includes('--no-audio') ? 'disabled' : 'default', record: applicationLog.record });
+    monitor.event('opening');
     const scrcpySpawn = buildScrcpySpawn(scrcpyPath, args);
-    const proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options);
-
-    const cleanup = () => {
-      clearTimeout(startupTimer);
-      clearTimeout(readyTimer);
-      proc.stdout?.removeListener('data', handleOutput);
-      proc.stderr?.removeListener('data', handleOutput);
-      proc.removeListener('error', handleError);
-      proc.removeListener('close', handleClose);
-      proc.stdout?.resume();
-      proc.stderr?.resume();
-      proc.stdout?.unref?.();
-      proc.stderr?.unref?.();
-      proc.unref?.();
+    let proc;
+    try { proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
+    catch { monitor.finish('failure', { reason: 'SPAWN_FAILED' }); reject(new Error(tr('Scrcpy 启动失败，请导出应用日志。'))); return; }
+    try { applicationLog.observeToolProcess?.(proc, { tool: 'scrcpy', operation: 'mirror', stdout: 'text', stderr: 'text', mirrorNumber, attemptNumber }); }
+    catch { /* Optional capture cannot change playback. */ }
+    const clearStartup = () => { clearTimeout(startupTimer); clearTimeout(readyTimer); };
+    const unref = () => { proc.stdout?.resume(); proc.stderr?.resume(); proc.stdout?.unref?.(); proc.stderr?.unref?.(); proc.unref?.(); };
+    const detach = () => {
+      clearStartup();
+      proc.stdout?.removeListener('data', handleStdout); proc.stderr?.removeListener('data', handleStderr);
+      proc.removeListener('error', handleError); proc.removeListener('close', handleClose); proc.removeListener('spawn', handleSpawn);
+      monitor.dispose(); unref();
     };
-
-    const settle = (callback) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback();
-    };
-
+    const settle = callback => { if (settled) return; settled = true; clearStartup(); unref(); callback(); };
     const retryNoAudio = () => {
-      console.warn(`[Scrcpy] Audio startup failed for ${deviceId}, retrying with --no-audio`);
-      scrcpyAudioModeCache.set(deviceId, 'no-audio');
+      stoppingForAudio = true; scrcpyAudioModeCache.set(deviceId, 'no-audio');
       const noAudioArgs = args.includes('--no-audio') ? args : args.concat('--no-audio');
-      stopScrcpyStartupProcess(proc)
-        .then(() => startScrcpyProcess(deviceId, scrcpyPath, noAudioArgs, {
-          retryWithoutAudio: false,
-          retriedWithoutAudio: true
-        }))
-        .then(resolve, reject);
+      stopScrcpyStartupProcess(proc).then(() => startScrcpyProcess(deviceId, scrcpyPath, noAudioArgs, {
+        retryWithoutAudio: false, retriedWithoutAudio: true, mirrorNumber, attemptNumber: attemptNumber + 1
+      })).then(resolve, reject);
     };
-
-    const resolveStarted = () => {
-      settle(() => {
-        resolve({
-          success: true,
-          message: retriedWithoutAudio ? tr("Scrcpy 已使用无音频模式启动") : tr("Scrcpy 已启动")
-        });
-      });
+    const resolveStarted = ready => {
+      if (settled || ended) return;
+      if (proc.exitCode != null || proc.signalCode != null) { handleClose(proc.exitCode, proc.signalCode); return; }
+      if (ready) { reportedReady = true; monitor.event('ready', { phase: 'streaming', readiness: 'texture' }); }
+      else monitor.event('startup-unconfirmed', { phase: 'awaiting-first-frame', readiness: 'process-grace', reason: 'STARTUP_UNCONFIRMED' });
+      settle(() => resolve({ success: true, ready,
+        message: !ready ? tr('Scrcpy 进程已启动，尚未确认画面。') : retriedWithoutAudio ? tr('Scrcpy 已使用无音频模式启动') : tr('Scrcpy 已启动') }));
     };
-
-    const scheduleReadyResolve = () => {
-      if (readyTimer) return;
-      readyTimer = setTimeout(resolveStarted, SCRCPY_READY_GRACE_MS);
-    };
-
-    function handleOutput(data) {
-      output += data.toString();
-      if (retryWithoutAudio && isScrcpyAudioStartupError(output)) {
-        settle(retryNoAudio);
-        return;
-      }
-      if (isScrcpyVideoReady(output)) {
-        scheduleReadyResolve();
-      }
+    function handleOutput(data, channel) {
+      flags = monitor.output(data, channel);
+      if (ended) return;
+      if (settled) { if (!reportedReady && flags.videoReady && !stoppingForAudio) { reportedReady = true; monitor.event('ready', { phase: 'streaming', readiness: 'texture' }); } return; }
+      if (retryWithoutAudio && flags.audioStartupFailure) { settle(retryNoAudio); return; }
+      if (flags.videoReady && !readyTimer) readyTimer = setTimeout(() => resolveStarted(true), SCRCPY_READY_GRACE_MS);
     }
-
-    function handleError(error) {
-      settle(() => {
-        console.error('Scrcpy spawn error:', error);
-        reject(new Error(tr("Scrcpy 启动失败: {0}", { 0: error.message })));
-      });
+    function handleError() {
+      monitor.finish('failure', { reason: settled ? 'TRANSPORT' : 'SPAWN_FAILED' });
+      settle(() => reject(new Error(tr('Scrcpy 启动失败，请导出应用日志。'))));
     }
-
     function handleClose(code, signal) {
+      if (ended) return; ended = true;
+      monitor.finish('exit', { exitCode: code, signal, ...(stoppingForAudio ? { reason: 'AUDIO_CAPTURE' } : !settled ? { reason: 'EARLY_EXIT' } : code === 0 ? { reason: 'CLEAN_EXIT' } : {}) });
+      detach();
       if (settled) return;
-      if (retryWithoutAudio && isScrcpyAudioStartupError(output)) {
-        settle(retryNoAudio);
-        return;
-      }
-      if (code !== 0) {
-        const lastOutput = output.trim().split(/\r?\n/).slice(-3).join('；');
-        const suffix = lastOutput ? `，${lastOutput}` : '';
-        settle(() => reject(new Error(tr("Scrcpy 启动失败，退出码: {0}{1}", { 0: code ?? signal ?? 'unknown', 1: suffix }))));
-      }
+      if (retryWithoutAudio && flags.audioStartupFailure) { settle(retryNoAudio); return; }
+      settle(() => reject(new Error(tr('Scrcpy 在画面确认前已退出（{0}），请导出应用日志。', { 0: code ?? signal ?? tr('未知') }))));
     }
-
-    proc.stdout?.on('data', handleOutput);
-    proc.stderr?.on('data', handleOutput);
-    proc.on('error', handleError);
-    proc.on('close', handleClose);
-    proc.on('spawn', () => {
-      console.log('Scrcpy process spawned successfully');
-    });
-
-    startupTimer = setTimeout(() => {
-      resolveStarted();
-    }, SCRCPY_STARTUP_WATCH_MS);
+    const handleStdout = data => handleOutput(data, 'stdout'), handleStderr = data => handleOutput(data, 'stderr');
+    const handleSpawn = () => { monitor.event('spawn'); monitor.event('startup-check', { phase: 'awaiting-first-frame' }); };
+    proc.stdout?.on('data', handleStdout); proc.stderr?.on('data', handleStderr);
+    proc.on('error', handleError); proc.on('close', handleClose); proc.on('spawn', handleSpawn);
+    startupTimer = setTimeout(() => resolveStarted(false), SCRCPY_STARTUP_WATCH_MS);
   });
 }
 
@@ -404,26 +341,27 @@ function register(ipcMain) {
       }
 
       const args = buildScrcpyArgs(deviceId, settings);
+      const mirrorNumber = ++scrcpyMirrorSequence;
       const audioMode = scrcpyAudioModeCache.get(deviceId);
       if (audioMode === 'no-audio') {
         return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
           retryWithoutAudio: false,
-          retriedWithoutAudio: true
+          retriedWithoutAudio: true, mirrorNumber
         });
       }
 
       if (audioMode !== 'normal') {
-        const audioAvailable = await probeScrcpyAudio(deviceId, scrcpyPath, args);
+        const audioAvailable = await probeScrcpyAudio(deviceId, scrcpyPath, args, { mirrorNumber });
         scrcpyAudioModeCache.set(deviceId, audioAvailable ? 'normal' : 'no-audio');
         if (!audioAvailable) {
           return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
             retryWithoutAudio: false,
-            retriedWithoutAudio: true
+            retriedWithoutAudio: true, mirrorNumber
           });
         }
       }
 
-      return await startScrcpyProcess(deviceId, scrcpyPath, args);
+      return await startScrcpyProcess(deviceId, scrcpyPath, args, { mirrorNumber });
     } catch (error) {
       console.error('Scrcpy error:', error);
       throw error;

@@ -60,7 +60,7 @@ function fixture(t, options = {}) {
       socket.destroy = () => { if (!socket.destroyed) { socket.destroyed = true; queueMicrotask(() => socket.emit('close')); } };
       socket.write = value => {
         sent.push(value.startsWith('AUTH ') ? 'AUTH' : value);
-        if (value.startsWith('AUTH ')) queueMicrotask(() => socket.emit('data', packet(2, Buffer.from([0, 0, 0, 1, 0x65]), options.frameFlags ?? 1)));
+        if (value.startsWith('AUTH ')) queueMicrotask(() => socket.emit('data', options.invalidPacket ? Buffer.alloc(20) : options.statePacket ? packet(3, options.statePacket) : packet(2, Buffer.from([0, 0, 0, 1, 0x65]), options.frameFlags ?? 1)));
         if (value === 'STOP\n') socket.destroy();
       };
       queueMicrotask(() => socket.emit('connect')); return socket;
@@ -114,6 +114,21 @@ test('old versions and generation changes never start an incompatible or replace
   const result = await changed.service.start('hdc:A');
   assert.equal(result.success, false); assert.equal(result.code, 'DEVICE_CHANGED');
   assert.ok(!changed.calls.some(call => call.args.includes('start-daemon')));
+});
+
+test('owned renderer backpressure remains terminal but is not misclassified as malformed protocol', async t => {
+  const h = fixture(t, { onFrame: () => { throw Object.assign(Error('private renderer data'), { code: 'MEDIA_BACKPRESSURE' }); } });
+  const result = await h.service.start('hdc:A'); assert.equal(result.success, false); assert.equal(result.code, 'MEDIA_BACKPRESSURE'); assert.equal(result.session.diagnosticReason, 'BACKPRESSURE');
+  const malformed = fixture(t, { invalidPacket: true }), invalid = await malformed.service.start('hdc:A'); assert.equal(invalid.success, false); assert.equal(invalid.code, 'MEDIA_PROTOCOL'); assert.equal(invalid.session.diagnosticReason, 'PROTOCOL_INVALID');
+});
+test('fixed native encoder state and explicit window closure keep distinct safe diagnostic reasons', async t => {
+  const native = fixture(t, { statePacket: { state: 'encoder-error', code: -1 } }), failure = await native.service.start('hdc:A'); assert.equal(failure.success, false); assert.equal(failure.session.diagnosticReason, 'VIDEO_ENCODER'); assert.equal(failure.session.toolVersion, '5.1.1.2');
+  const h = fixture(t), started = await h.service.start('hdc:A'); const stopped = await h.service.stop(started.session.id, 'WINDOW_CLOSED'); assert.equal(stopped.session.diagnosticReason, 'WINDOW_CLOSED'); assert.equal(stopped.session.status, 'stopped');
+});
+
+test('generic native capture errors do not fabricate an authorization cause, while known consent state remains explicit', async t => {
+  const generic = fixture(t, { statePacket: { state: 'capture-error', code: 42 } }), failed = await generic.service.start('hdc:A'); assert.equal(failed.success, false); assert.equal(failed.session.diagnosticReason, 'UNKNOWN');
+  const consent = fixture(t, { statePacket: { state: 'capture-state', code: 1 } }), denied = await consent.service.start('hdc:A'); assert.equal(denied.success, false); assert.equal(denied.session.diagnosticReason, 'AUTHORIZATION');
 });
 test('unsafe forward never receives the token and finished history stays bounded', async t => {
   const forward = fixture(t, { badForward: true });

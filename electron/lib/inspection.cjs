@@ -594,6 +594,7 @@ function sendProgress(task, step, index, total, status, result) {
   const payload = {
     taskId: task.id,
     deviceId: task.deviceId,
+    startedAt: task.startedAt || null,
     stepId: step.id,
     stepLabel: step.label,
     index,
@@ -617,7 +618,7 @@ function sendDone(task, payload) {
     lastTaskState = publicInspectionTask(task);
   }
   if (task.silent) return;
-  sendToSender(task, 'inspection:done', { taskId: task.id, deviceId: task.deviceId, ...payload });
+  sendToSender(task, 'inspection:done', { taskId: task.id, deviceId: task.deviceId, ...payload, startedAt: task.startedAt || null });
 }
 
 function sendToSender(task, channel, payload) {

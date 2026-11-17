@@ -3,18 +3,21 @@ import { Activity, CheckCircle2, CircleAlert, Loader2, Square, X } from 'lucide-
 import { tr, useLocale } from '../shared/i18n';
 import SidebarConnectionStatus from './SidebarConnectionStatus';
 import { activityPresentation } from '../shared/activityPresentation.js';
+import { activityRunning as running, buildActivityItems, isActivityDismissed, prepareActivityItems, readActivityDismissals, recordActivityDismissals } from '../shared/activityDismissals.js';
 
-const running = status => ['running', 'queued', 'starting', 'recording', 'stopping', 'saving', 'cancelling'].includes(status);
-const timestamp = value => Number.isFinite(value) ? value : Date.parse(value) || 0;
 export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection, theme, isDark }) {
   const locale = useLocale();
   const colors = activityPresentation(theme, isDark);
   const [registry, setRegistry] = useState({ items: [], olderCount: 0 });
   const [external, setExternal] = useState({ tasks: [], guards: [], recordings: [] });
-  const [open, setOpen] = useState(false), [busy, setBusy] = useState(''), [error, setError] = useState('');
+  const [boot] = useState(() => { try { return { preferences: readActivityDismissals(), error: '' }; } catch (failure) { return { preferences: { version: 1, entries: [] }, error: failure.message }; } });
+  const [dismissals, setDismissals] = useState(boot.preferences), [resolvedItems, setResolvedItems] = useState([]);
+  const [open, setOpen] = useState(false), [busy, setBusy] = useState(''), [error, setError] = useState(boot.error);
   const [now, setNow] = useState(Date.now());
   const [connectionSummary, setConnectionSummary] = useState({ connections: 0, issues: 0 });
   const dialog = useRef(null), toast = useRef(showToast), seenRunning = useRef(new Set()), notified = useRef(new Set());
+  const sourceState = useRef({ registry: { items: [] }, external: { tasks: [], guards: [], recordings: [] }, tasks }); sourceState.current.tasks = tasks;
+  const occurrences = useRef(new Map()), actionLock = useRef(false), focusAfterClear = useRef(false), clearButton = useRef(null), closeButton = useRef(null), aliveRef = useRef(false);
   useEffect(() => { toast.current = showToast; }, [showToast]);
   useEffect(() => {
     let alive = true;
@@ -29,18 +32,21 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
           toast.current?.(tr('后台活动已结束：{0}', { 0: item.title }));
         }
       }
+      sourceState.current.registry = value;
       setRegistry(value);
     };
-    const acceptTasks = (value, initial = false) => { if (!initial) revisions.tasks++; if (alive) setExternal(previous => ({ ...previous, tasks: [...(value?.activeTasks || []), ...(value?.history || []).slice(0, 10)] })); };
-    const acceptGuards = (value, initial = false) => { if (!initial) revisions.guards++; if (alive) setExternal(previous => ({ ...previous, guards: [...(value?.activeGuards || []), ...(value?.history || []).slice(0, 5)] })); };
-    const acceptRecording = (value, initial = false) => { if (!initial) revisions.recordings++; if (alive) setExternal(previous => ({ ...previous, recordings: (value?.sessions || []).slice(0, 10) })); };
+    const updateExternal = (key, rows) => { if (!alive) return; sourceState.current.external = { ...sourceState.current.external, [key]: rows }; setExternal(sourceState.current.external); };
+    const acceptTasks = (value, initial = false) => { if (!initial) revisions.tasks++; updateExternal('tasks', [...(value?.activeTasks || []).map(item => ({ ...item, activityActive: true })), ...(value?.history || [])]); };
+    const acceptGuards = (value, initial = false) => { if (!initial) revisions.guards++; updateExternal('guards', [...(value?.activeGuards || []).map(item => ({ ...item, activityActive: true })), ...(value?.history || [])]); };
+    const acceptRecording = (value, initial = false) => { if (!initial) revisions.recordings++; updateExternal('recordings', value?.sessions || []); };
     const api = window.electronAPI;
     void api?.workbenchActivityList?.().then(value => { if (!revisions.registry) acceptRegistry(value, true); }).catch(() => {});
     void api?.taskState?.().then(value => { if (!revisions.tasks) acceptTasks(value, true); }).catch(() => {});
     void api?.deviceGuardState?.().then(value => { if (!revisions.guards) acceptGuards(value, true); }).catch(() => {});
     void api?.recordingSessionsList?.({}).then(value => { if (!revisions.recordings) acceptRecording(value, true); }).catch(() => {});
     const offs = [api?.onWorkbenchActivity?.(acceptRegistry), api?.onTaskCenterUpdate?.(acceptTasks), api?.onDeviceGuardUpdate?.(acceptGuards), api?.onRecordingState?.(acceptRecording)];
-    return () => { alive = false; offs.forEach(off => off?.()); };
+    aliveRef.current = true;
+    return () => { alive = false; aliveRef.current = false; offs.forEach(off => off?.()); };
   }, []);
   useEffect(() => {
     if (!open) return;
@@ -49,51 +55,67 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => { clearInterval(timer); element?.close(); previous?.focus?.(); };
   }, [open]);
+  const projectedItems = useMemo(() => { void locale; return buildActivityItems({ registry, external, tasks }); }, [registry, external, tasks, locale]);
+  useEffect(() => {
+    let alive = true;
+    void prepareActivityItems(projectedItems, occurrences.current).then(value => { if (alive) setResolvedItems(value); }).catch(failure => { if (alive) setError(failure.message); });
+    return () => { alive = false; };
+  }, [projectedItems]);
   const items = useMemo(() => {
-    void locale;
-    const values = [...registry.items];
-    const add = item => { if (!values.some(value => value.id === item.id || value.target?.page === item.target.page && value.target?.id && value.target.id === item.target.id)) values.push(item); };
-    for (const task of external.tasks) add({ id: `task:${task.id}`, title: task.scriptName || tr('任务中心'), status: task.status, stage: task.error || '',
-      startedAt: timestamp(task.startedAt || task.createdAt), updatedAt: timestamp(task.endedAt || task.startedAt), target: { page: 'tasks', id: task.id } });
-    for (const guard of external.guards) add({ id: `guard:${guard.id}`, title: tr('设备守护'), status: guard.status === 'running' ? 'running' : guard.error ? 'failed' : 'completed',
-      stage: guard.error || '', deviceId: guard.deviceId, startedAt: timestamp(guard.startedAt), updatedAt: timestamp(guard.endedAt || guard.startedAt), target: { page: 'quality', id: guard.id, deviceId: guard.deviceId } });
-    for (const record of external.recordings) add({ id: `recording:${record.id}`, title: tr('录屏'), status: record.status === 'saved' ? 'completed' : ['error', 'needs-save'].includes(record.status) ? 'failed' : record.status,
-      stage: record.error || '', deviceId: record.deviceId, startedAt: timestamp(record.startedAt), updatedAt: timestamp(record.endedAt || record.startedAt), target: { page: 'devices', id: record.id, deviceId: record.deviceId } });
-    for (const task of tasks) add({ id: `legacy:${task.key}`, title: task.title, status: task.status === 'success' ? 'completed' : task.status, stage: task.message,
-      deviceId: task.deviceId, startedAt: 0, updatedAt: 0, target: { page: task.tab, deviceId: task.deviceId } });
-    return values.sort((a, b) => Number(running(b.status)) - Number(running(a.status)) || timestamp(b.updatedAt) - timestamp(a.updatedAt));
-  }, [registry, external, tasks, locale]);
-  const active = items.filter(item => running(item.status)).length, failed = items.filter(item => item.status === 'failed').length;
+    const visible = new Map(resolvedItems.filter(item => !isActivityDismissed(item, dismissals)).map(item => [item.identity, item]));
+    for (const item of projectedItems) if (item.active) visible.set(item.identity, { ...item, key: visible.get(item.identity)?.key || `active:${item.identity}` });
+    return [...visible.values()].sort((a, b) => Number(b.active) - Number(a.active) || b.through - a.through);
+  }, [resolvedItems, projectedItems, dismissals]);
+  const endedItems = items.filter(item => !item.active);
+  const active = projectedItems.filter(item => item.active).length, failed = items.filter(item => item.status === 'failed').length;
+  useEffect(() => {
+    if (!open || !focusAfterClear.current) return;
+    const frame = requestAnimationFrame(() => {
+      if (!aliveRef.current || !dialog.current?.open || !focusAfterClear.current) return;
+      focusAfterClear.current = false;
+      if (!dialog.current.contains(document.activeElement) || document.activeElement?.disabled) (clearButton.current?.disabled ? closeButton.current : clearButton.current)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [dismissals, open]);
   const labels = { running: tr('进行中'), queued: tr('排队中'), starting: tr('正在准备'), recording: tr('录制中'), stopping: tr('正在停止'), saving: tr('保存中'),
     cancelling: tr('正在取消'), completed: tr('已完成'), failed: tr('需要处理'), cancelled: tr('已取消') };
-  const act = async (id, cancel) => {
-    if (busy) return; setBusy(id); setError('');
+  const act = async id => {
+    if (actionLock.current) return; actionLock.current = true; setBusy(id); setError('');
     try {
-      const response = await (cancel ? window.electronAPI.workbenchActivityCancel({ id }) : window.electronAPI.workbenchActivityDismiss({ id }));
+      const response = await window.electronAPI.workbenchActivityCancel({ id });
       if (!response?.ok) throw new Error(response?.error || tr('后台活动操作未完成。'));
-    } catch (failure) { setError(failure.message); } finally { setBusy(''); }
+    } catch (failure) { if (aliveRef.current) setError(failure.message); } finally { actionLock.current = false; if (aliveRef.current) setBusy(''); }
+  };
+  const clearRecords = targets => {
+    if (actionLock.current) return; actionLock.current = true; setError('');
+    try {
+      const activeIds = new Set(buildActivityItems(sourceState.current).filter(item => item.active).map(item => item.identity));
+      const snapshot = targets.filter(item => !item.active && !activeIds.has(item.identity));
+      if (!snapshot.length) return;
+      const next = recordActivityDismissals(snapshot); focusAfterClear.current = true; setDismissals(next);
+    } catch (failure) { setError(failure.message); } finally { actionLock.current = false; }
   };
   return <div className="border-t border-[#3E4145] px-4 py-3">
     <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · {tr('连接 {0}', { 0: connectionSummary.connections })}</span></span></button>
     <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
-      <header className={`flex items-center justify-between border-b p-4 ${colors.border}`}><h3 className="font-semibold">{tr('后台活动')}</h3><button type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>
+      <header className={`flex flex-wrap items-center gap-2 border-b p-4 ${colors.border}`}><h3 className="mr-auto font-semibold">{tr('后台活动')}</h3><button ref={clearButton} type="button" disabled={!endedItems.length || Boolean(busy)} onClick={() => clearRecords(endedItems)} title={tr('只移除列表记录，不取消任务、不删除产物。')} className={`rounded-lg px-2.5 py-2 text-xs disabled:opacity-40 ${colors.muted} ${colors.hover}`}>{tr('清除已结束记录')}</button><button ref={closeButton} type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>
       <div className="max-h-[60vh] space-y-2 overflow-auto p-4">
         <h4 className={`text-xs font-medium ${colors.heading}`}>{tr('连接状态')}</h4>
         <SidebarConnectionStatus isDark={colors.dark} onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
         {!connectionSummary.connections && !connectionSummary.issues && <p className={`py-2 text-xs ${colors.muted}`}>{tr('当前没有活动连接。')}</p>}
         <h4 className={`pt-3 text-xs font-medium ${colors.heading}`}>{tr('任务与采集')}</h4>
         {!items.length && <p className={`py-8 text-center text-sm ${colors.muted}`}>{tr('当前没有后台活动。')}</p>}
-        {items.slice(0, 60).map(item => <div key={item.id} className={`rounded-xl border p-3 ${colors.border}`}>
-          <div className="flex items-start gap-3">{running(item.status) ? <Loader2 size={17} className="mt-1 shrink-0 animate-spin text-emerald-400" /> : item.status === 'failed' ? <CircleAlert size={17} className="mt-1 shrink-0 text-amber-400" /> : <CheckCircle2 size={17} className="mt-1 shrink-0 text-slate-400" />}
+        {items.slice(0, 60).map(item => <div key={item.key} data-activity-id={item.id} className={`rounded-xl border p-3 ${colors.border}`}>
+          <div className="flex items-start gap-3">{item.active ? <Loader2 size={17} className="mt-1 shrink-0 animate-spin text-emerald-400" /> : item.status === 'failed' ? <CircleAlert size={17} className="mt-1 shrink-0 text-amber-400" /> : <CheckCircle2 size={17} className="mt-1 shrink-0 text-slate-400" />}
             <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { onOpen?.(item.target.page, item.deviceId || item.target.deviceId, item.target.id); setOpen(false); }}><span className="block break-words text-sm font-medium">{item.title}</span><span className={`mt-1 block text-xs ${colors.muted}`}>{labels[item.status] || tr('状态未知')}{item.deviceId ? ` · ${item.deviceId}` : ''}</span></button>
-            {item.canCancel && <button type="button" disabled={Boolean(busy) || item.status === 'cancelling'} onClick={() => act(item.id, true)} aria-label={tr('取消活动')} className={`rounded p-2 text-amber-500 disabled:opacity-40 ${colors.hover}`}><Square size={14} /></button>}
-            {!running(item.status) && registry.items.some(value => value.id === item.id) && <button type="button" disabled={Boolean(busy)} onClick={() => act(item.id, false)} aria-label={tr('移除活动记录')} className={`rounded p-2 ${colors.muted} ${colors.hover}`}><X size={14} /></button>}
+            {item.canCancel && <button type="button" disabled={Boolean(busy) || item.status === 'cancelling'} onClick={() => act(item.id)} aria-label={tr('取消活动')} className={`rounded p-2 text-amber-500 disabled:opacity-40 ${colors.hover}`}><Square size={14} /></button>}
+            {!item.active && <button type="button" disabled={Boolean(busy)} onClick={() => clearRecords([item])} aria-label={tr('移除活动记录')} title={tr('只移除列表记录，不取消任务、不删除产物。')} className={`rounded p-2 ${colors.muted} ${colors.hover}`}><X size={14} /></button>}
           </div>
           {(item.stage || item.detail) && <p className={`mt-2 whitespace-pre-wrap break-words text-xs ${colors.muted}`}>{item.detail || item.stage}</p>}
-          {running(item.status) && item.startedAt > 0 && <p className={`mt-2 text-xs ${colors.muted}`}>{tr('已运行 {0} 秒', { 0: Math.max(0, Math.floor((now - item.startedAt) / 1000)) })}</p>}
+          {item.active && item.startedAt > 0 && <p className={`mt-2 text-xs ${colors.muted}`}>{tr('已运行 {0} 秒', { 0: Math.max(0, Math.floor((now - item.startedAt) / 1000)) })}</p>}
           {Number.isFinite(item.progress) && <progress className="mt-2 h-1.5 w-full accent-emerald-500" value={item.progress} max={100} />}
         </div>)}
-        {(registry.olderCount > 0 || items.length > 60) && <p className={`text-xs ${colors.muted}`}>{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
+        {items.length > 60 && <p className={`text-xs ${colors.muted}`}>{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
         {error && <p role="alert" className="text-xs text-red-400">{tr(error)}</p>}
       </div>
     </dialog>

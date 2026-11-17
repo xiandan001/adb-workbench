@@ -3,15 +3,18 @@ import { applySerialScheme } from './serialSchemes.js';
 
 export const SERIAL_SCHEME_SELECTION_KEY = 'adb-workbench.serial-scheme-selection.v1';
 export function normalizeSerialSchemeSelection(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value)) || Object.keys(value).length !== 3 || value.version !== 1
+  const required = ['version', 'rs232', 'terminal'], folds = ['rs232Expanded', 'terminalExpanded'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))
+    || !required.every(key => Object.hasOwn(value, key)) || Object.keys(value).some(key => !required.includes(key) && !folds.includes(key)) || value.version !== 1
+    || folds.some(key => Object.hasOwn(value, key) && typeof value[key] !== 'boolean')
     || ['rs232', 'terminal'].some(key => typeof value[key] !== 'string' || value[key].length > 200
       || value[key] && !value[key].trim()
       || [...value[key]].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))) throw new Error(tr('连接方案选择无法读取，原数据已保留。'));
-  return { version: 1, rs232: value.rs232, terminal: value.terminal };
+  return { version: 1, rs232: value.rs232, terminal: value.terminal, rs232Expanded: value.rs232Expanded ?? false, terminalExpanded: value.terminalExpanded ?? false };
 }
 export function readSerialSchemeSelection(storage = globalThis.localStorage) {
   const raw = storage.getItem(SERIAL_SCHEME_SELECTION_KEY);
-  if (raw == null) return { version: 1, rs232: '', terminal: '' };
+  if (raw == null) return normalizeSerialSchemeSelection({ version: 1, rs232: '', terminal: '' });
   try { if (typeof raw !== 'string' || raw.length > 2048) throw Error(); return normalizeSerialSchemeSelection(JSON.parse(raw)); }
   catch { throw new Error(tr('连接方案选择无法读取，原数据已保留。')); }
 }
@@ -20,7 +23,7 @@ export function saveSerialSchemeSelection(value, storage = globalThis.localStora
   const next = normalizeSerialSchemeSelection(value); storage.setItem(SERIAL_SCHEME_SELECTION_KEY, JSON.stringify(next)); return next;
 }
 export function resetSerialSchemeSelection(storage = globalThis.localStorage) {
-  const next = { version: 1, rs232: '', terminal: '' };
+  const next = normalizeSerialSchemeSelection({ version: 1, rs232: '', terminal: '' });
   storage.setItem(SERIAL_SCHEME_SELECTION_KEY, JSON.stringify(next)); return next;
 }
 

@@ -1,8 +1,8 @@
 const { createHash } = require('node:crypto');
 const { tr } = require('./localization.cjs');
-const { redactText } = require('./feedback-policy.cjs');
+const { redactWorkspaceText: redactText } = require('./ai-workspace-redaction.cjs');
 
-const LIMITS = Object.freeze({ requestBytes: 1280 * 1024, batchBytes: 8 * 1024 * 1024, requests: 16,
+const LIMITS = Object.freeze({ requestBytes: 1280 * 1024, batchBytes: require('./ai-context-limits.json').contentBytes, requests: 16,
   pendingBatches: 6, responseBytes: 1024 * 1024, previewMs: 10 * 60 * 1000 });
 const fail = (code, message) => Object.assign(new Error(message), { code });
 function sanitize(text) {
@@ -68,11 +68,11 @@ function prepareBody(body, { contentFormat } = {}) {
 function prepareBatch(bodies, options) {
   if (!Array.isArray(bodies) || !bodies.length || bodies.length > LIMITS.requests
     || bodies.reduce((sum, body) => sum + (typeof body === 'string' ? Buffer.byteLength(body) : LIMITS.batchBytes + 1), 0) > LIMITS.batchBytes) {
-    throw fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、8 MiB，请缩小筛选范围；未发送。'));
+    throw fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、20 MiB，请缩小筛选范围；未发送。'));
   }
   const requests = bodies.map(body => prepareBody(body, options));
   const bytes = requests.reduce((sum, request) => sum + request.bytes, 0);
-  if (bytes > LIMITS.batchBytes) throw fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、8 MiB，请缩小筛选范围；未发送。'));
+  if (bytes > LIMITS.batchBytes) throw fail('AI_SEND_LIMIT', tr('AI 批次最多 16 个请求、20 MiB，请缩小筛选范围；未发送。'));
   return { requests, bytes, estimatedInputTokens: requests.reduce((sum, request) => sum + request.estimatedInputTokens, 0),
     redactions: requests.reduce((sum, request) => sum + request.redactions, 0) };
 }
@@ -85,10 +85,12 @@ function readUsage(raw) {
 }
 function stripPrivateTaskSnapshot({ text, truncated }) {
   const invalid = () => fail('AI_HANDOFF_PRIVATE_REPORT', tr('任务结果文件不完整或格式无效，不能安全排除私有脚本；请使用任务结果分析入口。'));
-  if (truncated || typeof text !== 'string' || Buffer.byteLength(text) > 512 * 1024) throw invalid();
+  if (truncated || typeof text !== 'string' || Buffer.byteLength(text) > require('./ai-context-limits.json').contentBytes) throw invalid();
   let parsed;
   try { parsed = JSON.parse(text, (key, value) => key === 'rerunSnapshot' ? undefined : value); } catch { throw invalid(); }
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw invalid();
-  return JSON.stringify(parsed, null, 2);
+  const result = JSON.stringify(parsed, null, 2);
+  if (Buffer.byteLength(result) > require('./ai-context-limits.json').contentBytes) throw invalid();
+  return result;
 }
 module.exports = { LIMITS, fail, sanitize, prepareBody, prepareBatch, readUsage, stripPrivateTaskSnapshot };

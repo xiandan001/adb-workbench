@@ -6,9 +6,9 @@ const quotas = [128, 256, 512, 1024].map(value => value * 1024 * 1024);
 const exact = (value, fields, optional = []) => value && typeof value === 'object' && !Array.isArray(value)
   && [Object.prototype, null].includes(Object.getPrototypeOf(value)) && fields.every(key => Object.hasOwn(value, key))
   && Object.keys(value).every(key => fields.includes(key) || optional.includes(key));
-const foldFields = ['scopeExpanded', 'usageExpanded'];
+const foldFields = ['scopeExpanded', 'usageExpanded', 'infoExpanded'];
 const invalid = () => { throw new Error(tr('本地偏好数据无效')); };
-export const defaultLogView = () => ({ sidebarOpen: false, aiPanelHeight: 440, detailWrap: true, colWidths: { ts: 140, pkg: 100, tag: 100 }, filter: {}, buffers: ['main'], scopeExpanded: false, usageExpanded: false });
+export const defaultLogView = () => ({ sidebarOpen: false, aiPanelHeight: 440, detailWrap: true, colWidths: { ts: 140, pkg: 100, tag: 100 }, filter: {}, buffers: ['main'], scopeExpanded: false, usageExpanded: false, infoExpanded: false });
 export const defaultLogViewPreferences = () => ({ version: 1, archive: { enabled: false, maxBytes: 512 * 1024 * 1024 }, views: [] });
 export function normalizeLogViewFilter(value) {
   const fields = ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel', 'pid'];
@@ -47,7 +47,7 @@ export function normalizeLogViewPreferences(value) {
     const key = JSON.stringify([view.deviceId, view.source]); if (seen.has(key)) invalid(); seen.add(key);
     return { deviceId: view.deviceId, source: view.source, sidebarOpen: view.sidebarOpen, aiPanelHeight: view.aiPanelHeight,
       detailWrap: view.detailWrap, colWidths: { ...view.colWidths }, filter: normalizeLogViewFilter(legacy ? {} : view.filter), buffers: normalizeBuffers(legacy ? ['main'] : view.buffers),
-      scopeExpanded: view.scopeExpanded ?? false, usageExpanded: view.usageExpanded ?? false };
+      scopeExpanded: view.scopeExpanded ?? false, usageExpanded: view.usageExpanded ?? false, infoExpanded: view.infoExpanded ?? false };
   });
   return { version: 1, archive: { ...value.archive }, views };
 }
@@ -67,8 +67,8 @@ export function saveLogViewPreferences(value, storage = globalThis.localStorage)
 export function logViewFor(value, deviceId, source) {
   const view = normalizeLogViewPreferences(value).views.find(item => item.deviceId === deviceId && item.source === source);
   if (!view) return defaultLogView();
-  const { sidebarOpen, aiPanelHeight, detailWrap, colWidths, filter, buffers, scopeExpanded, usageExpanded } = view;
-  return { sidebarOpen, aiPanelHeight, detailWrap, colWidths: { ...colWidths }, filter: { ...filter }, buffers: [...buffers], scopeExpanded, usageExpanded };
+  const { sidebarOpen, aiPanelHeight, detailWrap, colWidths, filter, buffers, scopeExpanded, usageExpanded, infoExpanded } = view;
+  return { sidebarOpen, aiPanelHeight, detailWrap, colWidths: { ...colWidths }, filter: { ...filter }, buffers: [...buffers], scopeExpanded, usageExpanded, infoExpanded };
 }
 export function updateLogView(value, deviceId, source, changes) {
   const previous = normalizeLogViewPreferences(value), view = { ...logViewFor(previous, deviceId, source), ...changes };

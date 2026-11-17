@@ -459,6 +459,13 @@ function App() {
     }
   }), []);
 
+  const previousDevicePageRef = useRef(activeTab);
+  useEffect(() => {
+    const previous = previousDevicePageRef.current;
+    previousDevicePageRef.current = activeTab;
+    if (activeTab === 'devices' && previous !== activeTab) void fetchDevices();
+  }, [activeTab, fetchDevices]);
+
   useEffect(() => {
     if (activeDeviceId) localStorage.setItem('activeDeviceId', activeDeviceId);
     else localStorage.removeItem('activeDeviceId');
@@ -832,6 +839,7 @@ function App() {
         id: progress.taskId,
         taskId: progress.taskId,
         deviceId: progress.deviceId,
+        startedAt: progress.startedAt,
         status: 'running',
         progress
       });
@@ -841,6 +849,7 @@ function App() {
         id: result.taskId,
         taskId: result.taskId,
         deviceId: result.deviceId,
+        startedAt: result.startedAt,
         status: result.cancelled ? 'cancelled' : result.ok ? 'success' : 'failed',
         progress: { percent: 100, message: result.cancelled ? tr("巡检已取消") : result.ok ? tr("巡检已完成") : tr("巡检失败") },
         result
@@ -3205,6 +3214,9 @@ function toSidebarTask(key, task) {
   if (key === 'inspection') {
     return {
       key,
+      id: task.id,
+      startedAt: task.startedAt || task.createdAt,
+      endedAt: task.endedAt,
       tab: 'devices',
       deviceId: task.deviceId,
       icon: ClipboardCheck,
@@ -3216,6 +3228,9 @@ function toSidebarTask(key, task) {
   }
   return {
     key,
+    id: task.id,
+    startedAt: task.startedAt || task.createdAt,
+    endedAt: task.endedAt,
     tab: 'performance',
     deviceId: task.deviceId,
     icon: Gauge,

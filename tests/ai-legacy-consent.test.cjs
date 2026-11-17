@@ -54,6 +54,8 @@ function fixture({ map = false, status = 200 } = {}) {
         if (request === './ai-analyze.cjs') return load('ai-analyze.cjs');
         if (request === './localization.cjs') return require('../electron/lib/localization.cjs');
         if (request === './analysis-language.cjs') return require('../electron/lib/analysis-language.cjs');
+        if (request === './ai-legacy-request-plan.cjs') return require('../electron/lib/ai-legacy-request-plan.cjs');
+        if (request === './ai-workspace-processor.cjs') return { runWorkspaceJob: async (_command, args) => require('../electron/lib/ai-workspace-request-plan.cjs').buildMarkdownPlan(args) };
         if (request.includes('/shared/filter')) return { filterEntries: rows => rows };
         if (request === './log-filter-client.cjs') return { queryLogEntries: async (rows, filter, { offset = 0, limit = 1000, tail = false } = {}) => {
           const { filterEntries, countByLevel } = require('../electron/lib/log-filter-policy.cjs');

@@ -1,8 +1,9 @@
 import { captureLogEvidence } from './logWorkspace.js';
 import { tr } from './i18n.js';
+import { AI_CONTEXT_BYTES } from './aiContextTextWindow.js';
 
 export const INLINE_LOG_LINES = 2000;
-export const INLINE_LOG_BYTES = 448 * 1024;
+export const INLINE_LOG_BYTES = AI_CONTEXT_BYTES;
 const encoder = new TextEncoder();
 export function prepareInlineLogAnalysis(rows, { deviceId = '', previousEvidence = [], sourceTruncated = false, scopeLabel = '' } = {}) {
   const selected = []; let bytes = 0, retainedLines = 0, omittedOversized = 0, first = rows.length, last = -1;
