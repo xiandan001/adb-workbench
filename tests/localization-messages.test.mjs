@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMessageTranslator } from '../src/shared/messageCatalog.js';
-import { tr as applicationMessage } from '../src/shared/i18n.js';
+import { tr as applicationMessage, preloadLanguage } from '../src/shared/i18n.js';
 
 test('interpolation preserves user values and supports reordered parameters', () => {
   const tr = createMessageTranslator([['{0}，剩余 {1} 项', '{1} items remaining for {0}'], ['在线', 'Online']]);
@@ -23,7 +23,8 @@ test('unknown content and repeated multiline parameters remain original', () => 
   assert.equal(tr('名称 A / B', {}, 'en-US'), '名称 A / B');
 });
 
-test('shared action labels cannot be overwritten by boolean switch wording', () => {
+test('shared action labels cannot be overwritten by boolean switch wording', async () => {
+  await Promise.all(['en-US', 'ja-JP'].map(preloadLanguage));
   for (const [source, english] of [['关闭', 'Close'], ['取消', 'Cancel'], ['保存', 'Save'], ['刷新', 'Refresh'], ['删除', 'Delete'], ['启用', 'Enable'], ['已启用', 'Enabled'], ['已禁用', 'Disabled']]) {
     assert.equal(applicationMessage(source, {}, 'en-US'), english);
   }

@@ -6,10 +6,12 @@ import { randomUUID } from 'node:crypto';
 import * as stateHelpers from '../src/components/AiWorkspaceState.js';
 import * as flowHelpers from '../src/components/AiWorkspaceFlow.js';
 import * as editingHelpers from '../src/components/AiWorkspaceTaskEditing.js';
+import * as budgetHelpers from '../src/shared/aiMaterialBudget.js';
 
 function harness(overrides = {}) {
   const slots = []; let cursor = 0;
   let handoffCallback;
+  let budgetSubscriber, budgetEffectRan = false;
   const calls = []; const clipboard = []; const opened = [];
   const preview = { id: 'synthetic-preview', question: 'synthetic question', entries: [{ id: 'E1', text: '[L1] synthetic', numbered: true }], expiresAt: new Date(Date.now() + 60000).toISOString() };
   const result = { summary: 'synthetic finding', findings: [{ title: 'fixture', detail: 'fixture detail', evidenceIds: ['E1'], citations: [{ evidenceId: 'E1', startLine: 1, endLine: 1 }] }], hypotheses: [], nextSteps: [], limitations: [] };
@@ -30,21 +32,38 @@ function harness(overrides = {}) {
     ...overrides,
   };
   const electronAPI = Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, async args => { calls.push({ name, args }); return fn(args); }]));
+  electronAPI.onAiWorkspaceMaterialBudget = callback => { budgetSubscriber = callback; return () => { budgetSubscriber = null; }; };
   const source = fs.readFileSync(new URL('../src/components/AiWorkspaceController.js', import.meta.url), 'utf8')
     .replace(/^import .+;\n/gm, '').replace('export default function useAiWorkspace', 'function useAiWorkspace')
     // Capture the actual private callback without altering its implementation.
     .replace('  return { mode, setMode, cases,', '  captureHandoff(acceptHandoff);\n  return { mode, setMode, cases,');
   const controller = vm.runInNewContext(`${source}\nuseAiWorkspace`, {
-    ...stateHelpers, ...flowHelpers, ...editingHelpers, crypto: { randomUUID }, window: { electronAPI }, navigator: { clipboard: { writeText: async text => clipboard.push(text) } },
-    tr: text => text, useLocale: () => 'zh-CN', useCallback: fn => fn, useEffect: () => {},
+    ...stateHelpers, ...flowHelpers, ...editingHelpers, ...budgetHelpers, crypto: { randomUUID }, window: { electronAPI }, navigator: { clipboard: { writeText: async text => clipboard.push(text) } },
+    tr: text => text, useLocale: () => 'zh-CN', useCallback: fn => fn, useEffect: effect => { if (!budgetEffectRan && effect.toString().includes('onAiWorkspaceMaterialBudget')) { budgetEffectRan = true; effect(); } },
     captureHandoff: callback => { handoffCallback = callback; },
     useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
   });
   const render = () => { cursor = 0; return controller({ active: true, activeDeviceId: '', showToast() {}, onOpenTasks: id => opened.push(id) }); };
   const complete = async () => { let ui = render(); ui.setMode('analysis'); ui = render(); ui.edit({ question: 'synthetic question', text: 'fixture' }); await render().collect(); await render().analyze(); return render(); };
-  return { render, complete, calls, clipboard, opened, preview, turn, get acceptHandoff() { return handoffCallback; } };
+  return { render, complete, calls, clipboard, opened, preview, turn, emitBudget: value => budgetSubscriber?.(value), get acceptHandoff() { return handoffCallback; } };
 }
+
+test('material-budget events are numeric-only and cannot overwrite another preview, mode or cancelled generation', async () => {
+  let finish;
+  const h = harness({ aiWorkspaceCollect: async () => ({ ok: true, preview: h.preview, materialBudget: { localBytes: 1000, limitBytes: 20971520, complete: true } }),
+    aiWorkspaceAnalyze: () => new Promise(resolve => { finish = resolve; }) });
+  let ui = h.render(); ui.setMode('analysis'); h.render().edit({ question: 'Question', text: 'Text' }); await h.render().collect();
+  assert.equal(h.render().materialBudget.local.localBytes, 1000);
+  const pending = h.render().analyze(); ui = h.render();
+  const plan = { caseId: ui.current.caseId, previewId: ui.current.preview.id, sourceBytes: 800, requestCount: 33, initialBatchCount: 3, needsSummary: true, estimated: true };
+  h.emitBudget({ ...plan, previewId: 'other' }); assert.equal(h.render().materialBudget.plan, undefined);
+  h.emitBudget({ ...plan, body: 'private' }); assert.equal(h.render().materialBudget.plan, undefined);
+  h.emitBudget(plan); assert.equal(h.render().materialBudget.plan.requestCount, 33);
+  h.render().setMode('diagnose'); h.emitBudget({ ...plan, requestCount: 32, initialBatchCount: 2 }); h.render().setMode('analysis'); assert.equal(h.render().materialBudget.plan.requestCount, 33);
+  await h.render().cancel(); h.emitBudget(plan); assert.equal(h.render().materialBudget, null);
+  finish({ ok: false, cancelled: true }); await pending;
+});
 
 test('follow-up and task buttons transfer context without collecting, inferring, or executing', async () => {
   const h = harness(); let ui = await h.complete(); const count = h.calls.length;

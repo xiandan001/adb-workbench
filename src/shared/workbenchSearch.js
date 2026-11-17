@@ -22,7 +22,8 @@ export function searchDestinations() {
     ['skills', 'Skills'], ['backups', tr('配置备份')], ['portable', tr('加密迁移')]]
     .map(([tab, title]) => ({ id: `ai-tool:${tab}`, title, group: tr('AI 工具管理'),
       description: `${tr('AI 工具管理')} → ${title}`, destination: { kind: 'ai-tool', tab } }));
-  return [...settings, ...paths, ...tools];
+  return [{ id: 'diagnostics:application-log', title: tr('应用诊断记录'), group: tr('全局操作'),
+    keywords: [tr('应用日志'), tr('诊断记录')], description: tr('打开卓控台日志控制，不会自动记录或上传。'), destination: { kind: 'diagnostics' } }, ...settings, ...paths, ...tools];
 }
 
 export function searchRecords({ artifacts = [], reports = [], cases = [], tasks = [] } = {}) {

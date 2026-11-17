@@ -5,6 +5,9 @@ import SelectMenu from './SelectMenu';
 import { formatAscii, formatHex } from '../shared/serialFormat';
 import { SERIAL_VIEW_LIMIT } from '../shared/serialWorkspace';
 import { SUPPORTED_LOCALES } from '../shared/localeStore';
+import SerialTransactionsView from './SerialTransactionsView.jsx';
+import useRs232ProtocolMemory from '../shared/useRs232ProtocolMemory.js';
+import { getRs232MemoryScope, setRs232MemoryViewMode } from '../shared/rs232ProtocolMemory.js';
 
 const ROW_HEIGHT = 56;
 const VIEW_HEIGHT = 224;
@@ -40,13 +43,15 @@ function SerialEntryDetail({ entry, mode, theme, onClose, onCopy }) {
   </dialog>;
 }
 
-export default function SerialDataView({ theme, isDark, snapshot, receiveMode, onMode, following, onFollowing, onSave, onClear, saving, busy, showToast }) {
+export default function SerialDataView({ theme, isDark, snapshot, receiveMode, onMode, following, onFollowing, onSave, onClear, saving, busy, showToast, memoryScope = { workspace: 'rs232', schemeId: '' } }) {
   useLocale();
   const id = useId();
   const scrollRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [detailId, setDetailId] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const memory = useRs232ProtocolMemory(), viewMode = getRs232MemoryScope(memory.value, memoryScope).viewMode;
+  const transactions = snapshot.transactions || [];
   const entries = snapshot.entries;
   const detail = detailId === null ? null : entries.find(entry => entry.id === detailId);
   const maximumScroll = Math.max(0, entries.length * ROW_HEIGHT - VIEW_HEIGHT);
@@ -69,15 +74,17 @@ export default function SerialDataView({ theme, isDark, snapshot, receiveMode, o
       <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">{tr("收发记录")}</h3><label className="sr-only" htmlFor={`${id}-receive`}>{tr("接收显示格式")}</label><SelectMenu id={`${id}-receive`} isDark={isDark} compact value={receiveMode} onChange={onMode} options={[{ value: 'text', label: tr("文本 UTF-8") }, { value: 'hex', label: 'HEX' }, { value: 'ascii', label: 'ASCII（7-bit）' }]} className="w-36" /></div>
       <div className="flex flex-wrap gap-1.5"><button type="button" onClick={() => onFollowing(!following)} className={button} aria-pressed={!following}>{following ? <Pause size={13} /> : <Play size={13} />}{following ? tr("暂停滚动") : tr("恢复跟随")}</button><button type="button" onClick={onSave} disabled={!entries.length || busy} className={button}><Save size={13} />{saving ? tr("保存中…") : tr("保存当前记录")}</button><button type="button" onClick={() => setConfirmClear(true)} disabled={!entries.length || busy} className={button}><Trash2 size={13} />{tr("清空记录")}</button></div>
     </div>
+    <div className="flex flex-wrap items-center gap-2 text-xs"><div role="group" aria-label={tr('串口记录视图')} className="inline-flex rounded-lg border border-slate-400/20 p-0.5">{[['raw', tr('原始收发')], ['transactions', tr('命令响应')]].map(([value, label]) => <button key={value} type="button" aria-pressed={viewMode === value} onClick={() => memory.update(current => setRs232MemoryViewMode(current, memoryScope, value))} className={`rounded-md px-2.5 py-1 ${viewMode === value ? 'bg-emerald-500/15 text-emerald-500' : theme.textMuted}`}>{label}{value === 'transactions' && transactions.length ? ` ${transactions.length}` : ''}</button>)}</div></div>
+    {memory.error && <p role="alert" className="text-xs text-amber-500">{memory.error}</p>}
     {confirmClear && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs"><span className="flex-1 basis-64">{tr("清空后无法恢复，请先保存。只清理当前记录和统计，不发送命令或清理硬件缓冲。")}</span><button type="button" disabled={busy} onClick={() => { setConfirmClear(false); onClear(); }} className="rounded bg-amber-600 px-3 py-1.5 text-white disabled:opacity-40">{tr("确认清空")}</button><button type="button" onClick={() => setConfirmClear(false)} className={button}>{tr("取消")}</button></div>}
-    <div ref={scrollRef} role="region" aria-label={tr("串口收发记录")} tabIndex={0} style={{ height: VIEW_HEIGHT }} onScroll={event => { const element = event.currentTarget; setScrollTop(element.scrollTop); if (following && element.scrollHeight - element.scrollTop - element.clientHeight > ROW_HEIGHT) onFollowing(false); }} className={`overflow-auto rounded-lg border ${theme.input}`}>
+    {viewMode === 'transactions' ? <SerialTransactionsView transactions={transactions} entries={entries} following={following} theme={theme} onRecord={setDetailId} onFollowing={onFollowing} /> : <div ref={scrollRef} role="region" aria-label={tr("串口收发记录")} tabIndex={0} style={{ height: VIEW_HEIGHT }} onScroll={event => { const element = event.currentTarget; setScrollTop(element.scrollTop); if (following && element.scrollHeight - element.scrollTop - element.clientHeight > ROW_HEIGHT) onFollowing(false); }} className={`overflow-auto rounded-lg border ${theme.input}`}>
       {!entries.length ? <div className={`flex h-full items-center justify-center px-5 text-center text-xs ${theme.textMuted}`}>{tr("暂无收发数据。连接串口后开始接收；发送操作不会自动执行。")}</div> : <div style={{ height: entries.length * ROW_HEIGHT, position: 'relative' }}>
         {rows.map((entry, index) => <button type="button" key={entry.id} data-serial-entry-kind={entry.kind || 'raw'} data-serial-entry-protocol={entry.protocol || ''} onClick={() => setDetailId(entry.id)} style={{ height: ROW_HEIGHT, top: (start + index) * ROW_HEIGHT, position: 'absolute' }} className="left-0 w-full min-w-0 border-b border-slate-400/15 px-3 py-2 text-left hover:bg-slate-400/10" aria-label={tr("查看 {0} 记录 {1}", { 0: directionLabel(entry.direction), 1: entry.id })}>
           <span className={`flex items-center gap-2 text-[11px] ${theme.textMuted}`}><span className={`shrink-0 font-semibold ${entry.direction === 'RX' ? 'text-emerald-500' : 'text-sky-500'}`}>{directionLabel(entry.direction)}</span><span className="shrink-0">{timeFormat.format(entry.time)}</span><span className="truncate">{entry.path}</span><span className="shrink-0">{entry.bytes} B</span>{recordLabel(entry) && <span className={`shrink-0 ${entry.kind === 'frame' ? 'text-emerald-500' : entry.kind === 'pending' ? 'text-amber-500' : ''}`}>{recordLabel(entry)}</span>}<ChevronDown size={12} className="ml-auto shrink-0 -rotate-90" /></span>
           <span className="mt-1 block truncate font-mono text-xs">{preview(entryContent(entry, receiveMode, true)) || tr("（无完整文本，切换 HEX 查看）")}</span>
         </button>)}
       </div>}
-    </div>
+    </div>}
     <div className={`flex flex-wrap justify-between gap-1 text-[11px] ${theme.textMuted}`}><span>{tr("接收 ")}{snapshot.rxBytes.toLocaleString(getLocale())}{tr(" B · 发送 ")}{snapshot.txBytes.toLocaleString(getLocale())}{tr(" B · 缓存 ")}{entries.length}{tr(" 条")}{snapshot.unsaved ? tr(" · 有未保存记录") : ''}</span><span>{following ? tr("跟随最新") : tr("已暂停滚动，仍持续接收")}{tr(" · 点击记录查看完整内容")}</span></div>
     {snapshot.evicted > 0 && <p role="status" className="text-xs text-amber-500">{tr("仅保留最近记录，较早的 {0} 条记录已移出缓存；保存仅包含当前缓存。", { 0: snapshot.evicted })}</p>}
     <p className={`text-[11px] ${theme.textMuted}`}>{tr("收发记录上限：{0} 条 / {1} MiB 原始字节；超限后保留最近记录。", { 0: SERIAL_VIEW_LIMIT.toLocaleString(getLocale()), 1: 64 })}</p>

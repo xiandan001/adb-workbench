@@ -97,9 +97,10 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
   };
   return <div className="border-t border-[#3E4145] px-4 py-3">
     <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · {tr('连接 {0}', { 0: connectionSummary.connections })}</span></span></button>
-    <dialog ref={dialog} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
+    <dialog ref={dialog} style={open ? { display: 'flex', flexDirection: 'column' } : undefined} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
       <header className={`flex flex-wrap items-center gap-2 border-b p-4 ${colors.border}`}><h3 className="mr-auto font-semibold">{tr('后台活动')}</h3><button ref={clearButton} type="button" disabled={!endedItems.length || Boolean(busy)} onClick={() => clearRecords(endedItems)} title={tr('只移除列表记录，不取消任务、不删除产物。')} className={`rounded-lg px-2.5 py-2 text-xs disabled:opacity-40 ${colors.muted} ${colors.hover}`}>{tr('清除已结束记录')}</button><button ref={closeButton} type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>
-      <div className="max-h-[60vh] space-y-2 overflow-auto p-4">
+      {error && <p role="alert" className="max-h-24 shrink-0 overflow-y-auto border-b border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-500">{tr(error)}</p>}
+      <div className="min-h-0 max-h-[60vh] flex-1 space-y-2 overflow-auto p-4">
         <h4 className={`text-xs font-medium ${colors.heading}`}>{tr('连接状态')}</h4>
         <SidebarConnectionStatus isDark={colors.dark} onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
         {!connectionSummary.connections && !connectionSummary.issues && <p className={`py-2 text-xs ${colors.muted}`}>{tr('当前没有活动连接。')}</p>}
@@ -116,7 +117,6 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
           {Number.isFinite(item.progress) && <progress className="mt-2 h-1.5 w-full accent-emerald-500" value={item.progress} max={100} />}
         </div>)}
         {items.length > 60 && <p className={`text-xs ${colors.muted}`}>{tr('这里只展示近期活动，较早的结果请在对应页面查看。')}</p>}
-        {error && <p role="alert" className="text-xs text-red-400">{tr(error)}</p>}
       </div>
     </dialog>
   </div>;

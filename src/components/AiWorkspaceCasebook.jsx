@@ -3,27 +3,34 @@ import { BookCheck, Search } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
 import SelectMenu from './SelectMenu';
-import { workspaceCaseReview } from './AiWorkspaceState';
+import { casebookPrefill } from '../shared/aiCasebookPrefill.js';
 
 function ReviewForm({ view, disabled, onSave, theme }) {
   useLocale();
-  const [review, setReview] = useState(() => view.report.review || { ...workspaceCaseReview(), packageName: view.report.preview.diagnostic?.packageName || '' });
-  const [name, setName] = useState(view.report.name || view.report.preview.question.slice(0, 80));
-  const [tags, setTags] = useState((view.report.review?.tags || []).join(', '));
+  const [prefill] = useState(() => casebookPrefill(view.report));
+  const [review, setReview] = useState(prefill.review);
+  const [name, setName] = useState(prefill.name);
+  const [tags, setTags] = useState(prefill.review.tags.join(', '));
   const invalidTags = review.tags.length > 8 || review.tags.some(tag => tag.length > 32);
   const input = `w-full rounded-lg border px-3 py-2 text-xs disabled:opacity-50 ${theme.input}`;
-  const fields = [
-    { key: 'packageName', label: tr('适用包名'), max: 200 }, { key: 'version', label: tr('适用版本'), max: 80 },
-    { key: 'rootCause', label: tr('实际根因'), max: 2000 }, { key: 'solution', label: tr('实际处理方法'), max: 4000 },
-    { key: 'verification', label: tr('人工验证依据'), max: 2000 },
-  ];
+  const fields = [{ key: 'solution', label: tr('实际处理方法'), max: 4000 }, { key: 'verification', label: tr('人工验证依据'), max: 2000 }];
+  const advanced = [{ key: 'packageName', label: tr('适用包名'), max: 200 }, { key: 'version', label: tr('适用版本'), max: 80 }, { key: 'rootCause', label: tr('实际根因'), max: 2000 }];
   return <details className={`rounded-lg border p-3 ${theme.input}`}>
     <summary className="cursor-pointer text-xs font-medium">{view.reportRef.casebookId ? tr('更新案例验证记录') : tr('将当前报告保存为案例')}</summary>
     <div className="mt-3 space-y-3">
       <label className="block space-y-1"><span className="text-xs">{tr('案例名称')}</span><input value={name} onChange={event => setName(event.target.value)} maxLength={80} disabled={disabled || Boolean(view.reportRef.casebookId)} className={input} /></label>
+      <div className={`space-y-1 break-words rounded-lg border border-current/10 p-3 text-xs leading-5 ${theme.textMuted}`}>
+        <p>{tr('报告设备：{0}', { 0: prefill.provenance.deviceId || tr('未采集') })}</p>
+        <p>{tr('适用范围：{0} · {1}', { 0: review.packageName || tr('未填写'), 1: review.version || tr('未采集') })}</p>
+        <p>{prefill.provenance.versionSource === 'conflict' ? tr('采集版本存在冲突，未自动填写；请在高级信息中核对。') : prefill.provenance.packageSource === 'collected'
+          ? tr('适用信息来自本报告的只读采集快照，不代表实际根因或修复已验证。') : tr('未自动推测缺失的适用信息，可在高级信息中补充。')}</p>
+      </div>
       <SelectMenu ariaLabel={tr('人工验证状态')} value={review.status} onChange={status => setReview(value => ({ ...value, status }))} disabled={disabled} isDark={isDarkTheme(theme)} options={[{ value: 'unverified', label: tr('待验证') }, { value: 'verified', label: tr('已人工验证') }, { value: 'rejected', label: tr('已确认误判') }]} className="w-full" />
       {fields.map(field => <label key={field.key} className="block space-y-1"><span className="text-xs">{field.label}</span><textarea value={review[field.key]} onChange={event => setReview(value => ({ ...value, [field.key]: event.target.value }))} rows={field.max > 200 ? 2 : 1} maxLength={field.max} disabled={disabled} className={`${input} resize-y`} /></label>)}
-      <label className="block space-y-1"><span className="text-xs">{tr('标签（逗号分隔，最多 8 个）')}</span><input value={tags} onChange={event => { setTags(event.target.value); setReview(value => ({ ...value, tags: event.target.value.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })); }} maxLength={260} disabled={disabled} className={input} /></label>
+      <details className="rounded-lg border border-current/15 p-3"><summary className="cursor-pointer text-xs font-medium">{tr('高级适用信息（可选）')}</summary><div className="mt-3 space-y-3">
+        {advanced.map(field => <label key={field.key} className="block space-y-1"><span className="text-xs">{field.label}</span><textarea value={review[field.key]} onChange={event => setReview(value => ({ ...value, [field.key]: event.target.value }))} rows={field.max > 200 ? 2 : 1} maxLength={field.max} disabled={disabled} className={`${input} resize-y`} /></label>)}
+        <label className="block space-y-1"><span className="text-xs">{tr('标签（逗号分隔，最多 8 个）')}</span><input value={tags} onChange={event => { setTags(event.target.value); setReview(value => ({ ...value, tags: event.target.value.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })); }} maxLength={260} disabled={disabled} className={input} /></label>
+      </div></details>
       {invalidTags && <p className="text-xs text-amber-600">{tr('案例验证信息无效或过长。')}</p>}
       <p className={`text-[11px] leading-5 ${theme.textMuted}`}>{tr('验证状态只由你确认。保存包含独立的脱敏证据快照；不会上传，也不会自动采纳 AI 推测。')}</p>
       <button type="button" disabled={disabled || invalidTags || !name.trim() || (review.status !== 'unverified' && !review.verification.trim())} onClick={() => onSave(name.trim(), review)} className={`rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${theme.button.primary}`}>{tr('保存案例记录')}</button>

@@ -1,11 +1,12 @@
 import { tr } from './i18n.js';
+import { mergeSerialTransactions, serialTransactionsComplete } from './serialTransactions.js';
 export const SERIAL_VIEW_LIMIT = 10000;
 const MAX_ROWS = SERIAL_VIEW_LIMIT;
 export const SERIAL_WORKSPACES = Object.freeze(['rs232', 'terminal']);
 
 export function emptySerialSnapshot(workspace = 'rs232') {
   return { workspace, status: 'disconnected', path: '', sessionId: '', error: '', sending: false, revision: -1,
-    rxBytes: 0, txBytes: 0, evicted: 0, firstId: 0, lastId: 0, unsaved: false, entries: [], needsSnapshot: false };
+    rxBytes: 0, txBytes: 0, evicted: 0, firstId: 0, lastId: 0, unsaved: false, entries: [], transactions: [], firstTransactionId: 0, lastTransactionId: 0, needsSnapshot: false };
 }
 
 function firstIndexAtOrAfter(entries, id) {
@@ -45,9 +46,10 @@ function mergeSnapshot(current, incoming, replace) {
   const firstId = incoming.firstId ?? current.firstId;
   const lastId = incoming.lastId ?? current.lastId;
   const entries = mergeRows(replace ? [] : current.entries, incoming.entries, firstId, lastId);
+  const transactions = mergeSerialTransactions(current.transactions, incoming, replace);
   const complete = firstId === 0 && lastId === 0 ? entries.length === 0
     : entries.length === lastId - firstId + 1 && entries[0]?.id === firstId && entries.at(-1)?.id === lastId;
-  return { ...current, ...incoming, entries, needsSnapshot: !complete };
+  return { ...current, ...incoming, entries, transactions, needsSnapshot: !complete || !serialTransactionsComplete(transactions, incoming) };
 }
 
 export function applySerialDelta(current, delta) {

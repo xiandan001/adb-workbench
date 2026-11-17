@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parse } from '@babel/parser';
-import { tr } from '../src/shared/i18n.js';
+import { tr, preloadLanguage } from '../src/shared/i18n.js';
 
 const message = '此处的供应商与模型配置仅用于外部 AI 工具，不影响卓控台内置 AI。';
 const source = readFileSync(new URL('../src/components/ai-tools/AiToolsWorkspace.jsx', import.meta.url), 'utf8');
@@ -23,7 +23,8 @@ test('AI tools scope notice is permanent, before all tabs, loading and membershi
   assert.doesNotMatch(markup, /onClick|role="alert"|className="hidden|dismiss/);
 });
 
-test('AI tools scope notice uses all five app languages and the localized brand', () => {
+test('AI tools scope notice uses all five app languages and the localized brand', async () => {
+  await Promise.all(['en-US', 'zh-TW', 'ja-JP', 'ko-KR'].map(preloadLanguage));
   assert.equal(tr(message, {}, 'zh-CN'), message);
   const expected = {
     'en-US': 'Provider and model settings here apply only to external AI tools, not to Veylo’s built-in AI.',

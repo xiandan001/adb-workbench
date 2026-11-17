@@ -6,7 +6,7 @@ const quotas = [128, 256, 512, 1024].map(value => value * 1024 * 1024);
 const exact = (value, fields, optional = []) => value && typeof value === 'object' && !Array.isArray(value)
   && [Object.prototype, null].includes(Object.getPrototypeOf(value)) && fields.every(key => Object.hasOwn(value, key))
   && Object.keys(value).every(key => fields.includes(key) || optional.includes(key));
-const foldFields = ['scopeExpanded', 'usageExpanded', 'infoExpanded'];
+const foldFields = ['scopeExpanded', 'usageExpanded', 'infoExpanded', 'focusMode'];
 const invalid = () => { throw new Error(tr('本地偏好数据无效')); };
 function normalizeLogViewFilter(value) {
   const fields = ['text', 'excludeText', 'regex', 'regexFlags', 'pkg', 'tag', 'domain', 'minLevel', 'pid'];
@@ -45,7 +45,7 @@ function normalizeLogViewPreferences(value) {
     const key = JSON.stringify([view.deviceId, view.source]); if (seen.has(key)) invalid(); seen.add(key);
     return { deviceId: view.deviceId, source: view.source, sidebarOpen: view.sidebarOpen, aiPanelHeight: view.aiPanelHeight,
       detailWrap: view.detailWrap, colWidths: { ...view.colWidths }, filter: normalizeLogViewFilter(legacy ? {} : view.filter), buffers: normalizeBuffers(legacy ? ['main'] : view.buffers),
-      scopeExpanded: view.scopeExpanded ?? false, usageExpanded: view.usageExpanded ?? false, infoExpanded: view.infoExpanded ?? false };
+      scopeExpanded: view.scopeExpanded ?? false, usageExpanded: view.usageExpanded ?? false, infoExpanded: view.infoExpanded ?? false, focusMode: view.focusMode ?? false };
   });
   return { version: 1, archive: { ...value.archive }, views };
 }

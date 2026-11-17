@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
+function fixture(t, { delayedLoad = false, fakeTimers = false, workflow = null } = {}) {
   const windows = [], handlers = new Map(), states = new Map(), starts = [], stops = [], inputs = [], logs = [];
   let generation = 1, callbacks, localeCallback, releaseLoad;
   const timers = [];
@@ -66,7 +66,7 @@ function fixture(t, { delayedLoad = false, fakeTimers = false } = {}) {
     __dirname: path.dirname(filename), require: name => overrides[name] || require(name) });
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
   const api = module.exports;
-  api.register({ handle: (channel, handler) => handlers.set(channel, handler) });
+  api.register({ handle: (channel, handler) => handlers.set(channel, handler) }, workflow);
   const invoke = (name, window, args, senderFrame = window.webContents.mainFrame) => handlers.get('harmony-media:' + name)(
     { sender: window.webContents, senderFrame }, args);
   t.after(() => api.shutdownAll());
@@ -86,6 +86,15 @@ async function ackDecoded(h, window) {
   assert.equal((await h.invoke('ack', window, ack)).success, true);
   assert.equal((await h.invoke('ack', window, { ...ack, decoded: true })).success, true);
 }
+
+test('actual native decoded ACK is the only ready event forwarded to card workflow and cached windows retain that verified result', async t => {
+  const events = [], h = fixture(t, { workflow: { observeHdc: (deviceId, ordinal, ref, row) => events.push({ deviceId, ordinal, ref, row }) } });
+  const { opening, window } = await readyWindow(h);
+  assert.equal(events.some(item => item.row.event === 'ready'), false);
+  await ackDecoded(h, window); const result = await opening;
+  assert.equal(events.filter(item => item.row.event === 'ready').length, 1); assert.equal(result.pictureConfirmed, true); assert.equal(result.mirrorOrdinal, 1);
+  const reused = await h.api.openWindow('hdc:A'); assert.equal(reused.pictureConfirmed, true); assert.equal(reused.mirrorOrdinal, result.mirrorOrdinal);
+});
 test('device replacement while loadFile is pending rejects before native stream deployment', async t => {
   const h = fixture(t, { delayedLoad: true });
   const opening = h.api.openWindow('hdc:A');

@@ -123,7 +123,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('serial:changed', listener);
   },
   getDevices: () => ipcRenderer.invoke('adb:getDevices'),
-  startScrcpy: (deviceId, settings) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings }),
+  startScrcpy: (deviceId, settings, options) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings, ...(options ? { options } : {}) }),
+  mirrorGetState: () => ipcRenderer.invoke('mirror:state'),
+  mirrorConfirmProfile: args => ipcRenderer.invoke('mirror:confirm', args),
+  mirrorForgetProfile: args => ipcRenderer.invoke('mirror:forget', args),
+  onMirrorStateChanged: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('mirror:changed', listener);
+    return () => ipcRenderer.off('mirror:changed', listener);
+  },
   adbShell: (deviceId, command) => ipcRenderer.invoke('adb:shell', { deviceId, command }),
   adbShellCancel: (deviceId) => ipcRenderer.invoke('adb:shell:cancel', { deviceId }),
   adbScreenshot: (deviceId, localPath) => ipcRenderer.invoke('adb:screenshot', { deviceId, localPath }),
@@ -335,6 +342,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = safeListener(callback);
     ipcRenderer.on('ai-handoff:available', listener);
     return () => ipcRenderer.off('ai-handoff:available', listener);
+  },
+  onAiWorkspaceMaterialBudget: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('ai-workspace:materialBudget', listener);
+    return () => ipcRenderer.off('ai-workspace:materialBudget', listener);
   },
   aiOutboundList: () => ipcRenderer.invoke('ai-outbound:list'),
   aiOutboundGet: args => ipcRenderer.invoke('ai-outbound:get', args),

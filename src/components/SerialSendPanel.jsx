@@ -11,7 +11,7 @@ const Rs232ProtocolPanel = lazy(() => import('./Rs232ProtocolPanel.jsx'));
 const bytesHex = bytes => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 const commandPreview = item => item.mode === 'hex' ? formatHex(item.content.replace(/\s+/gu, '').slice(0, 80)) : item.content.slice(0, 120);
 
-export default function SerialSendPanel({ theme, isDark, preferences, onPreferences, draft, onDraft, commandsOpen, onCommandsOpen, connected, sending, busy, onSend, history, showToast }) {
+export default function SerialSendPanel({ theme, isDark, preferences, onPreferences, draft, onDraft, commandsOpen, onCommandsOpen, connected, sending, busy, onSend, history, showToast, memoryScope = { workspace: 'rs232', schemeId: '' } }) {
   const locale = useLocale();
   const id = useId();
   const [favoriteName, setFavoriteName] = useState('');
@@ -107,6 +107,6 @@ export default function SerialSendPanel({ theme, isDark, preferences, onPreferen
         <div className="min-w-0"><h4 className={`mb-2 flex items-center gap-1 text-xs ${theme.textMuted}`}><Clock size={12} />{tr("最近成功发送（")}{history.length}/50）</h4><div className="max-h-40 space-y-1 overflow-auto">{history.length ? history.map((item, index) => <button type="button" key={`${item.time}-${index}`} data-serial-history-index={index} data-command-selected={feedback.active && feedback.kind === 'history' && feedback.key === `${item.time}-${index}` ? 'true' : 'false'} onClick={() => selectCommand(item, 'history', `${item.time}-${index}`, tr("最近成功发送：第 {0} 条", { 0: index + 1 }))} title={tr("仅回填，不发送")} className={`block w-full rounded-lg px-3 py-2 text-left ${feedback.active && feedback.kind === 'history' && feedback.key === `${item.time}-${index}` ? 'bg-emerald-500/15 ring-1 ring-emerald-500/60' : 'bg-slate-400/10'}`}><span className={`block text-[11px] ${theme.textMuted}`}>{new Date(item.time).toLocaleString(getLocale())} · {item.mode.toUpperCase()}</span><span className="mt-1 block truncate font-mono text-xs">{commandPreview(item)}</span></button>) : <p className={`py-2 text-xs ${theme.textMuted}`}>{tr("成功写入串口后会出现在这里")}</p>}</div></div>
       </div>
     </div>}
-    {protocolOpen && <Suspense fallback={<p role="status" className={`text-xs ${theme.textMuted}`}>{tr('正在打开协议面板…')}</p>}><Rs232ProtocolPanel theme={theme} isDark={isDark} onClose={() => { if (!protocolFillRef.current) setProtocolOpen(false); }} onUse={useProtocol} /></Suspense>}
+    {protocolOpen && <Suspense fallback={<p role="status" className={`text-xs ${theme.textMuted}`}>{tr('正在打开协议面板…')}</p>}><Rs232ProtocolPanel key={`${memoryScope.workspace}:${memoryScope.schemeId}`} memoryScope={memoryScope} theme={theme} isDark={isDark} onClose={() => { if (!protocolFillRef.current) setProtocolOpen(false); }} onUse={useProtocol} /></Suspense>}
   </div>;
 }

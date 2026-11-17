@@ -58,11 +58,13 @@ test('actual analyzer wiring only changes the view boolean and leaves critical r
   assert.ok(element, 'The actual analyzer uses one controlled summary rather than leaving duplicate information rows');
   const attributes = new Map(element.openingElement.attributes.filter(item => item.type === 'JSXAttribute').map(item => [item.name.name, item.value]));
   const expression = name => analyzer.slice(attributes.get(name).expression.start, attributes.get(name).expression.end);
-  assert.equal(expression('expanded'), 'viewPreferences.view.infoExpanded');
+  assert.equal(expression('expanded'), '!focusMode && viewPreferences.view.infoExpanded');
   assert.match(expression('sourceIdentity'), /captureDeviceId/); assert.doesNotMatch(expression('sourceIdentity'), /\bdeviceId\b/);
-  const calls = [], toggle = vm.runInNewContext('(' + expression('onExpandedChange') + ')', { setViewField: (field, update) => calls.push({ field, update }) });
+  const calls = [], toggle = vm.runInNewContext('(' + expression('onExpandedChange') + ')', { focusMode: false, setViewField: (field, update) => calls.push({ field, update }) });
   toggle(); assert.equal(calls.length, 1); assert.equal(calls[0].field, 'infoExpanded');
   assert.equal(calls[0].update(false), true); assert.equal(calls[0].update(true), false);
+  const focusCalls = [], exit = vm.runInNewContext('(' + expression('onExpandedChange') + ')', { focusMode: true, setViewField: (field, update) => focusCalls.push({ field, update }) });
+  exit(); assert.equal(focusCalls.length, 1); assert.equal(focusCalls[0].field, 'focusMode'); assert.equal(focusCalls[0].update, false);
   for (const marker of ['{hydrateError &&', '{viewPreferences.error &&', '{viewEngine.error &&', '{worksetMemory.error &&']) {
     const index = analyzer.indexOf(marker); assert.ok(index >= 0); assert.ok(index < element.start || index > element.end, marker + ' stays directly visible');
   }

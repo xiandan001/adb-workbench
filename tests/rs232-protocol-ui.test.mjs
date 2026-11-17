@@ -10,6 +10,7 @@ import * as draftHelpers from '../src/shared/rs232ProtocolDraft.js';
 import { encodeMessage } from '../src/shared/serialSettings.js';
 import { formatHex } from '../src/shared/serialFormat.js';
 import { trapAppMessageFocus } from '../src/shared/appMessageDialog.js';
+import * as protocolMemory from '../src/shared/rs232ProtocolMemory.js';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 const theme = { card: '', text: '', textMuted: '', input: '', button: { primary: '', secondary: '' } };
@@ -30,6 +31,8 @@ function environment({ manualFrames = false } = {}) {
     trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex,
     ...Object.fromEntries(Object.entries(protocol).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
     ...Object.fromEntries(Object.entries(draftHelpers).filter(([, value]) => typeof value === 'function')),
+    ...Object.fromEntries(Object.entries(protocolMemory).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
+    useRs232ProtocolMemory() { return { value: protocolMemory.readRs232Memory(storage), error: '', update(change) { try { protocolMemory.writeRs232Memory(structuredClone(change(protocolMemory.readRs232Memory(storage))), storage); return true; } catch { return false; } } }; },
     defaultProtocolPreferences: persistence.defaultProtocolPreferences, readProtocolPreferences: () => persistence.readProtocolPreferences(storage), saveProtocolPreferences: value => persistence.saveProtocolPreferences(structuredClone(value), storage),
     upsertProtocolCommand: (value, command) => persistence.upsertProtocolCommand(structuredClone(value), structuredClone(command)), removeProtocolCommand: (value, id) => persistence.removeProtocolCommand(structuredClone(value), id), restoreProtocolCommand: (value, id) => persistence.restoreProtocolCommand(structuredClone(value), id),
     setTimeout(callback, delay) { const timer = setTimeout(callback, delay); timers.add(timer); return timer; }, clearTimeout,
@@ -67,6 +70,21 @@ function environment({ manualFrames = false } = {}) {
 }
 const editorNode = h => nodes(h.tree()).find(node => typeof node.type === 'function' && node.type.name === 'Rs232ProtocolCommandEditor');
 const command = (h, id) => nodes(h.tree()).find(node => node.type === 'button' && node.props.onClick && text(node).includes(protocol.getProtocolDisplayName(protocol.listProtocolCommands().find(item => item.id === id))));
+
+test('actual protocol callbacks restore safe parameters in the same scheme only and never invoke onUse', async t => {
+  const e = environment(); t.after(e.dispose); let sends = 0;
+  const props = { theme, isDark: false, memoryScope: { workspace: 'rs232', schemeId: 'a' }, onClose() {}, onUse: () => sends++ };
+  const h = e.mount('Rs232ProtocolPanel', props); await h.drain(); await command(h, 'lango-042').props.onClick(); await h.drain();
+  const input = nodes(region(h, '协议命令详情')).find(node => node.type === 'input'); input.props.onChange({ target: { value: '50' } }); await h.drain();
+  const next = e.mount('Rs232ProtocolPanel', props); await next.drain();
+  assert.equal(nodes(region(next, '协议命令详情')).find(node => node.type === 'input').props.value, 50);
+  const other = e.mount('Rs232ProtocolPanel', { ...props, memoryScope: { workspace: 'rs232', schemeId: 'b' } }); await other.drain();
+  assert.match(text(other.tree()), /获取电源状态/); assert.equal(sends, 0);
+  e.choices.push(false); await find(next, '清除操作记忆').props.onClick(); await next.drain();
+  assert.equal(nodes(region(next, '协议命令详情')).find(node => node.type === 'input').props.value, 50);
+  e.choices.push(true); await find(next, '清除操作记忆').props.onClick(); await next.drain(); assert.equal(sends, 0);
+  assert.equal(protocolMemory.readRs232Memory(e.storage).scopes.some(item => item.schemeId === 'a'), false);
+});
 
 test('actual panel previews fixed/parameter frames and never invokes a serial send while selecting', async t => {
   const e = environment(), used = []; t.after(e.dispose); const h = e.mount('Rs232ProtocolPanel', { theme, isDark: false, onClose() {}, onUse: async frame => { used.push(structuredClone(frame)); return false; } }); await h.drain();
@@ -178,10 +196,10 @@ test('new category persistence follows command save/reload while cancelling a di
   nodes(child.tree()).find(node => node.type === 'input').props.onChange({ target: { value: 'Stored category command' } }); await child.drain();
   nodes(child.tree()).find(node => node.type === 'textarea').props.onChange({ target: { value: 'FE 08 58 42 48 43 4D 44 02 08 CF' } }); await child.drain();
   find(child, '新增分类').props.onClick(); await child.drain(); nodes(child.tree()).find(node => node.props?.['aria-label'] === '新分类名称').props.onChange({ target: { value: 'Custom 原样分类' } }); await child.drain(); find(child, '确认分类').props.onClick(); await child.drain();
-  assert.equal(e.writes.length, 0); await find(child, '保存命令').props.onClick(); await child.drain(); await panel.drain(); assert.equal(e.writes.length, 1); const stored = e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY); assert.equal(JSON.parse(stored).overrides[0].category, 'Custom 原样分类');
+  assert.equal(e.writes.length, 0); await find(child, '保存命令').props.onClick(); await child.drain(); await panel.drain(); assert.equal(e.writes.filter(item => item.key === persistence.RS232_PROTOCOL_PREFS_KEY).length, 1); const stored = e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY); assert.equal(JSON.parse(stored).overrides[0].category, 'Custom 原样分类');
   const restored = e.mount('Rs232ProtocolPanel', props); await restored.drain(); const picker = nodes(restored.tree()).find(node => node.type === 'SelectMenu' && node.props.ariaLabel === '协议分类'); assert.equal(picker.props.options.find(item => item.value === 'Custom 原样分类').label, 'Custom 原样分类');
   await find(restored, '添加命令').props.onClick(); await restored.drain(); const cancelled = e.mount('Rs232ProtocolCommandEditor', editorNode(restored).props); await cancelled.drain(); find(cancelled, '新增分类').props.onClick(); await cancelled.drain(); nodes(cancelled.tree()).find(node => node.props?.['aria-label'] === '新分类名称').props.onChange({ target: { value: 'Never persist this category' } }); await cancelled.drain();
-  await editorNode(restored).props.onCancel(); await restored.drain(); assert.ok(editorNode(restored)); assert.equal(e.confirms.at(-1).title, '放弃未保存的命令修改？'); e.choices.push(true); await editorNode(restored).props.onCancel(); await restored.drain(); assert.equal(editorNode(restored), undefined); assert.equal(e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY), stored); assert.equal(e.writes.length, 1); assert.equal(sends, 0);
+  await editorNode(restored).props.onCancel(); await restored.drain(); assert.ok(editorNode(restored)); assert.equal(e.confirms.at(-1).title, '放弃未保存的命令修改？'); e.choices.push(true); await editorNode(restored).props.onCancel(); await restored.drain(); assert.equal(editorNode(restored), undefined); assert.equal(e.values.get(persistence.RS232_PROTOCOL_PREFS_KEY), stored); assert.equal(e.writes.filter(item => item.key === persistence.RS232_PROTOCOL_PREFS_KEY).length, 1); assert.equal(sends, 0);
 });
 
 test('the whole scheme disclosure is controlled, summarized and never applies or connects when toggled', async t => {

@@ -15,6 +15,7 @@ import {
 import { isDarkTheme } from '../shared/theme';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
 import SelectMenu from './SelectMenu';
+import { confirmAppMessage } from '../shared/appMessageDialog.js';
 
 function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, activeDeviceId, onActiveDeviceChange }) {
   useLocale();
@@ -76,9 +77,13 @@ function EnvironmentCheckWizard({ devices, theme, showToast, onRefreshDevices, a
     if (!window.electronAPI?.envCheckRestartAdb || restartPendingRef.current) return;
     restartPendingRef.current = true;
     setRestarting(true);
-    setError('');
-    setCheckError(null);
+    const context = deviceContextRef.current;
     try {
+      const confirmed = await confirmAppMessage({ type: 'warning', title: tr('确认重启共享 ADB 服务'), message: tr('此操作会影响此电脑上的所有 ADB 设备连接。'),
+        detail: tr('正在进行的 Android 投屏、设备日志、文件操作和终端命令可能中断，网络 ADB 可能需要重新连接。串口、SSH 和 HDC 不会因此重启。'),
+        confirmLabel: tr('确认重启 ADB'), cancelLabel: tr('取消'), defaultId: 0, cancelId: 0 });
+      if (!confirmed || deviceContextRef.current !== context) return;
+      setError(''); setCheckError(null);
       const res = await window.electronAPI.envCheckRestartAdb();
       if (!res?.ok) throw new Error(res?.error || res?.message || tr("ADB 服务重启失败"));
       showToast?.(res.message || tr("ADB 服务已重启"));

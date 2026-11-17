@@ -14,6 +14,9 @@ import AiWorkspaceRelated from './AiWorkspaceRelated';
 import { workspacePhase, workspacePrimaryBlock } from './AiWorkspaceFlow';
 import SelectMenu from './SelectMenu';
 import AiContextTextInput from './AiContextTextInput';
+import { useRef, useState } from 'react';
+import useAiMaterialBudget from '../shared/useAiMaterialBudget.js';
+import AiMaterialBudget from './AiMaterialBudget.jsx';
 
 function WorkspaceRules({ theme }) {
   return <details className={`rounded-xl border px-4 py-3 ${theme.card}`}>
@@ -41,6 +44,18 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
   useLocale();
   const state = useAiWorkspace({ active, devices, activeDeviceId, applicationContext, incomingHandoffId, incomingReportRef, onOpenTasks, showToast });
   const { mode, current, sources, loading, sourceError } = state;
+  const { summary: draftBudget, retry: retryBudget } = useAiMaterialBudget({ current, mode, active });
+  const preparingRef = useRef(null), [adjusting, setAdjusting] = useState('');
+  const preparationKey = `${current.caseId}:${current.revision}`;
+  const adjustMaterials = () => {
+    setAdjusting(preparationKey);
+    requestAnimationFrame(() => {
+      const section = preparingRef.current;
+      section?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+      const selection = section?.querySelector('[data-ai-material-selection] details');
+      if (selection) { selection.open = true; selection.querySelector('summary')?.focus({ preventScroll: true }); }
+    });
+  };
   const dark = isDarkTheme(theme); const busy = Boolean(current.busy || state.reportBusy);
   const entitled = sources.entitled === true;
   const online = workspaceDeviceOnline(devices, current.deviceId);
@@ -61,7 +76,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     generate: tr('正在生成测试任务草案…'), save: tr('正在确认并保存任务…'), cancelling: tr('正在取消…'), compare: tr('正在本机准备对比预览…'),
   }[current.busy];
   const blocked = workspacePrimaryBlock(current, { devices, sources: sources.sources, loading, entitled, reportBusy: state.reportBusy });
-  const canCollect = !blocked;
+  const canCollect = !blocked && draftBudget?.status !== 'over-limit';
   const phase = workspacePhase(current);
   const blockedReasons = { question: tr('先描述要分析的问题或测试目标。'), device: tr('请选择在线设备；不会自动替换已选目标。'), checks: tr('至少选择一项只读检查。'), package: tr('所选专项检查需要目标应用包名。'), source: tr('选择一个来源、带入上下文或补充文本即可。'), stale: tr('请移除已失效的来源，再准备预览。'), loading: tr('正在读取可用来源，请稍候。'), membership: tr('生成任务需要现有会员权限。'), busy: tr('当前操作尚未完成，可等待或取消。') };
   const view = current.reportView;
@@ -87,9 +102,10 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
       ['prepare', tr('1. 准备问题与材料')], ['review', tr('2. 核对后继续')], ['result', tr('3. 查看结论与下一步')],
     ].map(([id, label]) => <li key={id} aria-current={phase === id ? 'step' : undefined} className={phase === id ? 'font-semibold text-emerald-600 dark:text-emerald-300' : theme.textMuted}>{label}</li>)}</ol>
     {current.busy && <div role="status" className={`flex items-center gap-2 rounded-lg border p-3 ${theme.card}`}><Loader2 size={16} className="shrink-0 animate-spin text-emerald-500" /><span className={`flex-1 text-xs ${theme.textMuted}`}>{busyLabel}</span>{current.busy !== 'save' && <button type="button" onClick={state.cancel} disabled={current.busy === 'cancelling'} className={button}><Square size={12} />{tr('取消')}</button>}</div>}
+    {mode !== 'task' && (!view || current.preparing || view.report.preview.id === current.preview?.id) && <AiMaterialBudget draft={draftBudget} collected={state.materialBudget} busy={busy} onAdjust={adjustMaterials} onRetry={retryBudget} theme={theme} />}
     <div role="tabpanel" id={`ai-workspace-panel-${mode}`} aria-labelledby={`ai-workspace-tab-${mode}`} className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.85fr)_minmax(0,1.4fr)]">
       <div className="min-w-0 space-y-4">
-        <details open={phase === 'prepare'} className={`rounded-xl border p-4 ${theme.card}`}>
+        <details ref={preparingRef} open={phase === 'prepare' || adjusting === preparationKey} onToggle={event => { if (!event.currentTarget.open) setAdjusting(''); }} className={`rounded-xl border p-4 ${theme.card}`}>
           <summary className="cursor-pointer text-sm font-semibold">{tr('问题与材料')}<span className={`ml-2 text-xs font-normal ${theme.textMuted}`}>{phase !== 'prepare' ? tr('展开可修改，已有结果会保留') : ''}</span></summary>
           <div className="mt-4 space-y-4">
           <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">{currentMode.title}</h3><button type="button" onClick={state.reset} disabled={busy} className={button} title={tr('开始新问题，保留本会话已完成分析')}><RotateCcw size={13} />{tr('新建')}</button></div>
@@ -122,7 +138,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
             {staleSources && <div className="space-y-2 rounded-lg border border-amber-500/25 p-3"><p className="text-xs text-amber-600">{tr('部分所选来源已不可用，请移除后重新采集。')}</p><button type="button" disabled={busy} onClick={() => state.edit({ sourceIds: current.sourceIds.filter(id => availableSources.has(id)) })} className={button}>{tr('移除不可用来源')}</button></div>}
             <AiContextTextInput key={current.caseId} value={current.text} onChange={text => state.edit({ text })} disabled={busy} className={input} label={tr('补充文本（可选）')} placeholder={tr('仅粘贴本次需要分析的片段；采集后会显示脱敏预览。')} />
           </>}
-          {mode === 'task' ? <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('补充测试参数（可选）')}</summary><div className="mt-3"><AiWorkspaceRequirements requirements={current.requirements} onChange={requirements => state.edit({ requirements })} disabled={busy} theme={theme} /></div></details> : <AiWorkspaceSelection selection={current.selection} onChange={selection => state.edit({ selection })} disabled={busy} theme={theme} />}
+          {mode === 'task' ? <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('补充测试参数（可选）')}</summary><div className="mt-3"><AiWorkspaceRequirements requirements={current.requirements} onChange={requirements => state.edit({ requirements })} disabled={busy} theme={theme} /></div></details> : <div data-ai-material-selection><AiWorkspaceSelection selection={current.selection} onChange={selection => state.edit({ selection })} disabled={busy} theme={theme} /></div>}
           {blocked && <p role="status" className={`text-xs leading-5 ${theme.textMuted}`}>{blockedReasons[blocked]}</p>}
           {mode === 'task' ? <><p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('支持受控的点击、滑动、输入、按键、文本校验、等待、截图和性能采样。不会生成任意 Shell 或安装、删除操作。')}</p><button type="button" onClick={state.generate} disabled={Boolean(blocked)} className={primary}><Sparkles size={15} />{tr('生成任务草案')}</button></> : <button type="button" onClick={state.collectAndReview} disabled={!canCollect} className={phase === 'prepare' ? primary : button}><Database size={15} />{tr('采集并核对发送')}</button>}
           </div>

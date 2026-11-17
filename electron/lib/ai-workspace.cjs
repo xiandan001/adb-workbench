@@ -17,6 +17,7 @@ function register(ipcMain) {
   const plannedClient = createBuiltinBatchClient({ request: outbound.request, deferTimeoutUntilAuthorized: true,
     serializeBody: (payload, options) => runWorkspaceJob('transportBody', { payload }, options) });
   const factory = sender => createAiWorkspaceService({ client: args => outbound.withOperation({ title: tr('AI 工作区'), kind: 'summary', contentFormat: 'workspace-json', signal: args.signal }, () => client(args), sender), processor: runWorkspaceJob,
+    onMaterialBudget: value => { if (ctx.getMainWindow()?.webContents === sender && !sender.isDestroyed()) sender.send('ai-workspace:materialBudget', value); },
     batchClient: (requests, { signal }) => outbound.withOperation({ title: tr('AI 工作区'), kind: 'summary', contentFormat: 'workspace-json', signal },
       () => plannedClient(requests, { signal, run: action => outbound.withBatch(tr('AI 工作区'), action, 1) }), sender),
     evidence: createEvidenceAdapter({ getLogs: require('./log-analyzer.cjs').getAnalysisSnapshots,

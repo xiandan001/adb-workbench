@@ -15,6 +15,7 @@ const { createMirrorDiagnostics, mirrorFailureReason } = require('./mirror-diagn
 
 const ACTIVE_RECORDINGS = new Set(['starting', 'recording', 'stopping', 'saving']);
 let singleton;
+let mirrorWorkflow;
 function getManager() {
   if (singleton) return singleton;
   const { app, BrowserWindow } = require('electron');
@@ -103,7 +104,9 @@ function getManager() {
       webPreferences: { preload: path.join(__dirname, '../harmony-media-preload.cjs'), nodeIntegration: false,
         contextIsolation: true, sandbox: true, backgroundThrottling: false } });
     const view = { deviceId, ref, window, ordinal: ++viewCounter, sessionId: '', rendererReady: false, sequence: 0, inFlight: new Set(), inputBusy: false, allowClose: false };
-    view.monitor = createMirrorDiagnostics({ transport: 'hdc', mirrorNumber: view.ordinal, attemptNumber: 1, phase: 'validation', videoCodec: 'h264', audioMode: 'disabled', record: applicationLog.record });
+    view.monitor = createMirrorDiagnostics({ transport: 'hdc', mirrorNumber: view.ordinal, attemptNumber: 1, phase: 'validation', videoCodec: 'h264', audioMode: 'disabled', record: row => {
+      applicationLog.record(row); mirrorWorkflow?.observeHdc(deviceId, view.ordinal, view.ref, row);
+    } });
     view.monitor.event('opening');
     let readyResolve;
     const ready = new Promise(resolve => { readyResolve = resolve; });
@@ -158,7 +161,7 @@ function getManager() {
           applicationLog.record({ ...view.decoderDiagnostic, source: 'media', event: 'first-frame-timeout', errorCode: 'TIMEOUT' });
           reject(Object.assign(new Error(firstFrameFailure(view.decoderDiagnostic)), { code: 'CAPTURE_TIMEOUT' }));
         }, 15000); })]);
-        return { success: true, session: streams.get(view.sessionId) };
+        return { success: true, session: streams.get(view.sessionId), mirrorOrdinal: view.ordinal, pictureConfirmed: true };
       } catch (error) {
         view.monitor.finish('failure', { reason: error.mirrorReason || mirrorFailureReason(error.code) });
         applicationLog.record({ source: 'media', event: 'transport-error', ...classifyApplicationError(error) });
@@ -203,7 +206,8 @@ function getManager() {
   return singleton;
 }
 let registered = false;
-function register(ipcMain) {
+function register(ipcMain, workflow = null) {
+  if (workflow) mirrorWorkflow = workflow;
   if (registered) return; registered = true;
   const manager = getManager();
   const handle = (name, action) => ipcMain.handle('harmony-media:' + name, async (event, args) => {

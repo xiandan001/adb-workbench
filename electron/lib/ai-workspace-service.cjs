@@ -28,6 +28,7 @@ function targetKey(entries, deviceId) {
 }
 function createAiWorkspaceService({ client, batchClient, evidence, membership, saveTask, confirmSave, history, casebook,
   processor = computeWorkspaceJob, resolveHandoff, resolveBasket, resolveTaskTargets, activity,
+  onMaterialBudget = () => {},
   confirmDelete = async () => false, exportReport = async () => ({ cancelled: true }), now = Date.now }) {
   const cases = new Map();
   const lifetime = new AbortController();
@@ -110,7 +111,7 @@ function createAiWorkspaceService({ client, batchClient, evidence, membership, s
     const preview = frozen.preview, release = residentBudget.reserve(frozen.bytes);
     retained.set(preview, release);
     state.preview = preview; state.cache = null;
-    return { preview };
+    return { preview, materialBudget: { localBytes: frozen.bytes, limitBytes: limits.evidenceBytes, complete: true } };
   }
   async function inferPlanned(initial, prompt, payload, preview, validationEntries, signal, assertCurrent) {
     await entitled(); assertCurrent();
@@ -232,6 +233,9 @@ function createAiWorkspaceService({ client, batchClient, evidence, membership, s
       const validationEntries = preview.entries.map(entry => ({ id: entry.id, lineCount: entry.lineCount ?? entry.text.split('\n').length }));
       await entitled(); assertCurrent();
       if (state.cache?.key === key && now() - state.cache.at < 5 * 60 * 1000) return { ...state.cache.value, cached: true };
+      try { onMaterialBudget({ caseId: args.caseId, previewId: preview.id, sourceBytes: prepared.sourceBytes,
+        requestCount: prepared.requests.length, initialBatchCount: Math.ceil(prepared.requests.length / 16),
+        needsSummary: prepared.kind === 'map', estimated: true }); } catch { /* Budget presentation cannot authorize or replace an AI operation. */ }
       const answer = await withLocale(locale, () => prepared.kind === 'single'
         ? infer(analysisPrompt, payload, signal, assertCurrent, { content: prepared.requests[0].userContent, key })
         : inferPlanned(prepared, analysisPrompt, payload, preview, validationEntries, signal, assertCurrent));

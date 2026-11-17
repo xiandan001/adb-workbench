@@ -13,6 +13,7 @@ import DeviceRecentMedia from './DeviceRecentMedia';
 import AiContextButton from './AiContextButton';
 import useDeviceRecording from './useDeviceRecording';
 import './DeviceCard.css';
+import DeviceMirrorStatus from './DeviceMirrorStatus.jsx';
 // 设备巡检面板：采集逻辑在主进程 inspection 模块中
 import InspectionPanel from './InspectionPanel';
 // App 包管理增强面板
@@ -32,7 +33,7 @@ function DeviceTerminalSurface({ fullscreen, children }) {
   return fullscreen && typeof document !== 'undefined' ? createPortal(children, document.body) : children;
 }
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full' }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full', mirrorSession, onRetryMirror, onMirrorDiagnostics, onRememberMirror, onForgetMirror }) {
   useLocale();
   const isOnline = device.status === 'device';
   const harmony = isHarmonyDevice(device);
@@ -347,13 +348,14 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
       if (!event.target.closest('[data-device-pin]')) onSelectDevice?.();
     }} className={`device-card ${t.card} rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-shadow flex flex-col ${isActive ? 'ring-1 ring-emerald-500/50' : ''}`}>
       <DeviceCardHeader device={device} deviceName={deviceName} theme={t} isOnline={isOnline}
-        isActive={isActive} isPinned={isPinned} scrcpyLoading={scrcpyLoading}
+        isActive={isActive} isPinned={isPinned} scrcpyLoading={scrcpyLoading} mirrorActive={mirrorSession && ['starting', 'unconfirmed', 'running'].includes(mirrorSession.phase) && mirrorSession.generation === device.generation}
         isEditing={isEditing} editName={editName} onEditNameChange={setEditName}
         onEditNameKeyDown={handleNameKeyDown} onNameSubmit={handleNameSubmit}
         onBeginRename={() => { setEditName(deviceName || ''); setIsEditing(true); }}
         onSelectDevice={onSelectDevice} onTogglePin={onTogglePin} onDisconnect={onDisconnect} onStart={onStart} />
 
       <div className={`device-card-actions ${t.text}`}>
+        <DeviceMirrorStatus session={mirrorSession} device={device} theme={t} onRetry={onRetryMirror} onDiagnostics={onMirrorDiagnostics} onRemember={onRememberMirror} onForget={onForgetMirror} />
         {working.state.storageError && <div role="alert" className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
           {deviceWorkingErrorMessage(working.state.storageError)}<button type="button" onClick={working.retrySave} className="ml-2 underline">{tr('重试')}</button>
         </div>}

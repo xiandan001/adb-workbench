@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Loader2, Send, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 
-export default function AiOutboundPreviewHost({ isDark = true, usageTarget = null, usagePlacement = 'floating', usageExpanded, onUsageExpandedChange }) {
+export default function AiOutboundPreviewHost({ isDark = true, usageTarget = null, usagePlacement = 'floating', usageExpanded, onUsageExpandedChange, usageHidden = false }) {
   useLocale();
   const [state, setState] = useState({ pending: [], operations: [] });
   const [preview, setPreview] = useState(null);
@@ -66,7 +66,7 @@ export default function AiOutboundPreviewHost({ isDark = true, usageTarget = nul
     finally { if (alive.current) setBusy(false); }
   }
 
-  const usageView = state.operations.length > 0 && <aside aria-label={tr('AI 发送与用量')} className={`${usageTarget || usagePlacement === 'inline' ? 'min-w-0 w-full' : 'fixed bottom-3 right-3 z-40 w-[min(24rem,calc(100vw-1.5rem))] shadow-lg'} flex min-h-0 flex-col rounded-xl border ${panel}`}>
+  const usageView = !usageHidden && state.operations.length > 0 && <aside aria-label={tr('AI 发送与用量')} className={`${usageTarget || usagePlacement === 'inline' ? 'min-w-0 w-full' : 'fixed bottom-3 right-3 z-40 w-[min(24rem,calc(100vw-1.5rem))] shadow-lg'} flex min-h-0 flex-col rounded-xl border ${panel}`}>
     <div className="flex min-w-0 shrink-0 items-center"><button ref={usageToggle} type="button" aria-expanded={showUsage} aria-controls={usageBodyId} onClick={() => changeUsage(!showUsage)} className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-2"><span className="min-w-0 break-words">{tr('AI 发送与用量')}</span><ChevronDown size={14} aria-hidden="true" className={`shrink-0 ${showUsage ? 'rotate-180' : ''}`} /></button>
       {showUsage && <button type="button" aria-label={tr('收起 AI 发送与用量')} onClick={() => { changeUsage(false); usageToggle.current?.focus({ preventScroll: true }); }} className="mr-1 shrink-0 rounded-lg p-2 focus-visible:outline-2 focus-visible:outline-offset-2"><X size={14} /></button>}</div>
     <div id={usageBodyId} hidden={!showUsage} className="min-h-0 max-h-[min(15rem,25vh)] space-y-3 overflow-y-auto break-words border-t border-slate-500/25 p-3">{showUsage && state.operations.slice(-6).reverse().map(item => <OutboundUsage key={item.id} item={item} />)}</div>

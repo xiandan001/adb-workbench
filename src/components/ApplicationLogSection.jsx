@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
 import { Download, FileText, Loader2, Play, RefreshCw, Square } from 'lucide-react';
 import { tr, useLocale, formatDateTime, formatNumber } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
-import { createApplicationLogUi } from '../shared/applicationLogUi';
+import useApplicationLogCapture from '../shared/useApplicationLogCapture.js';
 
 function captureStatus(state, loading) {
   if (!state) return loading ? tr('正在读取应用日志状态…') : tr('状态未知');
@@ -18,10 +17,7 @@ function captureStatus(state, loading) {
 
 export default function ApplicationLogSection({ theme }) {
   useLocale();
-  const api = window.electronAPI;
-  const [view, setView] = useState({ capture: null, busy: '', loading: true, error: '', readError: '', notice: '' });
-  const model = useMemo(() => createApplicationLogUi({ api, onChange: setView }), [api]);
-  useEffect(() => { model.activate(); return () => model.deactivate(); }, [model]);
+  const { view, model } = useApplicationLogCapture();
   const state = view.capture, busy = Boolean(view.busy), disabled = busy || view.loading || !state;
   const error = view.error || view.readError || state?.error || '';
   const warning = state && ['time-limit', 'size-limit', 'interrupted', 'io-error'].includes(state.reason);

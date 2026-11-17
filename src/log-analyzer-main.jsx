@@ -7,11 +7,12 @@ import { initializeLanguage } from './shared/i18n.js'
 import LogWindowTitle from './components/LogWindowTitle.jsx'
 import LogWindowStartupBoundary, { LogWindowReady } from './components/LogWindowStartupBoundary.jsx'
 import { startLogWindow } from './shared/logWindowBootstrap.js'
+import { LanguageCatalogGate } from './components/LanguageLoadNotice.jsx'
 
 startLogWindow({ initializeLanguage, onFailure: () => console.warn('[LogWindow] language-unavailable'), render: () => createRoot(document.getElementById('root')).render(
-  <StrictMode>
+  <StrictMode><LanguageCatalogGate>
     <LogWindowTitle />
     <UiMotionPreferences />
     <LogWindowStartupBoundary><LogWindowApp /><LogWindowReady /></LogWindowStartupBoundary>
-  </StrictMode>,
+  </LanguageCatalogGate></StrictMode>,
 ) })

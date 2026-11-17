@@ -34,6 +34,10 @@ import InitialLanguageDialog from './components/InitialLanguageDialog';
 import { tr, useLocale, getLocale, useLanguageSelectionPending } from './shared/i18n.js';
 import FeedbackSection, { FeedbackDialog } from './components/FeedbackSection';
 import ApplicationLogSection from './components/ApplicationLogSection';
+import DiagnosticCaptureButton from './components/DiagnosticCaptureButton.jsx';
+import LanguageLoadNotice from './components/LanguageLoadNotice.jsx';
+import useMirrorSessions from './shared/useMirrorSessions.js';
+import ConnectionAttemptNotice from './components/ConnectionAttemptNotice.jsx';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { observeUpdaterState, updaterInstallLabel } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
@@ -115,6 +119,8 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionFormOpen, setConnectionFormOpen] = useState(false);
   const [connectionResults, setConnectionResults] = useState({});
+  const [lastConnectionAttempt, setLastConnectionAttempt] = useState(null);
+  const { sessions: mirrorSessions, error: mirrorStateError } = useMirrorSessions();
   const connectingAddressesRef = useRef(new Set());
   const [scrcpySettings, setScrcpySettings] = useState(() => readMigratedPreference('scrcpySettings', {
     screenOff: false,
@@ -272,6 +278,7 @@ function App() {
     return localStorage.getItem('autoUpdateEnabled') !== 'false';
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const indexedSearch = useWorkbenchSearch(commandPaletteOpen);
   useEffect(() => {
     try {
@@ -625,7 +632,8 @@ function App() {
     const destination = command?.destination;
     if (destination) {
       const requestId = crypto.randomUUID();
-      if (destination.kind === 'settings') { setSearchDestination({ ...destination, requestId }); setActiveTab('settings'); }
+      if (destination.kind === 'diagnostics') setDiagnosticOpen(true);
+      else if (destination.kind === 'settings') { setSearchDestination({ ...destination, requestId }); setActiveTab('settings'); }
       else if (destination.kind === 'ai-tool') { setSearchDestination({ ...destination, requestId }); setActiveTab('ai-tools'); }
       else if (destination.kind === 'artifact') { setIncomingArtifactRequest({ id: destination.id, requestId }); setActiveTab('artifacts'); }
       else if (destination.kind === 'history' || destination.kind === 'casebook') {
@@ -991,11 +999,11 @@ function App() {
     }
   };
 
-  const handleStartScrcpy = async (deviceId) => {
+  const handleStartScrcpy = async (deviceId, options) => {
     setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: true }));
     try {
       if (window.electronAPI) {
-        const res = await window.electronAPI.startScrcpy(deviceId, scrcpySettings);
+        const res = await window.electronAPI.startScrcpy(deviceId, scrcpySettings, options);
         if (res?.success === false || res?.ok === false) throw new Error(res.error || tr('原生投屏未能启动。'));
         showToast(res?.message || tr("开始投屏 {0}", { 0: deviceId }));
       } else {
@@ -1006,6 +1014,15 @@ function App() {
     } finally {
       setOperationLoading(prev => ({ ...prev, [`scrcpy_${deviceId}`]: false }));
     }
+  };
+
+  const handleMirrorProfile = async (deviceId, action) => {
+    const sessionId = mirrorSessions[deviceId]?.id;
+    if (!sessionId) return;
+    try {
+      const result = await window.electronAPI?.[action === 'remember' ? 'mirrorConfirmProfile' : 'mirrorForgetProfile']?.({ deviceId, sessionId });
+      if (!result?.ok) showToast(result?.error || tr('投屏配置操作未完成，请重试。'));
+    } catch { showToast(tr('投屏配置操作未完成，请重试。')); }
   };
 
   const handleExecuteCommand = async (deviceId, command) => {
@@ -1404,18 +1421,14 @@ function App() {
     const key = historyEntry?.deviceId || target;
     if (!target || connectingAddressesRef.current.has(key)) return false;
     connectingAddressesRef.current.add(key);
-    setConnectionResults(prev => ({ ...prev, [key]: { status: 'loading', message: tr("正在连接…") } }));
+    setLastConnectionAttempt({ key, address: target, historyEntry });
+    setConnectionResults(prev => ({ ...prev, [key]: { status: 'loading', address: target, message: tr("正在连接…") } }));
     try {
       const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
       if (result.history) setConnectionHistory(result.history);
-      setConnectionResults(prev => ({ ...prev, [key]: { status: result.success ? 'success' : 'error', message: result.message } }));
+      setConnectionResults(prev => ({ ...prev, [key]: { ...result, address: target, status: result.success ? 'success' : 'error' } }));
       showToast(result.message);
       if (result.success) setDeviceQuery('');
-      if (result.success && historyEntry) {
-        chooseDevice(result.deviceId || historyEntry.deviceId || target);
-        setActiveTab('devices');
-        setConnectionFormOpen(false);
-      }
       return result.success;
     } finally {
       connectingAddressesRef.current.delete(key);
@@ -1921,6 +1934,7 @@ function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <DiagnosticCaptureButton theme={t} open={diagnosticOpen} onOpenChange={setDiagnosticOpen} />
             <WorkbenchWorksets theme={t} devices={devices} deviceId={activeDeviceId} packageName={selectedApplication} page={activeTab} onRestore={restoreWorkset} />
             <button type="button" onClick={() => setCommandPaletteOpen(true)} title={tr('搜索功能、设置和报告')} aria-label={tr('搜索功能、设置和报告')} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm ${t.button.secondary}`}><Search size={16} /><span className="hidden sm:inline">{tr('搜索')}</span></button>
           </div>
@@ -1945,6 +1959,7 @@ function App() {
               </button>
             </div>
           )}
+          <LanguageLoadNotice />
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'artifacts'].includes(activeTab) &&
             <WorkbenchContextBar devices={devices} activeDevice={activeDevice} deviceNames={deviceNames} onDeviceChange={chooseDevice}
               packageName={selectedApplication} onApplicationChange={chooseApplication} theme={t} onEnvironment={() => setEnvironmentCheckModalOpen(true)} />}
@@ -1952,6 +1967,7 @@ function App() {
 
         {/* Content Area */}
         <main ref={mainRef} className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
+          {activeTab === 'devices' && mirrorStateError && <p role="status" className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600">{tr(mirrorStateError)}</p>}
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
           {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
           {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
@@ -2015,6 +2031,11 @@ function App() {
                   </button>
                 </form>
                 </div>}
+                <ConnectionAttemptNotice result={lastConnectionAttempt && connectionResults[lastConnectionAttempt.key]} theme={t}
+                  busy={Boolean(lastConnectionAttempt && connectionResults[lastConnectionAttempt.key]?.status === 'loading')}
+                  onRetry={() => { if (lastConnectionAttempt) void connectDevice(lastConnectionAttempt.address, lastConnectionAttempt.historyEntry); }}
+                  onEnvironment={() => setEnvironmentCheckModalOpen(true)} onUse={chooseDevice}
+                  onCast={id => { if (devices.some(device => device.id === id && device.status === 'device')) { chooseDevice(id); void handleStartScrcpy(id); } else showToast(tr('设备状态尚未更新，请刷新后重试。')); }} />
                 {showConnectionForm && recentWirelessEntries(connectionHistory).length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className={`text-xs ${t.textMuted}`}>{tr('最近连接')}</span>
                   {recentWirelessEntries(connectionHistory).map(entry => {
@@ -2087,6 +2108,11 @@ function App() {
                       deviceName={deviceNames[device.id]}
                       onNameChange={handleDeviceNameChange}
                       onStart={() => handleStartScrcpy(device.id)}
+                      mirrorSession={mirrorSessions[device.id]}
+                      onRetryMirror={mode => handleStartScrcpy(device.id, { profileMode: mode })}
+                      onMirrorDiagnostics={() => setDiagnosticOpen(true)}
+                      onRememberMirror={() => handleMirrorProfile(device.id, 'remember')}
+                      onForgetMirror={() => handleMirrorProfile(device.id, 'forget')}
                       onScreenshot={() => handleScreenshot(device.id)}
                       onScreenRecordStart={handleScreenRecordStart}
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}

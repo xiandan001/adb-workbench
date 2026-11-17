@@ -128,6 +128,7 @@ test('environment check results are hidden for a different device and late respo
 test('switching devices cannot reset the global ADB restart in-flight guard', async () => {
   const pending = deferred(); let calls = 0; const transitions = []; const clearedCheckErrors = [];
   const context = { restartPendingRef: { current: false }, setRestarting: value => transitions.push(value), setError() {}, setCheckError: value => clearedCheckErrors.push(value), showToast() {}, onRefreshDevices() {},
+    deviceContextRef: { current: {} }, confirmAppMessage: async () => true,
     window: { electronAPI: { envCheckRestartAdb: () => { calls++; return pending.promise; } } },
   };
   const restart = handler('EnvironmentCheckWizard.jsx', 'restartAdb', context);
@@ -136,6 +137,20 @@ test('switching devices cannot reset the global ADB restart in-flight guard', as
   assert.equal(calls, 1); assert.deepEqual(transitions, [true, false]);
   assert.deepEqual(clearedCheckErrors, [null]);
   assert.equal(handler('EnvironmentCheckWizard.jsx', 'visibleError', { selectedDeviceId: 'A', checkError: { deviceId: 'A', message: 'old device error' }, error: 'global restart error' }), 'global restart error');
+});
+
+test('shared ADB restart explains the affected operations, defaults to cancel and a stale confirmation cannot restart it', async () => {
+  for (const mode of ['cancel', 'stale']) {
+    const confirm = deferred(), options = []; let calls = 0;
+    const context = { restartPendingRef: { current: false }, deviceContextRef: { current: {} }, setRestarting() {}, setError() {}, setCheckError() {}, showToast() {}, onRefreshDevices() {},
+      confirmAppMessage: value => { options.push(value); return confirm.promise; }, window: { electronAPI: { envCheckRestartAdb: async () => { calls++; return { ok: true }; } } } };
+    const pending = handler('EnvironmentCheckWizard.jsx', 'restartAdb', context)();
+    if (mode === 'stale') context.deviceContextRef.current = {};
+    confirm.resolve(mode === 'stale'); await pending;
+    assert.equal(calls, 0); assert.equal(options[0].defaultId, 0); assert.equal(options[0].cancelId, 0);
+    assert.match(options[0].message, /所有 ADB/); assert.match(options[0].detail, /投屏.*日志.*终端/);
+    assert.equal(context.restartPendingRef.current, false);
+  }
 });
 
 test('unchanged recording context still records the original target and refreshes only that target', async () => {

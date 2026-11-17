@@ -1,12 +1,13 @@
 const { tr } = require('./localization.cjs');
 const { ACTIVITY_DISMISSALS_KEY, ACTIVITY_DISMISSALS_BYTES, normalizeActivityDismissals } = require('./activity-dismissal-policy.cjs');
+const { RS232_MEMORY_KEY, RS232_MEMORY_BYTES, normalizeRs232Memory } = require('./rs232-memory-policy.cjs');
 
 const APPLICATION_CONTEXT_KEY = 'adb-workbench.application-context.v1';
 const APPLICATION_RECENTS_KEY = 'adb-workbench.application-recents.v1';
 const AI_DRAFT_KEY = 'adb-workbench.ai-selection-draft.v1';
 const ARTIFACT_VIEW_KEY = 'adb-workbench.artifact-view.v1';
 const SERIAL_SCHEME_SELECTION_KEY = 'adb-workbench.serial-scheme-selection.v1';
-const UX_METADATA_KEYS = Object.freeze([APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY, ACTIVITY_DISMISSALS_KEY]);
+const UX_METADATA_KEYS = Object.freeze([APPLICATION_CONTEXT_KEY, APPLICATION_RECENTS_KEY, AI_DRAFT_KEY, ARTIFACT_VIEW_KEY, SERIAL_SCHEME_SELECTION_KEY, ACTIVITY_DISMISSALS_KEY, RS232_MEMORY_KEY]);
 const MODES = ['diagnose', 'analysis', 'task'];
 const CHECKS = ['device_info', 'logcat_snapshot', 'performance_snapshot', 'app_package', 'app_process', 'app_memory', 'app_activity'];
 const TYPES = ['all', 'troubleshooting', 'inspection', 'regression', 'deviceGuard', 'performance', 'task', 'reproduction'];
@@ -78,7 +79,8 @@ const RULES = new Map([
   [AI_DRAFT_KEY, { limit: 16384, normalize: normalizeAiSelectionDraft }],
   [ARTIFACT_VIEW_KEY, { limit: 131072, normalize: normalizeArtifactViewState }],
   [SERIAL_SCHEME_SELECTION_KEY, { limit: 2048, characters: true, normalize: normalizeSerialSchemeSelection }],
-  [ACTIVITY_DISMISSALS_KEY, { limit: ACTIVITY_DISMISSALS_BYTES, normalize: normalizeActivityDismissals }]
+  [ACTIVITY_DISMISSALS_KEY, { limit: ACTIVITY_DISMISSALS_BYTES, normalize: normalizeActivityDismissals }],
+  [RS232_MEMORY_KEY, { limit: RS232_MEMORY_BYTES, normalize: normalizeRs232Memory }]
 ]);
 function normalizeUxMetadataPreference(key, raw) {
   const rule = RULES.get(key);

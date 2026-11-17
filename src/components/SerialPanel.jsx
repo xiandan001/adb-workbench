@@ -13,6 +13,7 @@ import { readSerialTerminalStyle, saveSerialTerminalStyle } from '../shared/seri
 import SerialSchemeControls from './SerialSchemeControls';
 import { applyAndConnectSerialScheme, readSerialSchemeSelection, resetSerialSchemeSelection, saveSerialSchemeSelection } from '../shared/serialSchemeConnection';
 import { confirmAppMessage } from '../shared/appMessageDialog';
+import { effectiveProtocolMemoryScope } from '../shared/rs232ProtocolMemory.js';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
 const WORKSPACE_LABELS = () => ({ rs232: tr("RS232调试"), terminal: tr("串口终端") });
@@ -67,6 +68,7 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
   const otherSnapshot = snapshots[otherMode];
   const selectedPath = mode === 'terminal' ? workspace.terminalSelectedPath : workspace.selectedPath;
   const config = mode === 'terminal' ? preferences.terminalConfig : preferences.config;
+  const protocolMemoryScope = effectiveProtocolMemoryScope('rs232', selectedSchemes.rs232, preferences.schemes);
 
   const updateWorkspace = changes => {
     if (changes.mode === 'terminal') setTerminalOpened(true);
@@ -329,8 +331,8 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
       {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{tr(terminalStyleError)}</p>}
       {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>{tr("正在打开串口终端…")}</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
       {mode === 'rs232' && <>
-        <SerialDataView theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
-        <SerialSendPanel theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />
+        <SerialDataView memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
+        <SerialSendPanel memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />
       </>}
     </div>
   </section>;

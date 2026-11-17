@@ -206,7 +206,8 @@ app.whenReady().then(async () => {
   feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
   version.register(diagnosticIpc);
   updater.register(diagnosticIpc);
-  adb.register(diagnosticIpc);
+  const mirroring = require('./lib/mirror-workflow.cjs').register(diagnosticIpc);
+  adb.register(diagnosticIpc, mirroring);
   window.register(diagnosticIpc);
   settings.register(diagnosticIpc);
   localization.register(diagnosticIpc);

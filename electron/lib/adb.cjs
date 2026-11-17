@@ -107,12 +107,12 @@ function probeScrcpyAudio(deviceId, scrcpyPath, args, options = {}) {
   return new Promise((resolve) => {
     let settled = false, timer = null, audioFailed = false;
     const mirrorNumber = options.mirrorNumber || ++scrcpyMirrorSequence;
-    const monitor = createMirrorDiagnostics({ transport: 'adb', mirrorNumber, attemptNumber: 0, phase: 'audio-probe', audioMode: 'required-probe', record: applicationLog.record });
+    const monitor = createMirrorDiagnostics({ transport: 'adb', mirrorNumber, attemptNumber: 0, phase: 'audio-probe', audioMode: 'required-probe', record: row => { applicationLog.record(row); options.onDiagnostic?.(row); } });
     monitor.event('probe');
     const probeArgs = args.filter(arg => arg !== '--no-audio').concat('--no-window', '--require-audio');
     const scrcpySpawn = buildScrcpySpawn(scrcpyPath, probeArgs);
     let proc;
-    try { proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
+    try { options.assertCurrent?.(); proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
     catch { monitor.finish('failure', { reason: 'SPAWN_FAILED' }); resolve(true); return; }
     try { applicationLog.observeToolProcess?.(proc, { tool: 'scrcpy', operation: 'audio-probe', stdout: 'text', stderr: 'text', mirrorNumber, attemptNumber: 0 }); }
     catch { /* Optional capture cannot change probing. */ }
@@ -144,11 +144,11 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
     let settled = false, ended = false, stoppingForAudio = false, reportedReady = false;
     let startupTimer = null, readyTimer = null, flags = { audioStartupFailure: false, videoReady: false };
     const monitor = createMirrorDiagnostics({ transport: 'adb', mirrorNumber, attemptNumber, phase: 'launch',
-      audioMode: args.includes('--no-audio') ? 'disabled' : 'default', record: applicationLog.record });
+      audioMode: args.includes('--no-audio') ? 'disabled' : 'default', record: row => { applicationLog.record(row); options.onDiagnostic?.(row); } });
     monitor.event('opening');
     const scrcpySpawn = buildScrcpySpawn(scrcpyPath, args);
     let proc;
-    try { proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
+    try { options.assertCurrent?.(); proc = spawn(scrcpySpawn.command, scrcpySpawn.args, scrcpySpawn.options); }
     catch { monitor.finish('failure', { reason: 'SPAWN_FAILED' }); reject(new Error(tr('Scrcpy 启动失败，请导出应用日志。'))); return; }
     try { applicationLog.observeToolProcess?.(proc, { tool: 'scrcpy', operation: 'mirror', stdout: 'text', stderr: 'text', mirrorNumber, attemptNumber }); }
     catch { /* Optional capture cannot change playback. */ }
@@ -162,10 +162,12 @@ function startScrcpyProcess(deviceId, scrcpyPath, args, options = {}) {
     };
     const settle = callback => { if (settled) return; settled = true; clearStartup(); unref(); callback(); };
     const retryNoAudio = () => {
+      try { options.assertCurrent?.(); options.onAudioFallback?.(attemptNumber); } catch (error) { reject(error); return; }
       stoppingForAudio = true; scrcpyAudioModeCache.set(deviceId, 'no-audio');
       const noAudioArgs = args.includes('--no-audio') ? args : args.concat('--no-audio');
       stopScrcpyStartupProcess(proc).then(() => startScrcpyProcess(deviceId, scrcpyPath, noAudioArgs, {
-        retryWithoutAudio: false, retriedWithoutAudio: true, mirrorNumber, attemptNumber: attemptNumber + 1
+        retryWithoutAudio: false, retriedWithoutAudio: true, mirrorNumber, attemptNumber: attemptNumber + 1,
+        onDiagnostic: options.onDiagnostic, assertCurrent: options.assertCurrent, onAudioFallback: options.onAudioFallback
       })).then(resolve, reject);
     };
     const resolveStarted = ready => {
@@ -314,10 +316,10 @@ function stopAllShellProcs() {
   shellProcs.clear();
 }
 
-function register(ipcMain) {
+function register(ipcMain, mirrorWorkflow = null) {
   const screenshots = createScreenshotActions(require('electron'));
   screenRecording.register(ipcMain);
-  require('./harmony-media-window.cjs').register(ipcMain);
+  require('./harmony-media-window.cjs').register(ipcMain, mirrorWorkflow);
   ipcMain.handle('adb:screenshotAction', (_event, args) => screenshots.perform(args));
   // IPC Handlers for ADB
   ipcMain.handle('adb:getDevices', async () => {
@@ -332,37 +334,51 @@ function register(ipcMain) {
     }
   });
 
-  ipcMain.handle('scrcpy:start', async (event, { deviceId, settings }) => {
+  ipcMain.handle('scrcpy:start', async (event, { deviceId, settings, options }) => {
+    let prepared;
     try {
-      if (isHarmonyDevice(deviceId)) return await require('./harmony-media-window.cjs').openWindow(deviceId);
+      prepared = mirrorWorkflow ? await mirrorWorkflow.prepare(event, deviceId, settings, options) : { settings };
+      if (prepared.alreadyActive) return { success: true, alreadyActive: true, message: tr('此设备的投屏会话仍在运行，请先核对现有窗口。') };
+      const observe = mirrorWorkflow ? row => mirrorWorkflow.observe(prepared.ticket, row) : undefined;
+      const assertCurrent = mirrorWorkflow ? () => mirrorWorkflow.guard(prepared.ticket) : undefined;
+      const onAudioFallback = mirrorWorkflow ? attempt => mirrorWorkflow.beginAudioFallback(prepared.ticket, attempt) : undefined;
+      assertCurrent?.();
+      if (isHarmonyDevice(deviceId)) {
+        const result = await require('./harmony-media-window.cjs').openWindow(deviceId);
+        if (result.success === false) mirrorWorkflow?.fail(prepared.ticket);
+        else if (result.pictureConfirmed) mirrorWorkflow?.completeHdc(prepared.ticket, result.mirrorOrdinal);
+        return result;
+      }
       const scrcpyPath = await findScrcpyPath();
       if (!scrcpyPath) {
         throw new Error(tr("Scrcpy 未安装或未添加到 PATH。请安装 Scrcpy 并确保在命令行中可用。\n\n安装方法：\n1. Windows: winget install scrcpy 或从 https://github.com/Genymobile/scrcpy/releases 下载\n2. 确保 scrcpy.exe 所在目录已添加到系统 PATH"));
       }
 
-      const args = buildScrcpyArgs(deviceId, settings);
+      const args = buildScrcpyArgs(deviceId, prepared.settings);
       const mirrorNumber = ++scrcpyMirrorSequence;
-      const audioMode = scrcpyAudioModeCache.get(deviceId);
+      const audioMode = prepared.audioMode === 'disabled' ? 'no-audio' : prepared.audioMode === 'default' ? 'normal' : scrcpyAudioModeCache.get(deviceId);
       if (audioMode === 'no-audio') {
         return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
           retryWithoutAudio: false,
-          retriedWithoutAudio: true, mirrorNumber
+          retriedWithoutAudio: true, mirrorNumber, onDiagnostic: observe, assertCurrent
         });
       }
 
       if (audioMode !== 'normal') {
-        const audioAvailable = await probeScrcpyAudio(deviceId, scrcpyPath, args, { mirrorNumber });
+        const audioAvailable = await probeScrcpyAudio(deviceId, scrcpyPath, args, { mirrorNumber, onDiagnostic: observe, assertCurrent });
+        assertCurrent?.();
         scrcpyAudioModeCache.set(deviceId, audioAvailable ? 'normal' : 'no-audio');
         if (!audioAvailable) {
           return await startScrcpyProcess(deviceId, scrcpyPath, args.concat('--no-audio'), {
             retryWithoutAudio: false,
-            retriedWithoutAudio: true, mirrorNumber
+            retriedWithoutAudio: true, mirrorNumber, onDiagnostic: observe, assertCurrent
           });
         }
       }
 
-      return await startScrcpyProcess(deviceId, scrcpyPath, args, { mirrorNumber });
+      return await startScrcpyProcess(deviceId, scrcpyPath, args, { mirrorNumber, onDiagnostic: observe, assertCurrent, onAudioFallback });
     } catch (error) {
+      if (prepared?.ticket) mirrorWorkflow?.fail(prepared.ticket);
       console.error('Scrcpy error:', error);
       throw error;
     }

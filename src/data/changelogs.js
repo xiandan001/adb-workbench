@@ -3,6 +3,20 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.0': {
+    title: 'v4.8.0',
+    date: '2026-11-18',
+    items: [
+      { type: 'feature', get text() { return tr('新增全局诊断记录入口，可跨页面查看记录状态并停止导出。'); } },
+      { type: 'improve', get text() { return tr('连接和投屏状态支持就地查看、重试及安全配置记忆。'); } },
+      { type: 'feature', get text() { return tr('RS232 协议支持操作记忆和常用查询响应关联，保留完整原始收发记录。'); } },
+      { type: 'feature', get text() { return tr('AI 材料预算更直观，验证案例可带入可靠采集信息，减少重复填写。'); } },
+      { type: 'feature', get text() { return tr('新增日志专注模式，退出后恢复原布局。'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.7.31': {
     title: 'v4.7.31',
     date: '2026-11-17',

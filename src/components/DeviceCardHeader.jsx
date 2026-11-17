@@ -3,7 +3,7 @@ import { Smartphone, Unplug, Play, Pencil, Star, Loader2 } from 'lucide-react';
 import { displayDeviceId, platformLabel } from '../shared/devicePlatform';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
 
-export default function DeviceCardHeader({ device, deviceName, theme, isOnline, isActive, isPinned, scrcpyLoading,
+export default function DeviceCardHeader({ device, deviceName, theme, isOnline, isActive, isPinned, scrcpyLoading, mirrorActive = false,
   isEditing, editName, onBeginRename, onEditNameChange, onEditNameKeyDown, onNameSubmit, onSelectDevice, onTogglePin, onDisconnect, onStart }) {
   useLocale();
   const name = deviceName || device.model || tr('未知设备');
@@ -47,9 +47,9 @@ export default function DeviceCardHeader({ device, deviceName, theme, isOnline, 
       </button>
       <button type="button" onClick={onDisconnect} title={tr('断开设备')} aria-label={tr('断开设备')}
         className="device-card-disconnect rounded-lg p-2 text-slate-400 hover:bg-red-500/10 hover:text-red-500"><Unplug size={20} /></button>
-      <button type="button" onClick={onStart} disabled={!isOnline || scrcpyLoading} aria-busy={scrcpyLoading}
+      <button type="button" onClick={onStart} disabled={!isOnline || scrcpyLoading || mirrorActive} aria-busy={scrcpyLoading}
         className={`device-card-primary rounded-lg px-5 py-2.5 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${theme.button.primary}`}>
-        {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}<span>{scrcpyLoading ? tr('启动中...') : tr('开始投屏')}</span>
+        {scrcpyLoading ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}<span>{scrcpyLoading ? tr('启动中...') : mirrorActive ? tr('投屏中') : tr('开始投屏')}</span>
       </button>
     </div>
   </div>;

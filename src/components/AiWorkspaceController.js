@@ -3,6 +3,7 @@ import { tr, useLocale } from '../shared/i18n';
 import { AI_WORKSPACE_MODES, appendWorkspaceBasket, completeWorkspaceTurn, createWorkspaceCase, editWorkspaceCase, prepareWorkspaceContext, prepareWorkspaceHandoff, workspaceReportRef, workspaceRequestCurrent } from './AiWorkspaceState';
 import { adoptWorkspaceDefaults, normalizeWorkspaceReportRequest, prepareWorkspaceVerification, aiSelectionDraft, readAiSelectionDraft, saveAiSelectionDraft, restoreAiSelectionDraft, collectedPreviewCanReview } from './AiWorkspaceFlow';
 import { editableTask } from './AiWorkspaceTaskEditing';
+import { validateMaterialPlan } from '../shared/aiMaterialBudget.js';
 
 const newCase = (mode, deviceId = '') => createWorkspaceCase(mode, deviceId, crypto.randomUUID());
 const api = () => window.electronAPI;
@@ -29,6 +30,7 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, a
   const [pendingReport, setPendingReport] = useState(null);
   const [reportBusy, setReportBusy] = useState('');
   const [reportError, setReportError] = useState('');
+  const [materialBudgets, setMaterialBudgets] = useState({});
   const casesRef = useRef(cases); const alive = useRef(true); const refreshTicket = useRef(0); const reportLock = useRef(false);
   const incomingHandled = useRef('');
   const reportRequestHandled = useRef('');
@@ -40,6 +42,15 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, a
   }, []);
 
   useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => api()?.onAiWorkspaceMaterialBudget?.(payload => {
+    const plan = validateMaterialPlan(payload);
+    if (!plan || !alive.current || !activeRef.current) return;
+    const key = Object.keys(casesRef.current).find(key => casesRef.current[key].caseId === plan.caseId);
+    const current = casesRef.current[key];
+    if (key !== modeRef.current || current?.preview?.id !== plan.previewId || current.busy !== 'analyze') return;
+    setMaterialBudgets(previous => ({ ...previous, [key]: { ...(previous[key]?.previewId === plan.previewId ? previous[key] : {}),
+      caseId: current.caseId, revision: current.revision, previewId: plan.previewId, plan } }));
+  }), []);
 
   useEffect(() => {
     if (reportLock.current) return;
@@ -180,6 +191,12 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, a
       const response = await invoke(current);
       if (!isCurrent() || response?.cancelled || response?.code === 'CANCELLED') return;
       if (!response?.ok) throw new Error(response?.error || tr('操作未完成，请重试。'));
+      const local = response.materialBudget;
+      if (response.preview?.id && local?.complete === true && Object.keys(local).length === 3 && local.limitBytes === 20971520
+        && Number.isSafeInteger(local.localBytes) && local.localBytes >= 0 && local.localBytes <= local.limitBytes) {
+        setMaterialBudgets(previous => ({ ...previous, [key]: { caseId: current.caseId, revision: current.revision, previewId: response.preview.id,
+          local: { localBytes: local.localBytes, limitBytes: local.limitBytes, complete: true } } }));
+      }
       update(key, value => ({ ...accept(value, response), error: '',
         ...(operation === 'save' && response.script?.id ? { savedTask: { id: response.script.id, name: response.script.name || '' } } : {}),
       }));
@@ -379,7 +396,9 @@ export default function useAiWorkspace({ active, devices = [], activeDeviceId, a
       }));
     }
   });
-  return { mode, setMode, cases, current: cases[mode], sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, collectAndReview, analyze, generate, save,
+  const materialBudget = materialBudgets[mode];
+  const currentBudget = materialBudget?.caseId === cases[mode].caseId && materialBudget.revision === cases[mode].revision && materialBudget.previewId === cases[mode].preview?.id ? materialBudget : null;
+  return { mode, setMode, cases, current: cases[mode], materialBudget: currentBudget, sources, loading, sourceError, refresh, edit, cancel, reset, plan, collect, collectAndReview, analyze, generate, save,
     draftPersistenceError, draftNotice, retryDraftPersistence, dismissDraftNotice: () => setDraftNotice(false),
     openSavedTask: () => { const task = casesRef.current[mode].savedTask; if (task?.id) onOpenTasks?.(task.id); },
     editDraft: draftEdits => update('task', value => value.busy || !value.draft ? value : { ...value, draftEdits }),

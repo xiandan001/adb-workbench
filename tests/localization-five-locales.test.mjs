@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { createLanguageStore, normalizeLocale, SUPPORTED_LOCALES, LANGUAGE_STORAGE_KEY } from '../src/shared/localeStore.js';
 import { createMessageTranslator } from '../src/shared/messageCatalog.js';
-import { tr as rendererMessage, getLocale, setLanguage } from '../src/shared/i18n.js';
+import { tr as rendererMessage, getLocale, setLanguage, preloadLanguage } from '../src/shared/i18n.js';
 import { CHANGELOGS, getChangelog } from '../src/data/changelogs.js';
 
 const require = createRequire(import.meta.url);
@@ -44,7 +44,8 @@ test('five-language retained messages preserve every parameter across all locale
   }
 });
 
-test('real frontend and backend catalogs agree on the localized brand and every shared source key', () => {
+test('real frontend and backend catalogs agree on the localized brand and every shared source key', async () => {
+  await Promise.all(locales.map(preloadLanguage));
   for (const locale of locales) {
     assert.equal(rendererMessage('卓控台', {}, locale), brands[locale]);
     assert.equal(main.tr('卓控台', {}, locale), brands[locale]);
@@ -55,7 +56,8 @@ test('real frontend and backend catalogs agree on the localized brand and every 
   }
 });
 
-test('reviewed action and state labels retain their software meaning instead of dictionary homonyms', () => {
+test('reviewed action and state labels retain their software meaning instead of dictionary homonyms', async () => {
+  await Promise.all(locales.map(preloadLanguage));
   const reviewed = {
     'ja-JP': { '去激活': 'ライセンスを有効化', '运行': '実行', '运行中': '実行中', '已禁用': '無効', '清空记录': '記録をクリア', '应用': 'アプリ', '任务中心': 'タスクセンター' },
     'ko-KR': { '去激活': '라이선스 활성화', '运行': '실행', '运行中': '실행 중', '已禁用': '비활성화됨', '清空记录': '기록 지우기', '应用': '앱', '任务中心': '작업 센터' },

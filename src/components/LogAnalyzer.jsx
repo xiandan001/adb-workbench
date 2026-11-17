@@ -35,6 +35,9 @@ import { isLogAnalysisAnswer, isLogAnalysisTerminal, logAnalysisAttemptMatches, 
 import LogAnalysisStatus from './LogAnalysisStatus.jsx';
 import LogAnalysisComposer from './LogAnalysisComposer.jsx';
 import LogDisplayInfo from './LogDisplayInfo.jsx';
+import LogFocusToolbar from './LogFocusToolbar.jsx';
+import { shouldExitLogFocus } from '../shared/logFocus.js';
+import LanguageLoadNotice from './LanguageLoadNotice.jsx';
 
 const emptyFilter = {};
 const LOG_ROW_HEIGHT = 28;
@@ -187,6 +190,13 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const hasAnalysisAnswer = useMemo(() => aiTurns.some(turn => isLogAnalysisAnswer(turn.content)), [aiTurns]);
   const aiPanelHeight = viewPreferences.view.aiPanelHeight;
   const setAiPanelHeight = useCallback(value => setViewField('aiPanelHeight', value), [setViewField]);
+  const focusMode = viewPreferences.view.focusMode;
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = event => { if (shouldExitLogFocus(event)) { event.preventDefault(); setViewField('focusMode', false); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [focusMode, setViewField]);
   const aiListenersRef = useRef([]);
   const aiContentRef = useRef('');
   const aiReasoningRef = useRef('');
@@ -1392,7 +1402,14 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
   return (
     <div className={`flex flex-col h-full ${isDark ? 'bg-[#202124]' : 'bg-slate-50'}`}>
+      <LanguageLoadNotice />
+      {focusMode && <LogFocusToolbar active onToggle={() => setViewField('focusMode', false)} theme={logTheme}
+        sourceLabel={sourceLabel || captureDeviceId || tr('尚未加载日志')} deviceLabel={devices.find(device => device.id === (running ? captureDeviceId : deviceId))?.model || (running ? captureDeviceId : deviceId)}
+        running={running} busy={loading || importState?.status === 'reading' || Boolean(close.request)} canStart={devices.some(device => device.id === deviceId && device.status === 'device') && !aiAnalyzing && !smartSearching}
+        onStart={onStart} onStop={onStop} text={filterTextInput} onText={changeText} />}
+      <div className="shrink-0" style={focusMode ? { display: 'none' } : undefined}>
       <LogWorkbenchToolbar theme={logTheme} isDark={isDark} devices={devices} deviceId={deviceId} source={source}
+        focusControl={<LogFocusToolbar onToggle={() => setViewField('focusMode', true)} theme={logTheme} />}
         filterDevice={devices.find(device => device.id === (captureDeviceId || deviceId)) || (captureDeviceId || deviceId ? { id: captureDeviceId || deviceId, status: 'offline' } : null)}
         onDeviceChange={configureDevice}
         onRefresh={refreshDevices} running={running} busy={loading || importState?.status === 'reading' || Boolean(close.request)} analyzing={aiAnalyzing}
@@ -1429,7 +1446,8 @@ export default function LogAnalyzer({ theme, vipStatus }) {
           {isVip && <><button type="button" onClick={onToggleMcp} className="rounded-lg border border-current/20 px-3 py-2">{tr('MCP:')}{mcpRunning ? 'ON' : 'OFF'}</button><button type="button" onClick={() => setMcpHelpVisible(true)} className="rounded-lg border border-current/20 px-3 py-2">{tr('查看 MCP 使用说明')}</button></>}
           <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={snapshotTruncated} isDark={isDark} label={tr('在完整 AI 工作区继续')} />
         </>} />
-      <LogDisplayInfo expanded={viewPreferences.view.infoExpanded} onExpandedChange={() => setViewField('infoExpanded', value => !value)} isDark={isDark}
+      </div>
+      <LogDisplayInfo expanded={!focusMode && viewPreferences.view.infoExpanded} onExpandedChange={() => focusMode ? setViewField('focusMode', false) : setViewField('infoExpanded', value => !value)} isDark={isDark}
         sourceIdentity={source === 'file' ? sourceLabel || tr('尚未加载日志') : captureDeviceId || sourceLabel || tr('尚未加载日志')}
         captureState={source === 'realtime' ? running ? 'running' : 'stopped' : undefined} paused={paused}
         diagnosticIssue={Boolean(diagnosticError)} sourceMismatch={Boolean(captureDeviceId && deviceId && captureDeviceId !== deviceId)}
@@ -1473,7 +1491,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       {restoredSessionName && <div className={`border-b px-4 py-2 text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border-[#3E4145]' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>{tr("已恢复：")}{restoredSessionName} · {entries.length.toLocaleString(getLocale())}{tr(" 条原始日志 · ")}{sourceLabel || tr("已保存来源")} · {aiHistoryReadOnly ? tr("历史 AI 对话只读，未自动采集或请求 AI") : tr("当前可手动开始新分析")}
       </div>}
       <div className="flex-1 flex overflow-hidden">
-        {(viewPreferences.view.sidebarOpen || issueOpen) && <aside aria-label={tr('日志筛选与问题')} className={`w-[min(22rem,44vw)] shrink-0 space-y-3 overflow-y-auto border-r p-3 ${isDark ? 'border-slate-600 bg-[#202124]' : 'border-slate-200 bg-slate-50'}`}>
+        {(viewPreferences.view.sidebarOpen || issueOpen) && <aside style={focusMode ? { display: 'none' } : undefined} aria-label={tr('日志筛选与问题')} className={`w-[min(22rem,44vw)] shrink-0 space-y-3 overflow-y-auto border-r p-3 ${isDark ? 'border-slate-600 bg-[#202124]' : 'border-slate-200 bg-slate-50'}`}>
           {issueOpen && <LogIssueInbox groups={viewEngine.issues} selectedId={selectedIssue?.id} busy={analysisBlocked || aiAnalyzing || aiHistoryReadOnly}
             ungroupedIssueCount={viewEngine.ungroupedIssueCount} theme={logTheme}
             onSelect={group => { setSelectedIssue({ ...group, documentId }); setDetailEntry({ entry: group.representative, context: group.context, label: sourceLabel, documentId }); }}
@@ -1598,12 +1616,12 @@ export default function LogAnalyzer({ theme, vipStatus }) {
         <>
           {/* 全屏遮罩 */}
           {aiFullscreen && (
-            <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setAiFullscreen(false)} />
+            <div style={focusMode ? { display: 'none' } : undefined} className="fixed inset-0 z-40 bg-black/30" onClick={() => setAiFullscreen(false)} />
           )}
 
           <div
             className={`${aiFullscreen ? 'fixed inset-0 z-50' : 'relative'} flex min-h-0 flex-col [container-type:size] ${aiFullscreen ? '' : 'border-t'} ${isDark ? 'bg-[#202124]/95 border-[#3E4145]' : 'bg-white border-slate-200'}`}
-            style={aiFullscreen ? {} : { height: `${aiPanelHeight}px` }}
+            style={{ ...(aiFullscreen ? {} : { height: `${aiPanelHeight}px` }), ...(focusMode ? { display: 'none' } : {}) }}
           >
             {/* 拖拽调整高度的把手 */}
             {!aiFullscreen && (
@@ -2046,7 +2064,7 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
           </div>
         </div>
       )}
-      <AiOutboundPreviewHost isDark={isDark} usageTarget={usageTarget} usagePlacement="inline" usageExpanded={viewPreferences.view.usageExpanded} onUsageExpandedChange={value => setViewField('usageExpanded', value)} />
+      <AiOutboundPreviewHost isDark={isDark} usageTarget={usageTarget} usagePlacement="inline" usageHidden={focusMode} usageExpanded={viewPreferences.view.usageExpanded} onUsageExpandedChange={value => setViewField('usageExpanded', value)} />
     </div>
   );
 }

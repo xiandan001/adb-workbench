@@ -11,7 +11,7 @@ export default function LogWorkbenchToolbar({ theme, isDark, devices, deviceId, 
   onArchiveChange, onArchiveFolder, sessionControls, markerControls, onExport, moreActions, entriesCount, shownCount, truncated,
   text, onText, smartQuery, onSmartQuery, onSmartSearch, onSmartStop, smartSearching, smartResult, onSmartClear, isVip,
   onAnalyze, analyzing, onStopAnalyze, panelOpen, onPanelToggle, hasAnalysis, historyReadOnly, analysisPending, filterOpen, onFilterToggle, filterCount, issuesCount, onIssuesToggle,
-  paused, pendingCount, onPause, onLatest, queryPending, advancedControls }) {
+  paused, pendingCount, onPause, onLatest, queryPending, advancedControls, focusControl }) {
   useLocale(); const [searchMode, setSearchMode] = useState('text'), [advanced, setAdvanced] = useState(false);
   const secondary = `inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs disabled:opacity-40 ${theme.button.secondary}`;
   const activeDevice = devices.find(device => device.id === deviceId);
@@ -53,6 +53,7 @@ export default function LogWorkbenchToolbar({ theme, isDark, devices, deviceId, 
       <div className="flex-1" />
       <button type="button" onClick={onPause} aria-pressed={paused} className="inline-flex items-center gap-1 rounded border border-current/20 px-2 py-1"><Pause size={12} />{paused ? running ? tr('已暂停查看，采集仍在继续') : tr('已暂停查看当前快照') : tr('暂停查看')}</button>
       <button type="button" onClick={onLatest} className="rounded border border-current/20 px-2 py-1">{pendingCount ? tr('回到最新（新增 {0} 条）', { 0: pendingCount }) : tr('跟随最新')}</button>
+      {focusControl}
       <button type="button" onClick={() => setAdvanced(value => !value)} aria-expanded={advanced} className="inline-flex items-center gap-1 rounded px-2 py-1">{tr('高级')}<ChevronDown size={12} /></button>
     </div>
     {advanced && <div role="group" aria-label={tr('日志高级设置')} className={`flex max-h-[min(12rem,15vh)] flex-wrap items-center gap-3 overflow-y-auto rounded-lg border p-3 text-xs ${theme.input}`}>

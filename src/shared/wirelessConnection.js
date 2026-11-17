@@ -11,12 +11,12 @@ export async function connectWirelessDevice(address, { api, refreshDevices, hist
   let connected;
   try {
     const result = await api.adbConnect(historyEntry?.deviceId?.startsWith('hdc:') ? `hdc:${target}` : target);
-    if (!result.success) return { success: false, message: result.error || tr("设备连接失败") };
+    if (!result.success) return { success: false, address: target, code: result.code || '', message: result.error || tr("设备连接失败") };
     connected = result;
   } catch (error) {
-    return { success: false, message: error.message || tr("设备连接失败") };
+    return { success: false, address: target, code: error.code || '', message: error.message || tr("设备连接失败") };
   }
-  const result = { success: true, deviceId: connected.deviceId || target, message: tr("已连接 {0}", { 0: target }) };
+  const result = { success: true, address: target, deviceId: connected.deviceId || target, transport: connected.transport || 'adb', message: tr("已连接 {0}", { 0: target }) };
   const warnings = [];
   try {
     await refreshDevices();

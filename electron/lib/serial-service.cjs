@@ -3,6 +3,7 @@ const { randomUUID } = require('node:crypto');
 const { createSerialBuffer, RX_PENDING_IDLE_MS } = require('./serial-buffer.cjs');
 const { DEFAULT_CONFIG, normalizeConfig, encodeMessage } = require('./serial-policy.cjs');
 const { createSerialTerminalBuffer } = require('./serial-terminal-buffer.cjs');
+const { createSerialTransactions } = require('./serial-transactions.cjs');
 
 const BATCH_MS = 100;
 const OPEN_TIMEOUT_MS = 15000;
@@ -13,7 +14,12 @@ const PORT_FIELDS = ['path', 'manufacturer', 'serialNumber', 'pnpId', 'locationI
 function createSerialService({ listPorts: enumerate, createPort, onChange = () => {}, now = Date.now,
   writeTimeoutMs = 10000, closeTimeoutMs = 5000, maxEntries, maxBytes, mergeReceive = true, terminalReplayBytes }) {
   if (typeof enumerate !== 'function' || typeof createPort !== 'function') throw new Error(tr("串口驱动未初始化"));
-  const buffer = createSerialBuffer({ now, maxEntries, maxBytes, mergeReceive });
+  let observedWrite = null;
+  const transactions = mergeReceive ? createSerialTransactions({ onChange: () => changed() }) : null;
+  const buffer = createSerialBuffer({ now, maxEntries, maxBytes, mergeReceive, onEntry: entry => {
+    if (entry.direction === 'RX') transactions?.receive(entry);
+    else if (observedWrite) transactions?.written(observedWrite, entry);
+  } });
   const terminalBuffer = terminalReplayBytes === 0 ? null : createSerialTerminalBuffer({ maxBytes: terminalReplayBytes });
   const terminalQueue = [];
   let terminalInFlight = null;
@@ -31,11 +37,11 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   let disposed = false;
 
   function metadata() {
-    return { ...state, config: { ...state.config }, revision, ...buffer.metadata(), unsaved: lastDataRevision > savedRevision };
+    return { ...state, config: { ...state.config }, revision, ...buffer.metadata(), ...transactions?.metadata(), unsaved: lastDataRevision > savedRevision };
   }
 
   function snapshot() {
-    return { ...metadata(), entries: buffer.entriesAfter() };
+    return { ...metadata(), entries: buffer.entriesAfter(), ...(transactions ? { transactions: transactions.snapshot() } : {}) };
   }
 
   function changed({ data = false, reset = false } = {}) {
@@ -46,7 +52,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     if (batchTimer || disposed) return;
     batchTimer = setTimeout(() => {
       batchTimer = null;
-      const delta = { ...metadata(), baseRevision: publishedRevision, entries: buffer.drainChanges(resetPending), reset: resetPending };
+      const delta = { ...metadata(), baseRevision: publishedRevision, entries: buffer.drainChanges(resetPending), ...(transactions ? { transactions: transactions.drainChanges(resetPending) } : {}), reset: resetPending };
       publishedRevision = delta.revision;
       resetPending = false;
       try { onChange(delta); } catch { /* A renderer observer cannot break the hardware lifecycle. */ }
@@ -173,6 +179,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   function finishStream(session) {
     if (session.streamEnded) return;
     session.streamEnded = true;
+    transactions?.endSession(session.id);
     clearTimeout(receiveIdleTimer);
     receiveIdleTimer = null;
     if (buffer.endSession(session.id)) changed({ data: true, reset: true });
@@ -373,6 +380,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
   function writeBytes(session, bytes, { terminal = false } = {}) {
     if (terminal) buffer.sealRawReceive();
     else flushReceive();
+    const transactionId = terminal ? null : transactions?.begin({ sessionId: session.id, bytes, cursor: buffer.cursor(), time: now() });
     const action = deferred();
     let finished = false;
     const current = () => active === session && !session.cancelled && !session.released && state.status === 'connected';
@@ -383,6 +391,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
       if (session.write === operation) session.write = null;
       queueMicrotask(pumpTerminalQueue);
       if (error) {
+        if (transactionId) transactions.written(transactionId, null, true);
         if (active === session) {
           state.sending = false;
           changed();
@@ -395,11 +404,14 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
         return;
       }
       if (!current()) {
+        if (transactionId) transactions.written(transactionId, null, true);
         action.reject(new Error(tr("串口连接已变化，发送结果无法确认；已发送的部分数据无法撤回")));
         return;
       }
       buffer.sealRawReceive();
-      buffer.append({ sessionId: session.id, path: session.path, config: session.config, direction: 'TX', bytes });
+      observedWrite = transactionId;
+      try { buffer.append({ sessionId: session.id, path: session.path, config: session.config, direction: 'TX', bytes }); }
+      finally { observedWrite = null; }
       state.sending = false;
       changed({ data: true });
       action.resolve(terminal ? { bytes: bytes.length } : snapshot());
@@ -431,6 +443,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
     clearTimeout(receiveIdleTimer);
     receiveIdleTimer = null;
     buffer.clear();
+    transactions?.clear();
     changed({ reset: true });
     lastDataRevision = revision;
     savedRevision = revision;
@@ -456,6 +469,7 @@ function createSerialService({ listPorts: enumerate, createPort, onChange = () =
 
   async function dispose() {
     disposed = true;
+    transactions?.dispose();
     cancelTerminalQueue();
     clearTimeout(receiveIdleTimer);
     receiveIdleTimer = null;

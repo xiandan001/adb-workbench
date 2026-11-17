@@ -10,7 +10,7 @@ const RX_MERGE_SPAN_MS = 1000;
 const RX_MERGE_MAX_PARTS = 2;
 const RX_PENDING_IDLE_MS = 500;
 
-function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES, mergeReceive = true } = {}) {
+function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES, mergeReceive = true, onEntry } = {}) {
   const entryLimit = boundedLimit(maxEntries, MAX_ENTRIES);
   const byteLimit = boundedLimit(maxBytes, MAX_BYTES);
   const chunkLimit = Math.min(MAX_CHUNK_BYTES, byteLimit);
@@ -60,6 +60,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
     }
     retainedBytes += entry.bytes;
     dirtyEntries.set(entry.id, entry);
+    try { onEntry?.(entry); } catch { /* An observation cannot alter raw byte retention or framing. */ }
     return entry;
   }
 
@@ -265,7 +266,7 @@ function createSerialBuffer({ now = Date.now, maxEntries = MAX_ENTRIES, maxBytes
     pending = null; resetNeeded = false; decoders.clear(); dirtyEntries.clear(); sealRawReceive();
   }
 
-  return { append, endSession, entriesAfter, drainChanges, consumeReset, hasPendingReceive,
+  return { append, endSession, entriesAfter, drainChanges, consumeReset, hasPendingReceive, cursor: () => nextOrder,
     sealReceive, sealRawReceive, metadata, clear };
 }
 
