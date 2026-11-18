@@ -1925,7 +1925,7 @@ function App() {
               {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
-            {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("通过电脑串口线连接设备 · 端口列表每 2 秒自动更新")}</p>}
+            {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr('通过串口或网络连接设备，收发调试数据。')}</p>}
             {activeTab === 'ssh' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("多台主机 · 多个终端 · 文件与终端同屏操作")}</p>}
             {activeTab === 'ai-tools' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("供应商配置 · 额度查询 · 安全切换与恢复")}</p>}
           </div>

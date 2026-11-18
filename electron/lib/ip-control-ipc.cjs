@@ -1,0 +1,46 @@
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+
+// The socket and its byte history belong to the current main-window document,
+// not to a React route, a log window, or an iframe.
+function registerIpControl(ipc, { getOwner, appRoot, isDev, createService }) {
+  const page = pathToFileURL(resolve(appRoot, 'dist/index.html')).href;
+  let active, disposed = false;
+  function release() {
+    const old = active;
+    active = undefined;
+    if (!old) return;
+    old.contents.off('did-start-navigation', old.navigate);
+    old.contents.off('render-process-gone', release);
+    old.contents.off('destroyed', release);
+    old.service.dispose();
+  }
+  function trusted(frame) {
+    try {
+      const url = new URL(frame.url);
+      url.hash = '';
+      return url.href === page || (isDev && url.href === 'http://localhost:5173/');
+    } catch { return false; }
+  }
+  const denied = () => ({ ok: false, code: 'NOT_AUTHORIZED' });
+  for (const action of ['read', 'connect', 'send', 'disconnect']) {
+    ipc.handle('ip-control:' + action, async (event, args) => {
+      const owner = getOwner(), contents = owner?.webContents, frame = event.senderFrame;
+      if (disposed || !owner || owner.isDestroyed() || !contents || contents.isDestroyed() ||
+        contents !== event.sender || !frame || contents.mainFrame !== frame || !trusted(frame)) return denied();
+      if (active?.frame !== frame || active.contents !== contents) {
+        release();
+        const navigate = details => { if (details.isMainFrame && !details.isSameDocument) release(); };
+        active = { contents, frame, navigate, service: createService() };
+        contents.on('did-start-navigation', navigate);
+        contents.once('render-process-gone', release);
+        contents.once('destroyed', release);
+      }
+      const current = active;
+      const result = await current.service[action](args);
+      return current === active ? result : denied();
+    });
+  }
+  return () => { disposed = true; release(); };
+}
+module.exports = { registerIpControl };

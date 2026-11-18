@@ -3,6 +3,13 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.2': {
+    title: 'v4.8.2',
+    date: '2026-11-18',
+    items: [
+      { type: 'feature', get text() { return tr('RS232 新增 IP Control：支持 TCP 客户端、TCP 服务端和 UDP，记住各模式地址，以十六进制收发数据。'); } },
+    ],
+  },
   '4.8.1': {
     title: 'v4.8.1',
     date: '2026-11-18',

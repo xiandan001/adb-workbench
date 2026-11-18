@@ -234,6 +234,11 @@ app.whenReady().then(async () => {
   deviceMedia.register(diagnosticIpc);
   shortcutCapabilities.register(diagnosticIpc);
   serial.register(diagnosticIpc);
+  const disposeIpControl = require('./lib/ip-control-ipc.cjs').registerIpControl(diagnosticIpc, {
+    getOwner: ctx.getMainWindow, appRoot: app.getAppPath(), isDev,
+    createService: require('./lib/ip-control-service.cjs').createIpControlService
+  });
+  app.once('will-quit', disposeIpControl);
   appMessageDialog.register(diagnosticIpc);
   ssh.register(diagnosticIpc);
   aiTools.register(diagnosticIpc);

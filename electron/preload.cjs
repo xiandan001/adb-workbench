@@ -103,6 +103,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('ssh:changed', listener);
   },
   serialListPorts: () => ipcRenderer.invoke('serial:list'),
+  ipControlConnect: args => ipcRenderer.invoke('ip-control:connect', args),
+  ipControlDisconnect: args => ipcRenderer.invoke('ip-control:disconnect', args),
+  ipControlSend: args => ipcRenderer.invoke('ip-control:send', args),
+  ipControlRead: args => ipcRenderer.invoke('ip-control:read', args),
   serialSnapshot: args => ipcRenderer.invoke('serial:snapshot', args),
   serialConnect: args => ipcRenderer.invoke('serial:connect', args),
   serialDisconnect: args => ipcRenderer.invoke('serial:disconnect', args),

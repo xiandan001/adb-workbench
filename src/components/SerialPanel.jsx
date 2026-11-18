@@ -16,6 +16,7 @@ import { confirmAppMessage } from '../shared/appMessageDialog';
 import { effectiveProtocolMemoryScope } from '../shared/rs232ProtocolMemory.js';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
+const IpControlPanel = lazy(() => import('./IpControlPanel.jsx'));
 const WORKSPACE_LABELS = () => ({ rs232: tr("RS232调试"), terminal: tr("串口终端") });
 const STATUS_LABELS = () => ({ disconnected: tr("未连接"), connecting: tr("连接中"), connected: tr("已连接"), disconnecting: tr("断开中"), error: tr("连接错误") });
 
@@ -60,7 +61,8 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
   const snapshotRef = useRef(null);
   const preferencesRef = useRef(preferences);
   const isDark = isDarkTheme(theme);
-  const mode = workspace.mode;
+  const ipControl = workspace.mode === 'ip-control';
+  const mode = workspace.mode === 'terminal' ? 'terminal' : 'rs232';
   const snapshot = snapshots[mode];
   const currentPending = pending[mode];
   const error = errors[mode];
@@ -314,10 +316,12 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
 
   return <section aria-label={tr("串口 / RS232")} className={`mb-4 rounded-xl border shadow-sm ${theme.card} ${theme.text}`}>
     <div className="flex w-full flex-wrap items-center gap-2.5 rounded-xl px-4 py-3 text-left">
-      <Cable size={18} className={connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">{tr("串口 / RS232")}</h2><label className="sr-only" htmlFor={`${id}-mode`}>{tr("工作模式")}</label><SelectMenu id={`${id}-mode`} isDark={isDark} compact value={workspace.mode} onChange={mode => updateWorkspace({ mode })} options={[{ value: 'rs232', label: tr("RS232调试") }, { value: 'terminal', label: tr("串口终端") }]} className="w-36" /><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? tr(" · 有未保存记录") : ''}</span>
-      <p className={`w-full text-right text-[11px] ${theme.textMuted}`} aria-label={tr("另一串口连接状态")}>{WORKSPACE_LABELS()[otherMode]}：{otherSnapshot.revision < 0 ? tr("读取中") : STATUS_LABELS()[otherSnapshot.status]}{otherSnapshot.path ? ` · ${otherSnapshot.path}` : ''}{otherSnapshot.unsaved ? tr(" · 有未保存记录") : ''}</p>
+      <Cable size={18} className={!ipControl && connected ? 'text-emerald-500' : theme.textMuted} /><h2 id={`${id}-title`} className="text-sm font-semibold">{tr("串口 / RS232")}</h2><label className="sr-only" htmlFor={`${id}-mode`}>{tr("工作模式")}</label><SelectMenu id={`${id}-mode`} isDark={isDark} compact value={workspace.mode} onChange={mode => updateWorkspace({ mode })} options={[{ value: 'rs232', label: tr("RS232调试") }, { value: 'terminal', label: tr("串口终端") }, { value: 'ip-control', label: tr('IP Control') }]} className="w-36" />
+      {!ipControl && <><span role="status" className={`ml-auto min-w-0 text-xs ${connected ? 'text-emerald-500' : theme.textMuted}`}>{summary}{snapshot.unsaved ? tr(" · 有未保存记录") : ''}</span>
+      <p className={`w-full text-right text-[11px] ${theme.textMuted}`} aria-label={tr("另一串口连接状态")}>{WORKSPACE_LABELS()[otherMode]}：{otherSnapshot.revision < 0 ? tr("读取中") : STATUS_LABELS()[otherSnapshot.status]}{otherSnapshot.path ? ` · ${otherSnapshot.path}` : ''}{otherSnapshot.unsaved ? tr(" · 有未保存记录") : ''}</p></>}
     </div>
-    <div className="space-y-4 border-t border-slate-400/20 p-4">
+    {ipControl && <Suspense fallback={<p role="status" className={`p-4 text-xs ${theme.textMuted}`}>{tr("正在读取状态…")}</p>}><IpControlPanel theme={theme} isDark={isDark} showToast={showToast} /></Suspense>}
+    <div hidden={ipControl} className="space-y-4 border-t border-slate-400/20 p-4">
       <AiContextButton disabled={!snapshot.sessionId || !snapshot.entries?.length} context={{ reference: { kind: 'serial', workspace: mode, sessionId: snapshot.sessionId || '' } }} />
       <SerialSchemeControls key={`scheme-${mode}`} preferences={preferences} workspace={mode} config={connected ? snapshot.config : config} selectedPath={connected ? snapshot.path : selectedPath} terminalEnter={workspace.terminal.enter} status={snapshot.status} pending={snapshot.revision < 0 || Boolean(currentPending)} onCommit={commitScheme} selected={selectedSchemes[mode]} expanded={selectedSchemes[`${mode}Expanded`] === true} onExpandedChange={changeSchemeExpanded} onSelect={selectScheme} onApplyAndConnect={applySchemeAndConnect} canConnect={ports.some(port => port.path === selectedPath) && !selectedOccupied} theme={theme} isDark={isDark} />
       {schemeSelectionError && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-amber-500"><span className="break-words">{tr(schemeSelectionError)}</span><button type="button" onClick={retrySchemeSelection} className="underline">{tr('重试保存选择')}</button><button type="button" onClick={resetSchemeSelection} className="underline">{tr('重置连接方案选择')}</button></div>}
@@ -330,7 +334,7 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
       {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{tr(persistenceError)}</p>}
       {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{tr(terminalStyleError)}</p>}
       {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>{tr("正在打开串口终端…")}</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
-      {mode === 'rs232' && <>
+      {!ipControl && mode === 'rs232' && <>
         <SerialDataView memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
         <SerialSendPanel memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />
       </>}
