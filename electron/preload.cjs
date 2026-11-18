@@ -107,6 +107,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ipControlDisconnect: args => ipcRenderer.invoke('ip-control:disconnect', args),
   ipControlSend: args => ipcRenderer.invoke('ip-control:send', args),
   ipControlRead: args => ipcRenderer.invoke('ip-control:read', args),
+  ipControlSaveRecords: scope => ipcRenderer.invoke('ip-control:save-records', scope),
+  ipControlClearRecords: scope => ipcRenderer.invoke('ip-control:clear-records', scope),
   ipControlConnectionStatusSubscribe: args => ipcRenderer.invoke('ip-control:connection-status-subscribe', args),
   onIpControlConnectionStatus: callback => {
     const listener = safeListener(callback); ipcRenderer.on('ip-control:connection-status', listener);

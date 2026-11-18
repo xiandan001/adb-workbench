@@ -6,7 +6,7 @@ function isAnalysisSessionCurrent(sessionId) { return !!sessionId && analysisSou
 
 // The socket and its byte history belong to the current main-window document,
 // not to a React route, a log window, or an iframe.
-function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, history }) {
+function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, history, chooseRecordFile, writeRecordFile }) {
   const page = pathToFileURL(resolve(appRoot, 'dist/index.html')).href;
   let active, disposed = false, historyRevision = 0, historyError = '';
   async function changeHistory(operation) {
@@ -43,11 +43,32 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
     return active.service;
   };
   analysisSource = ownedService;
-  for (const action of ['read', 'connect', 'send', 'disconnect', 'history', 'remove-history', 'clear-history', 'connection-status-subscribe']) {
+  async function saveRecords(current, owner, scope) {
+    if (current.saving) return { ok: false, code: 'SAVE_BUSY' };
+    current.saving = true;
+    try {
+      const frozen = current.service.snapshotForExport(scope);
+      if (!frozen.ok) return frozen;
+      const chosen = await chooseRecordFile(owner, frozen.snapshot.mode);
+      if (chosen.canceled || !chosen.filePath) return { ok: true, cancelled: true };
+      const isCurrent = () => ownedService() === current.service && current.service.isRecordScopeCurrent(scope);
+      if (!isCurrent()) return { ok: false, code: 'STALE_RECORDS' };
+      await writeRecordFile(chosen.filePath, frozen.snapshot, { isCurrent });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, code: error.code === 'STALE_RECORDS' ? 'STALE_RECORDS' : 'SAVE_FAILED' };
+    } finally { current.saving = false; }
+  }
+  for (const action of ['read', 'connect', 'send', 'disconnect', 'history', 'remove-history', 'clear-history', 'connection-status-subscribe', 'save-records', 'clear-records']) {
     ipc.handle('ip-control:' + action, async (event, args) => {
       const owner = getOwner(), contents = owner?.webContents, frame = event.senderFrame;
       if (disposed || !owner || owner.isDestroyed() || !contents || contents.isDestroyed() ||
         contents !== event.sender || !frame || contents.mainFrame !== frame || !trusted(frame)) return denied();
+      if (action === 'save-records' || action === 'clear-records') {
+        if (!args || Object.keys(args).length !== 2 || typeof args.sessionId !== 'string' || !args.sessionId ||
+          !Number.isSafeInteger(args.recordEpoch) || args.recordEpoch < 0) return { ok: false, code: 'INVALID_SCOPE' };
+        if (ownedService() === null) return { ok: false, code: 'STALE_SESSION' };
+      }
       if (active?.frame !== frame || active.contents !== contents) {
         release();
         const navigate = details => { if (details.isMainFrame && !details.isSameDocument) release(); };
@@ -64,7 +85,9 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
       }
       const current = active;
       let result;
-      if (action === 'connection-status-subscribe') {
+      if (action === 'save-records') result = await saveRecords(current, owner, args);
+      else if (action === 'clear-records') result = current.service.clearRecords(args);
+      else if (action === 'connection-status-subscribe') {
         if (typeof args?.active !== 'boolean') return { success: false };
         current.subscribed = args.active;
         result = { success: true, status: current.service.connectionStatus() };

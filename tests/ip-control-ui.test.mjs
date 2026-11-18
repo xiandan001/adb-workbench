@@ -105,6 +105,29 @@ test('display is bounded, avoids duplicates and does not mix session bytes', () 
   current = model.mergeIpRead(current, view('connected', 'two', { entries: [{ id: 1, hex: 'FF' }], nextAfter: 1 }), false); assert.deepEqual(current.entries, [{ id: 1, hex: 'FF' }]); assert.equal(current.omitted, false);
 });
 
+test('clearing an epoch drops the paused/detail owner and fences a pending read without losing immediate RX', async () => {
+  const before = view('connected','session',{recordEpoch:5, entries:[{id:1,hex:'AA'}], nextAfter:1});
+  const after = view('connected','session',{recordEpoch:6, entries:[{id:1,hex:'BB'}], nextAfter:1});
+  const stale = deferred(), calls = [];
+  const ui = mount({ ipControlRead: async args => { calls.push({...args}); return calls.length === 1 ? before : calls.length === 2 ? stale.promise : after; } }, storage());
+  ui.tree(); await ui.drain(); const old = ui.find('IpControlTraffic');
+  const pending = ui.poll(); old.props.onCleared({sessionId:'session',recordEpoch:5},6);
+  await ui.drain(); stale.resolve(before); await pending;
+  const cleared = ui.find('IpControlTraffic');
+  assert.notEqual(cleared.props.key,old.props.key);
+  assert.deepEqual(cleared.props.entries.map(row=>row.hex), ['BB']);
+  assert.deepEqual(calls, [{},{after:1,sessionId:'session',recordEpoch:5},{after:0,sessionId:'session',recordEpoch:6}]);
+  old.props.onCleared({sessionId:'session',recordEpoch:5},6);
+  assert.equal(calls.length,3); ui.dispose();
+});
+
+test('an epoch changed outside this panel also resets old traffic and omission counters even if row IDs repeat', () => {
+  const prior = view('idle','s',{recordEpoch:1, entries:[{id:1,hex:'01'}],omitted:true});
+  const next = view('idle','s',{recordEpoch:2, entries:[{id:1,hex:'02'}],nextAfter:1});
+  const result = model.mergeIpRead(prior,next,false);
+  assert.deepEqual(result.entries,[{id:1,hex:'02'}]); assert.equal(result.omitted,false);
+});
+
 test('each mode remembers valid inputs on blur without network I/O or saving drafts or invalid edits', async () => {
   const saved = storage(), calls = [];
   saved.setItem('adb-workbench.ip-control.endpoint.v1', '{"version":1,"host":"192.0.2.8","port":8432}');

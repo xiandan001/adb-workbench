@@ -67,11 +67,16 @@ function createRecordBuffer() {
   function analysisTail() {
     return { lastId, dropped, entries: rows.slice(Math.max(head, rows.length - 2000)).map(project) };
   }
-  return { append, page, analysisTail };
+  // Export only on explicit request. Copy the retained bytes without building a full HEX string.
+  function exportRows() {
+    return { dropped, entries: rows.slice(head).map(({ id, at, direction, data, peer, protocol }) =>
+      ({ id, at, direction, data: Buffer.from(data), ...(peer || {}), ...(protocol ? { protocol } : {}) })) };
+  }
+  return { append, page, analysisTail, exportRows, get size() { return rows.length - head; } };
 }
 
 function createIpControlService({ createSocket = () => new net.Socket(), connectTimeoutMs = 5000, writeTimeoutMs = 5000, onSuccessfulEndpoint, onStatusChange } = {}) {
-  let owner, disposed = false, records = createRecordBuffer();
+  let owner, disposed = false, records = createRecordBuffer(), recordEpoch = 0;
   const noPeer = { peerId: '', peerHost: '', peerPort: 0 };
   let state = { status: 'idle', code: '', host: '', port: 0, sessionId: '', mode: 'tcp-client', localPort: 0, ...noPeer };
   const connectionStatus = () => ipConnectionStatus(state);
@@ -100,7 +105,7 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return Promise.resolve(failed('INVALID_PORT'));
     if (mode === 'udp' && (!Number.isSafeInteger(localPort) || localPort < 0 || localPort > 65535)) return Promise.resolve(failed('INVALID_BIND'));
     if (mode === 'udp' && (['0.0.0.0', '255.255.255.255', '::'].includes(host) || (net.isIPv4(host) && Number(host.split('.')[0]) >= 224) || /^ff/i.test(host))) return Promise.resolve(failed('INVALID_IP'));
-    const sessionId = randomUUID(); records = createRecordBuffer();
+    const sessionId = randomUUID(); records = createRecordBuffer(); recordEpoch = 0;
     state = { status: 'connecting', code: '', host, port, sessionId, mode, localPort: 0, ...noPeer };
     notifyStatus();
     let socket;
@@ -177,8 +182,28 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     if (disposed) return failed('DISPOSED');
     const after = args?.after;
     if (after !== undefined && (!Number.isSafeInteger(after) || after < 0)) return failed('INVALID_CURSOR');
-    const currentCursor = args?.sessionId === undefined || args.sessionId === state.sessionId;
-    return { ok: true, ...state, sending: Boolean(owner?.writing), ...records.page(currentCursor ? after : undefined) };
+    if (args?.recordEpoch !== undefined && (!Number.isSafeInteger(args.recordEpoch) || args.recordEpoch < 0)) return failed('INVALID_CURSOR');
+    const currentCursor = (args?.sessionId === undefined || args.sessionId === state.sessionId) &&
+      (args?.recordEpoch === undefined || args.recordEpoch === recordEpoch);
+    return { ok: true, ...state, recordEpoch, sending: Boolean(owner?.writing), ...records.page(currentCursor ? after : undefined) };
+  }
+  function recordScopeError(scope) {
+    if (disposed) return 'DISPOSED';
+    if (!state.sessionId || scope?.sessionId !== state.sessionId) return 'STALE_SESSION';
+    return scope.recordEpoch === recordEpoch ? '' : 'STALE_RECORDS';
+  }
+  const isRecordScopeCurrent = scope => !recordScopeError(scope);
+  function snapshotForExport(scope) {
+    const error = recordScopeError(scope);
+    if (error || !records.size) return failed(error || 'EMPTY_RECORDS');
+    const { sessionId, mode, host, port, localPort } = state;
+    return { ok: true, snapshot: { sessionId, recordEpoch, mode, host, port, localPort, ...records.exportRows() } };
+  }
+  function clearRecords(scope) {
+    const error = recordScopeError(scope);
+    if (error || !records.size) return failed(error || 'EMPTY_RECORDS');
+    records = createRecordBuffer();
+    return { ok: true, recordEpoch: ++recordEpoch };
   }
   function dispose() {
     disposed = true;
@@ -191,7 +216,8 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     const { sessionId, mode, host, port, localPort } = state;
     return { sessionId, mode, host, port, localPort, ...records.analysisTail() };
   }
-  return { connect, disconnect, send, read, dispose, connectionStatus, currentSessionId, snapshotForAnalysis };
+  return { connect, disconnect, send, read, dispose, connectionStatus, currentSessionId, snapshotForAnalysis,
+    snapshotForExport, clearRecords, isRecordScopeCurrent };
 }
 
 module.exports = { createIpControlService };

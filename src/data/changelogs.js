@@ -3,6 +3,13 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.4': {
+    title: 'v4.8.4',
+    date: '2026-11-18',
+    items: [
+      { type: 'feature', get text() { return tr('IP Control 支持保存和清空当前网络会话的收发记录。'); } },
+    ],
+  },
   '4.8.3': {
     title: 'v4.8.3',
     date: '2026-11-18',

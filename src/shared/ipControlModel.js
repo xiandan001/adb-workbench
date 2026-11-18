@@ -83,12 +83,12 @@ export function ipControlError(code) {
 }
 
 export function mergeIpRead(previous, read, replace) {
-  const retain = !replace && previous?.sessionId === read.sessionId;
+  const retain = !replace && previous && previous.sessionId === read.sessionId && (previous.recordEpoch ?? 0) === (read.recordEpoch ?? 0);
   const prior = retain ? previous.entries : [];
   const incoming = read.entries.filter(item => item.id > (prior.at(-1)?.id || 0));
   const entries = !incoming.length ? prior : [...prior, ...incoming].slice(-MAX_DISPLAY_ENTRIES);
   const omitted = Boolean(read.dropped || read.omitted || (retain && previous.omitted) || incoming.length + prior.length > MAX_DISPLAY_ENTRIES);
   if (previous && entries === previous.entries && previous.omitted === omitted &&
-    ['mode', 'sessionId', 'host', 'port', 'localPort', 'peerId', 'peerHost', 'peerPort', 'status', 'code', 'sending', 'nextAfter', 'historyRevision'].every(key => previous[key] === read[key])) return previous;
+    ['mode', 'sessionId', 'host', 'port', 'localPort', 'peerId', 'peerHost', 'peerPort', 'status', 'code', 'sending', 'nextAfter', 'historyRevision', 'recordEpoch'].every(key => previous[key] === read[key])) return previous;
   return { ...read, entries, omitted };
 }

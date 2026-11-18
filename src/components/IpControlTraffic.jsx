@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Pause, Play } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { formatHex } from '../shared/serialFormat.js';
 import { tr, useLocale } from '../shared/i18n.js';
 import { captureIpRecord, ipDirection, ipTransport, rowEndpoint } from '../shared/ipTrafficRecord.js';
 import IpControlRecordDetail from './IpControlRecordDetail.jsx';
+import IpControlRecordControls from './IpControlRecordControls.jsx';
 
 function TrafficRow({ row, view, theme, clock, onSelect }) {
   const dir = ipDirection(row.direction), address = rowEndpoint(row, view);
@@ -23,7 +24,7 @@ function TrafficRow({ row, view, theme, clock, onSelect }) {
   </li>;
 }
 
-export default function IpControlTraffic({ theme, entries, omitted, view }) {
+export default function IpControlTraffic({ theme, entries, omitted, view, busy, onCleared, showToast }) {
   const locale = useLocale(), scroll = useRef(null), trigger = useRef(null);
   const [frozen, setFrozen] = useState(null), [selected, setSelected] = useState(null);
   const rows = frozen || entries;
@@ -32,7 +33,8 @@ export default function IpControlTraffic({ theme, entries, omitted, view }) {
   function inspect(row, button) { trigger.current = button; setSelected(captureIpRecord(row, view)); }
   return <section className="min-w-0 space-y-2">
     <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">{tr('收发记录')}</h3><span className={`rounded-lg border border-slate-400/20 px-2.5 py-1.5 text-xs ${theme.textMuted}`}>HEX</span>
-      <button type="button" aria-pressed={Boolean(frozen)} onClick={() => setFrozen(previous => previous ? null : entries)} className={`ml-auto inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs ${theme.button.secondary}`}>{frozen ? <Play size={13}/> : <Pause size={13}/>}{frozen ? tr('跟随最新') : tr('暂停滚动')}</button></div>
+      <IpControlRecordControls view={view} disabled={busy || !entries.length} theme={theme} onCleared={onCleared} showToast={showToast}
+        paused={Boolean(frozen)} onTogglePause={() => setFrozen(previous => previous ? null : entries)} /></div>
     <div ref={scroll} role="region" aria-label={tr('网络收发记录')} tabIndex={-1} className={`h-56 min-w-0 overflow-auto rounded-lg border ${theme.input}`}>
       {rows.length ? <ul>{rows.map(row => <TrafficRow key={row.id} row={row} view={view} theme={theme} clock={clock} onSelect={inspect} />)}</ul>
         : <p className={`flex h-full items-center justify-center px-5 text-center text-xs ${theme.textMuted}`}>{tr('暂无收发记录')}</p>}

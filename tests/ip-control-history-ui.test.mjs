@@ -19,7 +19,7 @@ function mount(name, extra, properties) {
     useState(x){const slot=slots[pos++] ||= {value:typeof x==='function'?x():x};return [slot.value,v=>{slot.value=typeof v==='function'?v(slot.value):v;}];},
     useEffect(fn,deps){const slot=slots[pos++] ||= {}; if(slot.deps?.length===deps.length&&deps.every((v,i)=>slot.deps[i]===v))return;slot.deps=deps;effects.push(()=>{slot.cleanup?.();slot.cleanup=fn();});},
   };
-  for(const icon of ['ChevronDown','ArrowRight','Clock','History','Pencil','Plus','Star','Trash2','X','Pause','Play']) runtime[icon]='icon';
+  for(const icon of ['ChevronDown','ArrowRight','Clock','History','Pencil','Plus','Star','Trash2','X','Pause','Play','Save']) runtime[icon]='icon';
   const src=fs.readFileSync(new URL('../src/components/'+name+'.jsx',import.meta.url),'utf8').replace(/^import .+;\r?\n/gm,'').replace('export default function','function');
   const fn=vm.runInNewContext(transformSync(name+'.jsx',src,{jsx:{runtime:'classic',pragma:'jsx',pragmaFrag:'"fragment"'}}).code+'\n'+name,runtime);
   function draw(){pos=0;const tree=fn(props);while(effects.length)effects.shift()();return tree;}
@@ -27,6 +27,30 @@ function mount(name, extra, properties) {
   const button=label=>find('button',n=>(n.props['aria-label']||text(n))===label);
   return {draw,find,button,props(next){props={...props,...next};},dispose(){slots.forEach(slot=>slot.cleanup?.());}};
 }
+
+test('traffic actions snapshot session and epoch, cancel silently, prevent double submission and retire stale owners', async()=>{
+  const saves=[],clears=[],reset=[],toasts=[],save=deferred(),clear=deferred();
+  const api={ipControlSaveRecords:async value=>{saves.push({...value});return save.promise;},ipControlClearRecords:async value=>{clears.push({...value});return clear.promise;}};
+  const ui=mount('IpControlRecordControls',{window:{electronAPI:api}},{theme,view:{sessionId:'IP-A',recordEpoch:9},
+    disabled:true,onCleared:(ref,epoch)=>reset.push([{...ref},epoch]),showToast:message=>toasts.push(message)});
+  ui.draw();assert.ok(ui.button('保存当前记录').props.disabled);assert.ok(ui.button('清空记录').props.disabled);
+  ui.props({disabled:false});const startSave=ui.button('保存当前记录').props.onClick;
+  startSave();startSave();assert.deepEqual(saves,[{sessionId:'IP-A',recordEpoch:9}]);assert.ok(ui.button('清空记录').props.disabled);
+  save.resolve({ok:true,cancelled:true});await pause();assert.deepEqual(toasts,[]);assert.deepEqual(clears,[]);
+  ui.button('清空记录').props.onClick();const stale=ui.button('确认清空').props.onClick;ui.button('取消').props.onClick();stale();assert.deepEqual(clears,[]);
+  ui.button('清空记录').props.onClick();const submit=ui.button('确认清空').props.onClick;submit();submit();assert.deepEqual(clears,[{sessionId:'IP-A',recordEpoch:9}]);
+  ui.dispose();clear.resolve({ok:true,recordEpoch:10});await pause();startSave();submit();assert.deepEqual(reset,[]);assert.equal(saves.length,1);
+});
+
+test('record clear rejects stale scopes without changing the view and only acknowledges a successful new epoch', async()=>{
+  const reset=[],results=[{ok:false,code:'STALE_RECORDS'},{ok:true,recordEpoch:3}];
+  const ui=mount('IpControlRecordControls',{window:{electronAPI:{ipControlClearRecords:async()=>results.shift()}}},{theme,
+    view:{sessionId:'s',recordEpoch:2},onCleared:(ref,next)=>reset.push([{...ref},next])});
+  ui.draw();ui.button('清空记录').props.onClick();ui.button('确认清空').props.onClick();await pause();
+  assert.match(text(ui.find('p',node=>node.props.role==='alert')),/收发记录已变化/);assert.deepEqual(reset,[]);
+  ui.button('清空记录').props.onClick();ui.button('确认清空').props.onClick();await pause();
+  assert.deepEqual(reset,[[{sessionId:'s',recordEpoch:2},3]]);ui.dispose();
+});
 
 test('history modal ignores stale reads, only current enabled row starts once; dismiss, clear and delete make no network calls', async()=>{
   const first=deferred(), calls=[], starts=[], item={id:'1',mode:'udp',host:'192.0.2.1',port:8192,localPort:123,lastSuccessAt:123};

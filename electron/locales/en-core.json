@@ -1,4 +1,12 @@
 {
+  "IP Control 支持保存和清空当前网络会话的收发记录。": "IP Control can now save and clear the current network session’s traffic log.",
+  "仅清空当前网络会话的收发记录，不影响连接、串口记录或发送历史。": "Clear only this network session’s traffic log. The connection, serial records and send history are unaffected.",
+  "当前网络会话的收发记录已保存。": "Traffic records for this network session have been saved.",
+  "收发记录已变化，请核对当前会话后重试。": "The traffic records have changed. Check the current session and try again.",
+  "未能保存当前网络会话的记录，请检查保存位置后重试。": "Could not save the network session log. Check the save location and try again.",
+  "未能清空当前网络会话的记录，请重试。": "Could not clear the current network session log. Try again.",
+  "保存当前网络会话缓存中的全部收发记录": "Save all traffic records retained in the current network session",
+  "保存当前网络收发记录": "Save current network traffic log",
   "IP Control 支持准备 AI 分析，点击收发记录可查看并复制完整 HEX。": "IP Control can prepare an AI analysis. Select a traffic record to view and copy its complete hex data.",
   "后台活动显示网络连接，点击连接状态可进入对应工作区。": "Background activity now shows network connections. Select a connection to open its workspace.",
   "网络收发记录详情": "Network traffic record details",

@@ -238,6 +238,12 @@ app.whenReady().then(async () => {
   disposeIpControl = require('./lib/ip-control-ipc.cjs').registerIpControl(diagnosticIpc, {
     getOwner: ctx.getMainWindow, appRoot: app.getAppPath(), isDev,
     createService: require('./lib/ip-control-service.cjs').createIpControlService,
+    chooseRecordFile: (owner, mode) => dialog.showSaveDialog(owner, {
+      title: tr('保存当前网络收发记录'),
+      defaultPath: path.join(app.getPath('downloads'), `ip-control-${mode}-${new Date().toISOString().replace(/[:.]/g, '-')}.log`),
+      filters: [{ name: tr('网络收发记录'), extensions: ['log', 'txt'] }]
+    }),
+    writeRecordFile: require('./lib/ip-control-export.cjs').writeIpControlSnapshot,
     history: require('./lib/ip-control-history.cjs').createIpControlHistory({
       filename: path.join(app.getPath('userData'), 'ip-control-history.v1.json')
     })

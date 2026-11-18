@@ -5,12 +5,12 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { registerIpControl, readAnalysisSnapshot, isAnalysisSessionCurrent } = require('../electron/lib/ip-control-ipc.cjs');
 const url = pathToFileURL(path.resolve('dist/index.html')).href;
-function fixture(history) {
+function fixture(history, recordOptions) {
   const handlers = new Map(), services = [];
   const contents = Object.assign(new EventEmitter(), { mainFrame: { url }, isDestroyed: () => false });
   const owner = { webContents: contents, isDestroyed: () => false };
   const dispose = registerIpControl({ handle: (name, fn) => handlers.set(name, fn) }, {
-    getOwner: () => owner, appRoot: path.resolve('.'), isDev: false, history, createService({ onSuccessfulEndpoint }) {
+    getOwner: () => owner, appRoot: path.resolve('.'), isDev: false, history, ...recordOptions, createService({ onSuccessfulEndpoint }) {
       const calls = []; let close, opened = new Promise(resolve => { close = resolve; });
       const service = { calls, onSuccessfulEndpoint, connect: () => opened, read: () => ({ ok: true }), send: args => { calls.push(args); return { ok: true }; },
         dispose() { calls.push('dispose'); close({ ok: false, code: 'CANCELLED' }); } };
@@ -26,6 +26,34 @@ test('only the packaged main document has access: no socket for another window, 
   }
   f.contents.mainFrame.url = 'https://example.invalid/'; assert.equal((await f.invoke('read')).code, 'NOT_AUTHORIZED');
   assert.equal(f.services.length, 0); f.dispose();
+});
+
+test('record actions accept only main-frame session scope; export freezes before dialog, cancellation is a no-op', async () => {
+  const scope = { sessionId:'network-A', recordEpoch:0 };
+  let finish, choices=0, writes=0, current=true;
+  const f = fixture(undefined, { chooseRecordFile: () => { choices++; return new Promise(r=>{finish=r;}); },
+    writeRecordFile: async (_path, frozen, options) => {
+      assert.equal(frozen.sessionId,scope.sessionId); assert.ok(options.isCurrent()); writes++;
+    } });
+  await f.invoke('read');
+  let freezes=0, clears=0;
+  Object.assign(f.services[0], {
+    snapshotForExport: () => { freezes++; return { ok:true, snapshot:{sessionId:scope.sessionId} }; },
+    clearRecords: args => { assert.deepEqual(args,scope); clears++; return {ok:true,recordEpoch:1}; },
+    isRecordScopeCurrent: () => current
+  });
+  for(const action of ['save-records','clear-records']){
+    assert.equal((await f.invoke(action,scope,{sender:f.contents,senderFrame:{url}})).code,'NOT_AUTHORIZED');
+    assert.equal((await f.invoke(action,{...scope,filePath:'injected'})).ok,false);
+  }
+  assert.equal(clears+choices+freezes,0);
+  const first=f.invoke('save-records',scope); assert.equal(freezes,1);
+  assert.equal((await f.invoke('save-records',scope)).code,'SAVE_BUSY');
+  finish({canceled:true}); assert.deepEqual(await first,{ok:true,cancelled:true}); assert.equal(writes,0);
+  const second=f.invoke('save-records',scope); finish({filePath:'chosen.log'}); assert.deepEqual(await second,{ok:true});
+  const third=f.invoke('save-records',scope); current=false; finish({filePath:'stale.log'}); assert.equal((await third).ok,false); assert.equal(writes,1);
+  current=true; assert.deepEqual(await f.invoke('clear-records',scope),{ok:true,recordEpoch:1}); assert.equal(clears,1);
+  const last=f.invoke('save-records',scope); f.dispose(); finish({filePath:'old-owner.log'}); assert.equal((await last).ok,false); assert.equal(writes,1);
 });
 
 test('AI snapshot reads do not create a service and cannot reuse a departed owner or old session', async () => {

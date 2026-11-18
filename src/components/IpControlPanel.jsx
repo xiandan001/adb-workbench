@@ -20,37 +20,45 @@ export default function IpControlPanel({ theme, isDark, showToast }) {
   const [error, setError] = useState(''), [readError, setReadError] = useState(''), [prefError, setPrefError] = useState(false);
   const [dismissedError, setDismissedError] = useState(''), [invalidField, setInvalidField] = useState('');
   const hostInput = useRef(null), portInput = useRef(null), localInput = useRef(null);
-  const owner = useRef(null), lock = useRef(null), refresh = useRef(null);
+  const owner = useRef(null), lock = useRef(null), refresh = useRef(null), resetRecords = useRef(null);
   const live = activeStatuses.has(view?.status);
   const mode = live && IP_CONTROL_MODES.includes(view.mode) ? view.mode : selectedMode;
   const server = mode === 'tcp-server', udp = mode === 'udp', endpoint = endpoints[mode];
   useEffect(() => {
-    const token = {}; owner.current = token; let current = null, inFlight, timer;
+    const token = {}; owner.current = token; let current = null, inFlight, generation = 0;
     const api = window.electronAPI;
     const poll = () => {
       if (owner.current !== token || document.hidden) return;
       if (inFlight) return inFlight;
+      const ticket = generation, valid = () => owner.current === token && ticket === generation;
       inFlight = (async () => {
         try {
           if (!api?.ipControlRead) { setReadError('UNAVAILABLE'); return; }
           let replace = !current || current.hasMore;
-          let result = await api.ipControlRead(replace ? {} : { after: current.nextAfter, sessionId: current.sessionId });
-          if (owner.current !== token) return;
+          let result = await api.ipControlRead(replace ? {} : { after: current.nextAfter, sessionId: current.sessionId, recordEpoch: current.recordEpoch ?? 0 });
+          if (!valid()) return;
           if (result?.code === 'INVALID_CURSOR') {
             replace = true; result = await api.ipControlRead({});
-            if (owner.current !== token) return;
+            if (!valid()) return;
           }
           if (!result?.ok) { setReadError(result?.code || 'UNAVAILABLE'); return; }
           current = mergeIpRead(current, result, replace);
           if (activeStatuses.has(current.status) && IP_CONTROL_MODES.includes(current.mode)) setSelectedMode(current.mode);
           setReadError(''); setView(current);
-        } catch { if (owner.current === token) setReadError('UNAVAILABLE'); }
-      })().finally(() => { inFlight = null; });
+        } catch { if (valid()) setReadError('UNAVAILABLE'); }
+      })().finally(() => { if (valid()) inFlight = null; });
       return inFlight;
     };
-    refresh.current = poll; void poll(); timer = setInterval(poll, 350);
+    resetRecords.current = (ref, epoch) => {
+      if (owner.current !== token || current?.sessionId !== ref.sessionId || (current.recordEpoch ?? 0) !== ref.recordEpoch ||
+        !Number.isSafeInteger(epoch) || epoch <= ref.recordEpoch) return;
+      generation++; inFlight = null;
+      current = { ...current, recordEpoch: epoch, entries: [], dropped: 0, omitted: false, firstId: 0, lastId: 0, nextAfter: 0, hasMore: false };
+      setView(current); void poll();
+    };
+    refresh.current = poll; void poll(); const timer = setInterval(poll, 350);
     document.addEventListener('visibilitychange', poll);
-    return () => { owner.current = null; lock.current = null; refresh.current = null; clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
+    return () => { owner.current = null; lock.current = null; refresh.current = null; resetRecords.current = null; clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
   }, []);
 
   const connecting = view?.status === 'connecting' || action === 'connect';
@@ -143,7 +151,9 @@ export default function IpControlPanel({ theme, isDark, showToast }) {
     </div>
     <AiContextButton disabled={unavailable || !relevant || !view?.sessionId || !entries.length}
       context={{ reference: { kind: 'ip-control', sessionId: view?.sessionId || '' } }} />
-    <IpControlTraffic key={mode + ':' + (view?.sessionId || '')} theme={theme} view={relevant ? view : null} entries={entries} omitted={relevant && view?.omitted} />
+    <IpControlTraffic key={mode + ':' + (view?.sessionId || '') + ':' + (view?.recordEpoch ?? 0)} theme={theme} view={relevant ? view : null}
+      entries={entries} omitted={relevant && view?.omitted} busy={busy || unavailable}
+      onCleared={(ref, epoch) => resetRecords.current?.(ref, epoch)} showToast={showToast} />
     {commandWarning && <p role="status" className="text-xs text-amber-600">{tr('网络数据已写入，但未能保存发送历史。')}</p>}
     <IpControlComposer theme={theme} isDark={isDark} showToast={showToast} mode={mode} canSend={canSend && !busy && !unavailable} sending={action === 'send' || view?.sending} onSend={send} commandRevision={commandRevision} />
   </div>;
