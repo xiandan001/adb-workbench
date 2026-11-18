@@ -37,7 +37,6 @@ import ApplicationLogSection from './components/ApplicationLogSection';
 import DiagnosticCaptureButton from './components/DiagnosticCaptureButton.jsx';
 import LanguageLoadNotice from './components/LanguageLoadNotice.jsx';
 import useMirrorSessions from './shared/useMirrorSessions.js';
-import ConnectionAttemptNotice from './components/ConnectionAttemptNotice.jsx';
 import { preferredScrollBehavior } from './shared/uiMotionPreferences';
 import { observeUpdaterState, updaterInstallLabel } from './shared/updaterState.js';
 import { readMigratedPreference } from './shared/dataMigrationStorage';
@@ -119,7 +118,6 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionFormOpen, setConnectionFormOpen] = useState(false);
   const [connectionResults, setConnectionResults] = useState({});
-  const [lastConnectionAttempt, setLastConnectionAttempt] = useState(null);
   const { sessions: mirrorSessions, error: mirrorStateError } = useMirrorSessions();
   const connectingAddressesRef = useRef(new Set());
   const [scrcpySettings, setScrcpySettings] = useState(() => readMigratedPreference('scrcpySettings', {
@@ -1421,7 +1419,6 @@ function App() {
     const key = historyEntry?.deviceId || target;
     if (!target || connectingAddressesRef.current.has(key)) return false;
     connectingAddressesRef.current.add(key);
-    setLastConnectionAttempt({ key, address: target, historyEntry });
     setConnectionResults(prev => ({ ...prev, [key]: { status: 'loading', address: target, message: tr("正在连接…") } }));
     try {
       const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
@@ -2031,11 +2028,6 @@ function App() {
                   </button>
                 </form>
                 </div>}
-                <ConnectionAttemptNotice result={lastConnectionAttempt && connectionResults[lastConnectionAttempt.key]} theme={t}
-                  busy={Boolean(lastConnectionAttempt && connectionResults[lastConnectionAttempt.key]?.status === 'loading')}
-                  onRetry={() => { if (lastConnectionAttempt) void connectDevice(lastConnectionAttempt.address, lastConnectionAttempt.historyEntry); }}
-                  onEnvironment={() => setEnvironmentCheckModalOpen(true)} onUse={chooseDevice}
-                  onCast={id => { if (devices.some(device => device.id === id && device.status === 'device')) { chooseDevice(id); void handleStartScrcpy(id); } else showToast(tr('设备状态尚未更新，请刷新后重试。')); }} />
                 {showConnectionForm && recentWirelessEntries(connectionHistory).length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className={`text-xs ${t.textMuted}`}>{tr('最近连接')}</span>
                   {recentWirelessEntries(connectionHistory).map(entry => {

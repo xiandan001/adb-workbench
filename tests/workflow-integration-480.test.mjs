@@ -10,20 +10,27 @@ traverseModule.default(parse(app, { sourceType: 'module', plugins: ['jsx'] }), {
 } });
 const tr = (text, values = {}) => text.replace(/\{(\d+)\}/g, (token, key) => values[key] ?? token);
 
-test('a new address has a durable inline result DTO and reconnect success does not steal an unrelated active target', async () => {
-  let results = {}, last; const selected = [], calls = [], history = { deviceId: 'old-history', ip: '192.0.2.2' };
+test('connection feedback keeps original toast/history and target isolation without the removed result card', () => {
+  assert.equal(/ConnectionAttemptNotice|lastConnectionAttempt|setLastConnectionAttempt/.test(app), false);
+  assert.equal(fs.existsSync(new URL('../src/components/ConnectionAttemptNotice.jsx', import.meta.url)), false);
+  assert.match(app, /const \[connectionResults, setConnectionResults\]/);
+});
+
+test('connection result DTO and existing feedback survive without selecting a target or changing pages', async () => {
+  let results = {}; const selected = [], calls = [], toasts = [], navigation = [], history = { deviceId: 'old-history', ip: '192.0.2.2' };
   let result = { success: false, message: 'fixture timeout', code: 'ETIMEDOUT' };
   const connect = vm.runInNewContext('(' + functions.get('connectDevice') + ')', {
     tr, window: { electronAPI: {} }, connectingAddressesRef: { current: new Set() },
-    setLastConnectionAttempt: value => { last = value; }, setConnectionResults: update => { results = update(results); },
+    setConnectionResults: update => { results = update(results); },
     connectWirelessDevice: async (address, options) => { calls.push({ address, history: options.historyEntry }); return result; },
-    fetchDevices() {}, setConnectionHistory() {}, showToast() {}, setDeviceQuery() {}, chooseDevice: id => selected.push(id), setActiveTab() {}, setConnectionFormOpen() {},
+    fetchDevices() {}, setConnectionHistory() {}, showToast: value => toasts.push(value), setDeviceQuery() {}, chooseDevice: id => selected.push(id), setActiveTab: value => navigation.push(value), setConnectionFormOpen: value => navigation.push(value),
   });
-  assert.equal(await connect(' 192.0.2.1 '), false); assert.equal(last.address, '192.0.2.1');
-  assert.equal(results[last.key].status, 'error'); assert.equal(results[last.key].code, 'ETIMEDOUT'); assert.equal(results[last.key].address, last.address);
+  assert.equal(await connect(' 192.0.2.1 '), false);
+  assert.equal(results['192.0.2.1'].status, 'error'); assert.equal(results['192.0.2.1'].code, 'ETIMEDOUT'); assert.equal(results['192.0.2.1'].address, '192.0.2.1');
   result = { success: true, message: 'connected', deviceId: '192.0.2.2:5555' };
   assert.equal(await connect('192.0.2.2', history), true); assert.deepEqual(selected, []);
   assert.equal(results[history.deviceId].deviceId, result.deviceId); assert.equal(calls.length, 2);
+  assert.deepEqual(toasts, ['fixture timeout', 'connected']); assert.deepEqual(navigation, []);
 });
 
 test('mirror retry uses its explicit device/options and profile actions send only the current session identity', async () => {
