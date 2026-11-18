@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
 import './index.css';
 import './styles/workbenchLayout.css';
 import brandIcon from '../assets/brand/icon-128.png';
@@ -334,6 +334,28 @@ function App() {
   });
   // 连接历史记录
   const [connectionHistory, setConnectionHistory] = useState([]);
+  const historyVersion = useRef(0), historyMutation = useRef(false);
+  const [historyChanging, setHistoryChanging] = useState(false);
+  const refreshConnectionHistory = useCallback(async () => {
+    const version = ++historyVersion.current;
+    try {
+      const result = await window.electronAPI?.loadConnectionHistory();
+      if (version === historyVersion.current && result?.success && Array.isArray(result.data)) setConnectionHistory(result.data);
+    } catch { /* Keep the displayed history if the optional refresh fails. */ }
+  }, []);
+  const changeConnectionHistory = async entry => {
+    if (historyMutation.current) return;
+    historyMutation.current = true; setHistoryChanging(true); const version = ++historyVersion.current;
+    try {
+      const result = entry ? await window.electronAPI?.removeConnectionHistory({ id: entry.id, deviceId: entry.deviceId })
+        : await window.electronAPI?.clearConnectionHistory();
+      if (!result?.success || entry && !Array.isArray(result.data)) throw Error('HISTORY_UNAVAILABLE');
+      if (version === historyVersion.current) setConnectionHistory(entry ? result.data : []);
+      else await refreshConnectionHistory();
+      showToast(entry ? tr('连接记录已删除，设备连接不受影响。') : tr('历史记录已清除'));
+    } catch { showToast(entry ? tr('未能删除连接记录，原历史已保留。') : tr('未能更新连接历史，原记录已保留。')); }
+    finally { historyMutation.current = false; setHistoryChanging(false); }
+  };
   // 终端命令历史记录（全局共享）
   const [terminalCommandHistory, setTerminalCommandHistory] = useState([]);
   const [harmonyTerminalCommandHistory, setHarmonyTerminalCommandHistory] = useState([]);
@@ -726,15 +748,7 @@ function App() {
     };
     loadInitialSettings();
     // 加载连接历史记录
-    const loadConnectionHistory = async () => {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.loadConnectionHistory();
-        if (result.success && result.data) {
-          setConnectionHistory(result.data);
-        }
-      }
-    };
-    loadConnectionHistory();
+    void refreshConnectionHistory();
     // 加载终端命令历史记录
     const loadTerminalCmdHistory = async () => {
       if (window.electronAPI) {
@@ -749,7 +763,7 @@ function App() {
     loadTerminalCmdHistory();
     // 初始化 VIP 状态
     refreshVipStatus();
-  }, [fetchDevices, refreshVipStatus]);
+  }, [fetchDevices, refreshVipStatus, refreshConnectionHistory]);
 
   useEffect(() => {
     const saveThemes = async () => {
@@ -1422,7 +1436,7 @@ function App() {
     setConnectionResults(prev => ({ ...prev, [key]: { status: 'loading', address: target, message: tr("正在连接…") } }));
     try {
       const result = await connectWirelessDevice(target, { api: window.electronAPI, refreshDevices: fetchDevices, historyEntry });
-      if (result.history) setConnectionHistory(result.history);
+      if (result.history) void refreshConnectionHistory();
       setConnectionResults(prev => ({ ...prev, [key]: { ...result, address: target, status: result.success ? 'success' : 'error' } }));
       showToast(result.message);
       if (result.success) setDeviceQuery('');
@@ -2258,16 +2272,11 @@ function App() {
                           message: tr("确定要清除所有连接历史吗？"),
                           confirmLabel: tr("清除历史"),
                           rememberKey: 'history.clearConnections',
-                          onConfirm: async () => {
-                            if (window.electronAPI) {
-                              await window.electronAPI.clearConnectionHistory();
-                            }
-                            setConnectionHistory([]);
-                            showToast(tr("历史记录已清除"));
-                          }
+                          onConfirm: () => changeConnectionHistory(null)
                         });
                       }}
-                      className={`text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-red-400 hover:bg-red-900/30' : 'text-[#80868B] hover:text-red-600 hover:bg-red-50'}`}
+                      disabled={historyChanging}
+                      className={`text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 ${isDarkTheme(t) ? 'text-[#9AA0A6] hover:text-red-400 hover:bg-red-900/30' : 'text-[#80868B] hover:text-red-600 hover:bg-red-50'}`}
                     >
                       <RotateCcw size={14} />{tr("一键清除")}</button>
                   )}
@@ -2292,23 +2301,23 @@ function App() {
                             const connectionResult = connectionResults[item.deviceId || address];
                             return (
                       <div
-                        key={item.id}
+                        key={JSON.stringify([item.id, item.deviceId])}
                         className={`workbench-history-card p-4 rounded-xl border transition-all hover:shadow-md group ${isDarkTheme(t) ? 'bg-slate-700/50 border-[#5F6368] hover:border-slate-500' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-1 items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                              <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${isDarkTheme(t) ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                            <div className="mb-3 grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-2.5 gap-y-0.5">
+                              <div className={`row-span-2 flex size-8 items-center justify-center rounded-lg ${isDarkTheme(t) ? 'bg-slate-600' : 'bg-slate-200'}`}>
                                 {item.type === 'wifi' ? (
                                   <Wifi size={16} className="text-emerald-500" />
                                 ) : (
                                   <Smartphone size={16} className="text-slate-500" />
                                 )}
                               </div>
-                              <span title={item.deviceName} className={`workbench-history-name font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
+                              <span title={item.deviceName} className={`workbench-history-name line-clamp-2 font-semibold leading-5 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
                                 {item.deviceName}
                               </span>
-                              <span className={`workbench-history-platform text-xs ${t.textMuted}`}>{platformLabel(item.deviceId)}</span>
+                              <span className={`workbench-history-platform col-start-2 text-xs ${t.textMuted}`}>{platformLabel(item.deviceId)}</span>
                             </div>
                             {item.ip && (
                               <div className="workbench-history-address flex items-center gap-2 mb-2">
@@ -2329,11 +2338,19 @@ function App() {
                               {new Date(item.timestamp).toLocaleString(getLocale(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </div>
                           </div>
+                          <button type="button" disabled={historyChanging} onClick={() => void changeConnectionHistory(item)}
+                            aria-label={tr('删除连接记录 {0}', { 0: item.deviceId })} title={tr('删除连接记录 {0}', { 0: item.deviceId })}
+                            className={`inline-flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-red-500/10 hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:opacity-50 ${t.textMuted}`}>
+                            <Trash2 size={15} aria-hidden="true" />
+                          </button>
                         </div>
                         <div className={`mt-3 pt-3 border-t flex gap-2 ${isDarkTheme(t) ? 'border-[#5F6368]' : 'border-slate-200'}`}>
                           <button
                             type="button"
-                            onClick={() => connectDevice(address, item)}
+                            onClick={() => {
+                              setActiveTab('devices');
+                              void connectDevice(address, item);
+                            }}
                             disabled={!address || connectionResult?.status === 'loading'}
                             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''}`}
                           >

@@ -89,6 +89,6 @@ export function mergeIpRead(previous, read, replace) {
   const entries = !incoming.length ? prior : [...prior, ...incoming].slice(-MAX_DISPLAY_ENTRIES);
   const omitted = Boolean(read.dropped || read.omitted || (retain && previous.omitted) || incoming.length + prior.length > MAX_DISPLAY_ENTRIES);
   if (previous && entries === previous.entries && previous.omitted === omitted &&
-    ['mode', 'sessionId', 'host', 'port', 'localPort', 'peerId', 'peerHost', 'peerPort', 'status', 'code', 'sending', 'nextAfter'].every(key => previous[key] === read[key])) return previous;
+    ['mode', 'sessionId', 'host', 'port', 'localPort', 'peerId', 'peerHost', 'peerPort', 'status', 'code', 'sending', 'nextAfter', 'historyRevision'].every(key => previous[key] === read[key])) return previous;
   return { ...read, entries, omitted };
 }

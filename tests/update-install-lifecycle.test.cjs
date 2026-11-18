@@ -34,6 +34,7 @@ function fixture({ launch, proceed = true, restart = false, logProceed = true, p
     confirmSerialQuit: async () => true, confirmRecordingQuit: async () => true,
     dataMigration: { isRestartRequested: () => restart }, tr: value => value, console: { warn() {} },
     appMessageDialog: { ask: async value => { dialogs.push(value); return { response: 0 }; } },
+    disposeIpControl: async () => { calls.push('ip-control'); },
     cleanupBeforeQuit: async () => { calls.push('cleanup'); },
     updater: { isQuitAndInstallInProgress: () => false, shouldInstallDownloadedUpdateOnQuit: () => updateReady,
       beginUpdateInstall: async () => { calls.push('launch'); return launch ? launch() : { ok: true, code: 'READY' }; },
@@ -55,7 +56,7 @@ test('main waits for acknowledged launch before stopping any resource or diagnos
   assert.deepEqual(f.logFlow, ['review', 'prepare', 'lock']); assert.equal(f.logState.blocked, true);
   await f.state.before(f.event()); assert.deepEqual(f.calls, ['confirm', 'launch']);
   release({ ok: true, code: 'READY' }); await quit;
-  assert.deepEqual(f.calls, ['confirm', 'launch', 'quitting-record', 'cleanup', 'acknowledged-quit']);
+  assert.deepEqual(f.calls, ['confirm', 'launch', 'quitting-record', 'ip-control', 'cleanup', 'acknowledged-quit']);
   assert.equal(f.state.flags().finished, true);
 });
 
@@ -101,7 +102,7 @@ test('save cancellation never launches, while a migration restart never starts a
   const cancel = fixture({ proceed: false }); await cancel.state.before(cancel.event());
   assert.deepEqual(cancel.calls, ['confirm']); assert.equal(cancel.state.flags().running, false);
   const restart = fixture({ restart: true }); await restart.state.before(restart.event());
-  assert.deepEqual(restart.calls, ['confirm', 'cleanup', 'quit-request']);
+  assert.deepEqual(restart.calls, ['confirm', 'ip-control', 'cleanup', 'quit-request']);
 });
 
 test('handoff phases and typed failures persist in bounded diagnostics and optional capture without tokens or paths', async () => {

@@ -63,7 +63,7 @@ function createRecordBuffer() {
   return { append, page };
 }
 
-function createIpControlService({ createSocket = () => new net.Socket(), connectTimeoutMs = 5000, writeTimeoutMs = 5000 } = {}) {
+function createIpControlService({ createSocket = () => new net.Socket(), connectTimeoutMs = 5000, writeTimeoutMs = 5000, onSuccessfulEndpoint } = {}) {
   let owner, disposed = false, records = createRecordBuffer();
   const noPeer = { peerId: '', peerHost: '', peerPort: 0 };
   let state = { status: 'idle', code: '', host: '', port: 0, sessionId: '', mode: 'tcp-client', localPort: 0, ...noPeer };
@@ -95,22 +95,30 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
       state.status = 'error'; state.code = networkCode(error); return Promise.resolve(failed(state.code));
     }
     const session = { socket }; owner = session;
+    // Record user-configured endpoints only, never transient peers, payloads,
+    // failed attempts, or a UDP socket that merely opened locally.
+    function remember() {
+      if (!onSuccessfulEndpoint || session.remembered || owner !== session) return;
+      session.remembered = true;
+      try { Promise.resolve(onSuccessfulEndpoint({mode,host,port,...(mode === 'udp' ? {localPort} : {})})).catch(() => {}); }
+      catch { /* Persistence must not break a successful socket operation. */ }
+    }
     socket.once('connect', () => {
       if (owner !== session) return;
-      state.status = 'connected'; state.localPort = socket.localPort || 0; finishRequest(session, 'opening', { ok: true, sessionId });
+      state.status = 'connected'; state.localPort = socket.localPort || 0; remember(); finishRequest(session, 'opening', { ok: true, sessionId });
     });
     const openStatus = mode === 'tcp-server' ? 'listening' : 'ready';
     if (mode !== 'tcp-client') socket.once(openStatus, boundPort => {
       if (owner !== session) return;
       Object.assign(state, { status: openStatus, localPort: boundPort }); finishRequest(session, 'opening', { ok: true, sessionId });
     });
-    socket.on('peer', peer => { if (owner === session) { session.peer = peer; Object.assign(state, peer, { status: 'connected' }); } });
+    socket.on('peer', peer => { if (owner === session) { session.peer = peer; Object.assign(state, peer, { status: 'connected' }); remember(); } });
     socket.on('leave', id => {
       if (owner !== session || state.peerId !== id) return;
       session.peer = null; Object.assign(state, noPeer, { status: 'listening' }); finishRequest(session, 'writing', failed('REMOTE_CLOSED'));
     });
     socket.on('data', data => { if (owner === session && state.status === 'connected') records.append('RX', data, false, session.peer); });
-    socket.on('datagram', data => { if (owner === session && state.status === 'ready') records.append('RX', data, true); });
+    socket.on('datagram', data => { if (owner === session && state.status === 'ready') { records.append('RX', data, true); remember(); } });
     socket.on('error', error => close(session, 'error', networkCode(error)));
     socket.once('end', () => close(session, 'error', 'REMOTE_CLOSED'));
     socket.once('close', () => close(session, 'error', 'REMOTE_CLOSED'));

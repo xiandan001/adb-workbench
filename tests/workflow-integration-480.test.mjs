@@ -10,6 +10,23 @@ traverseModule.default(parse(app, { sourceType: 'module', plugins: ['jsx'] }), {
 } });
 const tr = (text, values = {}) => text.replace(/\{(\d+)\}/g, (token, key) => values[key] ?? token);
 
+test('device history Connect returns home immediately, before the clicked target finishes connecting', () => {
+  let handler;
+  traverseModule.default(parse(app, { sourceType:'module', plugins:['jsx'] }), {
+    JSXAttribute(path) {
+      const attr = path.node;
+      if (attr.name?.name !== 'onClick') return;
+      const expr = attr.value?.expression;
+      if (expr?.type === 'ArrowFunctionExpression' && app.slice(expr.start,expr.end).includes('connectDevice(address, item)')) handler = app.slice(expr.start,expr.end);
+    }
+  });
+  assert.ok(handler);
+  const trace = [], item = { transport:'hdc', deviceId:'hdc:example' }, address = '192.0.2.5:8710';
+  const run = vm.runInNewContext('(' + handler + ')', { setActiveTab: tab => trace.push(tab), address, item,
+    connectDevice: (target, entry) => { assert.equal(entry,item); trace.push(target); return new Promise(()=>{}); } });
+  run(); assert.deepEqual(trace,['devices',address]);
+});
+
 test('connection feedback keeps original toast/history and target isolation without the removed result card', () => {
   assert.equal(/ConnectionAttemptNotice|lastConnectionAttempt|setLastConnectionAttempt/.test(app), false);
   assert.equal(fs.existsSync(new URL('../src/components/ConnectionAttemptNotice.jsx', import.meta.url)), false);

@@ -107,6 +107,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ipControlDisconnect: args => ipcRenderer.invoke('ip-control:disconnect', args),
   ipControlSend: args => ipcRenderer.invoke('ip-control:send', args),
   ipControlRead: args => ipcRenderer.invoke('ip-control:read', args),
+  ipControlHistory: () => ipcRenderer.invoke('ip-control:history'),
+  ipControlRemoveHistory: args => ipcRenderer.invoke('ip-control:remove-history', args),
+  ipControlClearHistory: () => ipcRenderer.invoke('ip-control:clear-history'),
   serialSnapshot: args => ipcRenderer.invoke('serial:snapshot', args),
   serialConnect: args => ipcRenderer.invoke('serial:connect', args),
   serialDisconnect: args => ipcRenderer.invoke('serial:disconnect', args),
@@ -236,6 +239,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 连接历史记录
   saveConnectionHistory: (entry) => ipcRenderer.invoke('history:save', entry),
   loadConnectionHistory: () => ipcRenderer.invoke('history:load'),
+  removeConnectionHistory: entry => ipcRenderer.invoke('history:remove', entry),
   clearConnectionHistory: () => ipcRenderer.invoke('history:clear'),
   // 终端命令历史记录
   saveTerminalCommand: (command) => ipcRenderer.invoke('terminalHistory:save', command),

@@ -15,11 +15,12 @@ const walk = node => !node || typeof node !== 'object' ? [] : [node, ...(node.pr
 const text = node => typeof node === 'string' ? node : node && typeof node === 'object' ? node.props.children.flat(Infinity).map(text).join('') : '';
 const theme = { input: '', card: '', textMuted: '', button: { primary: '', secondary: '' } };
 function mount(api, saved) {
-  let cursor = 0, timer; const slots = [], effects = [], cleanups = [];
+  let cursor = 0, timer; const slots = [], effects = [], cleanups = [], sentHistory = [];
   const runtime = { window: { electronAPI: api }, document: { hidden: false, addEventListener() {}, removeEventListener() {} }, ...model, formatHex,
     readEndpoint: (_, mode) => model.readEndpoint(saved, mode), saveEndpoint: (value, _, mode) => model.saveEndpoint(value, saved, mode), useLocale: () => 'zh-CN',
     tr: (str, args = []) => str.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), jsx: (type, props, ...children) => ({ type, props: { ...props, children } }),
-    lazy: () => 'ProtocolPanel', Suspense: 'Suspense', requestAnimationFrame: () => 1,
+    lazy: () => 'ProtocolPanel', Suspense: 'Suspense', IpControlHistory: 'IpControlHistory', IpControlTraffic:'IpControlTraffic', IpControlSavedCommands:'IpControlSavedCommands',
+    appendIpSendHistory: value => sentHistory.push({...value}), requestAnimationFrame: () => 1,
     setInterval(fn) { timer = fn; return 1; }, clearInterval() {},
     useEffect(fn) { const i = cursor++; if (!slots[i]) { slots[i] = {}; effects.push(fn); } },
     useRef(initial) { const i = cursor++; return slots[i] ||= { current: initial }; },
@@ -28,14 +29,19 @@ function mount(api, saved) {
       return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value; }]; },
   };
   for (const name of ['ArrowDownLeft', 'ArrowUpRight', 'CircleAlert', 'Code2', 'Loader2', 'Network', 'Plug', 'Send', 'Unplug']) runtime[name] = 'icon';
-  const source = file('components/IpControlPanel.jsx').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
-  const fn = vm.runInNewContext(transformSync('IpControlPanel.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx' } }).code + '\nIpControlPanel', runtime);
+  const compile = name => {
+    const source = file('components/' + name + '.jsx').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
+    return vm.runInNewContext('(function(){' + transformSync(name+'.jsx',source,{jsx:{runtime:'classic',pragma:'jsx'}}).code+';return '+name+';})()',runtime);
+  };
+  runtime.IpControlComposer = compile('IpControlComposer');
+  const jsx = runtime.jsx; runtime.jsx = (type, props, ...children) => type === runtime.IpControlComposer ? type(props) : jsx(type, props, ...children);
+  const fn = compile('IpControlPanel');
   const tree = () => { cursor = 0; const root = fn({ theme, isDark: false }); while (effects.length) cleanups.push(effects.shift()()); return root; };
   const find = (type, predicate = () => true) => walk(tree()).find(node => node.type === type && predicate(node));
-  const button = label => find('button', node => text(node) === label);
+  const button = label => find('button', node => (node.props['aria-label'] || text(node)) === label);
   const submit = () => find('form').props.onSubmit({ preventDefault() {} });
   const drain = () => new Promise(resolve => setImmediate(resolve));
-  return { tree, find, button, submit, drain, poll: () => timer(), dispose() { cleanups.forEach(fn => fn()); } };
+  return { tree, find, button, submit, drain, sentHistory, poll: () => timer(), dispose() { cleanups.forEach(fn => fn()); } };
 }
 
 test('numeric endpoints, byte count and endpoint-only persistence preserve input boundaries', () => {
@@ -64,6 +70,7 @@ test('actual controls: no auto-connect; validate, refuse, retry, fill without se
   ui.button('RS232 协议面板').props.onClick(); assert.equal(ui.find('ProtocolPanel').props.onUse({ hex: '00 FF 08' }), true);
   assert.equal(ui.find('textarea').props.value, '00 FF 08'); assert.equal(calls.length, 2);
   ui.button('发送').props.onClick(); await ui.drain(); assert.deepEqual(calls.at(-1), ['send', 'new', '00 FF 08']);
+  assert.deepEqual(ui.sentHistory, [{mode:'tcp-client',host:'172.20.74.227',port:8192,hex:'00 FF 08'}]);
   ui.dispose();
 });
 
@@ -126,6 +133,7 @@ test('server listens only on explicit submit, waits for peer and binds writes to
   assert.deepEqual(calls[1], {sessionId:'s',peerId:'one',hex:'F0 00'});
   state = { ...state, peerId:'two',peerPort:34902 }; await ui.poll(); ui.button('发送').props.onClick(); await ui.drain();
   assert.equal(calls[2].peerId,'two'); ui.button('停止监听').props.onClick(); await ui.drain(); assert.equal(calls[3].sessionId,'s');
+  assert.deepEqual(ui.sentHistory.map(item=>item.port),[34901,34902]);
   ui.dispose();
 });
 
@@ -143,4 +151,28 @@ test('UDP local port and datagram limits are checked before sending; ready does 
   ui.find('textarea').props.onChange({target:{value:'ff'.repeat(65508)}}); assert.equal(ui.button('发送').props.disabled,true); assert.match(text(ui.tree()), /65507/);
   ui.find('textarea').props.onChange({target:{value:'00FF'}}); ui.button('发送').props.onClick(); await ui.drain();
   assert.deepEqual(calls[1],{sessionId:'udp-session',hex:'00FF'}); assert.equal(model.inspectHex('ff'.repeat(65507),'udp').code,''); ui.dispose();
+});
+
+test('history activation starts the explicit saved endpoint once, switches the form without stale state and never sends', async () => {
+  const entry={id:'u',mode:'udp',host:'192.0.2.19',port:6031,localPort:2001,lastSuccessAt:Date.now()}; const calls=[], sent=[], opening=deferred();
+  let state=view();
+  const ui=mount({ipControlRead:async()=>state,ipControlConnect:req=>{calls.push({...req});return opening.promise;},ipControlSend:req=>sent.push(req)},storage());
+  ui.tree();await ui.drain();
+  const start=ui.find('IpControlHistory').props.onConnect;
+  assert.equal(start(entry),true);assert.equal(start(entry),false);assert.equal(ui.button('UDP').props['aria-pressed'],true);
+  assert.equal(ui.find('input', n=>!n.props.inputMode).props.value,entry.host);assert.equal(ui.find('input', n=>n.props.inputMode==='numeric' && n.props.placeholder!=='0').props.value,'6031');
+  state=view('connected','active',{mode:'tcp-client',host:'192.0.2.99',port:8123,historyRevision:3});await ui.poll();
+  opening.resolve({ok:true});await ui.drain();
+  assert.equal(ui.find('IpControlHistory').props.locked,true);assert.equal(ui.find('IpControlHistory').props.revision,3);assert.equal(ui.find('IpControlHistory').props.onConnect(entry),false);
+  assert.equal(ui.find('input', n=>!n.props.inputMode).props.value,'192.0.2.99'); assert.deepEqual(calls,[{mode:'udp',host:entry.host,port:6031,localPort:2001}]);assert.deepEqual(sent,[]);ui.dispose();
+});
+
+test('layout puts traffic before editor; HEX formatting/clearing and saved-command fill never send; failed write excluded', async () => {
+  const calls=[], saved=storage(), state=view('connected','s',{mode:'tcp-client',host:'192.0.2.11',port:8192});
+  const ui=mount({ipControlRead:async()=>state,ipControlSend:async req=>{calls.push({...req});return {ok:false,code:'RESET'};}},saved);
+  ui.tree();await ui.drain();const nodes=walk(ui.tree());assert.ok(nodes.findIndex(n=>n.type==='IpControlTraffic')<nodes.findIndex(n=>n.type==='textarea'));
+  ui.find('textarea').props.onChange({target:{value:'00ff0a'}});ui.button('整理 HEX').props.onClick();assert.equal(ui.find('textarea').props.value,'00 FF 0A');
+  ui.button('清空输入').props.onClick();assert.equal(ui.find('textarea').props.value,'');ui.find('IpControlSavedCommands').props.onFill('0DFF');
+  assert.equal(ui.find('textarea').props.value,'0D FF');assert.deepEqual(calls,[]);
+  ui.button('发送').props.onClick();await ui.drain();assert.equal(calls.length,1);assert.deepEqual(ui.sentHistory,[]);ui.dispose();
 });

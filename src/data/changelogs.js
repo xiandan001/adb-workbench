@@ -8,6 +8,9 @@ const CHANGELOGS = {
     date: '2026-11-18',
     items: [
       { type: 'feature', get text() { return tr('RS232 新增 IP Control：支持 TCP 客户端、TCP 服务端和 UDP，记住各模式地址，以十六进制收发数据。'); } },
+      { type: 'feature', get text() { return tr('从连接历史可按原网络模式再次连接。'); } },
+      { type: 'feature', get text() { return tr('IP Control 支持独立的常用命令与发送历史。'); } },
+      { type: 'improve', get text() { return tr('设备列表的连接历史支持单条删除，点击连接会返回设备主页。'); } },
     ],
   },
   '4.8.1': {

@@ -133,10 +133,11 @@ async function unusedTcpPort() {
 }
 
 test('TCP Server accepts one explicit peer, preserves wire bytes and keeps the listener for a replacement peer', {timeout: 10000}, async t => {
-  const svc = createIpControlService(); t.after(svc.dispose);
+  const remembered = [], svc = createIpControlService({onSuccessfulEndpoint:value=>remembered.push(value)}); t.after(svc.dispose);
   const port = await unusedTcpPort();
   const { sessionId } = await svc.connect({ mode:'tcp-server', host:'127.0.0.1', port });
   assert.ok(sessionId); assert.equal(svc.read().localPort,port); assert.equal(svc.read().status,'listening');
+  assert.deepEqual(remembered, []);
   assert.equal((await svc.send({sessionId,hex:'00'})).code,'NO_PEER');
   const client = net.createConnection(port,'127.0.0.1'); t.after(() => client.destroy()); await once(client,'connect');
   await until(() => svc.read().status === 'connected');
@@ -151,23 +152,26 @@ test('TCP Server accepts one explicit peer, preserves wire bytes and keeps the l
   const next = net.createConnection(port,'127.0.0.1'); t.after(() => next.destroy()); await once(next,'connect');
   await until(() => svc.read().status === 'connected');
   assert.notEqual(svc.read().peerId,peerId); assert.equal((await svc.send({sessionId,peerId,hex:'bad0'})).code,'STALE_PEER');
+  assert.deepEqual(remembered, [{mode:'tcp-server',host:'127.0.0.1',port}]);
   assert.equal(svc.read().entries.length,2); assert.ok(svc.read().entries.every(item=>item.peerId===peerId));
   assert.ok(svc.disconnect({sessionId}).ok);
 });
 
 test('UDP keeps datagram boundaries and receives only the configured peer including binary and empty datagrams', {timeout: 10000}, async t => {
-  const svc = createIpControlService(); t.after(svc.dispose);
+  const remembered = [], svc = createIpControlService({onSuccessfulEndpoint:value=>remembered.push(value)}); t.after(svc.dispose);
   const target = dgram.createSocket('udp4'), other = dgram.createSocket('udp4');
   for (const sock of [target,other]) { sock.bind(0,'127.0.0.1'); await once(sock, 'listening'); t.after(()=>sock.close()); }
   const {sessionId} = await svc.connect({mode:'udp',host:'127.0.0.1',port:target.address().port,localPort:0}); const {localPort} = svc.read();
   assert.equal(svc.read().status,'ready'); assert.ok(localPort > 0);
   const message = once(target,'message'); assert.ok((await svc.send({sessionId,hex:'00 FF 80'})).ok);
   const [out,remote] = await message; assert.equal(out.toString('hex'),'00ff80'); assert.equal(remote.port,localPort);
+  assert.deepEqual(remembered, []);
   const large = Buffer.alloc(10000,0x87);
   for (const [peer,packet] of [[other,Buffer.of(0xfa)],[target,large],[target,Buffer.of(0xa5)],[target,Buffer.alloc(0)]])
     await new Promise((resolve,reject)=>peer.send(packet,localPort,'127.0.0.1',error=>error?reject(error):resolve()));
   await until(()=>svc.read().entries.some(row=>row.hex===''));
   assert.deepEqual(svc.read().entries.filter(row=>row.direction==='RX').map(row=>row.hex),[large.toString('hex').toUpperCase(),'A5','']);
+  assert.deepEqual(remembered,[{mode:'udp',host:'127.0.0.1',port:target.address().port,localPort:0}]);
   assert.equal((await svc.send({sessionId,hex:'ff'.repeat(65508)})).code,'UDP_TOO_LARGE');
   assert.ok(svc.disconnect({sessionId}).ok);
 });
@@ -193,5 +197,19 @@ test('cancelling a not-yet-bound TCP Server or UDP socket relinquishes the port 
     const pending = svc.connect(args), id = svc.read().sessionId; assert.ok(svc.disconnect({sessionId:id}).ok);
     assert.equal((await pending).code,'CANCELLED');await new Promise(resolve=>setImmediate(resolve));
     assert.equal(svc.read().status,'idle');assert.equal((await svc.connect(args)).ok,true, mode + ' releases old port');
+  }
+});
+
+test('only a current TCP Client handshake notifies success; observer failures do not affect open/write/close', async t => {
+  for (const observer of [() => { throw Error('store'); }, () => Promise.reject(Error('store'))]) {
+    const seen=[], { service,sockets,start }=fixture({onSuccessfulEndpoint:value=>{seen.push(value);return observer();}}); t.after(service.dispose);
+    const bad=start(); sockets[0].emit('error', Object.assign(Error('refused'),{code:'ECONNREFUSED'}));assert.equal((await bad).code,'REFUSED');
+    const cancelled=start();service.disconnect({sessionId:service.read().sessionId});await cancelled;
+    sockets[1].emit('connect');assert.deepEqual(seen,[]);
+    const ok=start();sockets[2].emit('connect');await ok;sockets[2].emit('connect');sockets[2].emit('data',Buffer.of(0xff));
+    assert.deepEqual(seen,[{mode:'tcp-client',host:'127.0.0.1',port:8192}]);
+    const tx=service.send({sessionId:service.read().sessionId,hex:'fF'});sockets[2].finishWrite(); assert.ok((await tx).ok);
+    assert.equal(service.read().status,'connected'); assert.equal(service.read().entries.length,2);
+    service.disconnect({sessionId:service.read().sessionId});await new Promise(resolve=>setImmediate(resolve));
   }
 });

@@ -91,6 +91,7 @@ function configureUserDataPath() {
 // 单实例锁定 - 确保只有一个应用实例在运行
 const gotTheLock = app.requestSingleInstanceLock();
 let startupPresentation = null;
+let disposeIpControl;
 let startupPresented = false;
 
 if (!gotTheLock) {
@@ -234,9 +235,12 @@ app.whenReady().then(async () => {
   deviceMedia.register(diagnosticIpc);
   shortcutCapabilities.register(diagnosticIpc);
   serial.register(diagnosticIpc);
-  const disposeIpControl = require('./lib/ip-control-ipc.cjs').registerIpControl(diagnosticIpc, {
+  disposeIpControl = require('./lib/ip-control-ipc.cjs').registerIpControl(diagnosticIpc, {
     getOwner: ctx.getMainWindow, appRoot: app.getAppPath(), isDev,
-    createService: require('./lib/ip-control-service.cjs').createIpControlService
+    createService: require('./lib/ip-control-service.cjs').createIpControlService,
+    history: require('./lib/ip-control-history.cjs').createIpControlHistory({
+      filename: path.join(app.getPath('userData'), 'ip-control-history.v1.json')
+    })
   });
   app.once('will-quit', disposeIpControl);
   appMessageDialog.register(diagnosticIpc);
@@ -367,6 +371,7 @@ app.on('before-quit', async (event) => {
     updater.noteUpdateInstallQuitting();
   }
   try {
+    await disposeIpControl?.();
     await cleanupBeforeQuit({ forUpdateInstall: shouldInstallUpdate });
   } catch (err) {
     console.warn('[App] before-quit cleanup failed:', err);
