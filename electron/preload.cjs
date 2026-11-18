@@ -107,6 +107,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ipControlDisconnect: args => ipcRenderer.invoke('ip-control:disconnect', args),
   ipControlSend: args => ipcRenderer.invoke('ip-control:send', args),
   ipControlRead: args => ipcRenderer.invoke('ip-control:read', args),
+  ipControlConnectionStatusSubscribe: args => ipcRenderer.invoke('ip-control:connection-status-subscribe', args),
+  onIpControlConnectionStatus: callback => {
+    const listener = safeListener(callback); ipcRenderer.on('ip-control:connection-status', listener);
+    return () => ipcRenderer.off('ip-control:connection-status', listener);
+  },
   ipControlHistory: () => ipcRenderer.invoke('ip-control:history'),
   ipControlRemoveHistory: args => ipcRenderer.invoke('ip-control:remove-history', args),
   ipControlClearHistory: () => ipcRenderer.invoke('ip-control:clear-history'),

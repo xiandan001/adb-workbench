@@ -47,6 +47,10 @@ function createSerialWorkspaces({ createService, onChange = () => {} }) {
     return Object.fromEntries(WORKSPACES.map(workspace => [workspace, snapshot(workspace)]));
   }
 
+  function statusMetadata() {
+    return Object.fromEntries(WORKSPACES.map(workspace => [workspace, project(workspace, select(workspace).service.metadata())]));
+  }
+
   async function connect(workspace = 'rs232', args = {}) {
     assertRunning();
     const slot = select(workspace);
@@ -131,7 +135,7 @@ function createSerialWorkspaces({ createService, onChange = () => {} }) {
   }
 
   return { get: (workspace = 'rs232') => select(workspace).facade,
-    snapshot, snapshots, connect, disconnect, needsQuitConfirmation, dispose };
+    snapshot, snapshots, statusMetadata, connect, disconnect, needsQuitConfirmation, dispose };
 }
 
 function normalizeSerialPort(value) {

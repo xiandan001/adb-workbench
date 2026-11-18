@@ -105,7 +105,7 @@ function createSerialController({ workspaces, getOwner, saveSnapshot }) {
       statusSubscribed = args.active;
       statusSubscriber = event.sender;
       watch(statusSubscriber);
-      if (args.active) statusStates = Object.fromEntries(Object.entries(workspaces.snapshots()).map(([workspace, value]) => [workspace, serialStatusMetadata(value)]));
+      if (args.active) statusStates = Object.fromEntries(Object.entries(workspaces.statusMetadata()).map(([workspace, value]) => [workspace, serialStatusMetadata(value)]));
       const status = serialConnectionStatus(statusStates);
       statusSignature = args.active ? JSON.stringify(status) : '';
       return { status };

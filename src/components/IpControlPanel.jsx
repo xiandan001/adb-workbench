@@ -6,6 +6,7 @@ import { appendIpSendHistory } from '../shared/ipControlCommands.js';
 import IpControlComposer from './IpControlComposer.jsx';
 import IpControlTraffic from './IpControlTraffic.jsx';
 import IpControlHistory from './IpControlHistory.jsx';
+import AiContextButton from './AiContextButton.jsx';
 
 const modeName = mode => mode === 'tcp-server' ? tr('TCP Server') : mode === 'udp' ? tr('UDP') : tr('TCP Client');
 const displayAddress = (host, port) => host.includes(':') ? `[${host}]:${port}` : `${host}:${port}`;
@@ -140,7 +141,9 @@ export default function IpControlPanel({ theme, isDark, showToast }) {
       {prefError && <p role="status" className={`text-xs ${theme.textMuted}`}>{tr('仅本次使用此地址，未能保存到本机。')}</p>}
       <IpControlHistory theme={theme} locked={live || busy || unavailable} revision={view?.historyRevision ?? 0} modeName={modeName} displayAddress={displayAddress} onConnect={connectHistory} />
     </div>
-    <IpControlTraffic key={mode + ':' + (view?.sessionId || '')} theme={theme} entries={entries} omitted={relevant && view?.omitted} />
+    <AiContextButton disabled={unavailable || !relevant || !view?.sessionId || !entries.length}
+      context={{ reference: { kind: 'ip-control', sessionId: view?.sessionId || '' } }} />
+    <IpControlTraffic key={mode + ':' + (view?.sessionId || '')} theme={theme} view={relevant ? view : null} entries={entries} omitted={relevant && view?.omitted} />
     {commandWarning && <p role="status" className="text-xs text-amber-600">{tr('网络数据已写入，但未能保存发送历史。')}</p>}
     <IpControlComposer theme={theme} isDark={isDark} showToast={showToast} mode={mode} canSend={canSend && !busy && !unavailable} sending={action === 'send' || view?.sending} onSend={send} commandRevision={commandRevision} />
   </div>;

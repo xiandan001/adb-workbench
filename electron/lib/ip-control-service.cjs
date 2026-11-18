@@ -1,6 +1,8 @@
 const net = require('node:net');
 const { randomUUID } = require('node:crypto');
 const { tcpServer, udpSocket } = require('./ip-control-transports.cjs');
+const { ipConnectionStatus } = require('./connection-status.cjs');
+const { wholeSerialResponseProtocol } = require('./serial-response-framer.cjs');
 
 const MAX_SEND = 64 * 1024, MAX_ROWS = 10000, MAX_RETAINED = 4 * 1024 * 1024;
 const PAGE_ROWS = 100, PAGE_BYTES = 64 * 1024, CHUNK_BYTES = 4096;
@@ -37,13 +39,15 @@ function createRecordBuffer() {
     const step = datagram ? Math.max(1, data.length) : CHUNK_BYTES;
     for (let i = 0; i < (datagram ? Math.max(1, data.length) : data.length); i += step) {
       const part = Buffer.from(data.subarray(i, i + step));
-      rows.push({ id: ++lastId, at, direction, data: part, peer }); bytes += part.length;
+      const protocol = direction === 'RX' && part.length === data.length ? wholeSerialResponseProtocol(part) : undefined;
+      rows.push({ id: ++lastId, at, direction, data: part, peer, protocol }); bytes += part.length;
       while (rows.length - head > MAX_ROWS || bytes > MAX_RETAINED) {
         bytes -= rows[head].data.length; rows[head++] = null; dropped++;
       }
       if (head > 1024 && head * 2 >= rows.length) { rows = rows.slice(head); head = 0; }
     }
   }
+  const project = ({ id, at, direction, data, peer, protocol }) => ({ id, at, direction, hex: data.toString('hex').toUpperCase(), ...(peer || {}), ...(protocol ? { protocol } : {}) });
   function page(after) {
     const firstId = rows[head]?.id || 0;
     // A stale cursor from a former session is safe to restore as a tail snapshot.
@@ -56,17 +60,24 @@ function createRecordBuffer() {
       start = Math.min(rows.length, head + Math.max(0, after + 1 - firstId)); end = start;
       while (end < rows.length && end - start < PAGE_ROWS && size + rows[end].data.length <= PAGE_BYTES) size += rows[end++].data.length;
     }
-    const entries = rows.slice(start, end).map(({ id, at, direction, data, peer }) => ({ id, at, direction, hex: data.toString('hex').toUpperCase(), ...(peer || {}) }));
+    const entries = rows.slice(start, end).map(project);
     const omitted = tail ? (entries[0]?.id || 1) - 1 : Math.max(0, firstId - after - 1);
     return { entries, firstId, lastId, dropped, omitted, nextAfter: entries.at(-1)?.id ?? lastId, hasMore: end < rows.length };
   }
-  return { append, page };
+  function analysisTail() {
+    return { lastId, dropped, entries: rows.slice(Math.max(head, rows.length - 2000)).map(project) };
+  }
+  return { append, page, analysisTail };
 }
 
-function createIpControlService({ createSocket = () => new net.Socket(), connectTimeoutMs = 5000, writeTimeoutMs = 5000, onSuccessfulEndpoint } = {}) {
+function createIpControlService({ createSocket = () => new net.Socket(), connectTimeoutMs = 5000, writeTimeoutMs = 5000, onSuccessfulEndpoint, onStatusChange } = {}) {
   let owner, disposed = false, records = createRecordBuffer();
   const noPeer = { peerId: '', peerHost: '', peerPort: 0 };
   let state = { status: 'idle', code: '', host: '', port: 0, sessionId: '', mode: 'tcp-client', localPort: 0, ...noPeer };
+  const connectionStatus = () => ipConnectionStatus(state);
+  function notifyStatus() {
+    try { onStatusChange?.(connectionStatus()); } catch { /* A closing view must not interrupt the socket. */ }
+  }
   function finishRequest(session, key, result) {
     const request = session[key]; if (!request) return;
     session[key] = null; clearTimeout(request.timer); request.resolve(result);
@@ -77,6 +88,7 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     finishRequest(session, 'opening', failed(code || 'CANCELLED'));
     finishRequest(session, 'writing', failed(code || 'CANCELLED'));
     session.socket.destroy();
+    notifyStatus();
   }
   function connect(args) {
     if (disposed) return Promise.resolve(failed('DISPOSED'));
@@ -90,9 +102,10 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     if (mode === 'udp' && (['0.0.0.0', '255.255.255.255', '::'].includes(host) || (net.isIPv4(host) && Number(host.split('.')[0]) >= 224) || /^ff/i.test(host))) return Promise.resolve(failed('INVALID_IP'));
     const sessionId = randomUUID(); records = createRecordBuffer();
     state = { status: 'connecting', code: '', host, port, sessionId, mode, localPort: 0, ...noPeer };
+    notifyStatus();
     let socket;
     try { socket = mode === 'tcp-client' ? createSocket() : mode === 'tcp-server' ? tcpServer() : udpSocket(net.isIP(host)); } catch (error) {
-      state.status = 'error'; state.code = networkCode(error); return Promise.resolve(failed(state.code));
+      state.status = 'error'; state.code = networkCode(error); notifyStatus(); return Promise.resolve(failed(state.code));
     }
     const session = { socket }; owner = session;
     // Record user-configured endpoints only, never transient peers, payloads,
@@ -105,17 +118,17 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     }
     socket.once('connect', () => {
       if (owner !== session) return;
-      state.status = 'connected'; state.localPort = socket.localPort || 0; remember(); finishRequest(session, 'opening', { ok: true, sessionId });
+      state.status = 'connected'; state.localPort = socket.localPort || 0; notifyStatus(); remember(); finishRequest(session, 'opening', { ok: true, sessionId });
     });
     const openStatus = mode === 'tcp-server' ? 'listening' : 'ready';
     if (mode !== 'tcp-client') socket.once(openStatus, boundPort => {
       if (owner !== session) return;
-      Object.assign(state, { status: openStatus, localPort: boundPort }); finishRequest(session, 'opening', { ok: true, sessionId });
+      Object.assign(state, { status: openStatus, localPort: boundPort }); notifyStatus(); finishRequest(session, 'opening', { ok: true, sessionId });
     });
-    socket.on('peer', peer => { if (owner === session) { session.peer = peer; Object.assign(state, peer, { status: 'connected' }); remember(); } });
+    socket.on('peer', peer => { if (owner === session) { session.peer = peer; Object.assign(state, peer, { status: 'connected' }); notifyStatus(); remember(); } });
     socket.on('leave', id => {
       if (owner !== session || state.peerId !== id) return;
-      session.peer = null; Object.assign(state, noPeer, { status: 'listening' }); finishRequest(session, 'writing', failed('REMOTE_CLOSED'));
+      session.peer = null; Object.assign(state, noPeer, { status: 'listening' }); notifyStatus(); finishRequest(session, 'writing', failed('REMOTE_CLOSED'));
     });
     socket.on('data', data => { if (owner === session && state.status === 'connected') records.append('RX', data, false, session.peer); });
     socket.on('datagram', data => { if (owner === session && state.status === 'ready') { records.append('RX', data, true); remember(); } });
@@ -172,7 +185,13 @@ function createIpControlService({ createSocket = () => new net.Socket(), connect
     if (owner) close(owner, 'idle');
     records = createRecordBuffer();
   }
-  return { connect, disconnect, send, read, dispose };
+  const currentSessionId = () => disposed ? '' : state.sessionId;
+  function snapshotForAnalysis(id) {
+    if (!id || id !== currentSessionId()) return null;
+    const { sessionId, mode, host, port, localPort } = state;
+    return { sessionId, mode, host, port, localPort, ...records.analysisTail() };
+  }
+  return { connect, disconnect, send, read, dispose, connectionStatus, currentSessionId, snapshotForAnalysis };
 }
 
 module.exports = { createIpControlService };

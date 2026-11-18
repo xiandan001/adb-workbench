@@ -31,8 +31,8 @@
 .workbench-history-card { display: flex; flex-direction: column; min-width: 0; }
 .workbench-history-name { min-width: 0; flex: 1 1 7rem; overflow-wrap: anywhere; }
 .workbench-history-platform { flex-shrink: 0; white-space: nowrap; }
-.workbench-history-address { min-width: 0; }
-.workbench-history-address code { min-width: 0; flex: 1; white-space: normal; overflow-wrap: anywhere; user-select: all; }
+.workbench-history-address { min-width: 0; width: fit-content; max-width: 100%; column-gap: .25rem; }
+.workbench-history-address code { min-width: 0; flex: 0 1 auto; white-space: normal; overflow-wrap: anywhere; user-select: all; }
 .workbench-history-address button { flex-shrink: 0; }
 .workbench-wireless-form { display: flex; flex-wrap: wrap; gap: .5rem; min-width: 0; width: 100%; }
 .workbench-wireless-form > input { flex: 1; min-width: 0; }

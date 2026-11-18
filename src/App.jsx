@@ -96,6 +96,7 @@ function App() {
   const { deviceQuery, setDeviceQuery, density: deviceCardDensity, setDensity: setDeviceCardDensity,
     expandedDeviceIds, setExpandedDeviceIds, mainRef, saveError: workspaceSaveError, retrySave: retryWorkspaceSave } = useWorkbenchUiWorkspace(activeTab);
   const [worksetRequest, setWorksetRequest] = useState(null);
+  const [serialNavigation, setSerialNavigation] = useState(null);
   const [worksetNotice, setWorksetNotice] = useState('');
   const worksetTargetRef = useRef('');
   const [aiTaskId, setAiTaskId] = useState('');
@@ -1896,7 +1897,11 @@ function App() {
           isDark={isDark}
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
           showToast={showToast}
-          onNavigateConnection={setActiveTab}
+          onNavigateConnection={target => {
+            if (target === 'ssh') { setActiveTab('ssh'); return; }
+            if (['rs232', 'terminal', 'ip-control'].includes(target)) setSerialNavigation({ mode: target });
+            setActiveTab('serial');
+          }}
           onOpen={(tab, deviceId, id) => {
             if (tab === 'reproduction') { setReproductionTarget({ deviceId: deviceId || '', sessionId: id || '' }); return; }
             if (tab === 'logs') { void window.electronAPI?.logAnalyzerOpen?.({ deviceId }).catch(error => showToast(error.message)); return; }
@@ -2185,7 +2190,7 @@ function App() {
             </>
           )}
 
-          {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} />}
+          {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} navigationRequest={serialNavigation} onNavigationHandled={setSerialNavigation} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
               <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId}

@@ -79,7 +79,8 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
       const result = await freeze({ sources: [{ kind: origin.startsWith('log-') ? 'log' : origin, label: title,
         target: trust === 'server-snapshot' ? deviceId : '', deviceId: trust === 'server-snapshot' ? deviceId : '',
         text: text || taskTargets.map(target => target.label).join('\n'), capturedAt, provenance,
-        truncated: input.truncated === true, timeBasis: trust === 'server-snapshot' && input.timeBasis || tr('冻结上下文；来源时钟与设备事实需按来源说明核对') }],
+        truncated: input.truncated === true, ...(origin === 'ip-control' && input.windowInfo && trust === 'server-snapshot' ? { windowInfo: input.windowInfo } : {}),
+        timeBasis: trust === 'server-snapshot' && input.timeBasis || tr('冻结上下文；来源时钟与设备事实需按来源说明核对') }],
         selection: { maxLines: 2000, contextLines: 0 }, now: capturedAt }, { locale: getLocale(), signal });
       if (!current()) throw fail(tr('AI 工作区窗口已变化，请重新带入上下文。'));
       purge();
@@ -121,7 +122,7 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
     async createFromRenderer(args) {
       if (!args || Boolean(args.reference) === Boolean(args.view)) throw fail(tr('AI 上下文格式无效或超过大小限制。'));
       if (args.reference) {
-        const shapes = { serial: ['kind', 'workspace', 'sessionId'], ssh: ['kind', 'sessionId', 'terminalId'], artifact: ['kind', 'artifactId', 'name'], 'task-run': ['kind', 'taskId'] };
+        const shapes = { serial: ['kind', 'workspace', 'sessionId'], 'ip-control': ['kind', 'sessionId'], ssh: ['kind', 'sessionId', 'terminalId'], artifact: ['kind', 'artifactId', 'name'], 'task-run': ['kind', 'taskId'] };
         const reference = args.reference, keys = shapes[reference.kind];
         if (!keys || Object.keys(reference).length !== keys.length || keys.some(key => typeof reference[key] !== 'string' || !reference[key] || reference[key].length > (key === 'artifactId' ? 2048 : 512))) throw fail(tr('AI 上下文引用无效。'));
         if (readingReference) throw fail(tr('正在读取一份 AI 来源，请稍后重试。'));
@@ -166,6 +167,14 @@ function createHandoffBroker({ getOwner, freeze, publish, readReference, basket,
 }
 async function readReference(reference, options) {
   if (!reference || typeof reference !== 'object') throw fail(tr('AI 上下文引用无效。'));
+  if (reference.kind === 'ip-control') {
+    const ip = require('./ip-control-ipc.cjs');
+    const snapshot = ip.readAnalysisSnapshot(reference.sessionId);
+    if (!snapshot || snapshot.sessionId !== reference.sessionId) throw fail(tr('所选会话已变化，请重新选择上下文。'));
+    const input = await runWorkspaceJob('ip-control-snapshot', snapshot, options);
+    if (!ip.isAnalysisSessionCurrent(reference.sessionId)) throw fail(tr('所选会话已变化，请重新选择上下文。'));
+    return input;
+  }
   if (reference.kind === 'serial') {
     if (!['rs232', 'terminal'].includes(reference.workspace)) throw fail(tr('AI 上下文引用无效。'));
     const serial = require('./serial.cjs');
@@ -213,7 +222,7 @@ function runtime() {
 function register(ipcMain) {
   const ctx = require('./app-context.cjs');
   for (const method of ['create', 'get', 'list', 'remove', 'clear']) ipcMain.handle(`ai-handoff:${method}`, async (event, args) => {
-    const windows = method === 'create' ? [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()] : [ctx.getMainWindow()];
+    const windows = method === 'create' && args?.reference?.kind !== 'ip-control' ? [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()] : [ctx.getMainWindow()];
     const allowed = windows.some(window => window && !window.isDestroyed() && window.webContents === event.sender && event.senderFrame === window.webContents.mainFrame);
     if (!allowed) return { ok: false, code: 'AI_HANDOFF_OWNER', error: tr('仅允许在应用主窗口或日志窗口带入 AI 上下文。') };
     try {

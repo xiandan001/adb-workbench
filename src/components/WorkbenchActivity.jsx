@@ -103,7 +103,7 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
       <div className="min-h-0 max-h-[60vh] flex-1 space-y-2 overflow-auto p-4">
         <h4 className={`text-xs font-medium ${colors.heading}`}>{tr('连接状态')}</h4>
         <SidebarConnectionStatus isDark={colors.dark} onSummary={setConnectionSummary} onNavigate={page => { setOpen(false); onNavigateConnection?.(page); }} />
-        {!connectionSummary.connections && !connectionSummary.issues && <p className={`py-2 text-xs ${colors.muted}`}>{tr('当前没有活动连接。')}</p>}
+        {!connectionSummary.hasRows && <p className={`py-2 text-xs ${colors.muted}`}>{tr('当前没有活动连接。')}</p>}
         <h4 className={`pt-3 text-xs font-medium ${colors.heading}`}>{tr('任务与采集')}</h4>
         {!items.length && <p className={`py-8 text-center text-sm ${colors.muted}`}>{tr('当前没有后台活动。')}</p>}
         {items.slice(0, 60).map(item => <div key={item.key} data-activity-id={item.id} className={`rounded-xl border p-3 ${colors.border}`}>

@@ -34,6 +34,7 @@ async function computeWorkspaceJob(command, args, { flag } = {}) {
     if (!args || Object.keys(args).some(key => !['prompt', 'lines', 'intro', 'maxTokens', 'maxLines'].includes(key))) throw evidenceLimit();
     return require('./ai-workspace-request-plan.cjs').buildMarkdownPlan(args, { checkCancelled });
   }
+  if (command === 'ip-control-snapshot') return require('./ip-control-ai-evidence.cjs').captureIpControlEvidence(args, checkCancelled);
   if (command === 'serial-snapshot') {
     if (!args || Object.keys(args).some(key => !['rows', 'maxRecords', 'maxBytes', 'originalRecords'].includes(key))
       || !Array.isArray(args.rows) || !Number.isSafeInteger(args.maxRecords) || args.maxRecords < 1 || args.maxRecords > 10000
@@ -50,7 +51,7 @@ async function computeWorkspaceJob(command, args, { flag } = {}) {
     contentBytes(args.sources);
     const selection = normalizeSelection(args.selection);
     const entries = args.sources.map((raw, index) => {
-      const source = shapeDiagnosticSource({ ...raw, kind: ['adb', 'hdc', 'log', 'serial', 'ssh', 'text'].includes(raw.kind) ? raw.kind : 'text' });
+      const source = shapeDiagnosticSource({ ...raw, kind: ['adb', 'hdc', 'log', 'serial', 'ip-control', 'ssh', 'text'].includes(raw.kind) ? raw.kind : 'text' });
       const entry = freezeEntry(source, index, args.now ?? Date.now(), selection);
       if (raw.provenance?.trust === 'renderer-view') entry.targetKey = null;
       if (raw.provenance) entry.provenance = copy(raw.provenance);

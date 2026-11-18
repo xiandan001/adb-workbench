@@ -1,6 +1,6 @@
 import { tr } from './i18n.js';
 
-export function normalizeConnectionStatus(value) {
+function summary(value) {
   if (!value || typeof value !== 'object') throw new Error(tr('连接状态格式无效'));
   const result = {};
   for (const key of ['activeCount', 'pendingCount', 'unsavedCount', 'failedCount', 'transferCount']) {
@@ -11,16 +11,28 @@ export function normalizeConnectionStatus(value) {
   return result;
 }
 
+export function normalizeConnectionStatus(value) {
+  const result = summary(value);
+  if (value.workspaces) {
+    result.workspaces = { rs232: summary(value.workspaces.rs232), terminal: summary(value.workspaces.terminal) };
+  }
+  if (['tcp-client', 'tcp-server', 'udp'].includes(value.mode)) {
+    result.mode = value.mode; result.phase = value.phase;
+  }
+  return result;
+}
+
 export function hasConnectionActivity(value) {
   return Boolean(value && (value.activeCount || value.pendingCount || value.unsavedCount || value.failedCount || value.transferCount));
 }
 
 export function subscribeConnectionStatus({ api, document, window, onStatus, onError }) {
   let alive = true;
-  const versions = { serial: 0, ssh: 0 };
+  const versions = { serial: 0, ssh: 0, 'ip-control': 0 };
   const channels = [
     { id: 'serial', subscribe: 'serialConnectionStatusSubscribe', listen: 'onSerialConnectionStatus' },
-    { id: 'ssh', subscribe: 'sshConnectionStatusSubscribe', listen: 'onSshConnectionStatus' }
+    { id: 'ssh', subscribe: 'sshConnectionStatusSubscribe', listen: 'onSshConnectionStatus' },
+    { id: 'ip-control', subscribe: 'ipControlConnectionStatusSubscribe', listen: 'onIpControlConnectionStatus' }
   ];
   const accept = (id, value) => {
     if (!alive || document.hidden) return;

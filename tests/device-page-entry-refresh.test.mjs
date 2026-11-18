@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'),
 const declarations = new Map(), effects = [], sidebar = new Map();
 traverse(ast, {
   VariableDeclarator({ node, parent }) {
-    if (['setActiveTab', 'fetchDevices', 'previousDevicePageRef'].includes(node.id.name)) declarations.set(node.id.name, parent);
+    if (['setActiveTab', 'fetchDevices', 'previousDevicePageRef', 'refreshConnectionHistory'].includes(node.id.name)) declarations.set(node.id.name, parent);
   },
   CallExpression({ node, parent }) {
     if (node.callee.name !== 'useEffect') return;
@@ -35,7 +35,7 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
   let navigation = { activeTab: page, sshVisited: false, aiToolsVisited: false, aiVisited: false }, effectIndex, refIndex, memoIndex, timerId = 0;
   const target = name => ({ addEventListener: (event, callback) => listeners.set(name + ':' + event, callback), removeEventListener: event => listeners.delete(name + ':' + event) });
   const context = {
-    tr, singleFlight, resolveActiveDeviceId, worksetTargetRef: { current: '' }, devicesRef: { current: initialRows },
+    tr, singleFlight, resolveActiveDeviceId, historyVersion: { current: 0 }, worksetTargetRef: { current: '' }, devicesRef: { current: initialRows },
     document: { ...target('document'), visibilityState: 'visible' },
     window: { ...target('window'), electronAPI: {
       getDevices: async () => { calls.push('getDevices'); return discover(); }, loadAllSettings: async () => ({ success: true, data: {} }),
@@ -43,7 +43,11 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
     } },
     setNavigation: update => { navigation = update(navigation); }, setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); }, setLoading: value => { state.loading = value; }, setError: value => { state.error = value; },
-    useCallback: callback => callback,
+    useCallback(callback, deps) {
+      const index = memoIndex++, previous = memoSlots[index];
+      if (previous && deps.every((value, i) => value === previous.deps[i])) return previous.callback;
+      memoSlots[index] = { callback, deps }; return callback;
+    },
     useMemo(callback) { const index = memoIndex++; return memoSlots[index] || (memoSlots[index] = callback()); },
     useRef(value) { const index = refIndex++; return refs[index] || (refs[index] = { current: value }); },
     useEffect(callback, deps) {

@@ -37,7 +37,7 @@ export default function AiWorkspaceEvidence({ preview, busy, entitled, onAnalyze
     </div>
     <div className="space-y-3 p-4">
       {!readOnly && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('本地证据已准备。完整消息只在最终发送确认中展示；未明确发送前不会联网。')}</p>}
-      {preview.entries.some(entry => entry.source === 'serial') && <p className="text-xs leading-5 text-amber-600 dark:text-amber-400">{tr('完整 HEX 可能包含编码后的敏感信息；可读文本脱敏不代表 HEX 已脱敏，请在最终发送前核对。')}</p>}
+      {preview.entries.some(entry => entry.source === 'serial' || entry.source === 'ip-control') && <p className="text-xs leading-5 text-amber-600 dark:text-amber-400">{tr('完整 HEX 可能包含编码后的敏感信息；可读文本脱敏不代表 HEX 已脱敏，请在最终发送前核对。')}</p>}
       {preview.truncated && <p className="flex items-start gap-2 text-xs leading-5 text-amber-600 dark:text-amber-400"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{tr('部分证据已达到大小限制，AI 只能分析预览中保留的内容。')}</p>}
       <details open={readOnly} className="rounded-lg border border-slate-400/15 p-3"><summary className="cursor-pointer text-xs font-medium">{readOnly ? tr('报告中的冻结证据') : tr('查看本地证据（不会发送）')}</summary><div className="mt-3 space-y-3">
       <div className={`rounded-lg border p-3 ${theme.input}`}><p className={`mb-1 text-xs ${theme.textMuted}`}>{tr('本次问题')}</p><p className="whitespace-pre-wrap break-words text-sm">{preview.question}</p></div>

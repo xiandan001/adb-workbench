@@ -34,7 +34,7 @@ function eventTime(line, kind) {
   if (iso) {
     try {
       const parsed = dateValue(iso[1]);
-      return { timestamp: iso[1], clockBasis: parsed.zone ? 'explicit-offset' : 'source-local', ...parsed };
+      return { timestamp: iso[1], clockBasis: kind === 'ip-control' ? 'host-receive' : parsed.zone ? 'explicit-offset' : 'source-local', ...parsed };
     } catch { return null; }
   }
   const partial = /^(\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})(?=\s)/.exec(line);

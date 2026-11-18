@@ -35,7 +35,7 @@ function initialSettings() {
   return { preferences, history, workspace, selectedSchemes, schemeSelectionError, terminalStyleError, error: errors.join('；') };
 }
 
-export default function SerialPanel({ theme, showToast, worksetRequest, onWorksetContext }) {
+export default function SerialPanel({ theme, showToast, worksetRequest, onWorksetContext, navigationRequest, onNavigationHandled }) {
   useLocale();
   const id = useId();
   const [settings] = useState(initialSettings);
@@ -96,6 +96,15 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
     setWorksetNotice(tr('已选中工作集的串口方案；仍需手动套用，当前 COM 和连接保持不变。'));
     onWorksetContext?.({ part: 'serial', value: { workspace: scheme.workspace, schemeId: scheme.id } });
   }, [worksetRequest, preferences.schemes, onWorksetContext, selectedSchemes]);
+
+  useEffect(() => {
+    const mode = navigationRequest?.mode;
+    if (!['rs232', 'terminal', 'ip-control'].includes(mode)) return;
+    updateSerialWorkspace({ mode });
+    setWorkspace(previous => previous.mode === mode ? previous : { ...previous, mode });
+    if (mode === 'terminal') setTerminalOpened(true);
+    onNavigationHandled?.(current => current === navigationRequest ? null : current);
+  }, [navigationRequest, onNavigationHandled]);
 
   const selectScheme = schemeId => {
     setWorksetNotice('');

@@ -1,5 +1,8 @@
 const { resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
+let analysisSource;
+function readAnalysisSnapshot(sessionId) { return analysisSource?.()?.snapshotForAnalysis(sessionId) ?? null; }
+function isAnalysisSessionCurrent(sessionId) { return !!sessionId && analysisSource?.()?.currentSessionId() === sessionId; }
 
 // The socket and its byte history belong to the current main-window document,
 // not to a React route, a log window, or an iframe.
@@ -33,7 +36,14 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
     } catch { return false; }
   }
   const denied = () => ({ ok: false, code: 'NOT_AUTHORIZED' });
-  for (const action of ['read', 'connect', 'send', 'disconnect', 'history', 'remove-history', 'clear-history']) {
+  const ownedService = () => {
+    const owner = getOwner();
+    if (!active || disposed || !owner || owner.isDestroyed() || owner.webContents !== active.contents ||
+      active.contents.isDestroyed() || active.frame !== active.contents.mainFrame || !trusted(active.frame)) return null;
+    return active.service;
+  };
+  analysisSource = ownedService;
+  for (const action of ['read', 'connect', 'send', 'disconnect', 'history', 'remove-history', 'clear-history', 'connection-status-subscribe']) {
     ipc.handle('ip-control:' + action, async (event, args) => {
       const owner = getOwner(), contents = owner?.webContents, frame = event.senderFrame;
       if (disposed || !owner || owner.isDestroyed() || !contents || contents.isDestroyed() ||
@@ -42,6 +52,10 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
         release();
         const navigate = details => { if (details.isMainFrame && !details.isSameDocument) release(); };
         active = { contents, frame, navigate, service: createService({
+          onStatusChange(status) {
+            if (active?.subscribed && active.contents === contents && active.frame === frame && !contents.isDestroyed() &&
+              contents.mainFrame === frame && getOwner() === owner && owner.isVisible() && !owner.isMinimized()) contents.send('ip-control:connection-status', status);
+          },
           onSuccessfulEndpoint: endpoint => changeHistory(() => history.record(endpoint))
         }) };
         contents.on('did-start-navigation', navigate);
@@ -50,7 +64,11 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
       }
       const current = active;
       let result;
-      if (action === 'history') {
+      if (action === 'connection-status-subscribe') {
+        if (typeof args?.active !== 'boolean') return { success: false };
+        current.subscribed = args.active;
+        result = { success: true, status: current.service.connectionStatus() };
+      } else if (action === 'history') {
         result = await history.list();
         if (historyError && result.ok) result = { ...result, error: historyError };
       } else if (action === 'remove-history') result = await changeHistory(() => history.remove(args));
@@ -62,6 +80,6 @@ function registerIpControl(ipc, { getOwner, appRoot, isDev, createService, histo
       return current === active ? result : denied();
     });
   }
-  return () => { disposed = true; release(); return history?.flush(); };
+  return () => { disposed = true; if (analysisSource === ownedService) analysisSource = undefined; release(); return history?.flush(); };
 }
-module.exports = { registerIpControl };
+module.exports = { registerIpControl, readAnalysisSnapshot, isAnalysisSessionCurrent };

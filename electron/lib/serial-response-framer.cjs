@@ -34,6 +34,17 @@ function candidateAt(bytes, start) {
   return { protocol, length: protocol === 'ab' ? declared : declared + 3 };
 }
 
+function validEnd(bytes, start, length, protocol) {
+  return protocol === 'ab' ? crcMatches(bytes, start, length) : bytes[start + length - 1] === 0xcf;
+}
+
+// Classify one retained network record without splitting, joining, or copying it.
+function wholeSerialResponseProtocol(bytes) {
+  if (bytes.length < 5 || bytes.length > 258) return undefined;
+  const frame = candidateAt(bytes, 0);
+  return frame?.length === bytes.length && validEnd(bytes, 0, frame.length, frame.protocol) ? frame.protocol : undefined;
+}
+
 function appendSegment(segments, kind, bytes, start, end, protocol) {
   if (start < end) segments.push({ kind, ...(protocol ? { protocol } : {}), bytes: Buffer.from(bytes.subarray(start, end)) });
 }
@@ -56,7 +67,7 @@ function splitSerialResponses(bytes, { final = false } = {}) {
       appendSegment(segments, 'pending', input, offset, input.length, protocol);
       return segments;
     }
-    const valid = protocol === 'ab' ? crcMatches(input, offset, length) : input[offset + length - 1] === 0xcf;
+    const valid = validEnd(input, offset, length, protocol);
     if (!valid) { offset++; continue; }
     appendSegment(segments, 'raw', input, rawStart, offset);
     appendSegment(segments, 'frame', input, offset, offset + length, protocol);
@@ -67,4 +78,4 @@ function splitSerialResponses(bytes, { final = false } = {}) {
   return segments;
 }
 
-module.exports = { splitSerialResponses };
+module.exports = { splitSerialResponses, wholeSerialResponseProtocol };

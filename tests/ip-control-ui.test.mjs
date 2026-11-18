@@ -19,7 +19,7 @@ function mount(api, saved) {
   const runtime = { window: { electronAPI: api }, document: { hidden: false, addEventListener() {}, removeEventListener() {} }, ...model, formatHex,
     readEndpoint: (_, mode) => model.readEndpoint(saved, mode), saveEndpoint: (value, _, mode) => model.saveEndpoint(value, saved, mode), useLocale: () => 'zh-CN',
     tr: (str, args = []) => str.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), jsx: (type, props, ...children) => ({ type, props: { ...props, children } }),
-    lazy: () => 'ProtocolPanel', Suspense: 'Suspense', IpControlHistory: 'IpControlHistory', IpControlTraffic:'IpControlTraffic', IpControlSavedCommands:'IpControlSavedCommands',
+    lazy: () => 'ProtocolPanel', Suspense: 'Suspense', AiContextButton:'AiContextButton', IpControlHistory: 'IpControlHistory', IpControlTraffic:'IpControlTraffic', IpControlSavedCommands:'IpControlSavedCommands',
     appendIpSendHistory: value => sentHistory.push({...value}), requestAnimationFrame: () => 1,
     setInterval(fn) { timer = fn; return 1; }, clearInterval() {},
     useEffect(fn) { const i = cursor++; if (!slots[i]) { slots[i] = {}; effects.push(fn); } },
@@ -43,6 +43,20 @@ function mount(api, saved) {
   const drain = () => new Promise(resolve => setImmediate(resolve));
   return { tree, find, button, submit, drain, sentHistory, poll: () => timer(), dispose() { cleanups.forEach(fn => fn()); } };
 }
+
+test('AI preparation references only the displayed IP session, never the COM session or editable endpoint', async () => {
+  let state = view();
+  const ui = mount({ ipControlRead: async () => state }, storage());
+  ui.tree(); await ui.drain();
+  assert.equal(ui.find('AiContextButton').props.disabled, true);
+  state = view('idle', 'captured-session', { entries: [{ id: 1, hex: '00FF', direction: 'RX', at: 1 }], nextAfter: 1 });
+  await ui.poll(); await ui.drain();
+  const action = ui.find('AiContextButton').props;
+  assert.equal(action.disabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(action.context)), { reference: { kind:'ip-control', sessionId:'captured-session' } });
+  ui.button('UDP').props.onClick();
+  assert.equal(ui.find('AiContextButton').props.disabled, true); ui.dispose();
+});
 
 test('numeric endpoints, byte count and endpoint-only persistence preserve input boundaries', () => {
   const s = storage(); assert.deepEqual(model.readEndpoint(s), { host: '172.20.74.227', port: '8192' });

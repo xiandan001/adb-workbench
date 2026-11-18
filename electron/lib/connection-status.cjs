@@ -7,14 +7,29 @@ function serialStatusMetadata(value = {}) {
     failed: value.status === 'error' || (Object.hasOwn(value, 'error') ? Boolean(value.error) : value.failed === true) };
 }
 
-function serialConnectionStatus(states) {
-  const list = Object.values(states).map(serialStatusMetadata);
+function serialSummary(list) {
   return {
     activeCount: list.filter(item => item.status === 'connected').length,
     pendingCount: list.filter(item => ['connecting', 'disconnecting'].includes(item.status)).length,
     unsavedCount: list.filter(item => item.unsaved).length,
     failedCount: list.filter(item => item.failed).length, transferCount: 0,
     labels: list.filter(item => item.path && (item.status !== 'disconnected' || item.unsaved || item.failed)).map(item => item.path)
+  };
+}
+
+function serialConnectionStatus(states) {
+  const list = Object.entries(states).map(([workspace, value]) => serialStatusMetadata({ ...value, workspace }));
+  return { ...serialSummary(list), workspaces: Object.fromEntries(['rs232', 'terminal'].map(key =>
+    [key, serialSummary(list.filter(item => item.workspace === key))])) };
+}
+
+function ipConnectionStatus({ status, mode, host, port, peerHost, peerPort }) {
+  const endpoint = (address, number) => address.includes(':') ? `[${address}]:${number}` : `${address}:${number}`;
+  return {
+    activeCount: ['connected', 'ready', 'listening'].includes(status) ? 1 : 0,
+    pendingCount: status === 'connecting' ? 1 : 0, failedCount: status === 'error' ? 1 : 0,
+    transferCount: 0, unsavedCount: 0, mode, phase: status,
+    labels: status === 'idle' || !host ? [] : [endpoint(host, port), ...(peerHost ? [endpoint(peerHost, peerPort)] : [])]
   };
 }
 
@@ -29,4 +44,4 @@ function sshConnectionStatus(sessions, transfers, drafts) {
   };
 }
 
-module.exports = { serialStatusMetadata, serialConnectionStatus, sshConnectionStatus };
+module.exports = { serialStatusMetadata, serialConnectionStatus, sshConnectionStatus, ipConnectionStatus };

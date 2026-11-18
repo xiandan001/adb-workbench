@@ -41,7 +41,7 @@ function validateReport(report) {
   for (const entry of report.preview.entries) {
     if (!entry || typeof entry.id !== 'string' || !/^E[1-9]\d*$/.test(entry.id) || ids.has(entry.id)
       || typeof entry.text !== 'string' || Buffer.byteLength(entry.text) > limits.sourceBytes
-      || !['adb', 'hdc', 'log', 'serial', 'ssh', 'text'].includes(entry.source) || !string(entry.label, 2000) || !string(entry.target, 2000)
+      || !['adb', 'hdc', 'log', 'serial', 'ip-control', 'ssh', 'text'].includes(entry.source) || !string(entry.label, 2000) || !string(entry.target, 2000)
       || !string(entry.timeBasis, 2000) || !string(entry.capturedAt, 40) || !Number.isFinite(Date.parse(entry.capturedAt))
       || typeof entry.truncated !== 'boolean' || !integer(entry.redactions)
       || (entry.numbered !== undefined && typeof entry.numbered !== 'boolean')
@@ -50,7 +50,7 @@ function validateReport(report) {
       || (entry.targetKey != null && !/^[a-f\d]{24,64}$/.test(entry.targetKey))
       || (entry.unavailable !== undefined && typeof entry.unavailable !== 'boolean')
       || (entry.platform !== undefined && !['android', 'harmony'].includes(entry.platform))
-      || (entry.evidenceKind !== undefined && ![...CHECK_IDS.flatMap(id => [`adb:${id}`, `hdc:${id}`]), 'log', 'serial', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
+      || (entry.evidenceKind !== undefined && ![...CHECK_IDS.flatMap(id => [`adb:${id}`, `hdc:${id}`]), 'log', 'serial', 'ip-control', 'ssh', 'text'].includes(entry.evidenceKind))) throw fail();
     if (entry.source === 'hdc' && (!entry.target.startsWith('hdc:') || entry.platform !== 'harmony' || !entry.evidenceKind?.startsWith('hdc:'))
       || entry.source === 'adb' && (entry.target.startsWith('hdc:') || entry.platform === 'harmony' || entry.evidenceKind?.startsWith('hdc:'))) throw fail();
     if (entry.diagnostic !== undefined) normalizeDiagnostic(entry.diagnostic);
@@ -64,7 +64,7 @@ function validateReport(report) {
     if (entry.retainedLineCount !== undefined && entry.retainedLineCount !== lineCount) throw fail();
     if (entry.originalLineCount !== undefined && entry.originalLineCount < lineCount) throw fail();
     if (entry.windowInfo && (!integer(entry.windowInfo.originalRecords) || !integer(entry.windowInfo.retainedRecords)
-      || entry.windowInfo.originalRecords < entry.windowInfo.retainedRecords || !integer(entry.windowInfo.byteLimit, limits.logcatBufferBytes))) throw fail();
+      || entry.windowInfo.originalRecords < entry.windowInfo.retainedRecords || !integer(entry.windowInfo.byteLimit, entry.source === 'ip-control' ? limits.sourceBytes : limits.logcatBufferBytes))) throw fail();
     if (entry.originalLineNumbers !== undefined && (!Array.isArray(entry.originalLineNumbers)
       || entry.originalLineNumbers.length !== lineCount || entry.originalLineNumbers.some((line, i, all) => !Number.isSafeInteger(line) || line < 1 || (i && line <= all[i - 1])))) throw fail();
     if (entry.events !== undefined && (!Array.isArray(entry.events) || entry.events.length > 256

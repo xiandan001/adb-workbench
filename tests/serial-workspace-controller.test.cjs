@@ -29,6 +29,7 @@ function fixture(saveSnapshot) {
     get: workspace => { if (!services[workspace]) throw new Error('工作区无效'); return services[workspace]; },
     snapshot: workspace => services[workspace].snapshot(),
     snapshots: () => Object.fromEntries(Object.keys(states).map(workspace => [workspace, services[workspace].snapshot()])),
+    statusMetadata: () => states,
     needsQuitConfirmation: () => Object.values(services).some(service => service.needsQuitConfirmation())
   };
   const sender = new EventEmitter(); sender.isDestroyed = () => false;

@@ -50,6 +50,23 @@ test('rejects non-IP, invalid ports and malformed HEX before doing I/O', async t
   assert.equal(sockets[0].bytes, undefined); assert.deepEqual(service.read().entries, []);
 });
 
+test('analysis snapshot stays bound to its session, includes only complete recent records and performs no I/O', async t => {
+  const { sockets, service, start } = fixture(); t.after(service.dispose);
+  const connecting = start(); sockets[0].emit('connect'); const { sessionId } = await connecting;
+  const data = Buffer.from([0x00, 0xff, 0xfe]);
+  for (let i = 0; i < 10001; i++) sockets[0].emit('data', data);
+  assert.equal(service.snapshotForAnalysis('other'), null);
+  service.disconnect({sessionId});
+  const snapshot = service.snapshotForAnalysis(sessionId);
+  assert.equal(snapshot.mode, 'tcp-client'); assert.equal(snapshot.entries.length, 2000);
+  assert.equal(snapshot.lastId, 10001); assert.equal(snapshot.dropped, 1);
+  assert.equal(snapshot.entries[0].id, 8002); assert.equal(snapshot.entries.at(-1).hex, '00FFFE');
+  snapshot.entries.at(-1).hex = '1'; assert.equal(service.read().entries.at(-1).hex, '00FFFE');
+  assert.equal(sockets.length, 1); assert.equal(sockets[0].bytes, undefined);
+  const next = start(); sockets[1].emit('connect'); await next;
+  assert.equal(service.snapshotForAnalysis(sessionId), null);
+});
+
 test('cancel, reconnect and ignore stale socket events, send and disconnect actions', async t => {
   const { sockets, service, start } = fixture(); t.after(service.dispose);
   const first = start(), a = service.read().sessionId;

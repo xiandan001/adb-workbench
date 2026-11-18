@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.3': {
+    title: 'v4.8.3',
+    date: '2026-11-18',
+    items: [
+      { type: 'feature', get text() { return tr('IP Control 支持准备 AI 分析，点击收发记录可查看并复制完整 HEX。'); } },
+      { type: 'improve', get text() { return tr('后台活动显示网络连接，点击连接状态可进入对应工作区。'); } },
+      { type: 'improve', get text() { return tr('优化用户体验'); } },
+    ],
+  },
   '4.8.2': {
     title: 'v4.8.2',
     date: '2026-11-18',

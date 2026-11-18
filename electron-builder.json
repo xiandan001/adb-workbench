@@ -95,6 +95,7 @@
     "electron/lib/ai-workspace-request-plan.cjs",
     "electron/lib/ai-artifact-reader.cjs",
     "electron/lib/serial-ai-evidence.cjs",
+    "electron/lib/ip-control-ai-evidence.cjs",
     "electron/lib/serial-format.cjs",
     "electron/lib/analysis-language.cjs",
     "electron/lib/feedback-policy.cjs",

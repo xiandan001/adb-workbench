@@ -58,6 +58,10 @@ test('header selector and wireless fields keep original content proportions with
   assert.equal(declaration('.workbench-wireless-form', 'flex-wrap'), 'wrap');
 });
 test('long identifiers and translated toolbar content have shrink and wrapping boundaries', () => {
+  assert.equal(declaration('.workbench-history-address', 'width'), 'fit-content');
+  assert.equal(declaration('.workbench-history-address', 'max-width'), '100%');
+  assert.equal(declaration('.workbench-history-address code', 'flex'), '0 1 auto');
+  assert.equal(declaration('.workbench-history-address button', 'flex-shrink'), '0');
   assert.equal(declaration('.workbench-wrap-anywhere', 'overflow-wrap'), 'anywhere');
   assert.equal(declaration('.workbench-history-address code', 'overflow-wrap'), 'anywhere');
   assert.equal(declaration('.workbench-history-address code', 'user-select'), 'all');

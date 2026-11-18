@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { registerIpControl } = require('../electron/lib/ip-control-ipc.cjs');
+const { registerIpControl, readAnalysisSnapshot, isAnalysisSessionCurrent } = require('../electron/lib/ip-control-ipc.cjs');
 const url = pathToFileURL(path.resolve('dist/index.html')).href;
 function fixture(history) {
   const handlers = new Map(), services = [];
@@ -26,6 +26,19 @@ test('only the packaged main document has access: no socket for another window, 
   }
   f.contents.mainFrame.url = 'https://example.invalid/'; assert.equal((await f.invoke('read')).code, 'NOT_AUTHORIZED');
   assert.equal(f.services.length, 0); f.dispose();
+});
+
+test('AI snapshot reads do not create a service and cannot reuse a departed owner or old session', async () => {
+  const f = fixture(), id = 'session-a';
+  assert.equal(readAnalysisSnapshot(id), null); assert.equal(f.services.length, 0);
+  await f.invoke('read');
+  f.services[0].currentSessionId = () => id;
+  f.services[0].snapshotForAnalysis = requested => requested === id ? { sessionId: id } : null;
+  assert.deepEqual(readAnalysisSnapshot(id), { sessionId: id }); assert.equal(isAnalysisSessionCurrent(id), true);
+  assert.equal(readAnalysisSnapshot('old'), null); assert.deepEqual(f.services[0].calls, []);
+  f.contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+  assert.equal(readAnalysisSnapshot(id), null); assert.equal(isAnalysisSessionCurrent(id), false);
+  f.dispose();
 });
 
 test('history comes only from transport evidence; listing and deleting never connect, send, or expose data to a subframe', async () => {
