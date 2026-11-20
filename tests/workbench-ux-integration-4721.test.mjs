@@ -114,7 +114,7 @@ test('global status and connection UI share one entry and keep the same explicit
 test('workset restoration rechecks current discovery and pins its explicit device through later disconnects', async () => {
   let finish;
   const state = { device: '', devices: [{ id: 'A', status: 'device' }] }, devicesRef = { current: state.devices }, worksetTargetRef = { current: '' };
-  const scope = { devices: state.devices, devicesRef, worksetTargetRef, resolveActiveDeviceId, useMemo: fn => fn(), singleFlight: fn => fn,
+  const scope = { devices: state.devices, devicesRef, worksetTargetRef, membershipOriginRef: { current: null }, resolveActiveDeviceId, useMemo: fn => fn(), singleFlight: fn => fn,
     window: { electronAPI: { logAnalyzerApplyContext: () => new Promise(resolve => { finish = resolve; }), getDevices: async () => devicesRef.current } },
     setActiveDeviceId: value => { state.device = typeof value === 'function' ? value(state.device) : value; }, setDevices: update => { state.devices = update(state.devices); }, setNavigationContext() {}, setWorksetRequest() {}, setLoading() {}, setError() {},
     setActiveTab: value => { state.page = value; }, setDeviceQuery() {}, setWorksetNotice() {}, rememberWorksetContext: async () => {}, crypto: { randomUUID: () => 'request' }, tr: value => value };
