@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.5': {
+    title: 'v4.8.5',
+    date: '2026-11-20',
+    items: [
+      { type: 'improve', get text() { return tr('会员中心支持直接粘贴激活码，权益对比默认显示差异。'); } },
+      { type: 'improve', get text() { return tr('从功能入口进入会员中心后，激活或取消均可返回原设备和任务，并保留已填内容。'); } },
+    ],
+  },
   '4.8.4': {
     title: 'v4.8.4',
     date: '2026-11-18',

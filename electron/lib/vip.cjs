@@ -6,7 +6,7 @@ const { tr } = require('./localization.cjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+const { app, shell } = require('electron');
 const { getMachineIdAsync, getMachineIdSync, resolveMachineIdAsync, rememberMachineId } = require('./machine-id.cjs');
 const { atomicWritePrivateFile } = require('./machine-identity.cjs');
 
@@ -162,6 +162,7 @@ async function computeStatusAsync() {
   try {
     token = fs.readFileSync(getTokenPath(), 'utf8').trim();
   } catch (e) {
+    if (e.code !== 'ENOENT') return freeBaseStatus(mid, 'vip_status_failed');
     return mid.success ? freeBaseStatus(mid, 'no_token') :
       { ...freeBaseStatus(null, 'machine_id_failed'), error: mid.error };
   }
@@ -196,6 +197,14 @@ async function computeStatusAsync() {
   };
 }
 
+function notifyVipStatusChanged(sender) {
+  const { getMainWindow, getLogAnalyzerWindow } = require('./app-context.cjs');
+  for (const window of [getMainWindow(), getLogAnalyzerWindow()]) {
+    if (!window || window.isDestroyed() || window.webContents === sender) continue;
+    try { window.webContents.send('vip:statusChanged'); } catch { /* Another window can close during activation. */ }
+  }
+}
+
 function register(ipcMain) {
   // 返回当前会员状态（异步，不阻塞）
   ipcMain.handle('vip:getStatus', async () => {
@@ -206,6 +215,8 @@ function register(ipcMain) {
   ipcMain.handle('vip:getMachineId', async () => {
     return getMachineIdAsync();
   });
+
+  ipcMain.handle('vip:openSupport', () => shell.openExternal('https://github.com/xiandan001/adb-workbench/issues'));
 
   // 激活：验签并持久化 token
   ipcMain.handle('vip:activate', async (event, token) => {
@@ -233,15 +244,19 @@ function register(ipcMain) {
     // Ancillary history cannot turn a durably saved license into a failed
     // activation; it is not used for authorization or identity recovery.
     try { appendActivationRecord(payload, mid.machineId, token); } catch { /* best effort */ }
-    return { success: true, status: await computeStatusAsync() };
+    const status = await computeStatusAsync();
+    if (status.activated) notifyVipStatusChanged(event?.sender);
+    return { success: true, status };
   });
 
   // 解绑（预留换机）
-  ipcMain.handle('vip:deactivate', async () => {
+  ipcMain.handle('vip:deactivate', async (event) => {
     try {
       fs.unlinkSync(getTokenPath());
     } catch (e) { /* 文件不存在无碍 */ }
-    return { success: true, status: await computeStatusAsync() };
+    const status = await computeStatusAsync();
+    notifyVipStatusChanged(event?.sender);
+    return { success: true, status };
   });
 
   // 激活记录增强：记录、备注、复制历史与重签流程说明。
@@ -288,7 +303,7 @@ function getStatus() {
   try {
     token = fs.readFileSync(getTokenPath(), 'utf8').trim();
   } catch (e) {
-    return freeBaseStatus(mid, 'no_token');
+    return freeBaseStatus(mid, e.code === 'ENOENT' ? 'no_token' : 'vip_status_failed');
   }
   const { valid, payload, error } = verifyToken(token);
   if (!valid) return freeBaseStatus(mid, error);

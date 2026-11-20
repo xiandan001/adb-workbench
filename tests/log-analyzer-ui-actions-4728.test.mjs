@@ -52,7 +52,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const fixtureRow = (id, raw, deviceId = 'A') => ({ id, raw, message: raw, deviceId, level: 'E', pkg: 'com.fixture', tag: 'A', ts: 1000, receivedAt: 1100, clockBasis: 'source-local' });
 function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const slots = [], listeners = new Map(), calls = [], clipboard = [], profiles = new Map(), effects = [], layouts = [], timers = new Set();
-  let cursor = 0, changed = false, rendered, props = { theme: { primary: 'tech', button: { primary: '' } }, vipStatus: { activated: true } }, closeProps;
+  let cursor = 0, changed = false, rendered, props = { theme: { primary: 'tech', button: { primary: '' } } }, closeProps;
   let state = { source: 'realtime', deviceId: 'A', captureId: 'cap-A', sourceIdentity: 'source-A', sourceLabel: 'Device A', running: false, buffers: ['main'], entries: [fixtureRow('old', 'old raw')], truncated: false };
   let nextId = 0, profileRevision = 0, readerRevision = -1, forTarget;
   const key = (device, source) => JSON.stringify([device, source]);
@@ -87,7 +87,9 @@ function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const text = fs.readFileSync(new URL('../src/components/LogAnalyzer.jsx', import.meta.url), 'utf8');
   const cut = text.indexOf('  return (\n    <div className='); assert.ok(cut > 0);
   const prefix = text.slice(0, cut).replace(/^import .+;\r?\n/gm, '').replace('export default function LogAnalyzer', 'function LogAnalyzer');
-  const component = vm.runInNewContext(prefix + '\nreturn { onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme }; }\nLogAnalyzer', {
+  const statusHook = fs.readFileSync(new URL('../src/shared/useMembershipStatus.js', import.meta.url), 'utf8')
+    .replace(/^import .+;\r?\n/gm, '').replace('export default function useMembershipStatus', 'function useMembershipStatus');
+  const component = vm.runInNewContext(statusHook + '\n' + prefix + '\nreturn { showVipBlock, returnFromMembership, activateMembership, membershipOrigin, aiCustomPrompt, setAiCustomPrompt, onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme }; }\nLogAnalyzer', {
     ...snapshots, ...workspace, ...markers, ...stream, ...model, ...analysisHelpers, prepareInlineLogAnalysis,
     crypto: { randomUUID }, window: { electronAPI: api, addEventListener() {}, removeEventListener() {}, innerHeight: 900 },
     document: { addEventListener() {}, removeEventListener() {}, body: { style: {} } }, navigator: { clipboard: { writeText: async value => clipboard.push(value) } }, performance,
@@ -142,6 +144,27 @@ test('actual inline callback sends the bounded frozen raw scope through legacy I
   h.ui().restoreSession({ name: 'saved C', source: 'file', sourceLabel: 'C.log', deviceId: '', entries: [fixtureRow('c', 'C原文', '')], filter: {}, buffers: [], evidence: [], markers: [], aiTurns: [{ header: 'saved', content: 'historic', reasoning: '', evidenceRefs: [] }], truncated: false }, { sourceIdentity: 'source-C' }); await h.drain();
   h.emit('onAiStreamChunk', { requestId: 'old-request', text: 'LATE', type: 'content' }); h.emit('onAiStreamEnd', { requestId: 'old-request' }); finish({ ok: true }); await pending; await pause(80); await h.drain();
   assert.equal(h.ui().aiTurns[0].content, 'historic'); assert.equal(h.ui().aiHistoryReadOnly, true); assert.equal(h.ui().sourceIdentity, 'source-C');
+});
+test('membership activation and cancellation preserve the actual log window, selected device and AI draft', async t => {
+  const h = uiHarness({ vipGetStatus: async () => ({ activated: false }) }); t.after(h.dispose); await h.mount();
+  h.ui().setAiCustomPrompt('draft on A'); await h.drain();
+  const { documentId, sourceIdentity } = h.ui();
+  h.calls.length = 0;
+  await h.ui().onAiAnalyze(); await h.drain();
+  assert.equal(h.ui().membershipOrigin.deviceId, 'A');
+  h.ui().applyContext({ deviceId: 'B', packageName: 'com.other' }); await h.drain();
+  h.ui().returnFromMembership(); await h.drain();
+  assert.equal(h.ui().membershipOrigin, null);
+  await h.ui().onAiAnalyze(); await h.drain();
+  h.ui().activateMembership({ activated: false }); await h.drain();
+  assert.equal(h.ui().membershipOrigin.deviceId, 'A');
+  h.ui().activateMembership({ activated: true, scope: 'vip' }); await h.drain();
+  assert.equal(h.ui().membershipOrigin, null);
+  assert.equal(h.ui().aiCustomPrompt, 'draft on A');
+  assert.equal(h.ui().deviceId, 'A');
+  assert.equal(h.ui().documentId, documentId);
+  assert.equal(h.ui().sourceIdentity, sourceIdentity);
+  assert.deepEqual(h.calls.map(value => value.method), ['vipGetStatus', 'vipGetStatus']);
 });
 test('actual local clear never invokes device clear and clipboard preserves original raw text', async t => {
   const h = uiHarness(); t.after(h.dispose); await h.mount(); await h.ui().onCopyAll(); assert.deepEqual(h.clipboard, ['old raw']); await h.ui().onClear(); await h.drain(); assert.equal(h.calls.filter(call => call.method === 'logClear').length, 1); assert.equal(h.calls.filter(call => call.method === 'logClearDevice').length, 0);

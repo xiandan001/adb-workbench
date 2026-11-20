@@ -249,8 +249,7 @@ function PackageManagerPanel({
 
   const requireVip = () => {
     if (isVip) return true;
-    showToast?.(tr("该包管理操作需要会员版"));
-    onOpenMemberCenter?.();
+    onOpenMemberCenter?.(tr('应用详情、权限和批量操作'));
     return false;
   };
 
@@ -435,7 +434,7 @@ function PackageManagerPanel({
     return (
       <button
         type="button"
-        onClick={onClick}
+        onClick={vipRequired && !isVip ? requireVip : onClick}
         disabled={!selectedPackage || !isOnline || Boolean(actionLoading) || Boolean(batchLoading) || !capability.supported}
         title={!capability.supported ? capability.reason : undefined}
         className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 ${toneClass}`}

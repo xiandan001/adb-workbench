@@ -7,6 +7,9 @@ import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
 import DeviceCard from './components/DeviceCard';
 import MemberCenter from './components/MemberCenter';
+import MembershipDialog from './components/MembershipDialog';
+import useMembershipStatus from './shared/useMembershipStatus';
+import membershipLimits from '../electron/lib/membership-limits.json' with { type: 'json' };
 // 性能监控面板
 import PerformanceDashboard from './components/PerformanceDashboard';
 import TaskCenter from './components/TaskCenter';
@@ -93,6 +96,12 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const [membershipOrigin, setMembershipOrigin] = useState(null);
+  const membershipOriginRef = useRef(null);
+  const rememberMembershipOrigin = useCallback(origin => {
+    membershipOriginRef.current = origin;
+    setMembershipOrigin(origin);
+  }, []);
   const { deviceQuery, setDeviceQuery, density: deviceCardDensity, setDensity: setDeviceCardDensity,
     expandedDeviceIds, setExpandedDeviceIds, mainRef, saveError: workspaceSaveError, retrySave: retryWorkspaceSave } = useWorkbenchUiWorkspace(activeTab);
   const [worksetRequest, setWorksetRequest] = useState(null);
@@ -109,10 +118,14 @@ function App() {
   const [searchDestination, setSearchDestination] = useState(null);
   const [incomingGuardId, setIncomingGuardId] = useState('');
   const [reproductionTarget, setReproductionTarget] = useState(null);
-  const setActiveTab = useCallback(next => setNavigation(previous => {
-    const tab = typeof next === 'function' ? next(previous.activeTab) : next;
-    return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
-  }), []);
+  const setActiveTab = useCallback(next => {
+    if (membershipOriginRef.current?.open) return;
+    if (membershipOriginRef.current) rememberMembershipOrigin(null);
+    setNavigation(previous => {
+      const tab = typeof next === 'function' ? next(previous.activeTab) : next;
+      return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
+    });
+  }, [rememberMembershipOrigin]);
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [wifiIp, setWifiIp] = useState('');
@@ -151,7 +164,7 @@ function App() {
     const off = window.electronAPI?.onAiHandoffAvailable?.(async event => {
       try {
         const response = await window.electronAPI.aiHandoffGet({ handoffId: event?.handoffId });
-        if (!alive) return;
+        if (!alive || membershipOriginRef.current?.open) return;
         if (!response?.ok) throw new Error(response?.error || tr('分析上下文已失效，请重新选择。'));
         setIncomingHandoffId(event.handoffId); setActiveTab('ai-workspace');
       } catch (failure) { if (alive) showToast(failure.message); }
@@ -306,7 +319,7 @@ function App() {
   }, [globalCommandSettings]);
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (!globalCommandSettings.enabled) return;
+      if (!globalCommandSettings.enabled || membershipOriginRef.current?.open) return;
       if (event.defaultPrevented || event.target?.closest?.('[data-ssh-terminal-input]')) return;
       if (isCommandShortcutMatch(event, globalCommandSettings.shortcut)) {
         event.preventDefault();
@@ -361,19 +374,29 @@ function App() {
   const [terminalCommandHistory, setTerminalCommandHistory] = useState([]);
   const [harmonyTerminalCommandHistory, setHarmonyTerminalCommandHistory] = useState([]);
   // VIP 会员状态
-  const [vipStatus, setVipStatus] = useState({
-    activated: false, scope: 'free', type: null,
-    issuedAt: null, expiresAt: null, machineId: null, reason: 'loading'
-  });
-  const refreshVipStatus = useCallback(async () => {
-    if (!window.electronAPI?.vipGetStatus) return;
-    try {
-      const s = await window.electronAPI.vipGetStatus();
-      setVipStatus(s);
-    } catch (error) {
-      setVipStatus(prev => ({ ...prev, activated: false, scope: 'free', reason: 'vip_status_failed', error: error.message }));
+  const { status: vipStatus, refresh: refreshVipStatus, acceptVerifiedStatus } = useMembershipStatus();
+
+  const openMembership = ({ deviceId = activeDeviceId, feature } = {}) => {
+    if (membershipOriginRef.current?.open) return;
+    const selectedId = activeTab === 'troubleshoot' ? deviceId : activeDeviceId;
+    rememberMembershipOrigin({
+      open: true, feature, deviceId, activeDeviceId: selectedId,
+      devices: devicesRef.current.filter(device => device.id === deviceId || device.id === selectedId)
+    });
+    if (selectedId !== activeDeviceId) setActiveDeviceId(selectedId);
+    void refreshVipStatus();
+  };
+  const returnFromMembership = () => {
+    const origin = membershipOriginRef.current;
+    if (!origin?.open) return;
+    rememberMembershipOrigin(origin.deviceId ? { ...origin, open: false } : null);
+    if (origin.deviceId && !devicesRef.current.some(device => device.id === origin.deviceId && device.status === 'device')) {
+      showToast(tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。'));
     }
-  }, []);
+  };
+  const activateMembership = status => {
+    if (acceptVerifiedStatus(status)) returnFromMembership();
+  };
 
   const allThemes = { ...themes, ...Object.fromEntries(customThemes.map(t => [t.key, t])) };
   const effectiveThemeKey = resolveThemeKey(currentTheme, customThemes);
@@ -472,6 +495,8 @@ function App() {
       devicesRef.current = nextDevices;
       setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
       setActiveDeviceId(previous => {
+        const origin = membershipOriginRef.current;
+        if (origin) return origin.activeDeviceId;
         const target = worksetTargetRef.current;
         if (!target) return resolveActiveDeviceId(previous, nextDevices);
         if (nextDevices.some(device => device.id === target && device.status === 'device')) return target;
@@ -562,7 +587,11 @@ function App() {
   useEffect(() => {
     if (navigationContext?.deviceId) rememberApplicationChoice(navigationContext.deviceId, navigationContext.packageName || '');
   }, [navigationContext?.deviceId, navigationContext?.packageName, rememberApplicationChoice]);
-  const chooseDevice = deviceId => { worksetTargetRef.current = ''; setActiveDeviceId(deviceId); };
+  const chooseDevice = deviceId => {
+    rememberMembershipOrigin(null);
+    worksetTargetRef.current = '';
+    setActiveDeviceId(deviceId);
+  };
   const chooseApplication = packageName => {
     if (!activeDeviceId) return;
     rememberApplicationChoice(activeDeviceId, packageName);
@@ -762,9 +791,7 @@ function App() {
       }
     };
     loadTerminalCmdHistory();
-    // 初始化 VIP 状态
-    refreshVipStatus();
-  }, [fetchDevices, refreshVipStatus, refreshConnectionHistory]);
+  }, [fetchDevices, refreshConnectionHistory]);
 
   useEffect(() => {
     const saveThemes = async () => {
@@ -1507,13 +1534,15 @@ function App() {
 
   const t = theme || themes.default;
   const isDark = isDarkTheme(t);
-  const activeDevice = devices.find(device => device.id === activeDeviceId);
+  const missingOriginDevices = membershipOrigin?.devices.filter(origin => !devices.some(device => device.id === origin.id)) || [];
+  const deviceCards = missingOriginDevices.length ? [...devices, ...missingOriginDevices.map(device => ({ ...device, status: 'offline' }))] : devices;
+  const activeDevice = deviceCards.find(device => device.id === activeDeviceId);
   const hasOnlineDevice = devices.some(device => device.status === 'device');
   const showConnectionForm = connectionFormOpen || !hasOnlineDevice;
   const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
-  const eligibleDevices = isVipOrLoading ? devices : [activeDevice || devices[0]].filter(Boolean);
+  const eligibleDevices = isVipOrLoading ? deviceCards : [activeDevice || deviceCards[0]].filter(Boolean);
   const visibleDevices = filterDeviceCards(eligibleDevices, { query: deviceQuery, names: deviceNames, pinnedIds: pinnedDeviceIds });
-  const lockedCount = devices.length - eligibleDevices.length;
+  const lockedCount = deviceCards.length - eligibleDevices.length;
   const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
   const settingsNavShellClass = isDarkTheme(t)
     ? 'bg-[#202124] border-[#3E4145]/80'
@@ -1599,6 +1628,8 @@ function App() {
     <div className={`workbench-shell flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
       <AiOutboundPreviewHost isDark={isDark} />
+      {membershipOrigin?.open && <MembershipDialog feature={membershipOrigin.feature} theme={t}
+        status={vipStatus} onRetry={refreshVipStatus} onActivated={activateMembership} onReturn={returnFromMembership} showToast={showToast} />}
       {reproductionTarget && <ReproductionDialog key={`${reproductionTarget.deviceId}:${reproductionTarget.sessionId || ''}`} theme={t} devices={devices}
         deviceId={reproductionTarget.deviceId} sessionId={reproductionTarget.sessionId} onClose={() => setReproductionTarget(null)} />}
       {languageSelectionPending && <InitialLanguageDialog theme={t} isDark={isDark} />}
@@ -1977,7 +2008,7 @@ function App() {
           )}
           <LanguageLoadNotice />
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'artifacts'].includes(activeTab) &&
-            <WorkbenchContextBar devices={devices} activeDevice={activeDevice} deviceNames={deviceNames} onDeviceChange={chooseDevice}
+            <WorkbenchContextBar devices={deviceCards} activeDevice={activeDevice} deviceNames={deviceNames} onDeviceChange={chooseDevice}
               packageName={selectedApplication} onApplicationChange={chooseApplication} theme={t} onEnvironment={() => setEnvironmentCheckModalOpen(true)} />}
         </header>
 
@@ -2084,7 +2115,7 @@ function App() {
                 </div>
               </div>}
               <div className="workbench-device-grid"><div className="workbench-device-list">
-                {devices.length === 0 && !loading && !error ? (
+                {deviceCards.length === 0 && !loading && !error ? (
                   <div className={`col-span-full flex flex-col items-center justify-center py-20 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#9AA0A6]'}`}>
                     <Smartphone size={48} className={`mb-4 opacity-50 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`} />
                     <p className="text-lg">{tr("未发现设备")}</p>
@@ -2175,13 +2206,13 @@ function App() {
                       vipStatus={vipStatus}
                       inspectionPath={inspectionPath}
                       onInspectionPathChange={setInspectionPath}
-                      onOpenMemberCenter={() => setActiveTab('member')}
+                      onOpenMemberCenter={feature => openMembership({ deviceId: device.id, feature })}
                     />
                   ))}
                   {lockedCount > 0 && (
                     <div className={`col-span-full flex items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                       <Lock size={20} className="text-amber-400" />
-                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("还有 ")}{lockedCount}{tr(" 台设备已连接，")}<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">{tr("开通会员")}</button>{tr("解锁全部")}</span>
+                      <span className={`text-sm ${t.textMuted}`}>{tr('基础版可管理 {0} 台设备。', { 0: membershipLimits.freeDeviceLimit })}{' '}<button type="button" onClick={() => openMembership({ feature: tr('同时管理设备数量') })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
                     </div>
                   )}
                   </>
@@ -2196,7 +2227,7 @@ function App() {
               <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId}
                 incomingReportRef={incomingReportRef}
                 onOpenRelatedTask={({ runId, scriptId }) => { if (runId) openTaskRun(runId); else if (scriptId) { setActivityTaskId(''); setAiTaskId(scriptId); setActiveTab('tasks'); } }}
-                showToast={showToast} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }}
+                showToast={showToast} onOpenMembership={openMembership} membershipActive={vipStatus.activated && vipStatus.scope === 'vip'}
                 onOpenTasks={id => { setActivityTaskId(''); setAiTaskId(id); setActiveTab('tasks'); }} />
             </Suspense>
           </div>}
@@ -2207,7 +2238,7 @@ function App() {
           </div>}
           {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
             <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 AI 工具管理…")}</div>}>
-              <AiToolsWorkspace active={activeTab === 'ai-tools'} incomingTabRequest={searchDestination?.kind === 'ai-tool' ? searchDestination : null} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => { setActiveTab('member'); void refreshVipStatus(); }} />
+              <AiToolsWorkspace active={activeTab === 'ai-tools'} incomingTabRequest={searchDestination?.kind === 'ai-tool' ? searchDestination : null} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => openMembership({ deviceId: '' })} membershipActive={vipStatus.activated && vipStatus.scope === 'vip'} />
             </Suspense>
           </div>}
           {activeTab === 'troubleshoot' && (
@@ -2219,7 +2250,7 @@ function App() {
               theme={theme}
               vipStatus={vipStatus}
               showToast={showToast}
-              onOpenMemberCenter={() => setActiveTab('member')}
+              onOpenMemberCenter={openMembership}
             />
           )}
 
@@ -2295,10 +2326,10 @@ function App() {
                 ) : (
                   <div className="workbench-history-grid">
                     {(() => {
-                      const FREE_HISTORY_LIMIT = 5;
                       const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
-                      const visibleHistory = isVipOrLoading ? connectionHistory : connectionHistory.slice(0, FREE_HISTORY_LIMIT);
-                      const lockedHistoryCount = isVipOrLoading ? 0 : Math.max(0, connectionHistory.length - FREE_HISTORY_LIMIT);
+                      const storedHistory = connectionHistory.slice(0, membershipLimits.storedConnectionHistoryLimit);
+                      const visibleHistory = isVipOrLoading ? storedHistory : storedHistory.slice(0, membershipLimits.freeConnectionHistoryLimit);
+                      const lockedHistoryCount = storedHistory.length - visibleHistory.length;
                       return (
                         <>
                           {visibleHistory.map((item) => {
@@ -2369,7 +2400,7 @@ function App() {
                     {lockedHistoryCount > 0 && (
                       <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                         <Lock size={18} className="text-amber-400" />
-                        <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("还有 ")}{lockedHistoryCount}{tr(" 条历史记录，")}<button onClick={() => setActiveTab('member')} className="text-amber-400 hover:underline font-medium">{tr("开通会员")}</button>{tr("查看全部")}</span>
+                        <span className={`text-sm ${t.textMuted}`}>{tr('基础版可查看最近 {0} 条连接记录。本机还保存了 {1} 条。', { 0: membershipLimits.freeConnectionHistoryLimit, 1: lockedHistoryCount })}{' '}<button type="button" onClick={() => openMembership({ deviceId: '', feature: tr('连接历史记录') })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
                       </div>
                     )}
                         </>
@@ -2408,7 +2439,7 @@ function App() {
               vipStatus={vipStatus}
               performancePath={performancePath}
               showToast={showToast}
-              onOpenMemberCenter={() => setActiveTab('member')}
+              onOpenMemberCenter={openMembership}
               onRefreshVipStatus={refreshVipStatus}
             />
           )}
@@ -2417,7 +2448,8 @@ function App() {
             <MemberCenter
               theme={theme}
               vipStatus={vipStatus}
-              onActivated={refreshVipStatus}
+              onActivated={activateMembership}
+              onRetry={refreshVipStatus}
               showToast={showToast}
             />
           )}

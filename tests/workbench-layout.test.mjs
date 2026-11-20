@@ -85,12 +85,15 @@ test('inspection still submits the full target and original options, never a sho
   const source = read('src/components/InspectionPanel.jsx'), ast = parse(source, { sourceType: 'module', plugins: ['jsx'] }); let fn;
   traverse(ast, { VariableDeclarator({ node }) { if (node.id.name === 'startInspection') fn = node.init; } });
   const id = 'hdc:' + 'A'.repeat(128), calls = [];
-  const action = runInNewContext('(' + source.slice(fn.start, fn.end) + ')', { isVip: true, isVipLoading: false, includeBugreport: false,
+  const fixture = { isVip: true, isVipLoading: false, isOnline: true, includeBugreport: false,
     includeAiSummary: false, device: { id, model: 'Fixture' }, inspectionPath: 'fixture-path', tr: value => value,
     setRunning() {}, setProgress() {}, setResult() {}, setError() {},
-    window: { electronAPI: { inspectionStart: async value => { calls.push(value); return { ok: true }; } } } });
+    window: { electronAPI: { inspectionStart: async value => { calls.push(value); return { ok: true }; } } } };
+  const action = runInNewContext('(' + source.slice(fn.start, fn.end) + ')', fixture);
   await action(); assert.equal(calls.length, 1); assert.equal(calls[0].deviceId, id); assert.equal(calls[0].outputBaseDir, 'fixture-path');
   assert.equal(calls[0].includeAiSummary, false); assert.equal(calls[0].includeBugreport, false);
+  fixture.isOnline = false;
+  await action(); assert.equal(calls.length, 1);
 });
 test('native shortcut dialogs retain top-layer menu hosting, full targets and confirmation semantics', () => {
   assert.match(read('src/components/SelectMenu.jsx'), /triggerRef\.current\?\.closest\('dialog\[open\]'\) \|\| document\.body/);

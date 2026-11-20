@@ -50,6 +50,7 @@ test('only the expected main document can remove a record; handler has no device
   vm.runInNewContext(source,{module,TextDecoder,require(key){
     if(key==='electron')return {app:{getAppPath:()=>dir,getPath:()=>dir}};
     if(key==='./app-context.cjs')return {getMainWindow:()=>owner,isDev:false};
+    if(key==='./membership-limits.json')return require('../electron/lib/membership-limits.json');
     assert.ok(['fs','path','node:crypto','node:url'].includes(key));return require(key);
   }});
   module.exports.register({handle:(key,fn)=>ipc.set(key,fn)});const remove=ipc.get('history:remove');

@@ -1,7 +1,7 @@
 import { tr, useLocale, getLocale } from '../shared/i18n';
 // H5: 导入 memo 用于 LogRow 性能优化
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
-import { Copy, Terminal, Radio, X, Sparkles, Loader2, Maximize2, Minimize2, FileDown, Brain, ChevronDown, Lock, BookmarkPlus } from "lucide-react";
+import { Copy, Terminal, Radio, X, Sparkles, Loader2, Maximize2, Minimize2, FileDown, Brain, ChevronDown, BookmarkPlus } from "lucide-react";
 import { isDarkTheme } from '../shared/theme';
 import { fingerprintLogLines, normalizeLogBuffers, normalizeLogFilter } from '../shared/logWorkspace';
 import LogFilterPresets from './LogFilterPresets';
@@ -22,6 +22,8 @@ import LogInlineAnalysisResult from './LogInlineAnalysisResult.jsx';
 import LogInlineAnalysisScope from './LogInlineAnalysisScope.jsx';
 import LogExportDialog from './LogExportDialog.jsx';
 import AppMessageDialogHost from './AppMessageDialogHost.jsx';
+import MembershipDialog from './MembershipDialog.jsx';
+import useMembershipStatus from '../shared/useMembershipStatus.js';
 import useLogViewPreferences from '../shared/useLogViewPreferences.js';
 import useLogViewEngine from '../shared/useLogViewEngine.js';
 import { prepareInlineLogAnalysis } from '../shared/logInlineAnalysis.js';
@@ -90,7 +92,7 @@ function compatibleFor(target, values) {
   return Array.isArray(values) ? values.filter(value => allowed.includes(value)) : target.startsWith('hdc:') ? [] : ['main'];
 }
 
-export default function LogAnalyzer({ theme, vipStatus }) {
+export default function LogAnalyzer({ theme }) {
   const locale = useLocale();
   const t = theme || {
     primary: 'tech',
@@ -103,13 +105,29 @@ export default function LogAnalyzer({ theme, vipStatus }) {
     textMuted: isDark ? 'text-slate-400' : 'text-slate-500', card: isDark ? 'border-slate-600 bg-[#202124] text-slate-100' : 'border-slate-200 bg-white text-slate-800',
     input: isDark ? 'border-slate-600 bg-[#2D2F33] text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700',
     button: { primary: 'bg-emerald-600 text-white hover:bg-emerald-500', secondary: isDark ? 'border-slate-600 bg-[#202124] text-slate-200 hover:bg-[#3E4145]' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' } }), [isDark]);
-  // VIP 门控：LogAnalyzer 在独立窗口渲染，props 可能未传 vipStatus，故主动拉取
-  const [vipStatusState, setVipStatusState] = useState(null);
-  const effectiveVipStatus = vipStatus || vipStatusState;
-  const isVip = effectiveVipStatus?.activated === true;
-  const [vipBlockMsg, setVipBlockMsg] = useState('');
-  const showVipBlock = (featureName) => setVipBlockMsg(featureName);
-  const dismissVipBlock = () => setVipBlockMsg('');
+  const { status: vipStatus, refresh: refreshVipStatus, acceptVerifiedStatus } = useMembershipStatus();
+  const isVip = vipStatus.activated;
+  const [membershipOrigin, setMembershipOrigin] = useState(null);
+  const membershipOriginRef = useRef(null);
+  const showVipBlock = feature => {
+    if (membershipOriginRef.current) return;
+    const origin = { feature, deviceId: source === 'realtime' ? captureDeviceId || deviceId : '', documentId };
+    membershipOriginRef.current = origin;
+    setMembershipOrigin(origin);
+    void refreshVipStatus();
+  };
+  const returnFromMembership = () => {
+    const origin = membershipOriginRef.current;
+    membershipOriginRef.current = null;
+    setMembershipOrigin(null);
+    if (origin?.documentId !== documentId) setNote(tr('日志来源已变化，操作已取消，请重新核对。'));
+    else if (origin?.deviceId && !devices.some(device => device.id === origin.deviceId && device.status === 'device')) {
+      setNote(tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。'));
+    }
+  };
+  const activateMembership = status => {
+    if (acceptVerifiedStatus(status)) returnFromMembership();
+  };
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState('');
   const [running, setRunning] = useState(false);
@@ -193,7 +211,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
   const focusMode = viewPreferences.view.focusMode;
   useEffect(() => {
     if (!focusMode) return;
-    const onKey = event => { if (shouldExitLogFocus(event)) { event.preventDefault(); setViewField('focusMode', false); } };
+    const onKey = event => { if (!membershipOriginRef.current && shouldExitLogFocus(event)) { event.preventDefault(); setViewField('focusMode', false); } };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [focusMode, setViewField]);
@@ -360,6 +378,10 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
   const applyContext = useCallback((context) => {
       if (!context?.deviceId && !context?.worksetLogs) return;
+      if (membershipOriginRef.current) {
+        setPendingLogContext({ ...context, manual: true });
+        return;
+      }
       if (!hydratedRef.current || runningRef.current || aiAnalyzingRef.current || smartSearchingRef.current || importFlightRef.current) {
         setPendingLogContext(context);
         setNote(tr("日志抓取或 AI 分析仍在运行，未切换设备或过滤条件；请先停止后重新打开设备日志"));
@@ -388,7 +410,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       setNote(tr("已选择 {0}{1}，未自动抓取；现有日志保持不变", { 0: context.deviceId, 1: context.packageName ? ` / ${context.packageName}` : '' }));
   }, [readTargetView, setTargetField, setFilter]);
   useEffect(() => {
-    if (pendingLogContext && initialLogStateLoaded && !running && !entries.length && !markers.length && !aiTurns.length) applyContext(pendingLogContext);
+    if (pendingLogContext && !pendingLogContext.manual && initialLogStateLoaded && !running && !entries.length && !markers.length && !aiTurns.length) applyContext(pendingLogContext);
   }, [pendingLogContext, initialLogStateLoaded, running, entries.length, markers.length, aiTurns.length, applyContext]);
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onLogAnalyzerContext?.(applyContext);
@@ -700,7 +722,6 @@ export default function LogAnalyzer({ theme, vipStatus }) {
       const revision = sourceEventRevision.current;
       void (async () => {
         try { const info = await window.electronAPI?.mcpGetInfo?.(); if (!disposed && info) { setMcpRunning(info.running); setMcpPort(info.port); } } catch { /* Optional MCP metadata. */ }
-        try { const status = await window.electronAPI?.vipGetStatus?.(); if (!disposed && status) setVipStatusState(status); } catch { /* Optional membership metadata. */ }
       })();
       try {
         if (!window.electronAPI?.logGetState) {
@@ -1173,7 +1194,7 @@ export default function LogAnalyzer({ theme, vipStatus }) {
 
   async function onToggleMcp() {
     if (!isVip) {
-      setNote(tr("MCP 服务为会员专属功能，请在会员中心开通"));
+      showVipBlock(tr('MCP 服务集成'));
       return;
     }
     if (window.electronAPI && window.electronAPI.mcpStop && window.electronAPI.mcpStart) {
@@ -2038,32 +2059,10 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
         onVipRequired={showVipBlock}
       />
 
-      {vipBlockMsg && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
-          <div className="p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4 bg-[#2D2F33] border border-[#3E4145]">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
-                <Lock size={20} className="text-amber-400" />
-              </div>
-              <div>
-                <h4 className="text-base font-semibold text-[#E8EAED]">{tr("会员专属功能")}</h4>
-                <p className="text-xs text-[#9AA0A6] mt-0.5">{tr("{0} 仅会员可用", { 0: vipBlockMsg })}</p>
-              </div>
-            </div>
-            <p className="text-sm text-[#9AA0A6] mb-5">{tr("当前为基础版，开通会员即可解锁全部 AI 能力与 MCP 服务。")}</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={dismissVipBlock} className="px-4 py-2 text-sm rounded-lg bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600 transition-colors">{tr("知道了")}</button>
-              <button
-                onClick={() => {
-                  dismissVipBlock();
-                  if (window.electronAPI?.logAnalyzerClose) window.electronAPI.logAnalyzerClose();
-                }}
-                className="px-4 py-2 text-sm rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white font-medium transition-all"
-              >{tr("去开通")}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {membershipOrigin && <MembershipDialog feature={membershipOrigin.feature} theme={logTheme} status={vipStatus}
+        onRetry={refreshVipStatus} onReturn={returnFromMembership}
+        showToast={message => { setNoteType('info'); setNote(message); }}
+        onActivated={activateMembership} />}
       <AiOutboundPreviewHost isDark={isDark} usageTarget={usageTarget} usagePlacement="inline" usageHidden={focusMode} usageExpanded={viewPreferences.view.usageExpanded} onUsageExpandedChange={value => setViewField('usageExpanded', value)} />
     </div>
   );

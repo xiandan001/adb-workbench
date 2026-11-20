@@ -78,11 +78,11 @@ test('log context navigation only selects idle device/filter and refuses active 
   const logs = source('components/LogAnalyzer.jsx');
   const compile = (running, analyzing) => {
     const events = [], restoredBuffers = []; let pending;
-    const fn = new Function('runningRef', 'aiAnalyzingRef', 'setNote', 'clearTimeout', 'filterDebounceRef', 'setDeviceId', 'setFilter', 'setFilterTextInput', 'tr', 'useCallback', 'setPendingLogContext', 'normalizeLogFilter', 'normalizeLogBuffers', 'setBuffers', 'scope', `const { hydratedRef, smartSearchingRef, importFlightRef, latestDocument, explicitPreference, preparedContext, preparedBufferTarget, setTargetField, readTargetView, compatibleFor, setScopeBuffers } = scope; return (${initializer(logs, 'applyContext')});`)(
+    const fn = new Function('runningRef', 'aiAnalyzingRef', 'setNote', 'clearTimeout', 'filterDebounceRef', 'setDeviceId', 'setFilter', 'setFilterTextInput', 'tr', 'useCallback', 'setPendingLogContext', 'normalizeLogFilter', 'normalizeLogBuffers', 'setBuffers', 'scope', `const { hydratedRef, smartSearchingRef, importFlightRef, membershipOriginRef, latestDocument, explicitPreference, preparedContext, preparedBufferTarget, setTargetField, readTargetView, compatibleFor, setScopeBuffers } = scope; return (${initializer(logs, 'applyContext')});`)(
       { current: running }, { current: analyzing }, value => events.push(['note', value]), value => events.push(['clearTimer', value]), { current: 17 },
       value => events.push(['device', value]), value => events.push(['filter', value]), value => events.push(['textFilter', value]), tr,
       callback => callback, value => { pending = value; }, normalizeLogFilter, normalizeLogBuffers, value => restoredBuffers.push(value),
-      { hydratedRef: { current: true }, smartSearchingRef: { current: false }, importFlightRef: { current: null }, latestDocument: { current: null },
+      { hydratedRef: { current: true }, smartSearchingRef: { current: false }, importFlightRef: { current: null }, membershipOriginRef: { current: null }, latestDocument: { current: null },
         explicitPreference: { current: '' }, preparedContext: { current: null }, preparedBufferTarget: { current: '' }, setTargetField() {}, readTargetView: () => ({ buffers: ['main'], filter: {} }), compatibleFor: (_id, buffers) => buffers, setScopeBuffers() {} });
     return { fn, events, restoredBuffers, get pending() { return pending; } };
   };

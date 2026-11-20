@@ -19,7 +19,7 @@ function signed(changes = {}) {
 function fixture(t, options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vip-persistence-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const calls = { remember: [], resolve: [], atomic: 0 };
+  const calls = { remember: [], resolve: [], atomic: 0, opened: [] };
   let cached = options.initialFailure ? { success: false, error: 'collect_failed' } : { success: true, machineId: options.currentId || id };
   const machine = {
     getMachineIdAsync: async () => cached, getMachineIdSync: () => cached, preloadMachineId: async () => cached,
@@ -29,12 +29,20 @@ function fixture(t, options = {}) {
   };
   const handlers = new Map(); const mod = { exports: {} };
   const files = Object.create(fs);
+  if (options.failRead) files.readFileSync = (file, ...args) => {
+    if (String(file).endsWith('vip-token.txt')) throw Object.assign(Error('read denied'), { code: 'EACCES' });
+    return fs.readFileSync(file, ...args);
+  };
   if (options.failHistory) files.writeFileSync = (file, ...args) => {
     if (String(file).endsWith('vip-activation-records.json')) throw Error('history denied');
     return fs.writeFileSync(file, ...args);
   };
   vm.runInNewContext(source, { module: mod, Buffer, console, require: name => {
-    if (name === 'electron') return { app: { getPath: () => directory } };
+    if (name === 'electron') return {
+      app: { getPath: () => directory },
+      shell: { openExternal: url => { calls.opened.push(url); } },
+    };
+    if (name === './app-context.cjs') return { getMainWindow: () => null, getLogAnalyzerWindow: () => null };
     if (name === './localization.cjs') return { tr: value => value };
     if (name === './machine-id.cjs') return machine;
     if (name === './machine-identity.cjs') return { ...identity, atomicWritePrivateFile: (...args) => {
@@ -47,6 +55,21 @@ function fixture(t, options = {}) {
   return { directory, tokenPath: path.join(directory, 'vip-token.txt'), calls, vip: mod.exports,
     invoke: (name, ...args) => handlers.get(name)({}, ...args) };
 }
+
+test('membership support only opens the fixed project page with no license information', async t => {
+  const h = fixture(t);
+  await h.invoke('vip:openSupport', { machineId: id, token: signed(), url: 'https://example.com' });
+  assert.deepEqual(h.calls.opened, ['https://github.com/xiandan001/adb-workbench/issues']);
+  assert.equal(fs.existsSync(h.tokenPath), false);
+});
+
+test('an unavailable saved license is distinguished from a first run and remains locked', async t => {
+  const h = fixture(t, { failRead: true });
+  for (const status of [h.vip.getStatus(), await h.invoke('vip:getStatus')]) {
+    assert.equal(status.activated, false);
+    assert.equal(status.reason, 'vip_status_failed');
+  }
+});
 
 test('old valid activations can adopt a locally reconstructed historical fingerprint without reactivation', async t => {
   const h = fixture(t, { currentId: 'b'.repeat(64), acceptLegacy: true });

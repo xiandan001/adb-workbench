@@ -19,7 +19,7 @@ import AiProviderHome from './AiProviderHome';
 import { aiToolsCan, providerDraft, providerInput } from './aiToolsModel';
 import { connectionCompletionNotice, connectionFeedback, providerFeedbackCurrent, providerFeedbackToken } from './aiProviderHomeModel';
 
-export default function AiToolsWorkspace({ active = true, incomingTabRequest, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership }) {
+export default function AiToolsWorkspace({ active = true, incomingTabRequest, theme, isDark = isDarkTheme(theme), showToast, onRequest, onOpenMembership, membershipActive }) {
   useLocale();
   const [snapshot, setSnapshot] = useState(null); const snapshotRef = useRef(null); const requestRef = useRef(onRequest);
   const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [tab, setTab] = useState('providers');
@@ -54,7 +54,7 @@ export default function AiToolsWorkspace({ active = true, incomingTabRequest, th
     finally { if (alive.current && ticket === loadTicket.current) setLoading(false); }
   }, [accept]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { if (active) void refresh(); }, [active, refresh]);
+  useEffect(() => { if (active) void refresh(); }, [active, membershipActive, refresh]);
   useEffect(() => { const focus = () => { if (activeRef.current && !document.hidden) void refresh(); }; window.addEventListener('focus', focus); return () => window.removeEventListener('focus', focus); }, [refresh]);
   const request = useCallback(async (command, args = {}, options) => {
     if (!aiToolsCan(snapshotRef.current, command, options)) throw new Error(snapshotRef.current?.membership?.activated ? tr("此能力尚未接通，未执行操作") : tr("请先通过本软件会员中心完成激活"));

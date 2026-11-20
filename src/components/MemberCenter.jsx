@@ -1,684 +1,251 @@
-import { tr, useLocale, getLocale } from '../shared/i18n';
+import { useId, useRef, useState } from 'react';
+import { ArrowLeft, ChevronDown, Copy, Crown, KeyRound, Loader2, Lock, RefreshCw } from 'lucide-react';
+import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
-// src/components/MemberCenter.jsx
-// 会员中心：状态卡 + 开通支付向导 + 激活区 + 分组功能对比
-
-import { useState, useEffect } from 'react';
-// 同步会员中心功能对比所需图标。
-import { Crown, Copy, Check, Lock, Brain, Loader2, Smartphone, History, X, ChevronRight, Wallet, QrCode, Package, ClipboardCheck } from 'lucide-react';
-// 会员激活记录增强面板
 import ActivationRecordsPanel from './ActivationRecordsPanel';
+import MembershipBenefits from './MembershipBenefits';
 
-// 同步当前版本已提供的会员权益，并按使用场景分组展示。
-const FEATURE_GROUPS = () => ([
-  {
-    title: tr("设备与历史"),
-    icon: Smartphone,
-    items: [
-      { name: tr("同时管理设备数量"), free: tr("1 台"), vip: tr("不限") },
-      { name: tr("连接历史记录"), free: tr("最近 5 条"), vip: tr("不限") }
-    ]
-  },
-  {
-    title: tr("App 包管理"),
-    icon: Package,
-    items: [
-      { name: tr("安装、推送和文件浏览"), free: true, vip: true },
-      { name: tr("应用详情、权限和批量操作"), free: tr("基础操作"), vip: tr("完整管理") }
-    ]
-  },
-  {
-    title: tr("质量与自动化"),
-    icon: ClipboardCheck,
-    items: [
-      { name: tr("回归基线与差异报告"), free: true, vip: true },
-      { name: tr("一键验收与任务中心"), free: tr("基础执行"), vip: tr("完整产物") },
-      { name: tr("设备巡检报告与证据包"), free: false, vip: true },
-      { name: tr("性能监控面板"), free: tr("基础采样"), vip: tr("阈值与导出") }
-    ]
-  },
-  {
-    title: tr("日志与 AI"),
-    icon: Brain,
-    items: [
-      { name: tr("日志诊断规则库"), free: tr("内置规则"), vip: tr("规则管理") },
-      { name: tr("AI 自动诊断"), free: true, vip: true },
-      { name: tr("AI 深度分析"), free: false, vip: true },
-      { name: tr("自然语言搜索日志"), free: false, vip: true },
-      { name: tr("MCP 服务集成"), free: false, vip: true }
-    ]
-  },
-  {
-    title: tr("会员记录"),
-    icon: History,
-    items: [
-      { name: tr("激活记录与复制历史"), free: true, vip: true }
-    ]
+const primaryButton = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 px-4 py-2 text-sm font-medium text-slate-950 hover:from-amber-400 hover:to-yellow-400 focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50';
+
+function activationErrorMessage(error) {
+  switch (error) {
+    case 'bad_signature': return tr('激活码无效（签名校验失败），请检查是否复制完整');
+    case 'machine_mismatch': return tr('机器码不匹配，请复制本机机器码联系开发者重新签发');
+    case 'expired': return tr('激活码已过期，请联系开发者续费');
+    case 'bad_format': return tr('激活码格式错误，请检查是否复制完整');
+    case 'bad_payload': return tr('激活码内容无效，请检查是否复制完整');
+    case 'token_empty': return tr('请粘贴激活码');
+    case 'machine_id_failed': return tr('机器码暂不可用，请重试。');
+    case 'write_failed': return tr('激活码未能保存，请重试。');
+    case 'status_unverified': return tr('授权尚未生效，请重新读取会员状态。');
+    default: return tr('激活失败，请重试。');
   }
-]);
-
-const BENEFIT_SUMMARIES = () => ([
-  {
-    title: tr("设备管理"),
-    icon: Smartphone,
-    desc: tr("解除设备数量限制，保留完整连接历史。"),
-    free: tr("1 台设备"),
-    vip: tr("不限设备")
-  },
-  {
-    title: tr("质量自动化"),
-    icon: ClipboardCheck,
-    desc: tr("开放巡检证据包、任务产物和回归报告。"),
-    free: tr("基础执行"),
-    vip: tr("完整产物")
-  },
-  {
-    title: tr("日志与 AI"),
-    icon: Brain,
-    desc: tr("启用深度分析、自然语言搜索和规则管理。"),
-    free: tr("内置规则"),
-    vip: tr("深度分析")
-  },
-  {
-    title: tr("会员记录"),
-    icon: History,
-    desc: tr("记录激活、机器码复制和重签线索。"),
-    free: tr("可用"),
-    vip: tr("可追踪")
-  }
-]);
-
-// 支付预留：套餐与支付方式数据结构（常量化，便于未来接入在线支付）
-// 未来接入在线支付时，只需修改 PAYMENT_METHODS 中的 handler，UI 无需改动
-const PLANS = () => ([
-  {
-    id: 'lifetime',
-    name: tr("终身买断"),
-    price: 99,
-    priceLabel: '¥99',
-    desc: tr("一次开通，永久使用全部功能"),
-    badge: tr("推荐"),
-    type: 'lifetime',
-    expiresAt: null
-  },
-  // 预留订阅套餐（未来上线时取消注释）
-  // { id: 'yearly', name: '年度订阅', price: 39, priceLabel: '¥39/年', desc: '全年享受全部会员功能', badge: null, type: 'subscription', durationDays: 365 },
-  // { id: 'monthly', name: '月度订阅', price: 9, priceLabel: '¥9/月', desc: '灵活订阅，随时取消', badge: null, type: 'subscription', durationDays: 30 },
-]);
-
-const PAYMENT_METHODS = () => ([
-  {
-    id: 'alipay',
-    name: tr("支付宝"),
-    icon: Wallet,
-    color: 'text-blue-500',
-    bgColor: 'bg-blue-500/10 border-blue-500/30',
-    // 占位图路径：替换 src/assets/payment-alipay.png 即可显示真实收款码
-    qrPlaceholder: 'data:image/svg+xml,' + encodeURIComponent(
-      tr("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\"><rect width=\"200\" height=\"200\" fill=\"#f0f0f0\"/><text x=\"100\" y=\"100\" text-anchor=\"middle\" font-size=\"14\" fill=\"#999\" dy=\".3em\">支付宝收款码</text><text x=\"100\" y=\"130\" text-anchor=\"middle\" font-size=\"11\" fill=\"#bbb\">替换 assets/payment-alipay.png</text></svg>")
-    )
-  },
-  {
-    id: 'wechat',
-    name: tr("微信支付"),
-    icon: QrCode,
-    color: 'text-green-500',
-    bgColor: 'bg-green-500/10 border-green-500/30',
-    qrPlaceholder: 'data:image/svg+xml,' + encodeURIComponent(
-      tr("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\"><rect width=\"200\" height=\"200\" fill=\"#f0f0f0\"/><text x=\"100\" y=\"100\" text-anchor=\"middle\" font-size=\"14\" fill=\"#999\" dy=\".3em\">微信收款码</text><text x=\"100\" y=\"130\" text-anchor=\"middle\" font-size=\"11\" fill=\"#bbb\">替换 assets/payment-wechat.png</text></svg>")
-    )
-  }
-]);
-
-// 开发者联系方式（预留）
-const CONTACT_INFO = () => ({
-  wechat: tr("请扫描左侧微信收款码加好友"),
-  note: tr("付款后请将「本机机器码」发送给开发者，获取专属激活码")
-});
-
-const ERROR_TEXT = () => ({
-  bad_signature: tr("激活码无效（签名校验失败），请检查是否复制完整"),
-  machine_mismatch: tr("机器码不匹配，请复制本机机器码联系开发者重新签发"),
-  expired: tr("激活码已过期，请联系开发者续费"),
-  bad_format: tr("激活码格式错误，请检查是否复制完整"),
-  bad_payload: tr("激活码内容无效，请检查是否复制完整"),
-  token_empty: tr("请粘贴激活码"),
-  no_token: '',
-  loading: ''
-});
-
-export default function MemberCenter({ theme, vipStatus, onActivated, showToast }) {
-  useLocale();
-  const t = theme || { primary: 'tech' };
-  const isDark = isDarkTheme(t);
-  const isVip = vipStatus.activated;
-  const isLoading = vipStatus.reason === 'loading';
-  const [tokenInput, setTokenInput] = useState('');
-  const [activating, setActivating] = useState(false);
-  const [activateError, setActivateError] = useState('');
-  const [copied, setCopied] = useState(false);
-  // 顶部机器码复制后刷新激活记录面板，确保复制历史即时显示。
-  const [activationRecordsRefreshKey, setActivationRecordsRefreshKey] = useState(0);
-  const [activationRecordData, setActivationRecordData] = useState(null);
-
-  // 支付向导状态
-  const [payWizardOpen, setPayWizardOpen] = useState(false);
-  const [payStep, setPayStep] = useState(0); // 0=选套餐, 1=选支付方式, 2=扫码支付, 3=完成
-  const [selectedPlanId, setSelectedPlan] = useState(null);
-  const [selectedMethodId, setSelectedMethod] = useState(null);
-  const selectedPlan = PLANS().find(plan => plan.id === selectedPlanId);
-  const selectedMethod = PAYMENT_METHODS().find(method => method.id === selectedMethodId);
-  // 机器码默认隐藏，仅支付完成后或已是会员时解锁可复制
-  // loading 状态下初始为 true（避免先隐藏再显示的闪烁），加载完成后按真实状态修正
-  const [machineIdUnlocked, setMachineIdUnlocked] = useState(isLoading || vipStatus.activated === true);
-  // 已是会员时自动解锁（异步加载 vipStatus 场景）
-  useEffect(() => {
-    if (vipStatus.activated) setMachineIdUnlocked(true);
-  }, [vipStatus.activated]);
-
-  const copyMachineId = async () => {
-    if (!vipStatus.machineId) return;
-    try {
-      await navigator.clipboard.writeText(vipStatus.machineId);
-      // 写入复制历史，便于激活码重签与售后追踪。
-      const historyRes = await window.electronAPI?.vipAddCopyHistory?.({ kind: 'machineId', value: vipStatus.machineId });
-      if (historyRes?.ok) setActivationRecordData(historyRes);
-      setActivationRecordsRefreshKey(prev => prev + 1);
-      setCopied(true);
-      showToast?.(tr("机器码已复制"));
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      showToast?.(tr("复制失败"));
-    }
-  };
-
-  const handleActivate = async () => {
-    const token = tokenInput.trim();
-    if (!token) {
-      setActivateError(tr("请粘贴激活码"));
-      return;
-    }
-    setActivating(true);
-    setActivateError('');
-    try {
-      const res = await window.electronAPI.vipActivate(token);
-      if (res.success) {
-        setTokenInput('');
-        showToast?.(tr("会员激活成功，感谢支持！"));
-        // 激活成功后同步刷新激活记录面板。
-        setActivationRecordData(res);
-        setActivationRecordsRefreshKey(prev => prev + 1);
-        await onActivated?.();
-      } else {
-        setActivateError(ERROR_TEXT()[res.error] || tr('激活失败：{0}', { 0: res.error }));
-      }
-    } catch (e) {
-      setActivateError(tr('激活异常：{0}', { 0: e.message }));
-    } finally {
-      setActivating(false);
-    }
-  };
-
-  // 支付向导：打开/关闭
-  const openPayWizard = () => {
-    setPayStep(0);
-    setSelectedPlan(null);
-    setSelectedMethod(null);
-    setPayWizardOpen(true);
-  };
-  const closePayWizard = () => {
-    setPayWizardOpen(false);
-    setPayStep(0);
-    setSelectedPlan(null);
-    setSelectedMethod(null);
-  };
-  // 支付完成 → 解锁机器码 + 跳转到激活步骤
-  const onPayComplete = () => {
-    setMachineIdUnlocked(true);
-    closePayWizard();
-    showToast?.(tr("机器码已解锁，请复制发送给开发者获取激活码"));
-  };
-
-  const cardClass = `rounded-xl border shadow-sm ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
-  const mutedTextClass = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const softPanelClass = isDark ? 'bg-[#2D2F33]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200';
-  const statusTitle = isVip ? tr("会员版") : tr("基础版");
-  const statusDesc = isVip
-    ? vipStatus.type === 'lifetime' ? tr("永久有效，感谢您的支持") : tr("有效期至 {0}", { 0: new Date((vipStatus.expiresAt || 0) * 1000).toLocaleDateString(getLocale()) })
-    : tr("升级会员后解锁多设备、完整产物和深度分析能力");
-  const statusBadge = isVip
-    ? vipStatus.type === 'lifetime' ? tr("终身授权") : tr("订阅授权")
-    : tr("未开通");
-
-  // loading 骨架屏：状态加载中不显示具体套餐，避免先闪基础版再切会员版
-  if (isLoading) {
-    return (
-      <div className="w-full space-y-5">
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-          <div className={`p-6 rounded-xl border shadow-sm animate-pulse ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-            <div className="flex items-center gap-4">
-              <div className={`w-14 h-14 rounded-2xl ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
-              <div className="flex-1 space-y-2">
-                <div className={`h-5 w-24 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
-                <div className={`h-3 w-56 rounded ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
-              </div>
-            </div>
-          </div>
-          <div className={`p-6 rounded-xl border shadow-sm animate-pulse ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-            <div className={`h-4 w-24 rounded mb-4 ${isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />
-            <div className={`h-10 w-full rounded-lg ${isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`} />
-          </div>
-        </div>
-        <div className={`flex items-center justify-center py-8 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>
-          <Loader2 size={20} className="animate-spin mr-2" />
-          <span className="text-sm">{tr("正在加载会员信息…")}</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-        <section className={`relative overflow-hidden p-6 rounded-xl border shadow-sm ${isVip ? 'border-amber-300/60 bg-gradient-to-br from-amber-50 via-white to-yellow-50' : isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-4 min-w-0">
-              <div className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 ${isVip ? 'bg-gradient-to-br from-amber-400 to-yellow-500 shadow-lg shadow-amber-500/25' : isDark ? 'bg-[#3E4145]' : 'bg-slate-100'}`}>
-                {isVip ? <Crown size={28} className="text-white" /> : <Lock size={26} className={isDark ? 'text-[#9AA0A6]' : 'text-slate-500'} />}
-              </div>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className={`text-2xl font-bold ${isVip ? 'text-amber-700' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-                    {statusTitle}
-                  </h3>
-                  <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${isVip ? 'bg-amber-500/15 text-amber-700 border-amber-500/30' : isDark ? 'bg-[#3E4145] text-[#BDC1C6] border-[#5F6368]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                    {statusBadge}
-                  </span>
-                </div>
-                <p className={`text-sm mt-2 ${isVip ? 'text-amber-700/80' : mutedTextClass}`}>
-                  {statusDesc}
-                </p>
-              </div>
-            </div>
-
-            {!isVip && (
-              <button
-                onClick={openPayWizard}
-                className="shrink-0 px-5 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 transition-all active:scale-95 shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
-              >
-                <Crown size={18} />{tr("立即开通")}</button>
-            )}
-          </div>
-
-          <div className={`mt-6 grid gap-3 sm:grid-cols-3`}>
-            {[
-              [tr("设备额度"), isVip ? tr("不限") : tr("1 台")],
-              [tr("连接历史"), isVip ? tr("不限") : tr("最近 5 条")],
-              [tr("高阶能力"), isVip ? tr("已解锁") : tr("待开通")]
-            ].map(([label, value]) => (
-              <div key={label} className={`rounded-lg border px-3 py-3 ${isVip ? 'bg-white/70 border-amber-200/70' : softPanelClass}`}>
-                <div className={`text-xs ${isVip ? 'text-amber-700/70' : mutedTextClass}`}>{label}</div>
-                <div className={`text-base font-semibold mt-1 ${isVip ? 'text-amber-700' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className={`mt-5 rounded-xl border p-4 ${isVip ? 'bg-white/70 border-amber-200/70' : softPanelClass}`}>
-            <div className={`text-xs font-medium ${isVip ? 'text-amber-700/75' : mutedTextClass}`}>{tr("开通后可用能力")}</div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {[tr("不限设备"), tr("完整产物"), tr("深度分析"), tr("规则管理")].map((item) => (
-                <div key={item} className={`flex items-center gap-2 text-sm ${isVip ? 'text-amber-700' : isDark ? 'text-[#BDC1C6]' : 'text-slate-700'}`}>
-                  <Check size={14} className={isVip ? 'text-amber-500' : 'text-emerald-500'} />
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className={`p-5 ${cardClass}`}>
-          <div className="flex items-start justify-between gap-3 mb-4">
-            <div>
-              <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("激活与机器码")}</h3>
-              <p className={`text-xs mt-1 ${mutedTextClass}`}>
-                {isVip ? tr("用于重签、迁移设备和售后核对。") : tr("支付后复制机器码，获取激活码后在此激活。")}
-              </p>
-            </div>
-            {!isVip && (
-              <button
-                onClick={openPayWizard}
-                className={`shrink-0 px-3 py-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors ${isDark ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
-              >
-                <Crown size={14} />{tr("开通")}</button>
-            )}
-          </div>
-
-          <div className={`text-xs mb-1.5 ${mutedTextClass}`}>{tr("本机机器码")}</div>
-          {machineIdUnlocked ? (
-            <div className="flex items-center gap-2">
-              <code className={`flex-1 px-3 py-2 rounded-lg font-mono text-xs break-all ${isDark ? 'bg-[#3E4145]/60 text-[#E8EAED]' : 'bg-slate-50 text-slate-700'}`}>
-                {vipStatus.machineId || tr("获取中…")}
-              </code>
-              <button
-                onClick={copyMachineId}
-                disabled={!vipStatus.machineId}
-                className={`shrink-0 p-2.5 rounded-lg transition-colors disabled:opacity-50 ${isDark ? 'bg-[#3E4145] hover:bg-slate-600 text-[#E8EAED]' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                title={tr("复制机器码")}
-              >
-                {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={openPayWizard}
-              className={`w-full px-3 py-2.5 rounded-lg border-2 border-dashed transition-colors flex items-center justify-center gap-2 ${isDark ? 'border-[#3E4145] bg-[#3E4145]/30 hover:border-amber-500/40 hover:bg-amber-500/5' : 'border-slate-200 bg-slate-50 hover:border-amber-300 hover:bg-amber-50'}`}
-            >
-              <Lock size={14} className="text-amber-400" />
-              <span className={`text-xs ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{tr("完成支付后解锁机器码")}</span>
-            </button>
-          )}
-
-          {!isVip && (
-            <div className={`mt-4 pt-4 border-t ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-              <label className={`block text-xs font-medium mb-2 ${mutedTextClass}`}>{tr("激活码")}</label>
-              <textarea
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder={tr("在此粘贴激活码…")}
-                rows={3}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm font-mono resize-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none ${isDark ? 'bg-[#3E4145] border-[#5F6368] text-[#E8EAED] placeholder-slate-500' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-              />
-              {activateError && (
-                <div className="mt-2 px-3 py-2 rounded-lg text-xs bg-red-500/10 text-red-500 border border-red-500/20">
-                  {tr(activateError)}
-                </div>
-              )}
-              <button
-                onClick={handleActivate}
-                disabled={activating || !tokenInput.trim()}
-                className="mt-3 w-full px-4 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 disabled:opacity-50 transition-all active:scale-95 shadow-sm"
-              >
-                {activating ? <span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />{tr("激活中…")}</span> : tr("立即激活")}
-              </button>
-            </div>
-          )}
-        </section>
-      </div>
-
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {BENEFIT_SUMMARIES().map((benefit) => {
-          const Icon = benefit.icon;
-          return (
-            <div key={benefit.title} className={`rounded-xl border p-4 shadow-sm ${isVip ? 'border-amber-200 bg-amber-50/70' : isDark ? 'bg-slate-800/70 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isVip ? 'bg-amber-500/15 text-amber-600' : isDark ? 'bg-[#3E4145] text-[#BDC1C6]' : 'bg-slate-100 text-slate-600'}`}>
-                  <Icon size={20} />
-                </div>
-                <span className={`text-xs font-medium ${isVip ? 'text-amber-700' : mutedTextClass}`}>{isVip ? benefit.vip : benefit.free}</span>
-              </div>
-              <h4 className={`text-sm font-semibold mt-3 ${isVip ? 'text-amber-800' : isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{benefit.title}</h4>
-              <p className={`text-xs leading-5 mt-1 ${isVip ? 'text-amber-700/75' : mutedTextClass}`}>{benefit.desc}</p>
-            </div>
-          );
-        })}
-      </section>
-
-      {/* 功能对比 */}
-      <section className={`p-5 ${cardClass}`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("权益对比")}</h3>
-            <p className={`text-xs mt-1 ${mutedTextClass}`}>{tr("按常用场景整理基础版与会员版差异")}</p>
-          </div>
-        </div>
-
-        <div className={`hidden md:block overflow-hidden rounded-xl border ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-          <div className={`grid grid-cols-[minmax(260px,1fr)_150px_150px] px-4 py-3 text-xs font-semibold ${isDark ? 'bg-[#2D2F33] text-[#9AA0A6]' : 'bg-slate-50 text-slate-500'}`}>
-            <div>{tr("功能场景")}</div>
-            <div className="flex items-center justify-center gap-1">
-              <Lock size={13} />{tr("基础版")}</div>
-            <div className="flex items-center justify-center gap-1 text-amber-500">
-              <Crown size={13} />{tr("会员版")}</div>
-          </div>
-
-          {FEATURE_GROUPS().map((group) => {
-            const Icon = group.icon;
-            return (
-              <div key={group.title}>
-                <div className={`flex items-center gap-2 px-4 py-3 border-t text-sm font-semibold ${isDark ? 'bg-[#202124]/35 border-[#3E4145] text-[#E8EAED]' : 'bg-white border-slate-100 text-slate-800'}`}>
-                  <Icon size={16} className="text-amber-500" />
-                  {group.title}
-                </div>
-                {group.items.map((item) => (
-                  <div key={item.name} className={`grid grid-cols-[minmax(260px,1fr)_150px_150px] items-center px-4 py-3 border-t ${isDark ? 'border-[#3E4145]/70' : 'border-slate-100'}`}>
-                    <div className={`text-sm ${isDark ? 'text-[#BDC1C6]' : 'text-slate-600'}`}>{item.name}</div>
-                    <FeatureValue value={item.free} tone="free" isDark={isDark} />
-                    <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className={`md:hidden divide-y rounded-xl border ${isDark ? 'divide-[#3E4145] border-[#3E4145]' : 'divide-slate-100 border-slate-200'}`}>
-          {FEATURE_GROUPS().map((group) => {
-            const Icon = group.icon;
-            return (
-              <div key={group.title} className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Icon size={16} className="text-amber-500" />
-                  <span className={`text-sm font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{group.title}</span>
-                </div>
-                <div className="space-y-3">
-                  {group.items.map((item) => (
-                    <div key={item.name} className={`rounded-lg border p-3 ${softPanelClass}`}>
-                      <div className={`text-sm mb-2 ${isDark ? 'text-[#BDC1C6]' : 'text-slate-700'}`}>{item.name}</div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <div className={mutedTextClass}>{tr("基础版")}</div>
-                          <FeatureValue value={item.free} tone="free" isDark={isDark} />
-                        </div>
-                        <div>
-                          <div className="text-amber-500">{tr("会员版")}</div>
-                          <FeatureValue value={item.vip} tone="vip" isDark={isDark} />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <h3 className={`text-lg font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("记录与售后")}</h3>
-          <p className={`text-xs mt-1 ${mutedTextClass}`}>{tr("集中查看激活记录、备注、复制历史和重签说明。")}</p>
-        </div>
-        <ActivationRecordsPanel
-          theme={t}
-          showToast={showToast}
-          refreshKey={`${vipStatus.activated}-${vipStatus.issuedAt || ''}-${vipStatus.expiresAt || ''}-${activationRecordsRefreshKey}`}
-          recordData={activationRecordData}
-        />
-      </section>
-
-      {/* 支付向导模态框 */}
-      {payWizardOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={closePayWizard}>
-          <div
-            className={`w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-white border-slate-200'}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="relative px-6 py-5 bg-gradient-to-br from-amber-500/20 via-yellow-500/15 to-orange-500/10 border-b border-amber-500/20">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center shadow-lg">
-                  <Crown size={22} className="text-white" />
-                </div>
-                <div className="flex-1">
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("开通会员")}</h3>
-                  {/* 步骤指示器 */}
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    {[tr("选套餐"), tr("选支付"), tr("扫码"), tr("完成")].map((label, i) => (
-                      <div key={i} className="flex items-center gap-1.5">
-                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-colors ${i <= payStep ? 'bg-amber-500 text-white' : isDark ? 'bg-[#3E4145] text-[#80868B]' : 'bg-slate-200 text-slate-400'}`}>
-                          {i < payStep ? <Check size={11} /> : i + 1}
-                        </div>
-                        {i < 3 && <div className={`w-4 h-px ${i < payStep ? 'bg-amber-500' : isDark ? 'bg-[#3E4145]' : 'bg-slate-200'}`} />}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button onClick={closePayWizard} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-[#9AA0A6] hover:bg-[#3E4145] hover:text-[#E8EAED]' : 'text-[#9AA0A6] hover:bg-slate-100 hover:text-slate-600'}`}>
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div className="px-6 py-5 min-h-[280px]">
-              {/* Step 0: 选择套餐 */}
-              {payStep === 0 && (
-                <div className="space-y-3">
-                  <p className={`text-sm mb-4 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("选择您需要的会员套餐")}</p>
-                  {PLANS().map((plan) => (
-                    <button
-                      key={plan.id}
-                      onClick={() => { setSelectedPlan(plan.id); setPayStep(1); }}
-                      className={`w-full text-left p-4 rounded-xl border-2 transition-all hover:shadow-md ${selectedPlan?.id === plan.id ? 'border-amber-500 bg-amber-500/5' : isDark ? 'border-[#3E4145] hover:border-[#5F6368]' : 'border-slate-200 hover:border-slate-300'}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center">
-                            <Crown size={20} className="text-white" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className={`font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{plan.name}</span>
-                              {plan.badge && (
-                                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-500/20 text-amber-600 border border-amber-500/30">{plan.badge}</span>
-                              )}
-                            </div>
-                            <p className={`text-xs mt-0.5 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{plan.desc}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-lg font-bold text-amber-500">{plan.priceLabel}</span>
-                          <ChevronRight size={18} className={isDark ? 'text-[#5F6368]' : 'text-slate-300'} />
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Step 1: 选择支付方式 */}
-              {payStep === 1 && (
-                <div className="space-y-3">
-                  <p className={`text-sm mb-4 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("选择支付方式 · ")}<span className="text-amber-500 font-medium">{selectedPlan?.name} {selectedPlan?.priceLabel}</span>
-                  </p>
-                  {PAYMENT_METHODS().map((method) => {
-                    const Icon = method.icon;
-                    return (
-                      <button
-                        key={method.id}
-                        onClick={() => { setSelectedMethod(method.id); setPayStep(2); }}
-                        className={`w-full text-left p-4 rounded-xl border-2 transition-all hover:shadow-md ${selectedMethod?.id === method.id ? 'border-amber-500 bg-amber-500/5' : isDark ? 'border-[#3E4145] hover:border-[#5F6368]' : 'border-slate-200 hover:border-slate-300'}`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${method.bgColor}`}>
-                              <Icon size={20} className={method.color} />
-                            </div>
-                            <span className={`font-medium ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{method.name}</span>
-                          </div>
-                          <ChevronRight size={18} className={isDark ? 'text-[#5F6368]' : 'text-slate-300'} />
-                        </div>
-                      </button>
-                    );
-                  })}
-                  <button onClick={() => setPayStep(0)} className={`mt-2 text-xs ${isDark ? 'text-[#80868B] hover:text-[#E8EAED]' : 'text-slate-400 hover:text-slate-600'} transition-colors`}>{tr("← 返回选择套餐")}</button>
-                </div>
-              )}
-
-              {/* Step 2: 扫码支付 */}
-              {payStep === 2 && (
-                <div className="flex flex-col items-center">
-                  <p className={`text-sm mb-4 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{tr("请使用")}<span className={`font-medium ${selectedMethod?.color}`}> {selectedMethod?.name} </span>{tr("扫描下方二维码付款")}</p>
-                  {/* 二维码占位图（替换 assets/ 下的真实图片即可） */}
-                  <div className="w-48 h-48 rounded-xl overflow-hidden border-2 border-slate-200 shadow-md">
-                    <img src={selectedMethod?.qrPlaceholder} alt={tr("{0}收款码", { 0: selectedMethod?.name })} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="mt-4 text-center">
-                    <span className={`text-2xl font-bold text-amber-500`}>{selectedPlan?.priceLabel}</span>
-                    <p className={`text-xs mt-1 ${isDark ? 'text-[#80868B]' : 'text-slate-400'}`}>{selectedPlan?.name}</p>
-                  </div>
-                  <div className="flex gap-2 mt-5">
-                    <button onClick={() => setPayStep(1)} className={`px-4 py-2 text-sm rounded-lg transition-colors ${isDark ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>{tr("返回")}</button>
-                    <button
-                      onClick={() => setPayStep(3)}
-                      className="px-5 py-2 text-sm rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 transition-all active:scale-95"
-                    >{tr("我已完成支付")}</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 3: 完成 */}
-              {payStep === 3 && (
-                <div className="flex flex-col items-center py-4">
-                  <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-4">
-                    <Check size={32} className="text-emerald-500" />
-                  </div>
-                  <h4 className={`text-lg font-bold mb-2 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("支付信息已记录")}</h4>
-                  <p className={`text-sm text-center max-w-xs mb-4 ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>
-                    {CONTACT_INFO().note}
-                  </p>
-                  {/* 一键复制机器码 */}
-                  <button
-                    onClick={copyMachineId}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-mono transition-colors ${isDark ? 'bg-[#3E4145] text-[#E8EAED] hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                  >
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? tr("已复制！") : tr("复制本机机器码")}
-                  </button>
-                  <button
-                    onClick={onPayComplete}
-                    className="mt-5 px-6 py-2.5 rounded-lg font-medium text-white bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 transition-all active:scale-95 shadow-sm"
-                  >{tr("去激活")}</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
-function FeatureValue({ value, tone, isDark }) {
-  useLocale();
-  const text = typeof value === 'boolean' ? '' : String(value || '-');
-  const isAvailable = value === true;
-  const isUnavailable = value === false;
-  const color = tone === 'vip'
-    ? 'text-amber-500'
-    : isAvailable
-      ? 'text-emerald-500'
-      : isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
+function getMembershipStatus(status, locale) {
+  if (status.reason === 'loading') return { title: tr('正在加载会员信息…') };
+  if (['vip_status_failed', 'status_unavailable', 'machine_id_failed', 'not_ready'].includes(status.reason)) {
+    return { unavailable: true, title: tr('会员状态暂不可用'), detail: tr('无法读取本机授权，请重试。') };
+  }
+  if (status.activated) {
+    if (status.scope === 'free') {
+      return { title: tr('已验证基础授权'), detail: tr('此授权不包含会员 AI 分析或 AI 工具权限。') };
+    }
+    const expirationDate = status.expiresAt > 0 ? new Date(status.expiresAt * 1000) : null;
+    const expiry = expirationDate && Number.isFinite(+expirationDate)
+      ? tr('有效期至 {0}', { 0: expirationDate.toLocaleDateString(locale) })
+      : tr('订阅授权');
+    return {
+      active: true,
+      title: tr('会员版'),
+      detail: status.type === 'lifetime' ? tr('永久有效，感谢您的支持') : expiry,
+    };
+  }
+  if (status.reason === 'expired') {
+    return { expired: true, title: tr('会员授权已到期'), detail: tr('续期后可继续使用会员权益。') };
+  }
+  const detail = status.reason && status.reason !== 'no_token'
+    ? activationErrorMessage(status.reason)
+    : tr('升级会员后解锁多设备、完整产物和深度分析能力');
+  return { title: tr('基础版'), detail };
+}
+
+export default function MemberCenter({ theme, vipStatus, onActivated, onReturn, onRetry, showToast }) {
+  const locale = useLocale();
+  const dark = isDarkTheme(theme);
+  const status = getMembershipStatus(vipStatus, locale);
+  const loading = vipStatus.reason === 'loading';
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [error, setError] = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
+  const [supportError, setSupportError] = useState(false);
+  const [copiedMachineId, setCopiedMachineId] = useState('');
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsRefresh, setRecordsRefresh] = useState(0);
+  const activationPending = useRef(false);
+  const tokenInput = useRef(null);
+  const benefits = useRef(null);
+  const tokenId = useId();
+  const manualId = useId();
+  const recordsId = useId();
+  const muted = dark ? 'text-[#9AA0A6]' : 'text-slate-500';
+  const heading = dark ? 'text-[#E8EAED]' : 'text-slate-800';
+  const card = `rounded-xl border shadow-sm ${dark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
+  const panel = dark ? 'bg-[#2D2F33]/70 border-[#3E4145]' : 'bg-slate-50 border-slate-200';
+  const secondary = `inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50 ${dark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`;
+
+  async function activate(event) {
+    event.preventDefault();
+    const value = token.trim();
+    if (!value || activationPending.current) return;
+    activationPending.current = true;
+    setBusy(true);
+    setError('');
+    let result;
+    try {
+      result = await window.electronAPI.vipActivate(value);
+    } catch {
+      setError('activation_failed');
+      return;
+    } finally {
+      activationPending.current = false;
+      setBusy(false);
+    }
+    if (result?.success !== true || result.status?.activated !== true) {
+      setError(result?.error || 'status_unverified');
+      return;
+    }
+    setToken('');
+    setManualOpen(false);
+    setRecordsRefresh(previous => previous + 1);
+    showToast?.(result.status.scope === 'free' ? tr('已验证基础授权') : tr('会员激活成功，感谢支持！'));
+    onActivated?.(result.status);
+  }
+
+  async function retryStatus() {
+    setRetrying(true);
+    try {
+      await onRetry?.();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  async function copyMachineId() {
+    const { machineId } = vipStatus;
+    if (!machineId) return;
+    try {
+      await navigator.clipboard.writeText(machineId);
+    } catch {
+      showToast?.(tr('复制失败'));
+      return;
+    }
+    setCopiedMachineId(machineId);
+    showToast?.(tr('机器码已复制'));
+    try {
+      await window.electronAPI?.vipAddCopyHistory?.({ kind: 'machineId', value: machineId });
+      setRecordsRefresh(previous => previous + 1);
+    } catch {
+      // Copy history does not determine whether the clipboard write succeeded.
+    }
+  }
+
+  async function openSupport() {
+    setSupportError(false);
+    try {
+      await window.electronAPI.vipOpenSupport();
+    } catch {
+      setSupportError(true);
+    }
+  }
+
+  function viewBenefits() {
+    benefits.current?.focus({ preventScroll: true });
+    benefits.current?.scrollIntoView({ block: 'start' });
+  }
+
+  const copyButton = (
+    <button type="button" className={secondary} onClick={copyMachineId} disabled={!vipStatus.machineId}>
+      <Copy size={15} className="shrink-0" />
+      <span aria-live="polite">{copiedMachineId && copiedMachineId === vipStatus.machineId ? tr('已复制') : tr('复制机器码')}</span>
+    </button>
+  );
 
   return (
-    <div className={`text-sm font-medium sm:text-center ${color}`}>
-      {isAvailable ? (
-        <span className="inline-flex items-center gap-1">
-          <Check size={14} />{tr("可用")}</span>
-      ) : isUnavailable ? (
-        <span className="inline-flex items-center gap-1">
-          <X size={14} />{tr("不可用")}</span>
-      ) : text}
+    <div className="w-full min-w-0 space-y-4">
+      <section className={`p-4 sm:p-6 ${card} ${status.active ? 'border-amber-500/40' : ''}`} aria-busy={loading || retrying || busy}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${status.active ? 'bg-amber-500/20 text-amber-500' : panel + ' border ' + muted}`}>
+              {loading || retrying ? <Loader2 size={22} className="animate-spin" /> : status.active ? <Crown size={22} /> : <Lock size={19} />}
+            </div>
+            <div className="min-w-0">
+              <h3 className={`break-words text-xl font-semibold ${heading}`}>{status.title}</h3>
+              {status.detail && <p className={`mt-1 break-words text-sm ${muted}`}>{status.detail}</p>}
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {status.active && <button type="button" onClick={viewBenefits} className={secondary}>{tr('查看会员权益')}</button>}
+            {status.unavailable && <button type="button" onClick={retryStatus} disabled={retrying || !onRetry} className={secondary}><RefreshCw size={15} className={retrying ? 'animate-spin' : ''} />{tr('重试')}</button>}
+            {onReturn && <button type="button" data-membership-return onClick={onReturn} disabled={busy} className={secondary}><ArrowLeft size={15} className="shrink-0" />{tr('返回原操作')}</button>}
+          </div>
+        </div>
+
+        {!loading && !status.active && (
+          <div className={`mt-5 rounded-xl border p-3 sm:p-4 ${panel}`}>
+            <form onSubmit={activate} className="space-y-2">
+              <label htmlFor={tokenId} className={`block text-sm font-medium ${heading}`}>{tr('已有激活码')}</label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <textarea
+                  id={tokenId}
+                  ref={tokenInput}
+                  value={token}
+                  onChange={event => { setToken(event.target.value); if (error) setError(''); }}
+                  placeholder={tr('在此粘贴激活码…')}
+                  disabled={busy}
+                  aria-invalid={!!error}
+                  aria-describedby={error ? `${tokenId}-error` : undefined}
+                  autoComplete="off"
+                  spellCheck={false}
+                  rows={2}
+                  className={`w-full min-w-0 resize-y rounded-lg border px-3 py-2 font-mono text-sm focus-visible:ring-2 focus-visible:ring-amber-400 ${dark ? 'border-[#5F6368] bg-[#202124] text-[#E8EAED]' : 'border-slate-200 bg-white text-slate-700'}`}
+                />
+                <button type="submit" disabled={busy || !token.trim()} className={`shrink-0 ${primaryButton}`}>
+                  {busy ? <Loader2 size={16} className="shrink-0 animate-spin" /> : <KeyRound size={16} className="shrink-0" />}
+                  {busy ? tr('正在激活…') : tr('激活会员')}
+                </button>
+              </div>
+              {error && <p id={`${tokenId}-error`} role="alert" className={`text-sm ${dark ? 'text-red-300' : 'text-red-700'}`}>{activationErrorMessage(error)}</p>}
+            </form>
+
+            <button type="button" aria-controls={manualId} aria-expanded={manualOpen} onClick={() => setManualOpen(open => !open)} className={`mt-3 ${secondary}`}>
+              {status.expired ? tr('续期方式') : tr('开通方式')}
+              <ChevronDown size={15} className={`shrink-0 ${manualOpen ? 'rotate-180' : ''}`} />
+            </button>
+            <div id={manualId} hidden={!manualOpen} className="mt-4">
+              <h4 className={`text-sm font-semibold ${heading}`}>{tr('人工开通')} · {tr('终身买断')} · ¥99</h4>
+              <ol className={`mt-3 list-decimal space-y-3 pl-5 text-sm ${muted}`}>
+                <li><span className={heading}>{tr('复制本机信息')}</span><div className="mt-1">{copyButton}</div></li>
+                <li>
+                  <span className={heading}>{tr('联系开发者获取激活码')}</span>
+                  <p className="mt-1">{tr('请通过私下沟通发送机器码，获取绑定本机的激活码。')}</p>
+                  <p className="mt-1">{tr('在项目反馈中询问开通联系方式。请勿公开机器码或激活码。')}</p>
+                  <button type="button" className={`mt-2 ${secondary}`} onClick={openSupport}>{tr('打开项目反馈')}</button>
+                  {supportError && <p className={`mt-1 ${dark ? 'text-red-300' : 'text-red-700'}`} role="alert">{tr('未能打开项目反馈。')}</p>}
+                </li>
+                <li><button type="button" onClick={() => tokenInput.current?.focus()} disabled={busy} className={`${heading} underline underline-offset-2 disabled:opacity-50`}>{tr('粘贴激活码')}</button><p className="mt-1">{tr('获取后在上方粘贴激活码，再提交确认。')}</p></li>
+              </ol>
+              {!vipStatus.machineId && <p className={`mt-3 text-sm ${muted}`}>{tr('机器码暂不可用，请重试。')}</p>}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section ref={benefits} tabIndex={-1} aria-label={tr('查看会员权益')} className="scroll-mt-4 focus-visible:outline-amber-400">
+        <MembershipBenefits theme={theme} />
+      </section>
+
+      {!loading && (
+        <section className={card}>
+          <button type="button" aria-expanded={recordsOpen} aria-controls={recordsId} onClick={() => setRecordsOpen(open => !open)} className={`flex w-full items-center justify-between gap-3 rounded-xl p-4 text-left text-sm font-semibold focus-visible:ring-2 focus-visible:ring-amber-400 ${heading}`}>
+            {tr('会员记录与重签')}
+            <ChevronDown size={16} className={`shrink-0 ${recordsOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div id={recordsId} hidden={!recordsOpen} className="space-y-3 px-4 pb-4">
+            <div className={`rounded-lg border p-3 ${panel}`}>
+              <h4 className={`text-sm font-medium ${heading}`}>{tr('本机机器码')}</h4>
+              <p className={`mt-1 text-xs ${muted}`}>{tr('如需重签，请复制机器码并联系开发者。')}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <code className={`min-w-0 break-all text-xs ${heading}`}>{vipStatus.machineId || tr('机器码暂不可用，请重试。')}</code>
+                {copyButton}
+              </div>
+            </div>
+            {recordsOpen && <ActivationRecordsPanel theme={theme} showToast={showToast} refreshKey={recordsRefresh} />}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

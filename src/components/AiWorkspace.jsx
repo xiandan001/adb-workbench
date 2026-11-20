@@ -40,7 +40,7 @@ function SelectionCards({ items, selected, onToggle, disabled, theme, empty }) {
   </label>)}</div>;
 }
 
-export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', applicationContext, incomingHandoffId = '', incomingReportRef, onOpenTasks, onOpenRelatedTask, onOpenMembership, showToast }) {
+export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', applicationContext, incomingHandoffId = '', incomingReportRef, onOpenTasks, onOpenRelatedTask, onOpenMembership, membershipActive, showToast }) {
   useLocale();
   const state = useAiWorkspace({ active, devices, activeDeviceId, applicationContext, incomingHandoffId, incomingReportRef, onOpenTasks, showToast });
   const { mode, current, sources, loading, sourceError } = state;
@@ -57,7 +57,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     });
   };
   const dark = isDarkTheme(theme); const busy = Boolean(current.busy || state.reportBusy);
-  const entitled = sources.entitled === true;
+  const entitled = (membershipActive ?? sources.entitled) === true;
   const online = workspaceDeviceOnline(devices, current.deviceId);
   const onlineDevices = devices.filter(device => device.status === 'device');
   const availableSources = new Set((sources.sources || []).map(source => source.id));
@@ -94,7 +94,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     {state.reportError && <p role="alert" className="rounded-lg border border-red-500/25 p-3 text-xs text-red-500">{state.reportError}</p>}
     {state.pendingReport && <div className={`flex items-center gap-3 rounded-xl border p-3 ${theme.card}`}><p className="flex-1 text-xs">{tr('有一份报告等待查看；当前输入和进行中的操作会保留。')}</p><button type="button" disabled={busy || Object.values(state.cases).some(value => value.busy)} onClick={state.acceptPendingReport} className={button}>{tr('打开待查看报告')}</button></div>}
     {(state.pendingHandoff || state.pendingBasket) && <div className={`flex items-center gap-3 rounded-xl border p-3 ${theme.card}`}><p className="flex-1 text-xs">{state.pendingHandoff && !state.pendingHandoff.basketItem ? tr('带入新上下文会替换当前输入；已完成报告会保留。') : tr('新材料已加入本地证据篮；应用后保留问题与报告，重新核对预览。')}</p><button type="button" disabled={Boolean(state.reportBusy) || Object.values(state.cases).some(value => value.busy)} onClick={state.pendingHandoff ? state.acceptPendingHandoff : state.refreshBasket} className={button}>{tr('带入等待中的上下文')}</button></div>}
-    {!entitled && !loading && <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${theme.card}`}><ShieldCheck size={21} className="shrink-0 text-emerald-500" /><p className={`min-w-0 flex-1 text-xs leading-5 ${theme.textMuted}`}>{tr('AI 调用沿用本软件会员权限。请在会员中心确认激活；无需新建 AI 账号。')}</p><button type="button" onClick={onOpenMembership} disabled={!onOpenMembership} className={button}>{tr('打开会员中心')}</button></div>}
+    {!entitled && !loading && <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${theme.card}`}><ShieldCheck size={21} className="shrink-0 text-emerald-500" /><p className={`min-w-0 flex-1 text-xs leading-5 ${theme.textMuted}`}>{tr('AI 调用沿用本软件会员权限。请在会员中心确认激活；无需新建 AI 账号。')}</p><button type="button" onClick={() => onOpenMembership?.({ deviceId: current.deviceId })} disabled={!onOpenMembership} className={button}>{tr('打开会员中心')}</button></div>}
     <div role="tablist" aria-label={tr('AI 工作区功能')} className="grid gap-2 md:grid-cols-3">{modes.map(item => <button key={item.id} type="button" role="tab" id={`ai-workspace-tab-${item.id}`} aria-selected={mode === item.id} aria-controls={`ai-workspace-panel-${item.id}`} onClick={() => state.setMode(item.id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${mode === item.id ? (dark ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700') : theme.card}`}>
       <item.icon size={20} className="shrink-0" /><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{item.title}</span><span className={`mt-1 block text-[11px] ${theme.textMuted}`}>{item.detail}</span></span>{state.cases[item.id].busy && <Loader2 size={15} className="shrink-0 animate-spin" />}
     </button>)}</div>

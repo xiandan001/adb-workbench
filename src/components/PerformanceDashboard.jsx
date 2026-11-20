@@ -207,9 +207,9 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   }, [applyReportTask]);
 
   const requireVip = (featureName) => {
-    if (isVip) return true;
-    showToast?.(tr("{0}需要会员版", { 0: featureName }));
-    onOpenMemberCenter?.();
+    if (hasVipAccess) return true;
+    if (isVipLoading) return false;
+    onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: featureName });
     return false;
   };
 

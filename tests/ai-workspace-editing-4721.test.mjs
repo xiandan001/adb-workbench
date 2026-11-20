@@ -52,8 +52,9 @@ test('log workset context only updates local selections and queues running captu
   const ast = parser.parse(source, { sourceType: 'module', plugins: ['jsx'] }); let body;
   traverse(ast, { VariableDeclarator({ node }) { if (node.id.name === 'applyContext') body = source.slice(node.init.arguments[0].start, node.init.arguments[0].end); } });
   assert.ok(body); const changes = [], runningRef = { current: true }, aiAnalyzingRef = { current: false };
+  const membershipOriginRef = { current: null };
   const context = { deviceId: 'workset-device', worksetLogs: { filter: { text: 'error', tag: 'Fixture' }, buffers: ['crash'] } };
-  const apply = vm.runInNewContext(`(${body})`, { runningRef, aiAnalyzingRef, clearTimeout() {}, filterDebounceRef: {}, tr: value => value,
+  const apply = vm.runInNewContext(`(${body})`, { runningRef, aiAnalyzingRef, membershipOriginRef, clearTimeout() {}, filterDebounceRef: {}, tr: value => value,
     hydratedRef: { current: true }, smartSearchingRef: { current: false }, importFlightRef: { current: null }, latestDocument: { current: null },
     explicitPreference: { current: '' }, preparedContext: { current: null }, preparedBufferTarget: { current: '' },
     setTargetField() {}, readTargetView: () => ({ buffers: ['main'], filter: {} }), compatibleFor: (_id, buffers) => buffers, setScopeBuffers() {},
@@ -64,6 +65,8 @@ test('log workset context only updates local selections and queues running captu
   changes.length = 0; runningRef.current = false; apply(context);
   assert.deepEqual(changes[0], ['device', 'workset-device']); assert.deepEqual(changes[1], ['filter', context.worksetLogs.filter]);
   assert.deepEqual(changes[3], ['buffers', ['crash']]); assert.deepEqual(changes[4], ['pending', null]);
+  changes.length = 0; membershipOriginRef.current = { deviceId: 'original-device' }; apply(context);
+  assert.equal(changes.length, 1); assert.equal(changes[0][0], 'pending'); assert.equal(changes[0][1].manual, true);
   assert.doesNotMatch(body, /logAnalyzerStart|aiAnalyze|connect|runAdb/);
   assert.match(source, /useLogWorksetMemory\(\{ deviceId, filter: rememberedFilter, buffers \}\)/);
   assert.match(source, /rememberedFilter = source === 'file' \|\| captureDeviceId && captureDeviceId !== deviceId \? forTargetView\(deviceId, 'realtime'\)\.filter : filter/);

@@ -34,8 +34,10 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
   const state = { devices: initialRows, active: initialRows[0]?.id || '', loading: false, error: '' };
   let navigation = { activeTab: page, sshVisited: false, aiToolsVisited: false, aiVisited: false }, effectIndex, refIndex, memoIndex, timerId = 0;
   const target = name => ({ addEventListener: (event, callback) => listeners.set(name + ':' + event, callback), removeEventListener: event => listeners.delete(name + ':' + event) });
+  const membershipOriginRef = { current: null };
   const context = {
     tr, singleFlight, resolveActiveDeviceId, historyVersion: { current: 0 }, worksetTargetRef: { current: '' }, devicesRef: { current: initialRows },
+    membershipOriginRef, rememberMembershipOrigin: origin => { membershipOriginRef.current = origin; },
     document: { ...target('document'), visibilityState: 'visible' },
     window: { ...target('window'), electronAPI: {
       getDevices: async () => { calls.push('getDevices'); return discover(); }, loadAllSettings: async () => ({ success: true, data: {} }),
@@ -57,7 +59,7 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
       jobs.push(() => { slot.cleanup?.(); slot.cleanup = callback(); });
     },
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id),
-    refreshVipStatus() {}, setCustomThemes() {}, setCustomThemesLoaded() {}, setConnectionHistory() {}, setTerminalCommandHistory() {}, setHarmonyTerminalCommandHistory() {},
+    setCustomThemes() {}, setCustomThemesLoaded() {}, setConnectionHistory() {}, setTerminalCommandHistory() {}, setHarmonyTerminalCommandHistory() {},
     inspectionPathLoadedRef: { current: false }, performancePathLoadedRef: { current: false }, taskCenterPathLoadedRef: { current: false }, qualityCenterPathLoadedRef: { current: false },
   };
   const program = `(function renderEntry(navigation) { const { activeTab } = navigation; ${ordered.map(node => source.slice(node.start, node.end)).join('\n')} return { fetchDevices, setActiveTab, sidebar: { ${[...sidebar].map(([pageName, callback]) => JSON.stringify(pageName) + ': ' + callback).join(',')} } }; })`;

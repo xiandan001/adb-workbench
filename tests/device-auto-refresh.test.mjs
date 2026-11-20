@@ -58,7 +58,7 @@ function appDiscoveryHarness(initialRows = []) {
   const state = { devices: [], active: '', error: '' };
   const fetch = runInNewContext(`(${fetchCallback})`, {
     window: { electronAPI: { getDevices: async () => backendRows } }, tr, resolveActiveDeviceId,
-    worksetTargetRef: { current: '' }, devicesRef: { current: [] }, setLoading() {},
+    membershipOriginRef: { current: null }, worksetTargetRef: { current: '' }, devicesRef: { current: [] }, setLoading() {},
     setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); },
     setError: value => { state.error = value; },
@@ -168,7 +168,7 @@ test('selection feedback is brief, once per unavailable selection change, never 
 
 test('free device card follows the current selection while remaining limited to one device', () => {
   const devices = [{ id: 'wifi', status: 'offline' }, { id: 'usb', status: 'device' }];
-  const evaluate = isVipOrLoading => runInNewContext(eligibleExpression, { devices, activeDevice: devices[1], isVipOrLoading });
+  const evaluate = isVipOrLoading => runInNewContext(eligibleExpression, { deviceCards: devices, activeDevice: devices[1], isVipOrLoading });
   assert.deepEqual(Array.from(evaluate(false)), [devices[1]]);
   assert.equal(evaluate(true), devices);
 });

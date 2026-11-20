@@ -1,0 +1,5 @@
+{
+  "freeDeviceLimit": 1,
+  "freeConnectionHistoryLimit": 5,
+  "storedConnectionHistoryLimit": 20
+}

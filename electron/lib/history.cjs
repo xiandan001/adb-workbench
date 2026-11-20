@@ -7,9 +7,8 @@ const path = require('path');
 const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const ctx = require('./app-context.cjs');
+const { storedConnectionHistoryLimit: MAX_HISTORY_SIZE } = require('./membership-limits.json');
 
-// 连接历史记录上限
-const MAX_HISTORY_SIZE = 20;
 // 终端命令历史记录上限
 const MAX_TERMINAL_HISTORY_SIZE = 100;
 const terminalFile = deviceId => String(deviceId || '').startsWith('hdc:') ? 'hdc_terminal_command_history.json' : 'terminal_command_history.json';

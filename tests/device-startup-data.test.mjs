@@ -27,7 +27,7 @@ traverse(ast, {
   },
 });
 
-async function fetchState(api, previous = [], active = '', worksetTarget = '') {
+async function fetchState(api, previous = [], active = '', worksetTarget = '', membershipOrigin = null) {
   assert.ok(fetchCallback);
   const state = { devices: previous, active, error: '', loading: false };
   const callback = runInNewContext(`(${source.slice(fetchCallback.start, fetchCallback.end)})`, {
@@ -37,6 +37,7 @@ async function fetchState(api, previous = [], active = '', worksetTarget = '') {
     setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); },
     resolveActiveDeviceId,
+    membershipOriginRef: { current: membershipOrigin },
     worksetTargetRef: { current: worksetTarget },
     devicesRef: { current: previous },
     setError: value => { state.error = value; },
@@ -101,6 +102,16 @@ test('startup clears an absent remembered selection after successful discovery a
   assert.equal(empty.active, '');
   const reconnected = await fetchState({ getDevices: async () => [{ id: 'new-usb', status: 'device' }] }, empty.devices, empty.active);
   assert.equal(reconnected.active, 'new-usb');
+});
+
+test('an original membership device remains selected when discovery only finds another device', async () => {
+  const rows = [{ id: 'other-online', status: 'device' }];
+  for (const open of [true, false]) {
+    const state = await fetchState({ getDevices: async () => rows }, [], 'original', '', { open, activeDeviceId: 'original' });
+    assert.equal(state.active, 'original');
+    assert.deepEqual(state.devices, rows);
+    assert.equal(state.error, '');
+  }
 });
 
 test('startup discovery rejection is not treated as proof the remembered device disconnected', async () => {

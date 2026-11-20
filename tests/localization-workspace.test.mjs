@@ -66,10 +66,7 @@ test('language changes update static options and terminal labels without recreat
   assert.match(source('SelectMenu.jsx'), /aria-label=\{ariaLabel\}/);
 });
 
-test('membership availability and tutorial dismiss behavior use stable values, not translated labels', () => {
-  assert.match(source('MemberCenter.jsx'), /const isAvailable = value === true/);
-  assert.match(source('MemberCenter.jsx'), /const isUnavailable = value === false/);
-  assert.match(source('MemberCenter.jsx'), /plan\.id === selectedPlanId/);
+test('tutorial dismiss behavior uses a stable value, not a translated label', () => {
   assert.match(source('TaskCenterOnboarding.jsx'), /dismissMode === 'close'/);
   assert.doesNotMatch(source('TaskCenterOnboarding.jsx'), /dismissLabel ===/);
 });

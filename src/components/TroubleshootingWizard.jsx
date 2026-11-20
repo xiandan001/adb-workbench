@@ -463,7 +463,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
               {!hasVip && !isVipLoading && (
                 <button
                   type="button"
-                  onClick={onOpenMemberCenter}
+                  onClick={() => onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: tr('设备巡检报告与证据包') })}
                   className="text-xs text-amber-400 flex items-center gap-1"
                 >
                   <Lock size={12} />{tr("会员")}</button>

@@ -455,8 +455,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // VIP 会员体系
   vipGetStatus: () => ipcRenderer.invoke('vip:getStatus'),
   vipGetMachineId: () => ipcRenderer.invoke('vip:getMachineId'),
+  vipOpenSupport: () => ipcRenderer.invoke('vip:openSupport'),
   vipActivate: (token) => ipcRenderer.invoke('vip:activate', token),
   vipDeactivate: () => ipcRenderer.invoke('vip:deactivate'),
+  onVipStatusChanged: (callback) => {
+    const listener = safeListener(callback);
+    ipcRenderer.on('vip:statusChanged', listener);
+    return () => ipcRenderer.off('vip:statusChanged', listener);
+  },
   // 会员激活记录、备注与复制历史
   vipGetActivationRecords: () => ipcRenderer.invoke('vip:getActivationRecords'),
   vipUpdateActivationRecordNote: (args) => ipcRenderer.invoke('vip:updateActivationRecordNote', args),

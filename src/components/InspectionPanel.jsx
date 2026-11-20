@@ -10,6 +10,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
   useLocale();
   const t = theme || {};
   const isDark = isDarkTheme(t);
+  const isOnline = device?.status === 'device';
   const isVipLoading = !vipStatus || vipStatus.reason === 'loading';
   const isVip = vipStatus?.activated === true;
   const [includeBugreport, setIncludeBugreport] = useState(false);
@@ -72,7 +73,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
   const soft = isDark ? 'bg-[#3E4145]/60 border-[#5F6368]' : 'bg-slate-50 border-slate-200';
 
   const startInspection = async () => {
-    if (!isVip || isVipLoading) return;
+    if (!isVip || isVipLoading || !isOnline) return;
     const initialProgress = { index: 0, total: includeBugreport ? 19 : 18, stepLabel: tr("准备巡检"), status: 'running' };
     setRunning(true);
     setProgress(initialProgress);
@@ -157,6 +158,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
           </button>
         </div>
 
+        {!isOnline && <p role="status" className="px-5 pt-3 text-xs text-amber-500">{tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。')}</p>}
         {isVipLoading ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-6">
             <div className={`p-5 rounded-xl border flex items-center gap-4 ${soft}`}>
@@ -181,10 +183,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
                 <div className="workbench-dialog-actions mt-5">
                   <button onClick={closePanel} className={`px-4 py-2 text-sm rounded-lg border ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>{tr("知道了")}</button>
                   <button
-                    onClick={() => {
-                      closePanel();
-                      onOpenMemberCenter?.();
-                    }}
+                    onClick={() => onOpenMemberCenter?.(tr('设备巡检'))}
                     className="px-4 py-2 text-sm rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-medium"
                   >{tr("去开通")}</button>
                 </div>
@@ -308,7 +307,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
               {running ? (
                 <button onClick={cancelInspection} className="px-4 py-2 text-sm rounded-lg bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/20">{tr("取消巡检")}</button>
               ) : (
-                <button onClick={startInspection} className="px-5 py-2 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2">
+                <button onClick={startInspection} disabled={!isOnline} className="px-5 py-2 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
                   <Archive size={15} />{tr("开始巡检")}</button>
               )}
             </div>
