@@ -1,6 +1,6 @@
 import { tr } from './i18n.js';
 export const UI_WORKSPACE_KEY = 'adb-workbench.ui-workspace.v1';
-const PAGES = ['devices', 'serial', 'ssh', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'history', 'settings', 'member', 'artifacts', 'ai-tools'];
+const PAGES = ['devices', 'firmware', 'serial', 'ssh', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'history', 'settings', 'member', 'artifacts', 'ai-tools'];
 export const defaultUiWorkspace = () => ({ version: 2, density: 'full', expandedDeviceIds: [], deviceQuery: '', scrollPositions: {}, lastPage: 'devices' });
 const fail = () => { throw new Error(tr('界面现场设置无效，原数据已保留。')); };
 const hasControl = value => Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);

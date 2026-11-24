@@ -1,7 +1,7 @@
 import { tr, useLocale } from '../shared/i18n';
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck } from 'lucide-react';
+import { Camera, Video, ScrollText, Shield, Save, RotateCcw, Loader, Unlock, Package, Terminal, Download, Upload, FolderOpen, Folder, File, ChevronDown, ChevronRight, ArrowLeft, Copy, RefreshCw, Send, Loader2, Maximize2, Minimize2, X, ClipboardCheck, HardDriveDownload } from 'lucide-react';
 import themes from '../data/themes';
 import DeviceCardHeader from './DeviceCardHeader';
 import ControlButton from './ControlButton';
@@ -33,7 +33,7 @@ function DeviceTerminalSurface({ fullscreen, children }) {
   return fullscreen && typeof document !== 'undefined' ? createPortal(children, document.body) : children;
 }
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full', mirrorSession, onRetryMirror, onMirrorDiagnostics, onRememberMirror, onForgetMirror }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onOpenFirmware, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full', mirrorSession, onRetryMirror, onMirrorDiagnostics, onRememberMirror, onForgetMirror }) {
   useLocale();
   const isOnline = device.status === 'device';
   const harmony = isHarmonyDevice(device);
@@ -447,6 +447,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
           <DeviceRecordingStatus recording={recording} isOnline={isOnline} theme={t} showToast={showToast} />
         </section>
         {showSecondaryTools && <section className="device-control-section" aria-label={tr("设备维护")}>
+          <div className="device-control-toolbar">
           <button
             type="button"
             aria-expanded={maintenanceOpen}
@@ -457,6 +458,11 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             className={`device-control-heading device-maintenance-toggle ${t.textMuted}`}
           >
             <ChevronDown size={14} className={maintenanceOpen ? '' : '-rotate-90'} />{tr("设备维护")}</button>
+            {onOpenFirmware && <button type="button" onClick={onOpenFirmware}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs ${t.button.secondary}`}>
+              <HardDriveDownload size={14} aria-hidden="true" />{tr('固件刷机')}
+            </button>}
+          </div>
           {maintenanceOpen && <div className="device-tool-grid device-maintenance-grid">
             <ControlButton
               icon={<Shield size={16} />}

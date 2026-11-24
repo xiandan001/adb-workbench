@@ -60,6 +60,7 @@ const { getMainWindowBounds } = require('./lib/main-window-bounds.cjs');
 const { confirmSerialQuit } = require('./lib/serial-quit.cjs');
 const { confirmRecordingQuit } = require('./lib/recording-quit.cjs');
 const environmentCheck = require('./lib/environment-check.cjs');
+const firmwareWorkspace = require('./lib/firmware-workspace.cjs');
 const regressionReport = require('./lib/regression-report.cjs');
 const acceptanceSuite = require('./lib/acceptance-suite.cjs');
 const deviceGuard = require('./lib/device-guard.cjs');
@@ -259,6 +260,7 @@ app.whenReady().then(async () => {
   workbenchWorksets.register(diagnosticIpc);
   reproduction.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
+  firmwareWorkspace.register(diagnosticIpc);
   regressionReport.register(diagnosticIpc);
   acceptanceSuite.register(diagnosticIpc);
   deviceGuard.register(diagnosticIpc);

@@ -213,7 +213,8 @@ test('all five locales keep navigation labels readable by wrapping while changel
   assert.equal(declaration('.workbench-sidebar-nav > button > span', 'overflow-wrap'), 'anywhere');
   assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'flex-shrink'), '0');
   const labels = [...navigation.matchAll(/<span className="font-medium">\{tr\(['"]([^'"]+)['"]\)\}<\/span>/g)].map(match => match[1]);
-  assert.equal(labels.length, 13);
+  assert.equal(labels.length, 14);
+  assert.ok(labels.includes('固件刷机'));
   for (const locale of locales) for (const label of labels) {
     assert.ok(rendererMessage(label, {}, locale).trim(), `${locale}: ${label}`);
   }

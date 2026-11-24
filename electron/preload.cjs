@@ -147,6 +147,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('serial:changed', listener);
   },
   getDevices,
+  firmwareStatus: platform => ipcRenderer.invoke('firmware:status', platform),
+  firmwareChooseTools: platform => ipcRenderer.invoke('firmware:chooseTools', platform),
+  firmwareChooseFile: platform => ipcRenderer.invoke('firmware:chooseFile', platform),
+  firmwareInstallDriver: platform => ipcRenderer.invoke('firmware:installDriver', platform),
+  firmwareOpenTool: platform => ipcRenderer.invoke('firmware:openTool', platform),
+  firmwareOpenVendorHelp: platform => ipcRenderer.invoke('firmware:openVendorHelp', platform),
   startScrcpy: (deviceId, settings, options) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings, ...(options ? { options } : {}) }),
   mirrorGetState: () => ipcRenderer.invoke('mirror:state'),
   mirrorConfirmProfile: args => ipcRenderer.invoke('mirror:confirm', args),

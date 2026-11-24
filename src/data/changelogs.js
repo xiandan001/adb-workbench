@@ -3,6 +3,13 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.8': {
+    title: 'v4.8.8',
+    date: '2026-11-24',
+    items: [
+      { type: 'feature', get text() { return tr('新增固件刷机工作区，支持 RK 和 MTK 驱动检测与安装、固件预检及厂商工具启动。'); } },
+    ],
+  },
   '4.8.7': {
     title: 'v4.8.7',
     date: '2026-11-24',

@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles, HardDriveDownload } from 'lucide-react';
 import './index.css';
 import './styles/workbenchLayout.css';
 import brandIcon from '../assets/brand/icon-128.png';
@@ -61,6 +61,7 @@ import SerialPanel from './components/SerialPanel';
 const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
 const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspace'));
 const AiWorkspace = lazy(() => import('./components/AiWorkspace'));
+const FirmwareWorkspace = lazy(() => import('./components/FirmwareWorkspace'));
 
 async function requestAiTools(command, args = {}) {
   const response = await window.electronAPI.aiToolsRequest({ command, args });
@@ -97,6 +98,7 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const [firmwareEntry, setFirmwareEntry] = useState(null);
   const [aiUsageTarget, setAiUsageTarget] = useState(null);
   const [membershipOrigin, setMembershipOrigin] = useState(null);
   const membershipOriginRef = useRef(null);
@@ -1840,6 +1842,16 @@ function App() {
             <span className="font-medium">{tr("设备列表")}</span>
           </button>
           <button
+            type="button"
+            onClick={() => { setFirmwareEntry(null); setActiveTab('firmware'); }}
+            aria-current={activeTab === 'firmware' ? 'page' : undefined}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'firmware' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
+            style={{ WebkitAppRegion: 'no-drag' }}
+          >
+            <HardDriveDownload size={20} />
+            <span className="font-medium">{tr('固件刷机')}</span>
+          </button>
+          <button
             onClick={() => setActiveTab('serial')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'serial' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
@@ -1985,7 +1997,7 @@ function App() {
           <div className="workbench-header-title" style={{ flex: '1 1 18rem', minWidth: 'min(100%, 18rem)' }}>
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
+              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'firmware' ? tr('固件刷机') : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr('通过串口或网络连接设备，收发调试数据。')}</p>}
@@ -2173,6 +2185,13 @@ function App() {
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}
                       onReboot={() => handleReboot(device.id)}
                       onRebootLoader={() => handleRebootLoader(device.id)}
+                      onOpenFirmware={() => {
+                        const hint = [device.model, device.manufacturer, device.board].filter(Boolean).join(' ');
+                        const platformHint = /rockchip|\brk\d{4}\b/i.test(hint) ? 'rk'
+                          : /mediatek|\bmt\d{4}\b/i.test(hint) ? 'mtk' : null;
+                        setFirmwareEntry({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, requestId: crypto.randomUUID() });
+                        setActiveTab('firmware');
+                      }}
                       onUnlock={() => handleUnlock(device.id)}
                       onRoot={() => handleRoot(device.id)}
                       onRemount={() => handleRemount(device.id)}
@@ -2234,6 +2253,11 @@ function App() {
             </>
           )}
 
+          {activeTab === 'firmware' && (
+            <Suspense fallback={<Loader2 className="animate-spin" />}>
+              <FirmwareWorkspace theme={t} entryDevice={firmwareEntry} />
+            </Suspense>
+          )}
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} navigationRequest={serialNavigation} onNavigationHandled={setSerialNavigation} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>

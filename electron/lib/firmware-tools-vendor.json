@@ -1,0 +1,27 @@
+{
+  "rk": {
+    "RKDevTool.exe": "2084abdd625fc9c2028c9d59d6288e508a68080339ca765db72958e156b9a45e",
+    "bin/adb.exe": "b40abda76f72462483a95321caf431b752b7988de0f92bcb0ba27bf6e3b86bfc",
+    "bin/AdbWinApi.dll": "d60103a5e99bc9888f786ee916f5d6e45493c3247972cb053833803de7e95cf9",
+    "bin/AdbWinUsbApi.dll": "25207c506d29c4e8dceb61b4bd50e8669ba26012988a43fbf26a890b1e60fc97",
+    "bin/AFPTool.exe": "685f743429f1767a2c46d12c272bd3976fd0ff647239442a6ba89dfe54915626",
+    "bin/RKImageMaker.exe": "de2f9db5dd5778bca9c344a6f88a390cc72526323f2461d4b77c0e701253bcba"
+  },
+  "mtk": {
+    "SPFlashToolV6.exe": "14dea1527ff86d217b1e16177ab1776d5ad7fcbfa9a7419454f7485ce97fb48f",
+    "flash.dll": "c6094a3853bdf0b7f4d382641529b45e73f2ed1e71cca4d3828685c935a4211e",
+    "imageChecker.dll": "2906306e02d09abbf36cfd249980a2ccbe6ecadd49534d4553939990bcfc465a",
+    "libeay32.dll": "097d73def5a5797611282b3f36e7d8b197362b20b0daf6f532f5e54925c28232",
+    "Qt5Core.dll": "b967ade09a9338320e0db4e5da11a2ac396950f0eed689b28bd31686b7baf018",
+    "Qt5Gui.dll": "ab160992f30dc69b97feedd2fcaf7528a56fc98a3f30a166c1076589340ac8be",
+    "Qt5Network.dll": "ddc9894e36231d749265155ba02f2d70ec5e006cea34010750b220ce49ce391a",
+    "Qt5SerialPort.dll": "46e356bf6cfb218507c0d3f1f106417d104b8af70c7e2c0a0887e4eaf0a6fee1",
+    "Qt5Widgets.dll": "4a12866260ff266eeffe0b4d8eaf27ed064682f00e8907bd53956f446e23c496",
+    "Qt5Xml.dll": "398f670ea5dc065e7796346bca1c2ad5d2c01b1325a93e82ef921f5f36769d06",
+    "Qt5XmlPatterns.dll": "6e11361425d4ccef2d9b91a1d038e7996f8d62934b6dc5b9f593442a02e99c18",
+    "SLA_Challenge.dll": "3afa217793fbc4f8fb8671fec07ae77d09c65ade7bb0f8ac3c34b95271a16349",
+    "ssleay32.dll": "ea5523026bb5171f1978501998dbc41abb79a0ad5f00da141f65865afa6cf346",
+    "plugins/platforms/qwindows.dll": "2565fe1111bf0ba6b98683030b8da92f77da877d0a981f712184e4ce5018b723",
+    "plugins/styles/qwindowsvistastyle.dll": "424ba260332cf1d7b45813032ecba9150f59fb5c5f966eae63675e376e3d0ed1"
+  }
+}

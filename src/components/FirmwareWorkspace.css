@@ -1,0 +1,19 @@
+.firmware-workspace {
+  container: firmware / inline-size;
+}
+
+.firmware-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@container firmware (min-width: 55rem) {
+  .firmware-steps {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .firmware-vendor-step {
+    grid-column: 1 / -1;
+  }
+}
