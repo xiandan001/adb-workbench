@@ -1,4 +1,4 @@
-const { types } = require('node:util');
+const { promisify, types } = require('node:util');
 const { normalizeCodeArguments, own } = require('./application-log-text.cjs');
 const { safeDiagnosticChannel } = require('./app-diagnostic-log.cjs');
 const { toolIdentity, safeToolText } = require('./application-log-tools.cjs');
@@ -18,7 +18,7 @@ function installCodeHooks({ consoleObject, childProcess, record, isEnabled, obse
   }
   for (const name of ['spawn', 'exec', 'execFile', 'fork', 'spawnSync', 'execFileSync', 'execSync']) {
     const original = childProcess?.[name]; if (typeof original !== 'function') continue;
-    const replacement = function (...args) {
+    const invoke = (fn, receiver, args, promiseResult = false) => {
       const tool = name === 'fork' ? 'node' : name.startsWith('exec') && !name.includes('File') ? 'other' : toolIdentity(args[0]), started = now();
       const policy = ['spawn', 'execFile', 'spawnSync', 'execFileSync'].includes(name) ? classifyToolCall(args[0], args[1] || []) : { tool, operation: 'process', stdout: 'sensitive', stderr: 'sensitive' };
       const output = (value, stream) => { if (isEnabled() && policy[stream] === 'text' && (typeof value === 'string' || Buffer.isBuffer(value))) {
@@ -29,15 +29,24 @@ function installCodeHooks({ consoleObject, childProcess, record, isEnabled, obse
         capture({ source: 'tool', event: 'output', tool, operation: policy.operation, stream, outputMode: 'text', ...normalized });
       } };
       try {
-        const value = Reflect.apply(original, this, args);
+        const value = Reflect.apply(fn, receiver, args);
         if (name.endsWith('Sync')) {
           output(name === 'spawnSync' ? own(value, 'stdout') : value, 'stdout'); output(own(value, 'stderr'), 'stderr');
           capture({ source: 'tool', event: 'exit', tool, operation: policy.operation, exitCode: own(value, 'status') ?? 0, durationMs: Math.max(0, now() - started) });
-        } else { try { observeToolProcess(value, policy); } catch { /* Observation does not change a successful spawn. */ } }
+        } else { try { observeToolProcess(promiseResult ? value.child : value, policy); } catch { /* Observation does not change a successful spawn. */ } }
         return value;
       } catch (error) { output(own(error, 'stdout'), 'stdout'); output(own(error, 'stderr'), 'stderr');
         capture({ source: 'tool', event: 'failure', tool, operation: policy.operation, durationMs: Math.max(0, now() - started) }); throw error; }
     };
+    const replacement = function (...args) { return invoke(original, this, args); };
+    const promised = original[promisify.custom];
+    if (typeof promised === 'function') {
+      // Node's native exec/execFile promise preserves both streams and the child handle.
+      Object.defineProperty(replacement, promisify.custom, {
+        value: function (...args) { return invoke(promised, this, args, true); },
+        configurable: true,
+      });
+    }
     childProcess[name] = replacement; removers.push(() => { if (childProcess[name] === replacement) childProcess[name] = original; });
   }
   return () => { for (const remove of removers.reverse()) remove(); };
