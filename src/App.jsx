@@ -97,6 +97,7 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const [aiUsageTarget, setAiUsageTarget] = useState(null);
   const [membershipOrigin, setMembershipOrigin] = useState(null);
   const membershipOriginRef = useRef(null);
   const rememberMembershipOrigin = useCallback(origin => {
@@ -1638,7 +1639,8 @@ function App() {
   return (
     <div className={`workbench-shell flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
-      <AiOutboundPreviewHost isDark={isDark} />
+      <AiOutboundPreviewHost isDark={isDark} usageTarget={activeTab === 'ai-workspace' ? aiUsageTarget : null}
+        usageHidden={activeTab === 'ai-workspace' && !aiUsageTarget} />
       {membershipOrigin?.open && <MembershipDialog feature={membershipOrigin.feature} capability={membershipOrigin.capability} theme={t}
         status={vipStatus} onRetry={refreshVipStatus} onActivated={activateMembership} onReturn={returnFromMembership} showToast={showToast} />}
       {reproductionTarget && <ReproductionDialog key={`${reproductionTarget.deviceId}:${reproductionTarget.sessionId || ''}`} theme={t} devices={devices}
@@ -2235,7 +2237,7 @@ function App() {
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} navigationRequest={serialNavigation} onNavigationHandled={setSerialNavigation} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
             <Suspense fallback={<div className={`p-6 ${t.textMuted}`}><Loader2 className="animate-spin" /></div>}>
-              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId}
+              <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId} usageTargetRef={setAiUsageTarget}
                 incomingReportRef={incomingReportRef}
                 onOpenRelatedTask={({ runId, scriptId }) => { if (runId) openTaskRun(runId); else if (scriptId) { setActivityTaskId(''); setAiTaskId(scriptId); setActiveTab('tasks'); } }}
                 showToast={showToast} onOpenMembership={openMembership} membershipActive={canUseMembershipFeature(vipStatus, 'ai-workspace')}

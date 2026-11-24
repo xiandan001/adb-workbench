@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
@@ -9,7 +10,7 @@ const { prepareBatch } = require('../electron/lib/ai-outbound-policy.cjs');
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function until(predicate) { for (let index = 0; index < 200; index++) { if (predicate()) return; await tick(); } assert.fail('Legacy fixture did not settle'); }
-function fixture({ map = false, status = 200 } = {}) {
+function fixture({ map = false, status = 200, report } = {}) {
   const events = [], calls = [], handlers = new Map();
   const owner = Object.assign(new EventEmitter(), { mainFrame: {}, isDestroyed: () => false, send: (channel, payload) => events.push({ channel, payload }) });
   const entries = Array.from({ length: 1203 }, (_, index) => ({ id: `row-${index}`, raw: `log ${index} password=raw-private`, message: `log ${index} password=raw-private`, ts: 1, level: 'E', tag: 'Fixture' }));
@@ -65,8 +66,14 @@ function fixture({ map = false, status = 200 } = {}) {
         if (request === './log-analyzer.cjs') return { getLogStore: () => ({ realtime: entries }), getCurrentLogSource: () => 'realtime', getLogcatProc: () => null };
         if (request === './version.cjs') return { getAppVersion: () => 'fixture' };
         if (request === './vip.cjs') return { getStatusAsync: async () => ({ activated: true, scope: 'vip' }) };
-        if (request === './app-context.cjs') return {};
-        if (request === 'electron') return { app: { getPath: () => assert.fail('No real profile access') }, dialog: {} };
+        if (request === './app-context.cjs') return report ? { getMainWindow: () => ({ isDestroyed: () => false, webContents: owner }) } : {};
+        if (request === 'electron') return report
+          ? { app: { getPath: () => report.root }, dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [report.filename] }) } }
+          : { app: { getPath: () => assert.fail('No real profile access') }, dialog: {} };
+        if (report && request === './adb-runtime.cjs') return { runAdb: () => assert.fail('Legacy AI report must not collect from ADB') };
+        if (report && ['./membership-entitlements.cjs', './troubleshooting-summary.cjs', './ai-workspace-redaction.cjs'].includes(request)) {
+          return require('../electron/lib/' + request.slice(2));
+        }
         if (request.startsWith('.')) return {};
         return require(request);
       } }, { filename: file });
@@ -127,6 +134,43 @@ test('actual diagnostic and generic job summary cancellation perform no model ca
   const summary = f.api.generateAiSummary({ systemPrompt: 'fixture report summary', userContent: original.report });
   await f.decide(await f.pending(), 'cancel');
   assert.equal((await summary).cancelled, true); assert.equal(original.report, 'synthetic completed evidence'); assert.equal(f.calls.length, 0);
+});
+
+test('actual legacy Markdown picker and retry require a fresh confirmed report preview without rewriting evidence', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'veylo-response-consent-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const filename = path.join(root, 'old-evidence.md');
+  const evidence = '# Old report\n\nObserved a crash. password=evidence-private\nLocal path C:/private-folder';
+  fs.writeFileSync(filename, evidence);
+  const f = fixture({ report: { root, filename } });
+  t.after(() => f.transport.cleanup());
+  f.load('troubleshooting.cjs').register({ handle: (name, fn) => f.handlers.set(name, fn) });
+  const choose = f.handlers.get('troubleshooting:chooseReport');
+  const generate = f.handlers.get('troubleshooting:generateSummary');
+  assert.equal((await choose({ sender: f.owner, senderFrame: {} })).ok, false);
+  const { report } = await choose(f.event);
+  assert.equal(report.legacy, true);
+  assert.equal(report.evidenceSources.report, true);
+  assert.equal(report.evidenceSources.logs, false);
+  const cancelled = generate(f.event, report.reportRef);
+  const first = await f.pending();
+  assert.equal(f.calls.length, 0);
+  await f.decide(first, 'cancel');
+  assert.equal((await cancelled).cancelled, true);
+  assert.equal(f.calls.length, 0);
+  const pending = generate(f.event, report.reportRef);
+  const second = await f.pending();
+  assert.notEqual(second.id, first.id);
+  const { selectedRequest: preview } = f.transport.gate.get(f.owner, { previewId: second.id, index: 0 });
+  assert.match(JSON.stringify(preview.messages), /Observed a crash/);
+  assert.doesNotMatch(JSON.stringify(preview.messages), /evidence-private|private-folder/);
+  await f.decide(second);
+  const completed = await pending;
+  assert.equal(completed.ok, true);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].messages, preview.messages);
+  assert.equal(fs.readFileSync(filename, 'utf8'), evidence);
+  assert.ok(fs.existsSync(completed.summaryPath));
 });
 
 test('actual MCP AI tool is independently gated and cannot authorize itself or retry server errors', async t => {

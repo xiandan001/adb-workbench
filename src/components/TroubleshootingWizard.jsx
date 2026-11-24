@@ -15,7 +15,6 @@ import {
   Play,
   Search,
   ShieldAlert,
-  Sparkles,
   Smartphone,
   Square,
   Zap
@@ -24,6 +23,7 @@ import { isDarkTheme } from '../shared/theme';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
 import { nextTroubleshootingContext } from '../shared/troubleshootingContext';
 import { canUseMembershipFeature } from '../shared/membershipEntitlements';
+import { LegacyReportSummary, ReportSummaryAction } from './TroubleshootingReportSummary';
 
 const ISSUE_OPTIONS = () => ([
   { id: 'crash', label: tr("应用闪退/崩溃"), icon: ShieldAlert },
@@ -304,13 +304,13 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     if (res && !res.ok) showToast?.(tr("打开失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
-  const updateAiSummary = (taskId, aiSummary) => {
-    const update = report => report?.taskId === taskId ? { ...report, aiSummary } : report;
+  const updateAiSummary = (taskId, aiSummary, aiSummaryPath) => {
+    const update = report => report?.taskId === taskId ? { ...report, aiSummary, aiSummaryPath } : report;
     setResult(update);
     setSavedReport(update);
   };
   const openSummaryMembership = report => onOpenMemberCenter?.({
-    deviceId: report.deviceId, feature: tr('AI 总结'), capability: 'ai-analysis'
+    deviceId: report.legacy ? activeDeviceId : report.deviceId, feature: tr('AI 总结'), capability: 'ai-analysis'
   });
   const reportPanelProps = { isDark, text, muted, soft, onOpenPath: openPath, canGenerateSummary,
     isVipLoading, onOpenSummaryMembership: openSummaryMembership, onAiSummary: updateAiSummary };
@@ -326,6 +326,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
 
   return (
     <div className="space-y-5">
+      <LegacyReportSummary {...reportPanelProps} panel={panel} />
       <section className={`rounded-xl border ${panel} overflow-hidden`}>
         <div className={`px-5 py-4 border-b ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
           <div className="flex items-center justify-between gap-4">
@@ -605,51 +606,10 @@ function ResultPanel({ result, isDark, text, muted, soft, onOpenPath, ...summary
         )}
       </div>
       {ok && result.aiSummaryAvailable === true && (
-        <ReportSummaryAction result={result} muted={muted} isDark={isDark} {...summaryProps} />
+        <ReportSummaryAction result={result} muted={muted} isDark={isDark} onOpenPath={onOpenPath} {...summaryProps} />
       )}
     </div>
   );
-}
-
-function ReportSummaryAction({ result, muted, isDark, canGenerateSummary, isVipLoading, onOpenSummaryMembership, onAiSummary }) {
-  const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState('');
-  const running = useRef(false);
-
-  const generate = async () => {
-    if (running.current || !result.reportRef) return;
-    if (!canGenerateSummary) {
-      onOpenSummaryMembership(result);
-      return;
-    }
-    running.current = true;
-    setPending(true);
-    setFailure('');
-    try {
-      const response = await window.electronAPI?.troubleshootingGenerateSummary?.(result.reportRef);
-      if (response?.ok && response.taskId === result.taskId) onAiSummary(response.taskId, response.aiSummary);
-      else setFailure(response?.cancelled ? tr('AI 发送已取消。') : response?.error || tr('AI 总结异常'));
-    } catch { setFailure(tr('AI 总结异常')); }
-    finally { running.current = false; setPending(false); }
-  };
-  const cancel = async () => {
-    try { await window.electronAPI?.troubleshootingCancelSummary?.(result.taskId); }
-    catch { setFailure(tr('AI 总结异常')); }
-  };
-  const button = `px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`;
-  return <div className="mt-4 border-t border-current/10 pt-3" aria-busy={pending}>
-    {result.aiSummary?.ok ? <p role="status" className={`text-sm ${muted}`}>{tr('AI 总结已写入报告')}</p> : <>
-      <p className={`mb-2 text-xs ${muted}`}>{tr('报告已保存。可使用本次证据生成 AI 总结，无需重新采集。')}</p>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={generate} disabled={pending || isVipLoading} className={button}>
-          {pending ? <Loader2 size={15} className="animate-spin" /> : canGenerateSummary ? <Sparkles size={15} /> : <Lock size={15} />}
-          {pending ? tr('正在生成 AI 总结') : failure ? tr('重试 AI 总结') : tr('生成 AI 总结')}
-        </button>
-        {pending && <button type="button" onClick={cancel} className={button}>{tr('取消')}</button>}
-      </div>
-      {failure && <p role="status" className="mt-2 text-xs text-amber-500">{failure}</p>}
-    </>}
-  </div>;
 }
 
 function DeviceSelect({ value, options, isDark, disabled, onChange }) {

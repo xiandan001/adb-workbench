@@ -1,9 +1,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { atomicWriteAsync } = require('./ai-workspace-store-async.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const { tr } = require('./localization.cjs');
+const { readLegacyEvidence, readLegacySummary, writeLegacySummary, samePath } = require('./troubleshooting-legacy-material.cjs');
 
 const REPORT = 'troubleshooting-report.md';
 const SUMMARY = 'troubleshooting-summary.json';
@@ -15,10 +17,6 @@ const directoryValid = value => typeof value === 'string' && value.length <= 255
   /^\d{4}-\d{2}-\d{2}T[\d-]+Z-[^/\\:*?"<>|]+$/.test(value);
 const idValid = value => typeof value === 'string' && /^trouble-[a-z\d-]{1,80}$/i.test(value);
 const unavailable = () => new Error(tr('原报告不存在、已变化或不可写入，未更新 AI 总结。'));
-
-const samePath = (actual, expected) => process.platform === 'win32'
-  ? path.resolve(actual).toLowerCase() === path.resolve(expected).toLowerCase()
-  : path.resolve(actual) === path.resolve(expected);
 
 async function readFile(file, maxBytes) {
   const stat = await fs.lstat(file);
@@ -40,11 +38,17 @@ async function writeSummaryMaterial(outputDir, { taskId, platform, payload }) {
 
 function createTroubleshootingSummary({ getRoot, getStatus, generate, formatLines }) {
   const active = new Map();
+  const selected = new WeakMap();
 
-  async function readReport(ref) {
-    if (!idValid(ref?.taskId) || !directoryValid(ref?.directory)) throw unavailable();
-    const dir = path.join(await fs.realpath(getRoot()), ref.directory);
+  async function reportDirectory(directory) {
+    if (!directoryValid(directory)) throw unavailable();
+    const dir = path.join(await fs.realpath(getRoot()), directory);
     if (!samePath(await fs.realpath(dir), dir)) throw unavailable();
+    return dir;
+  }
+
+  async function readReport(ref, dir) {
+    if (!idValid(ref?.taskId)) throw unavailable();
     const reportFile = path.join(dir, REPORT);
     const summaryFile = path.join(dir, SUMMARY);
     const [report, originalSummary, materialText] = await Promise.all([
@@ -60,6 +64,43 @@ function createTroubleshootingSummary({ getRoot, getStatus, generate, formatLine
       reportPrefix: report.slice(0, marker + AI_SECTION.length + 2) };
   }
 
+  async function legacyReport(evidence, ref) {
+    const metadata = evidence.metadata;
+    const reportPath = evidence.markdownPath;
+    const filename = path.basename(reportPath);
+    const previous = metadata?.aiSummary?.ok === true && typeof metadata.aiSummary.summary === 'string'
+      ? { aiSummary: { ok: true, summary: metadata.aiSummary.summary.slice(0, 96 * 1024) } } : {};
+    return {
+      ok: true, legacy: true, taskId: ref.taskId, title: filename, filename,
+      deviceId: typeof metadata?.deviceId === 'string' ? metadata.deviceId.slice(0, 255) : '',
+      reportPath, outputDir: path.dirname(reportPath), reportRef: ref, aiSummaryAvailable: true,
+      evidenceSources: evidence.evidenceSources, evidenceLimited: evidence.evidenceLimited,
+      ...previous, ...await readLegacySummary(getRoot, evidence)
+    };
+  }
+
+  async function choose(markdownPath, sender) {
+    try {
+      const folder = await fs.realpath(path.dirname(markdownPath));
+      const evidence = await readLegacyEvidence(path.join(folder, path.basename(markdownPath)));
+      const importId = randomUUID();
+      const ref = { importId, taskId: 'trouble-import-' + importId };
+      selected.set(sender, { ref, markdownPath: evidence.markdownPath, fingerprint: evidence.fingerprint });
+      return { ok: true, report: await legacyReport(evidence, ref) };
+    } catch {
+      return { ok: false, error: tr('无法读取这份 Markdown 报告。请确认文件可读、非空且不超过 2 MiB。') };
+    }
+  }
+
+  async function savedMetadata(dir) {
+    try { return JSON.parse(await readFile(path.join(dir, SUMMARY), REPORT_BYTES)); }
+    catch { return null; }
+  }
+
+  function legacyTaskId(evidence) {
+    return evidence.metadata?.taskId || 'trouble-legacy-' + evidence.sourceKey.slice(0, 24);
+  }
+
   async function latest() {
     try {
       const root = await fs.realpath(getRoot());
@@ -67,22 +108,42 @@ function createTroubleshootingSummary({ getRoot, getStatus, generate, formatLine
         .map(entry => entry.name).sort().reverse().slice(0, 32);
       for (const directory of dirs) {
         try {
-          const dir = path.join(root, directory);
-          if (!samePath(await fs.realpath(dir), dir)) continue;
-          const summary = JSON.parse(await readFile(path.join(dir, SUMMARY), REPORT_BYTES));
-          if (summary.ok !== true || !idValid(summary.taskId) || typeof summary.deviceId !== 'string') continue;
+          const dir = await reportDirectory(directory);
+          const summary = await savedMetadata(dir);
           const reportPath = path.join(dir, REPORT);
           const stat = await fs.lstat(reportPath);
           if (!stat.isFile() || stat.isSymbolicLink()) continue;
-          return { ...summary, outputDir: dir, reportPath, summaryPath: path.join(dir, SUMMARY) };
+          if (summary?.aiSummaryAvailable === true && summary.ok === true && idValid(summary.taskId)) {
+            return { ...summary, outputDir: dir, reportPath, summaryPath: path.join(dir, SUMMARY) };
+          }
+          const evidence = await readLegacyEvidence(reportPath, { trustedBundle: true });
+          return legacyReport(evidence, { taskId: legacyTaskId(evidence), directory });
         } catch { /* Ignore incomplete or unavailable reports. */ }
       }
     } catch { /* No previous report exists. */ }
     return null;
   }
 
+  async function initialEvidence(ref, sender) {
+    if (ref.importId) {
+      const choice = selected.get(sender);
+      if (!choice || choice.ref.importId !== ref.importId || choice.ref.taskId !== ref.taskId) throw unavailable();
+      const evidence = await readLegacyEvidence(choice.markdownPath);
+      if (evidence.fingerprint !== choice.fingerprint) throw unavailable();
+      return { evidence, material: evidence.material };
+    }
+    const dir = await reportDirectory(ref.directory);
+    const summary = await savedMetadata(dir);
+    if (summary?.aiSummaryAvailable === true) return readReport(ref, dir);
+    const evidence = await readLegacyEvidence(path.join(dir, REPORT), { trustedBundle: true });
+    if (legacyTaskId(evidence) !== ref.taskId) throw unavailable();
+    return { evidence, material: evidence.material };
+  }
+
   async function run(ref, sender) {
-    if (!idValid(ref?.taskId) || !directoryValid(ref?.directory)) return { ok: false, error: unavailable().message };
+    if (!idValid(ref?.taskId) || (!directoryValid(ref?.directory) && typeof ref?.importId !== 'string')) {
+      return { ok: false, error: unavailable().message };
+    }
     const key = ref.taskId;
     if (active.size > 0) return { ok: false, error: tr('正在生成 AI 总结') };
     const job = { sender };
@@ -93,16 +154,22 @@ function createTroubleshootingSummary({ getRoot, getStatus, generate, formatLine
         return { ok: false, code: 'AI_SEND_VIP', error: tr('AI 分析需要有效会员授权。') };
       }
       let initial;
-      try { initial = await readReport(ref); }
+      try { initial = await initialEvidence(ref, sender); }
       catch { return { ok: false, error: unavailable().message }; }
-      if (initial.summary.aiSummary?.ok) return { ok: true, taskId: key, aiSummary: initial.summary.aiSummary };
+      if (initial.summary?.aiSummary?.ok) return { ok: true, taskId: key, aiSummary: initial.summary.aiSummary };
       if (lifetime.signal.aborted) return { ok: false, cancelled: true };
       const response = await generate(initial.material, lifetime.signal);
       if (lifetime.signal.aborted || response?.cancelled) return { ok: false, cancelled: true };
       if (!response?.ok || !response.summary?.trim()) return { ok: false, code: response?.code, error: response?.error || tr('AI 总结为空') };
       const aiSummary = { ok: true, summary: response.summary };
       try {
-        const current = await readReport(ref);
+        const current = await initialEvidence(ref, sender);
+        if (initial.evidence) {
+          if (current.evidence?.fingerprint !== initial.evidence.fingerprint) throw unavailable();
+          if (lifetime.signal.aborted) return { ok: false, cancelled: true };
+          const summaryPath = await writeLegacySummary(getRoot, initial.evidence, aiSummary.summary);
+          return { ok: true, taskId: key, aiSummary, summaryPath };
+        }
         if (current.report !== initial.report || current.originalSummary !== initial.originalSummary
           || current.materialText !== initial.materialText) throw unavailable();
         if (lifetime.signal.aborted) return { ok: false, cancelled: true };
@@ -131,7 +198,7 @@ function createTroubleshootingSummary({ getRoot, getStatus, generate, formatLine
     return { ok: true, cancelled: true };
   }
 
-  return { run, latest, cancel };
+  return { run, latest, choose, cancel };
 }
 
 module.exports = { AI_SECTION, createTroubleshootingSummary, writeSummaryMaterial };

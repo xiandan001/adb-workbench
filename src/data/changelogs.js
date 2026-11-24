@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.8.7': {
+    title: 'v4.8.7',
+    date: '2026-11-24',
+    items: [
+      { type: 'feature', get text() { return tr('旧排查报告可复用本机已有证据生成或重试 AI 总结，支持仅有 Markdown 的报告。'); } },
+      { type: 'improve', get text() { return tr('优化 AI 工作区布局，常用输入、发送预览与结果更容易找到。'); } },
+    ],
+  },
   '4.8.6': {
     title: 'v4.8.6',
     date: '2026-11-24',

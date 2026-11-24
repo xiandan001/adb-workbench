@@ -1,0 +1,31 @@
+.ai-workspace-shell {
+  container: ai-workspace / inline-size;
+}
+
+.ai-workspace-grid {
+  display: grid;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.ai-workspace-section-link {
+  scroll-margin-block: 1rem;
+}
+
+.ai-workspace-mode-tabs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container ai-workspace (min-width: 35rem) {
+  .ai-workspace-mode-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container ai-workspace (min-width: 57rem) {
+  .ai-workspace-grid {
+    grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.2fr);
+  }
+}

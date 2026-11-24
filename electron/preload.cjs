@@ -535,6 +535,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   troubleshootingStart: (args) => ipcRenderer.invoke('troubleshooting:start', args),
   troubleshootingCancel: () => ipcRenderer.invoke('troubleshooting:cancel'),
   troubleshootingState: () => ipcRenderer.invoke('troubleshooting:state'),
+  troubleshootingChooseReport: () => ipcRenderer.invoke('troubleshooting:chooseReport'),
   troubleshootingGenerateSummary: (report) => ipcRenderer.invoke('troubleshooting:generateSummary', report),
   troubleshootingCancelSummary: (taskId) => ipcRenderer.invoke('troubleshooting:cancelSummary', taskId),
   troubleshootingOpenFolder: (folderPath) => ipcRenderer.invoke('troubleshooting:openFolder', folderPath),
