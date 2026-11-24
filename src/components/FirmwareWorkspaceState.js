@@ -16,10 +16,18 @@ export function resolveFirmwarePlatform(selection, entryDevice) {
   return selection.platform;
 }
 
+export function firmwareDriverAction(status, readError) {
+  if (readError || !(status?.installer?.available || status?.installer?.canChoose)) return null;
+  if (status.state === 'installed' || status.state === 'bound') return 'reinstall';
+  if (status.state === 'problem' && status.driverPackage) return 'reinstall';
+  return status.state === 'missing' || status.state === 'problem' ? 'install' : null;
+}
+
 function installError() { return tr('安装驱动失败，请检查工具目录和 Windows 授权。'); }
 
 function toolActionError(result, fallback) {
   if (result?.code === 'untrusted-package') return tr('工具文件校验未通过，请使用受支持的工具包。');
+  if (result?.code === 'signature-check-unavailable') return tr('Windows 暂时无法验证驱动签名，未安装驱动。');
   if (result?.code === 'tool-access-denied') return tr('Windows 阻止了厂商工具启动，请检查文件权限或安全策略。');
   if (result?.code === 'tool-exited-early') return tr('厂商工具启动后立即退出，请检查运行组件及工具目录。');
   return result?.error || fallback;

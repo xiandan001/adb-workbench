@@ -458,7 +458,7 @@ function configureAuto(event, value) {
 // electron-updater 打包后会自动读取 resources/app-update.yml 中的 publish 配置
 // 无需手动检测 electron-builder.json（该文件打包后不存在于 asar 中）
 
-function register(ipcMain) {
+function register(ipcMain, { canInstall = () => true } = {}) {
   if (!updatePoller) {
     updatePoller = createUpdatePoller({
       canRun: () => !isDev && !updaterStatus.downloaded && !refreshFlight && !quitAndInstallInProgress,
@@ -478,6 +478,7 @@ function register(ipcMain) {
 
   // 安装更新（退出应用并安装）
   ipcMain.handle('updater:install', async () => {
+    if (!canInstall()) return { success: false, error: tr('设备正在刷机，请保持连接。') };
     if (refreshFlight) return { success: false, error: tr('正在检查更新…') };
     if (updaterStatus.downloaded) {
       app.quit();

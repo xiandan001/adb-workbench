@@ -20,9 +20,10 @@ function callback(object, event) {
   assert.ok(result, `${object}.${event}`); return result;
 }
 
-function fixture({ launch, proceed = true, restart = false, logProceed = true, prepareLogs, reviewFault = async () => true, updateReady = true, liveLog = false } = {}) {
+function fixture({ launch, proceed = true, restart = false, logProceed = true, prepareLogs, reviewFault = async () => true, updateReady = true, liveLog = false, flashProtected = false } = {}) {
   const calls = [], dialogs = [], logFlow = []; const logState = { closing: false, blocked: false }; const owner = { isDestroyed: () => false };
   const context = {
+    directFirmware: { isProtected: () => flashProtected }, flashQuitNotice: null,
     logAnalyzer: { reviewFailedLogWindowForQuit: reviewFault },
     logCloseGuard: { confirmQuit: async () => { logFlow.push('review'); return { proceed: logProceed }; },
       allowQuit: () => { logState.closing = true; logFlow.push('lock'); return true; }, revokeQuit: () => { logState.closing = false; logFlow.push('revoke'); } },
@@ -47,6 +48,17 @@ function fixture({ launch, proceed = true, restart = false, logProceed = true, p
   let prevented = 0;
   return { calls, dialogs, state, logFlow, logState, event: () => ({ preventDefault: () => { prevented++; } }), prevented: () => prevented };
 }
+
+test('a protected firmware write stops close, normal quit and update handoff before any cleanup', async () => {
+  const f = fixture({ flashProtected: true });
+  f.state.close(f.event());
+  assert.deepEqual(f.calls, ['quit-request']);
+  await f.state.before(f.event());
+  assert.equal(f.prevented(), 2);
+  assert.deepEqual(f.calls, ['quit-request']);
+  assert.equal(f.logFlow.length, 0);
+  assert.equal(f.dialogs[0].message, '设备正在刷机，请保持连接。');
+});
 
 test('main waits for acknowledged launch before stopping any resource or diagnostic capture', async () => {
   let release; const pending = new Promise(resolve => { release = resolve; });

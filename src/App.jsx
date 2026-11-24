@@ -143,6 +143,7 @@ function App() {
   const [connectionFormOpen, setConnectionFormOpen] = useState(false);
   const [connectionResults, setConnectionResults] = useState({});
   const { sessions: mirrorSessions, error: mirrorStateError } = useMirrorSessions();
+  const [dismissedMirrorSessions, setDismissedMirrorSessions] = useState({});
   const connectingAddressesRef = useRef(new Set());
   const [scrcpySettings, setScrcpySettings] = useState(() => readMigratedPreference('scrcpySettings', {
     screenOff: false,
@@ -2181,7 +2182,8 @@ function App() {
                       deviceName={deviceNames[device.id]}
                       onNameChange={handleDeviceNameChange}
                       onStart={() => handleStartScrcpy(device.id)}
-                      mirrorSession={mirrorSessions[device.id]}
+                      mirrorSession={dismissedMirrorSessions[device.id] === mirrorSessions[device.id]?.id ? null : mirrorSessions[device.id]}
+                      onDismissMirrorStatus={id => setDismissedMirrorSessions(previous => ({ ...previous, [device.id]: id }))}
                       onRetryMirror={mode => handleStartScrcpy(device.id, { profileMode: mode })}
                       onMirrorDiagnostics={() => setDiagnosticOpen(true)}
                       onRememberMirror={() => handleMirrorProfile(device.id, 'remember')}
@@ -2195,7 +2197,9 @@ function App() {
                         const hint = [device.model, device.manufacturer, device.board].filter(Boolean).join(' ');
                         const platformHint = /rockchip|\brk\d{4}\b/i.test(hint) ? 'rk'
                           : /mediatek|\bmt\d{4}\b/i.test(hint) ? 'mtk' : null;
-                        openFirmware({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, requestId: crypto.randomUUID() });
+                        const targetHint = device.transport === 'adb' && device.status === 'device' &&
+                          /^[a-z0-9_-]{1,128}$/i.test(device.id) ? device.id : undefined;
+                        openFirmware({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, targetHint, requestId: crypto.randomUUID() });
                       }}
                       onUnlock={() => handleUnlock(device.id)}
                       onRoot={() => handleRoot(device.id)}

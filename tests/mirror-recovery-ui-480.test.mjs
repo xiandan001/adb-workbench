@@ -25,3 +25,23 @@ test('texture readiness is not labelled a confirmed picture, remembering is expl
   const ended = View({ ...props, session: { ...props.session, phase: 'exited', exitCode: 1, profileStatus: 'saved' } });
   assert.match(text(ended), /异常结束/); button(ended, '使用全局设置重试').props.onClick(); assert.deepEqual(actions, ['remember', 'global']);
 });
+
+test('successful Android and Harmony exits are hidden, but early exits and renderer failures can be dismissed', () => {
+  const View = component('DeviceMirrorStatus'), dismissed = [];
+  const device = { id: 'A', generation: 1, status: 'device' };
+  const base = { id: 'previous-session', deviceId: 'A', generation: 1, phase: 'exited' };
+  const render = session => View({ session, device, theme, onDismiss: id => dismissed.push(id) });
+  const collapse = tree => nodes(tree).find(node => node.type === 'button' && node.props['aria-label'] === '收起');
+
+  assert.equal(render({ ...base, reason: 'CLEAN_EXIT', exitCode: 0 }), null);
+  assert.equal(render({ ...base, reason: 'WINDOW_CLOSED' }), null);
+  assert.equal(render({ ...base, reason: 'USER_STOP' }), null);
+  const early = render({ ...base, reason: 'EARLY_EXIT', exitCode: 0 });
+  assert.match(text(early), /异常结束/);
+  collapse(early).props.onClick();
+  const crashed = render({ ...base, id: 'new-session', phase: 'failed', reason: 'WINDOW_CLOSED' });
+  assert.match(text(crashed), /异常结束/);
+  collapse(crashed).props.onClick();
+  assert.deepEqual(dismissed, ['previous-session', 'new-session']);
+  assert.equal(collapse(render({ ...base, phase: 'running' })), undefined);
+});

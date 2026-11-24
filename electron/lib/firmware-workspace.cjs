@@ -3,6 +3,7 @@ const path = require('node:path');
 const { atomicWriteAsync } = require('./ai-workspace-store-async.cjs');
 const { tr } = require('./localization.cjs');
 const { inspectSignedDriver, signedDriverInfName } = require('./firmware-driver-package.cjs');
+const { registerFirmwareDirectWorkspace } = require('./firmware-direct-workspace.cjs');
 
 const PLATFORMS = Object.freeze({
   rk: ['img'],
@@ -29,6 +30,7 @@ function register(ipcMain, options = {}) {
   const configFile = path.join(app.getPath('userData'), 'firmware-tools.v1.json');
   let configuring = false;
   let installing = false;
+  let openingVendor = false;
 
   function ownerFor(event) {
     const main = getMainWindow();
@@ -42,7 +44,8 @@ function register(ipcMain, options = {}) {
       if ((await fs.stat(configFile)).size <= 8192) {
         const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
         if (config?.version === 1) {
-          return { rk: config.rk, mtk: config.mtk, rkDriver: config.rkDriver, mtkDriver: config.mtkDriver };
+          return { rk: config.rk, mtk: config.mtk, rkDriver: config.rkDriver, mtkDriver: config.mtkDriver,
+            rkDirect: config.rkDirect, mtkDirect: config.mtkDirect };
         }
       }
     } catch { /* An empty or moved setup can be selected again. */ }
@@ -67,6 +70,30 @@ function register(ipcMain, options = {}) {
     return { ok: true, ...await tools.status(platform, root, { refresh, ...(driverDirectory ? { driverDirectory } : {}) }), toolRoot: root };
   };
   const operationResult = response => response.message && !response.error ? { ...response, error: response.message } : response;
+  const direct = registerFirmwareDirectWorkspace(ipcMain, {
+    ownerFor, isWindows, getOwnerFrame: () => getMainWindow()?.webContents?.mainFrame,
+    canStart: () => !configuring && !installing && !openingVendor && options.canStartDirect?.() !== false,
+    toolRoot: async platform => await localDirectory((await readToolConfig())[platform + 'Direct']) || toolRoot(platform),
+    async chooseToolRoot(platform, owner, frame, signal) {
+      if (configuring || installing || signal.aborted) return '';
+      configuring = true;
+      try {
+        const previous = await toolRoot(platform);
+        const picked = await dialog.showOpenDialog(owner, {
+          title: tr('选择刷机工具目录'), defaultPath: previous || app.getPath('desktop'), properties: ['openDirectory']
+        });
+        if (signal.aborted || owner.isDestroyed() || owner.webContents.mainFrame !== frame || picked.canceled || !picked.filePaths?.[0]) return '';
+        return localDirectory(picked.filePaths[0]);
+      } finally { configuring = false; }
+    },
+    async rememberToolRoot(platform, root) {
+      const config = { version: 1, ...await readToolConfig(), [platform + 'Direct']: root };
+      await fs.mkdir(path.dirname(configFile), { recursive: true });
+      await atomicWriteAsync(configFile, JSON.stringify(config));
+    },
+    ...options.direct,
+  });
+  const flashBusy = () => failure(tr('设备正在刷机，请保持连接。'));
 
   function handle(name, action) {
     ipcMain.handle(`firmware:${name}`, async (event, platform, refresh) => {
@@ -81,6 +108,7 @@ function register(ipcMain, options = {}) {
   handle('status', async (platform, _owner, _event, refresh) =>
     workspaceStatus(platform, await toolRoot(platform), refresh));
   handle('chooseTools', async (platform, owner, event) => {
+    if (direct.isActive()) return flashBusy();
     if (configuring || installing) return cancelled();
     configuring = true;
     try {
@@ -108,6 +136,7 @@ function register(ipcMain, options = {}) {
     } finally { configuring = false; }
   });
   handle('chooseFile', async (platform, owner, event) => {
+    if (direct.isActive()) return flashBusy();
     const selected = await dialog.showOpenDialog(owner, {
       title: tr('选择待预检的固件'),
       properties: ['openFile'],
@@ -115,9 +144,12 @@ function register(ipcMain, options = {}) {
     });
     if (selected.canceled || !selected.filePaths?.[0] || ownerFor(event) !== owner) return cancelled();
     const filePath = selected.filePaths[0];
-    return { ...await preflight(platform, filePath), filePath };
+    const checked = await preflight(platform, filePath);
+    if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
+    return { ...checked, filePath, ...(checked.ok ? { firmwareId: direct.rememberFile(platform, filePath, event.senderFrame) } : {}) };
   });
   handle('installDriver', async (platform, owner, event) => {
+    if (direct.isActive()) return flashBusy();
     if (installing || configuring) return failure(tr('正在处理另一个驱动或工具设置操作。'));
     installing = true;
     try {
@@ -149,10 +181,14 @@ function register(ipcMain, options = {}) {
     } finally { installing = false; }
   });
   handle('openTool', async (platform, owner, event) => {
-    const root = await toolRoot(platform);
-    return ownerFor(event) === owner ? operationResult(await tools.open(platform, root)) : cancelled();
+    if (direct.isActive() || openingVendor) return flashBusy();
+    openingVendor = true;
+    try {
+      const root = await toolRoot(platform);
+      return ownerFor(event) === owner ? operationResult(await tools.open(platform, root)) : cancelled();
+    } finally { openingVendor = false; }
   });
-  return { warmup: () => isWindows ? tools.warmup() : undefined };
+  return { warmup: () => isWindows ? tools.warmup() : undefined, direct };
 }
 
 module.exports = { register };

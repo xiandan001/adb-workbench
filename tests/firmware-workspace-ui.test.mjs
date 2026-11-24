@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { firmwareDriverAction } from '../src/components/FirmwareWorkspaceState.js';
 
 const source = readFileSync(new URL('../src/components/FirmwareWorkspaceState.js', import.meta.url), 'utf8')
   .replace(/^import .+;\n/gm, '').replaceAll('export function ', 'function ');
@@ -60,6 +61,16 @@ function mount(electronAPI, entryDevice) {
 }
 
 const vendorStatus = state => ({ ok: true, state, devices: [], installer: { available: true }, tool: { available: true } });
+
+test('driver action preserves installation and offers reinstallation for known installed packages only', () => {
+  const status = state => ({ state, installer: { canChoose: true } });
+  for (const state of ['installed', 'bound']) assert.equal(firmwareDriverAction(status(state)), 'reinstall');
+  assert.equal(firmwareDriverAction({ ...status('problem'), driverPackage: { inf: 'rockusb.inf' } }), 'reinstall');
+  for (const state of ['missing', 'problem']) assert.equal(firmwareDriverAction(status(state)), 'install');
+  assert.equal(firmwareDriverAction(status('unknown')), null);
+  assert.equal(firmwareDriverAction(status('installed'), 'probe failed'), null);
+  assert.equal(firmwareDriverAction({ state: 'installed', installer: { available: false } }), null);
+});
 
 test('the card hint applies once and explicit changes keep platform firmware selections separate', async () => {
   const selected = [];
@@ -142,6 +153,23 @@ test('uses the post-install probe without a second query and identifies an untru
   assert.equal(checks, 1);
   await ui.view().act('vendor');
   assert.match(ui.view().error, /校验未通过/);
+  ui.unmount();
+});
+
+test('reinstallation reuses the current platform and accepts the fresh probe without a second scan', async () => {
+  const calls = [];
+  const ui = mount({
+    firmwareStatus: async platform => { calls.push(['probe', platform]); return vendorStatus('installed'); },
+    firmwareInstallDriver: async platform => {
+      calls.push(['install', platform]);
+      return { ok: true, status: vendorStatus('bound') };
+    },
+  }, { platformHint: 'mtk', requestId: 'reinstall-a' });
+  await flush();
+  assert.equal(firmwareDriverAction(ui.view().status), 'reinstall');
+  await ui.view().act('install');
+  assert.equal(ui.view().status.state, 'bound');
+  assert.deepEqual(calls, [['probe', 'mtk'], ['install', 'mtk']]);
   ui.unmount();
 });
 

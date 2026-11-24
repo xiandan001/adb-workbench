@@ -9,7 +9,7 @@ const codec = require('../electron/lib/data-migration-v2.cjs');
 const PASSWORD = 'fixture-password';
 const validPayload = () => ({ schemaVersion: 1, appVersion: '4.6.1', createdAt: '2026-10-23T00:00:00.000Z', preferences: {}, files: [] });
 
-function harness(t, restartError = '') {
+function harness(t, restartError = '', canImport) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'adb-migration-ipc-'));
   t.after(() => {
     assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
@@ -72,7 +72,7 @@ function harness(t, restartError = '') {
   module.exports.register({ handle: (name, action) => handlers.set(name, (event, args) => {
     if (event.sender === sender && !Object.hasOwn(event, 'senderFrame')) event.senderFrame = sender.mainFrame;
     return action(event, args);
-  }) }, { restart: () => {
+  }) }, { canImport, restart: () => {
     if (restartError) throw new Error(restartError);
     calls.push({ restart: true });
   } });
@@ -84,6 +84,18 @@ test('migration is restricted to main window and cancellation does not create da
   assert.equal((await h.handlers.get('migration:preview')({ sender: {} })).ok, false);
   assert.equal((await h.handlers.get('migration:export')({ sender: h.sender }, { password: PASSWORD })).cancelled, true);
   assert.equal(h.calls.length, 0);
+});
+
+test('firmware write protection refuses staging and restart but retains a valid preview', async t => {
+  let protectedWrite = true;
+  const h = harness(t, '', () => !protectedWrite);
+  const event = { sender: h.sender };
+  const preview = await h.handlers.get('migration:preview')(event);
+  const request = { token: preview.token, confirmed: true, preferences: {} };
+  assert.equal((await h.handlers.get('migration:import')(event, request)).ok, false);
+  assert.equal(h.calls.length, 0);
+  protectedWrite = false;
+  assert.equal((await h.handlers.get('migration:import')(event, request)).restarting, true);
 });
 
 test('import requires current preview token and explicit confirmation; staging precedes restart', async t => {

@@ -11,13 +11,14 @@ const { readSafe, atomicReplace } = require('./ai-tools-file-safety.cjs');
 
 let startupState = null;
 let restartRequested = false;
+let importInProgress = false;
 
 function hasPendingImport() { return core.hasPendingImport(app.getPath('userData')); }
 async function prepareStartup() {
   startupState = await core.applyPendingImport(app.getPath('userData'));
 }
 
-function register(ipcMain, { restart = () => {
+function register(ipcMain, { canImport = () => true, restart = () => {
   app.relaunch();
   setTimeout(() => app.quit(), 300);
 } } = {}) {
@@ -116,6 +117,7 @@ function register(ipcMain, { restart = () => {
   });
 
   action('migration:import', async (event, { token, preferences, confirmed }) => {
+    if (!canImport()) throw new Error(tr('设备正在刷机，请保持连接。'));
     if (confirmed !== true) throw new Error(tr("请先确认覆盖同名数据并重启应用"));
     if (require('./screen-recording.cjs').listUnresolved().length) throw new Error(tr("请先停止录屏并保存待恢复的录屏，再导入数据"));
     if (!preview || preview.token !== token || preview.sender !== event.sender || preview.frame !== event.senderFrame || preview.expiresAt < Date.now()) throw new Error(tr("备份预览已失效，请重新选择备份文件"));
@@ -125,12 +127,14 @@ function register(ipcMain, { restart = () => {
     let releaseSshReservation;
     let releaseAiReservation;
     let staged;
+    importInProgress = true;
     try {
       releaseSshReservation = require('./ssh.cjs').reserveForMigration();
       releaseAiReservation = await require('./ai-tools.cjs').reserveForMigration(); authorize(event);
       staged = await core.stageImport(directory(), pendingPreview.payload, preferences || {}, { aiWrites: pendingPreview.aiPlan?.writes || [], aiGuards: pendingPreview.aiPlan?.guards || [] });
     }
     catch (error) { releaseSerialReservation(); releaseSshReservation?.(); releaseAiReservation?.(); throw error; }
+    finally { importInProgress = false; }
     preview = null;
     restarting = true;
     restartRequested = true;
@@ -159,4 +163,5 @@ function register(ipcMain, { restart = () => {
 
 function summaryOf(summary) { return { ...summary, bytes: summary.bytes ?? summary.totalBytes }; }
 
-module.exports = { register, hasPendingImport, prepareStartup, isRestartRequested: () => restartRequested };
+module.exports = { register, hasPendingImport, prepareStartup, isRestartRequested: () => restartRequested,
+  isImporting: () => importInProgress || restartRequested };

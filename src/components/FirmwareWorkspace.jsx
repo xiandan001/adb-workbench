@@ -4,7 +4,9 @@ import { tr, useLocale } from '../shared/i18n.js';
 import { isDarkTheme } from '../shared/theme.js';
 import { formatBytes } from '../shared/artifactWorkspace.js';
 import DangerConfirmModal from './DangerConfirmModal.jsx';
-import { useFirmwareWorkspace } from './FirmwareWorkspaceState.js';
+import FirmwareDirectPanel from './FirmwareDirectPanel.jsx';
+import { useFirmwareDirect } from './FirmwareDirectState.js';
+import { firmwareDriverAction, useFirmwareWorkspace } from './FirmwareWorkspaceState.js';
 import './FirmwareWorkspace.css';
 
 const platforms = [{ id: 'rk', label: 'RK' }, { id: 'mtk', label: 'MTK' }];
@@ -55,12 +57,11 @@ function driverPackageText(driverPackage) {
   return [driverPackage?.name || driverPackage?.inf, driverPackage?.provider, driverPackage?.version].filter(Boolean).join(' · ');
 }
 
-function DriverStep({ view, theme }) {
+function DriverStep({ view, theme, driverAction, driverActionLabel }) {
   const { busy, status, checking, readError } = view;
   const deviceRows = Array.isArray(status?.devices) ? status.devices : [];
   const info = driverPackageText(status?.driverPackage);
   const state = readError ? 'unknown' : status?.state;
-  const showInstall = (state === 'missing' || state === 'problem') && (status?.installer?.available || status?.installer?.canChoose);
   const muted = theme.textMuted;
   return <Step id={1} title={tr('工具与驱动')} theme={theme}>
     <div className="space-y-3">
@@ -77,11 +78,11 @@ function DriverStep({ view, theme }) {
       </div>
       {readError && <p role="alert" className={`break-words text-xs ${warningText(theme)}`}>{readError}</p>}
       <div className="flex flex-wrap gap-2">
-        {showInstall && <Action icon={Download} processing={busy === 'install'} className={theme.button.primary}
-          disabled={Boolean(busy || checking)} onClick={() => view.setConfirm(true)}>{busy === 'install' ? tr('正在安装驱动…') : tr('安装驱动')}</Action>}
+        {driverAction && <Action icon={Download} processing={busy === 'install'} className={theme.button.primary}
+          disabled={Boolean(busy || checking)} onClick={() => view.setConfirm(true)}>{busy === 'install' ? tr('正在安装驱动…') : driverActionLabel}</Action>}
         <Action icon={RefreshCw} className={theme.button.secondary} disabled={Boolean(busy || checking)} onClick={view.refresh}>{tr('刷新')}</Action>
       </div>
-      {showInstall && !status?.installer?.available && <p className={`text-xs ${muted}`}>{tr('安装时可选择本机已签名的驱动 INF 文件。')}</p>}
+      {driverAction && !status?.installer?.available && <p className={`text-xs ${muted}`}>{tr('安装时可选择本机已签名的驱动 INF 文件。')}</p>}
       {state === 'problem' && <p className={`text-xs ${muted}`}>{tr('未确认驱动绑定，请重新连接设备后刷新。')}</p>}
       <Feedback view={view} actions={['install']} theme={theme} />
       <div className="border-t border-current/10 pt-3">
@@ -143,14 +144,18 @@ function PreflightStep({ view, theme }) {
   </Step>;
 }
 
-function VendorStep({ view, theme }) {
+function VendorStep({ view, theme, direct, targetHint, blocked }) {
   const { status, busy, platform } = view;
   const toolName = status?.tool?.name || (platform === 'rk' ? 'RKDevTool' : 'SP Flash Tool V6');
-  return <Step id={3} title={tr('厂商刷机工具')} theme={theme} className="firmware-vendor-step">
+  return <Step id={3} title={tr('刷机操作')} theme={theme} className="firmware-vendor-step">
+    <FirmwareDirectPanel direct={direct} platform={platform} theme={theme} file={view.file} targetHint={targetHint} blocked={blocked} />
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
         <p className="break-words text-sm font-medium">{toolName}</p>
         <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('在厂商工具中确认目标与固件后开始写入。')}</p>
+        {platform === 'mtk' && <p className={`text-xs leading-5 ${theme.textMuted}`}>
+          {tr('使用 USB ADB 时，在 V6 核对固件和下载模式后，先点 Download 等待设备，再对目标设备执行 Loader 重启；识别到设备后可能立即写入。')}
+        </p>}
         {!view.checking && !status?.tool?.available && <p className={`text-xs ${warningText(theme)}`}>
           {status?.tool?.code === 'untrusted-package' ? tr('工具文件校验未通过，请使用受支持的工具包。')
             : status?.toolRoot ? tr('未找到厂商工具。') : tr('首次打开时请选择厂商工具所在目录。')}
@@ -161,7 +166,7 @@ function VendorStep({ view, theme }) {
         </details>}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Action icon={ExternalLink} processing={busy === 'vendor'} className={theme.button.primary}
+        <Action icon={ExternalLink} processing={busy === 'vendor'} className={direct.enabled ? theme.button.secondary : theme.button.primary}
           disabled={Boolean(busy || view.confirm || view.checking)} onClick={() => view.act('vendor')}>{tr('打开厂商工具')}</Action>
       </div>
     </div>
@@ -172,12 +177,18 @@ function VendorStep({ view, theme }) {
 export default function FirmwareWorkspace({ theme, active = true, entryDevice }) {
   useLocale();
   const view = useFirmwareWorkspace({ active, entryDevice });
+  const direct = useFirmwareDirect({ active, platform: view.platform });
+  const locked = Boolean(direct.busy || direct.running || direct.globalBusy);
+  const stepView = locked && !view.busy ? { ...view, busy: 'direct' } : view;
   const dark = isDarkTheme(theme);
   const platformName = platforms.find(item => item.id === view.platform).label;
+  const driverAction = firmwareDriverAction(view.status, view.readError);
+  const reinstall = driverAction === 'reinstall';
+  const driverActionLabel = reinstall ? tr('重新安装驱动') : tr('安装驱动');
   return <div className={`firmware-workspace min-w-0 space-y-4 ${theme.text}`}>
     <div className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card}`}>
       <div role="group" aria-label={tr('选择刷机平台')} className="grid grid-cols-2 gap-2.5">
-        {platforms.map(item => <button key={item.id} type="button" aria-pressed={view.platform === item.id} disabled={Boolean(view.busy || view.confirm)}
+        {platforms.map(item => <button key={item.id} type="button" aria-pressed={view.platform === item.id} disabled={Boolean(stepView.busy || view.confirm)}
           className={`min-w-0 rounded-lg border px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-emerald-500 disabled:opacity-70 ${view.platform === item.id ? `border-emerald-500/40 bg-emerald-500/10 ${dark ? 'text-emerald-300' : 'text-emerald-800'}` : theme.input}`}
           onClick={() => view.changePlatform(item.id)}>
           <span className="block text-sm font-semibold">{item.label}</span>
@@ -187,13 +198,16 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
       {entryDevice?.name && <p className={`mt-3 break-words text-xs ${theme.textMuted}`}>{tr('来自设备卡片：{0}', { 0: entryDevice.name })}</p>}
     </div>
     <div className="firmware-steps">
-      <DriverStep view={view} theme={theme} />
-      <PreflightStep view={view} theme={theme} />
-      <VendorStep view={view} theme={theme} />
+      <DriverStep view={stepView} theme={theme} driverAction={driverAction} driverActionLabel={driverActionLabel} />
+      <PreflightStep view={stepView} theme={theme} />
+      <VendorStep view={stepView} theme={theme} direct={direct}
+        targetHint={entryDevice?.platformHint && entryDevice.platformHint !== view.platform ? undefined : entryDevice?.targetHint}
+        blocked={Boolean(view.busy || view.confirm || direct.globalBusy)} />
     </div>
-    <DangerConfirmModal open={view.confirm} theme={theme} tone="warning" title={tr('确认安装 {0} 驱动', { 0: platformName })}
+    <DangerConfirmModal open={view.confirm} theme={theme} tone="warning"
+      title={reinstall ? tr('确认重新安装 {0} 驱动', { 0: platformName }) : tr('确认安装 {0} 驱动', { 0: platformName })}
       message={tr('安装需要 Windows 管理员授权，完成后将自动复查。')}
       detail={view.status?.installer?.needsConfirmation ? tr('将打开当前目录中的未签名厂商安装器。请确认工具来源可信。') : undefined}
-      confirmLabel={tr('安装驱动')} loading={view.busy === 'install'} onCancel={() => view.setConfirm(false)} onConfirm={() => view.act('install')} />
+      confirmLabel={driverActionLabel} loading={view.busy === 'install'} onCancel={() => view.setConfirm(false)} onConfirm={() => view.act('install')} />
   </div>;
 }

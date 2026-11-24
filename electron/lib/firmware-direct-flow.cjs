@@ -1,0 +1,221 @@
+const { randomUUID } = require('node:crypto');
+
+const livePhases = new Set(['preparing', 'confirming', 'waiting', 'choice-required', 'checking', 'authorizing', 'armed', 'writing', 'verifying']);
+const protectedPhases = new Set(['checking', 'authorizing', 'armed', 'writing', 'verifying']);
+const choicePhases = new Set(['waiting', 'choice-required']);
+const failure = code => ({ ok: false, code });
+
+function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, scanMs = 450, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let current;
+  const active = () => livePhases.has(current?.phase);
+  const isProtected = () => protectedPhases.has(current?.phase);
+  const alive = job => current === job && active() && !job.abort.signal.aborted;
+  const publicTarget = target => ({ id: target.id, label: target.label, details: target.details });
+  const status = platform => {
+    if (current?.platform !== platform) return { busy: active(), job: null };
+    const { id, phase, percent, code, deadline, targetLabel, candidates } = current;
+    return { busy: active(), job: { id, platform, phase, percent, code, deadline, targetLabel, candidates: candidates.map(publicTarget) } };
+  };
+  const expired = job => job.deadline !== undefined && now() >= job.deadline;
+
+  function finish(job, phase, code) {
+    clearTimer(job.timer);
+    job.timer = undefined;
+    job.abort.abort();
+    Object.assign(job, { phase, code, candidates: [], plan: null, owner: null });
+    const staged = job.staged;
+    job.staged = null;
+    if (staged?.release) void Promise.resolve().then(staged.release).catch(() => {});
+  }
+
+  function later(job) {
+    if (!alive(job) || !choicePhases.has(job.phase)) return;
+    clearTimer(job.timer);
+    job.timer = setTimer(() => { void poll(job); }, Math.min(scanMs, Math.max(0, job.deadline - now())));
+    job.timer?.unref?.();
+  }
+
+  async function snapshot(job) {
+    const result = await services.scan(job.plan, { signal: job.abort.signal });
+    if (!result?.ok || !Array.isArray(result.candidates)) return null;
+    const unique = new Map();
+    for (const item of result.candidates) {
+      if (item?.id && item.identity && !unique.has(item.id)) unique.set(item.id, item);
+      else return null;
+    }
+    return { candidates: [...unique.values()].slice(0, 24), anchor: result.anchor };
+  }
+
+  async function arm(request, owner) {
+    if (active()) return failure('flash-busy');
+    if (!services.canStart(owner)) return failure('flash-busy');
+    const job = { id: randomUUID(), platform: request.platform, phase: 'preparing', candidates: [], percent: null, owner, abort: new AbortController() };
+    current = job;
+    void prepare(job, request);
+    return { ok: true, ...status(job.platform) };
+  }
+
+  async function prepare(job, request) {
+    try {
+      job.plan = await services.prepare(request, { signal: job.abort.signal });
+      if (!alive(job)) return;
+      if (!job.plan?.ok) { finish(job, 'failed', job.plan?.code || 'flash-firmware-unavailable'); return; }
+      const baseline = await snapshot(job);
+      if (!alive(job)) return;
+      if (!baseline) { finish(job, 'failed', 'flash-usb-unavailable'); return; }
+      job.anchor = baseline.anchor || null;
+      if (job.plan.profile?.product && !job.anchor) { finish(job, 'failed', 'flash-anchor-required'); return; }
+      const only = !request.targetHint && baseline.candidates.length === 1 ? baseline.candidates[0] : null;
+      job.phase = 'confirming';
+      if (!await services.confirm(job.plan, only || job.anchor, { owner: job.owner, signal: job.abort.signal })) {
+        if (alive(job)) finish(job, 'cancelled', 'flash-cancelled');
+        return;
+      }
+      if (!alive(job)) return;
+      job.phase = 'preparing';
+      const staged = await services.stage(job.plan, { signal: job.abort.signal });
+      if (!alive(job)) { await staged?.release?.(); return; }
+      if (!staged?.firmware) { finish(job, 'failed', 'flash-plan-changed'); return; }
+      job.staged = staged;
+      job.deadline = now() + waitMs;
+      if (job.plan.elevatedMtk) { await armVendor(job); return; }
+      if (only) { await dispatch(job, only); return; }
+      job.phase = 'waiting';
+      await poll(job);
+    } catch {
+      if (alive(job)) finish(job, 'failed', 'flash-preparation-failed');
+    }
+  }
+
+  async function poll(job) {
+    if (!alive(job) || !choicePhases.has(job.phase)) return;
+    if (expired(job)) { finish(job, 'cancelled', 'flash-wait-expired'); return; }
+    const sweep = job.sweep = (job.sweep || 0) + 1;
+    try {
+      const fresh = await snapshot(job);
+      if (!alive(job) || !choicePhases.has(job.phase) || sweep !== job.sweep) return;
+      if (expired(job)) { finish(job, 'cancelled', 'flash-wait-expired'); return; }
+      if (!fresh) {
+        Object.assign(job, { candidates: [], phase: 'waiting', code: 'flash-usb-unavailable' });
+      } else if (job.anchor) {
+        const matched = fresh.candidates.filter(target => services.matchesAnchor(job.anchor, target, job.plan));
+        if (matched.length === 1) { await dispatch(job, matched[0], true); return; }
+        const choices = matched.length ? matched : fresh.candidates.filter(target => target.location === job.anchor.location);
+        Object.assign(job, { candidates: choices, phase: choices.length ? 'choice-required' : 'waiting', code: undefined });
+      } else {
+        Object.assign(job, { candidates: fresh.candidates, phase: fresh.candidates.length ? 'choice-required' : 'waiting', code: undefined });
+      }
+    } catch {
+      if (alive(job) && choicePhases.has(job.phase) && sweep === job.sweep) Object.assign(job, { candidates: [], phase: 'waiting', code: 'flash-usb-unavailable' });
+    }
+    if (sweep === job.sweep) later(job);
+  }
+
+  async function choose(platform, jobId, targetId, owner) {
+    const job = current;
+    if (!job || job.id !== jobId || job.platform !== platform || job.owner !== owner || job.phase !== 'choice-required') return failure('flash-target-unavailable');
+    if (expired(job)) { finish(job, 'cancelled', 'flash-wait-expired'); return failure('flash-wait-expired'); }
+    const target = job.candidates.find(item => item.id === targetId);
+    if (!target) return failure('flash-target-unavailable');
+    clearTimer(job.timer);
+    job.sweep = (job.sweep || 0) + 1;
+    job.phase = 'confirming';
+    void Promise.resolve().then(async () => {
+      if (!alive(job)) return;
+      const confirmed = await services.confirm(job.plan, target, { owner, signal: job.abort.signal });
+      if (!alive(job)) return;
+      if (confirmed) await dispatch(job, target);
+      else { job.phase = 'waiting'; await poll(job); }
+    }).catch(() => { if (alive(job)) finish(job, 'failed', 'flash-preparation-failed'); });
+    return { ok: true, ...status(platform) };
+  }
+
+  async function dispatch(job, target, automatic = false) {
+    if (!alive(job)) return;
+    if (expired(job)) { finish(job, 'cancelled', 'flash-wait-expired'); return; }
+    job.phase = 'checking';
+    job.candidates = [];
+    job.targetLabel = target.label;
+    try {
+      if (!services.canStart(job.owner) || !await services.validate(job.plan, job.staged, { signal: job.abort.signal })) {
+        finish(job, 'failed', 'flash-plan-changed'); return;
+      }
+      const sameTarget = item => item.id === target.id && item.identity === target.identity &&
+        item.selector === target.selector && (!automatic || services.matchesAnchor(job.anchor, item, job.plan));
+      const fresh = await snapshot(job);
+      if (!alive(job)) return;
+      if (expired(job)) { finish(job, 'cancelled', 'flash-wait-expired'); return; }
+      const exact = fresh?.candidates.find(sameTarget);
+      if (!exact || !services.canStart(job.owner)) { finish(job, 'failed', 'flash-plan-changed'); return; }
+      if (!job.plan.profile?.product) job.phase = 'writing';
+      const result = await services.write(job.plan, exact, job.staged, {
+        beforeDispatch: async (handoff = exact) => {
+          const latest = await snapshot(job);
+          const stillApproved = item => item.id === handoff.id && item.identity === handoff.identity && item.selector === handoff.selector &&
+            item.location === exact.location && (!automatic || services.matchesAnchor(job.anchor, item, job.plan));
+          return alive(job) && !expired(job) && services.canStart(job.owner) && latest?.candidates.some(stillApproved);
+        },
+        onWriteStart: () => { if (alive(job) && job.phase === 'checking') job.phase = 'writing'; },
+        onProgress: value => {
+          if (job.phase === 'writing' && Number.isFinite(value) && value >= (job.percent ?? 0) && value <= 100) job.percent = value;
+        },
+      });
+      await conclude(job, exact, result);
+    } catch {
+      finish(job, 'failed', job.phase === 'writing' ? 'flash-completion-unconfirmed' : 'flash-preparation-failed');
+    }
+  }
+
+  async function armVendor(job) {
+    if (!alive(job) || !job.anchor || !services.canStart(job.owner)) {
+      if (alive(job)) finish(job, 'failed', 'flash-anchor-required');
+      return;
+    }
+    job.phase = 'authorizing';
+    job.targetLabel = job.anchor.label;
+    const result = await services.armVendor(job.plan, job.anchor, job.staged, {
+      beforeDispatch: () => alive(job) && services.canStart(job.owner),
+      onReady: () => { if (alive(job) && job.phase === 'authorizing') job.phase = 'armed'; },
+      onProgress: value => {
+        if (!alive(job) || !['armed', 'writing'].includes(job.phase)) return;
+        if (value === null) { job.phase = 'writing'; return; }
+        if (Number.isFinite(value) && value >= (job.percent ?? 0) && value <= 100) {
+          job.phase = 'writing'; job.percent = value;
+        }
+      },
+    });
+    await conclude(job, job.anchor, result);
+  }
+
+  async function conclude(job, target, result) {
+    if (result?.transferCompleted !== true) {
+      const safeCodes = new Set(['flash-plan-changed', 'flash-mtk-port-unknown', 'flash-cancelled', 'flash-wait-expired',
+        'flash-tool-unavailable', 'flash-rk-storage-unverified', 'flash-target-unavailable', 'flash-busy', 'flash-vendor-busy']);
+      const nativeCodes = { 'mtk-uac-cancelled': 'flash-cancelled', 'mtk-target-mismatch': 'flash-plan-changed',
+        'mtk-tool-start-failed': 'flash-tool-unavailable', 'mtk-wait-expired': 'flash-wait-expired' };
+      const code = safeCodes.has(result?.code) ? result.code :
+        Object.hasOwn(nativeCodes, result?.code) ? nativeCodes[result.code] : 'flash-completion-unconfirmed';
+      finish(job, code === 'flash-cancelled' || code === 'flash-wait-expired' ? 'cancelled' : 'failed', code);
+      return;
+    }
+    job.percent = 100;
+    job.phase = 'verifying';
+    const verified = await services.verify(job.plan, target, result).catch(() => false);
+    finish(job, verified ? 'verified' : 'written', verified ? undefined : 'flash-boot-unverified');
+  }
+
+  function cancel(platform, jobId, owner) {
+    const job = current;
+    if (!job || job.platform !== platform || job.id !== jobId || job.owner !== owner || !active() || isProtected()) return failure('flash-cannot-cancel');
+    finish(job, 'cancelled', 'flash-cancelled');
+    return { ok: true, ...status(platform) };
+  }
+
+  function cancelPending() {
+    if (active() && !isProtected()) finish(current, 'cancelled', 'flash-cancelled');
+  }
+
+  return { arm, choose, cancel, status, active, isProtected, cancelPending };
+}
+
+module.exports = { createFirmwareDirectFlow };

@@ -19,6 +19,7 @@ function fixture({ serialFailure = false, preparationFailure = false } = {}) {
   const asynchronous = name => async () => { calls.push(name); };
   const logWindow = { isDestroyed: () => !owned.logCapture, destroy() { calls.push('log-window'); owned.logCapture = false; } };
   const context = {
+    directFirmware: { cancelPending: remember('cancel-pending-flash') },
     startupPresentation: { dispose: remember('startup') }, startupSettings: { cleanup: remember('startup-settings') },
     appMessageDialog: { cleanup: remember('app-dialog') }, feedback: { record: remember('shutdown-record'), cleanup: asynchronous('feedback') },
     aiTools: { cleanup: asynchronous('ai-tools') }, reproduction: { cleanup: asynchronous('reproduction') },
@@ -50,12 +51,13 @@ function fixture({ serialFailure = false, preparationFailure = false } = {}) {
 
 test('actual normal quit preserves the shared ADB server, USB/Wi-Fi transports and other clients while cleaning owned resources', async () => {
   const f = fixture(); await f.cleanup();
+  assert.equal(f.calls[0], 'cancel-pending-flash');
   assert.deepEqual(f.forbidden, [], 'Normal quit must not sweep bundled executable paths, kill-server or disconnect');
   assert.equal(f.shared.serverAlive, true); assert.equal(f.shared.externalClientAlive, true);
   assert.deepEqual([...f.transports.values()], ['device', 'device', 'device']);
   assert.deepEqual(f.owned, { logCapture: false, shell: false });
   assert.deepEqual([...f.calls].sort(), ['startup', 'startup-settings', 'app-dialog', 'shutdown-record', 'feedback', 'ai-tools', 'reproduction', 'serial', 'ssh',
-    'application-log', 'ai-state', 'ai-workspace', 'ai-handoff', 'ai-outbound', 'activity', 'mcp', 'log-window', 'performance', 'tasks', 'device-guard', 'owned-shell', 'owned-hdc-media'].sort());
+    'application-log', 'ai-state', 'ai-workspace', 'ai-handoff', 'ai-outbound', 'activity', 'mcp', 'log-window', 'performance', 'tasks', 'device-guard', 'owned-shell', 'owned-hdc-media', 'cancel-pending-flash'].sort());
 });
 
 test('a failed owned serial cleanup does not fall back to killing the ADB server or skip the other owned cleanup', async () => {

@@ -33,7 +33,7 @@ function DeviceTerminalSurface({ fullscreen, children }) {
   return fullscreen && typeof document !== 'undefined' ? createPortal(children, document.body) : children;
 }
 
-function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onOpenFirmware, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full', mirrorSession, onRetryMirror, onMirrorDiagnostics, onRememberMirror, onForgetMirror }) {
+function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, onScreenRecordStart, onScreenRecordStop, onReboot, onRebootLoader, onOpenFirmware, onUnlock, onRoot, onRemount, onDisconnect, showApkManager, onApkManager, onSelectApkForInstall, recentApks, onSelectRecentApk, onSelectApkForPush, onInstallApk, onPushApk, onBrowsePath, onPullFile, onPushPathChange, showToast, apkInstallPath, apkPushPath, apkInstallResult, apkPushResult, apkPushRemotePath, pushRemotePathHistory, apkBrowserPath, apkBrowserItems, apkBrowserLoading, operationLoading, onExecuteCommand, theme, sharedCommandHistory, onSaveTerminalCommand, onClearTerminalHistory, vipStatus, inspectionPath, onInspectionPathChange, onOpenMemberCenter, isActive, onSelectDevice, onEnvironmentCheck, onInspectApplication, onViewApplicationLogs, onOpenReproduction, operationError, onDismissOperationError, isPinned, onTogglePin, deviceCardDensity = 'full', mirrorSession, onRetryMirror, onMirrorDiagnostics, onRememberMirror, onForgetMirror, onDismissMirrorStatus }) {
   useLocale();
   const isOnline = device.status === 'device';
   const harmony = isHarmonyDevice(device);
@@ -355,7 +355,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
         onSelectDevice={onSelectDevice} onTogglePin={onTogglePin} onDisconnect={onDisconnect} onStart={onStart} />
 
       <div className={`device-card-actions ${t.text}`}>
-        <DeviceMirrorStatus session={mirrorSession} device={device} theme={t} onRetry={onRetryMirror} onDiagnostics={onMirrorDiagnostics} onRemember={onRememberMirror} onForget={onForgetMirror} />
+        <DeviceMirrorStatus session={mirrorSession} device={device} theme={t} onRetry={onRetryMirror} onDiagnostics={onMirrorDiagnostics} onRemember={onRememberMirror} onForget={onForgetMirror} onDismiss={onDismissMirrorStatus} />
         {working.state.storageError && <div role="alert" className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
           {deviceWorkingErrorMessage(working.state.storageError)}<button type="button" onClick={working.retrySave} className="ml-2 underline">{tr('重试')}</button>
         </div>}

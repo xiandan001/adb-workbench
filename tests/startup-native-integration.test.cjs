@@ -43,6 +43,7 @@ function harness() {
   const context = { BrowserWindow: Window, path, __dirname: path.resolve('electron'), ctx, isDev: false,
     localization: require('../electron/lib/localization.cjs'), tr: require('../electron/lib/localization.cjs').tr,
     feedback: { record() {}, cleanup() {} }, applicationLog: { cleanup: async () => {} }, setTimeout, clearTimeout,
+    directFirmware: { isProtected: () => false, cancelPending: () => calls.push('flash-wait-cancelled') },
     require(name) { assert.equal(name, './lib/harmony-media-window.cjs'); return { shutdownAll: async () => { calls.push('harmony-media'); } }; },
     startupPresentation: null, startupPresented: false, ipcMain: {},
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1.25 }) },
@@ -126,6 +127,7 @@ test('confirmed quit cancels animation before awaiting potentially slow device c
     cleanupRuntimeResources: h.cleanup, cleanupAndroidToolProcesses: async () => {},
   });
   const pending = vm.runInContext(beforeQuitSource, h.context)();
+  assert.ok(h.calls.includes('flash-wait-cancelled'));
   assert.equal(h.presentations[0].disposals, 1); assert.equal(h.context.startupPresentation, null);
   assert.equal(h.presentations[0].reveals, 0); await new Promise(resolve => setImmediate(resolve)); finish(); await pending;
   assert.equal(h.presentations[0].disposals, 1);

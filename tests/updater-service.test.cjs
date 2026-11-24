@@ -24,7 +24,7 @@ function fakeClock() {
     },
   };
 }
-function harness({ development = false, clock, launch = async () => ({ ok: true, code: 'READY', installerPid: 5252 }) } = {}) {
+function harness({ development = false, clock, canInstall, launch = async () => ({ ok: true, code: 'READY', installerPid: 5252 }) } = {}) {
   const handlers = new Map(); const events = []; const calls = { checks: 0, downloads: 0, wakes: 0, disposals: 0, quits: 0, pollers: 0, launches: 0 };
   const app = new EventEmitter(); app.quit = () => calls.quits++;
   const powerMonitor = new EventEmitter(); const updater = new EventEmitter();
@@ -64,7 +64,7 @@ function harness({ development = false, clock, launch = async () => ({ ok: true,
     if (name === 'node:path') return require(name);
     throw new Error(`Unexpected test dependency: ${name}`);
   }, module, module.exports, (callback, ms) => { retryDelays.push(ms); queueMicrotask(callback); return retryDelays.length; }, () => {}, { log() {}, warn() {}, error() {} });
-  module.exports.register({ handle: (name, callback) => handlers.set(name, callback) });
+  module.exports.register({ handle: (name, callback) => handlers.set(name, callback) }, { canInstall });
   return { app, powerMonitor, updater, calls, events, retryDelays, main, analyzer, event,
     invoke: (name, value, owner = event(main)) => handlers.get(`updater:${name}`)(owner, value),
     setCheck: value => { check = value; }, setDownload: value => { download = value; },
@@ -72,6 +72,18 @@ function harness({ development = false, clock, launch = async () => ({ ok: true,
     canRun: () => options.canRun(), poller: () => poller.snapshot(), api: module.exports };
 }
 const available = { updateInfo: { version: '4.7.3' }, isUpdateAvailable: true };
+
+test('firmware write protection refuses install without discarding the already downloaded update', async () => {
+  let protectedWrite = true;
+  const h = harness({ canInstall: () => !protectedWrite });
+  h.updater.emit('update-downloaded', { version: '4.7.3' });
+  assert.equal((await h.invoke('install')).success, false);
+  assert.equal(h.calls.quits, 0);
+  assert.equal((await h.invoke('status')).downloaded, true);
+  protectedWrite = false;
+  assert.equal((await h.invoke('install')).success, true);
+  assert.equal(h.calls.quits, 1);
+});
 
 test('real poller and updater compose through configure IPC, two-hour intervals, resume, ready state and shutdown', async () => {
   const clock = fakeClock(); const h = harness({ clock });

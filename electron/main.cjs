@@ -93,6 +93,8 @@ function configureUserDataPath() {
 const gotTheLock = app.requestSingleInstanceLock();
 let startupPresentation = null;
 let disposeIpControl;
+let directFirmware;
+let flashQuitNotice;
 let startupPresented = false;
 
 if (!gotTheLock) {
@@ -158,7 +160,7 @@ function createWindow() {
   });
   mainWindow.on('close', event => {
     const logWindow = ctx.getLogAnalyzerWindow();
-    if (!quitCleanupFinished && (logWindow && !logWindow.isDestroyed() || updater.shouldInstallDownloadedUpdateOnQuit() || screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
+    if (!quitCleanupFinished && (directFirmware?.isProtected() || logWindow && !logWindow.isDestroyed() || updater.shouldInstallDownloadedUpdateOnQuit() || screenRecording.listUnresolved().length || serial.needsQuitConfirmation() || ssh.needsQuitConfirmation())) {
       event.preventDefault();
       app.quit();
     }
@@ -207,7 +209,7 @@ app.whenReady().then(async () => {
   const diagnosticIpc = localization.scopeIpc(applicationLog.observeIpc ? applicationLog.observeIpc(observedIpc) : observedIpc);
   feedback.record({ level: 'info', module: 'app', operation: 'startup', outcome: 'success' });
   version.register(diagnosticIpc);
-  updater.register(diagnosticIpc);
+  updater.register(diagnosticIpc, { canInstall: () => !directFirmware?.isProtected() });
   const mirroring = require('./lib/mirror-workflow.cjs').register(diagnosticIpc);
   adb.register(diagnosticIpc, mirroring);
   window.register(diagnosticIpc);
@@ -232,7 +234,7 @@ app.whenReady().then(async () => {
   performanceMonitor.register(diagnosticIpc);
   taskCenter.register(diagnosticIpc);
   artifactCenter.register(diagnosticIpc);
-  dataMigration.register(diagnosticIpc);
+  dataMigration.register(diagnosticIpc, { canImport: () => !directFirmware?.isProtected() });
   deviceMedia.register(diagnosticIpc);
   shortcutCapabilities.register(diagnosticIpc);
   serial.register(diagnosticIpc);
@@ -260,7 +262,11 @@ app.whenReady().then(async () => {
   workbenchWorksets.register(diagnosticIpc);
   reproduction.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
-  const firmware = firmwareWorkspace.register(diagnosticIpc);
+  const firmware = firmwareWorkspace.register(diagnosticIpc, {
+    canStartDirect: () => !quitCleanupRunning && !quitCleanupFinished &&
+      !updater.isQuitAndInstallInProgress() && !dataMigration.isImporting(),
+  });
+  directFirmware = firmware.direct;
   regressionReport.register(diagnosticIpc);
   acceptanceSuite.register(diagnosticIpc);
   deviceGuard.register(diagnosticIpc);
@@ -308,6 +314,7 @@ function cleanupRuntimeResources() {
 }
 
 async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
+  directFirmware?.cancelPending();
   // Quit is confirmed: late animation callbacks must not reveal a closing app.
   startupPresentation?.dispose();
   startupPresentation = null;
@@ -337,6 +344,14 @@ async function cleanupBeforeQuit({ forUpdateInstall = false } = {}) {
 }
 
 app.on('before-quit', async (event) => {
+  if (directFirmware?.isProtected()) {
+    event.preventDefault();
+    if (!flashQuitNotice) {
+      flashQuitNotice = appMessageDialog.ask({ type: 'warning', message: tr('设备正在刷机，请保持连接。'),
+        buttons: [tr('返回应用')], defaultId: 0, cancelId: 0 }).finally(() => { flashQuitNotice = null; });
+    }
+    return;
+  }
   if (quitCleanupFinished || updater.isQuitAndInstallInProgress()) return;
   event.preventDefault();
   if (quitCleanupRunning) return;

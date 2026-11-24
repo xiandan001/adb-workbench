@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.9.1': {
+    title: 'v4.9.1',
+    date: '2026-11-24',
+    items: [
+      { type: 'feature', get text() { return tr('新增应用内固件刷机，支持已验证的 RK 整包升级和 MTK 仅下载。'); } },
+      { type: 'improve', get text() { return tr('固件刷机支持重新安装驱动，并分别显示写入结果和开机验证。'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.9.0': {
     title: 'v4.9.0',
     date: '2026-11-24',

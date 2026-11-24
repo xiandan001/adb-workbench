@@ -21,8 +21,7 @@ function powershell(script, timeout = 12_000) {
   });
 }
 
-function queryWindowsDrivers() {
-  return powershell(String.raw`
+const driverStoreProbe = String.raw`
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -55,6 +54,12 @@ public static class FirmwareDriverStoreProbe {
   [DllImport("setupapi.dll", CharSet = CharSet.Unicode)]
   private static extern bool SetupGetStringField(ref InfContext context, uint field, StringBuilder value, uint capacity, out uint required);
 
+  public static bool VerifyCatalog(string inf, string expectedCatalog) {
+    var signature = new SignerInfo { size = (uint)Marshal.SizeOf(typeof(SignerInfo)) };
+    return SetupVerifyInfFile(inf, IntPtr.Zero, ref signature) &&
+      String.Equals(Path.GetFileName(signature.catalog), expectedCatalog, StringComparison.OrdinalIgnoreCase);
+  }
+
   public static string[] Query(string inf) {
     uint required;
     var published = new StringBuilder(1024);
@@ -75,6 +80,10 @@ public static class FirmwareDriverStoreProbe {
   }
 }
 '@
+`;
+
+function queryWindowsDrivers() {
+  return powershell(String.raw`${driverStoreProbe}
 $driverStore = Join-Path $env:SystemRoot 'System32\DriverStore\FileRepository'
 $packages = @(
   foreach ($entry in [IO.Directory]::EnumerateDirectories($driverStore)) {
@@ -100,13 +109,20 @@ $devices = @(
 `, 25_000);
 }
 
-async function installWindowsDriver(platform, files) {
+async function installWindowsDriver(platform, files, { runPowerShell = powershell } = {}) {
   const infName = signedDriverInfName(platform);
   if (!infName || !files?.length) return { ok: false, code: 'untrusted-package' };
   const catalogName = infName.replace(/\.inf$/, '.cat');
   const data = Buffer.from(JSON.stringify({ platform, infName, catalogName, files }), 'utf8').toString('base64');
-  return powershell("$data = '" + data + "'\n" + String.raw`
+  return runPowerShell("$data = '" + data + "'\n" + String.raw`
 $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($data)) | ConvertFrom-Json
+function Get-DriverCatalogStatus([string]$catalog) {
+  $manifest = [IO.Path]::Combine($PSHOME, 'Modules', 'Microsoft.PowerShell.Security', 'Microsoft.PowerShell.Security.psd1')
+  Import-Module -Name $manifest -ErrorAction Stop
+  $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $catalog -ErrorAction Stop
+  if ($null -eq $signature) { throw 'NO_SIGNATURE_RESULT' }
+  if ($signature.Status -eq 'Valid') { 'valid' } else { 'invalid' }
+}
 $held = @()
 $child = $null
 $result = [ordered]@{ ok = $false; code = 'untrusted-package' }
@@ -126,7 +142,20 @@ try {
   if ($signedInf) {
     $catalog = Join-Path $folder $payload.catalogName
     if ($catalog -notin $payload.files.path) { throw 'MISSING_CHECKED_CATALOG' }
-    if ((Get-AuthenticodeSignature -LiteralPath $catalog).Status -ne 'Valid') { throw 'UNTRUSTED_CATALOG' }
+    try {
+      $signatureStatus = Get-DriverCatalogStatus $catalog
+    } catch {
+      $signatureStatus = 'unavailable'
+      try {
+${driverStoreProbe}
+        $signatureStatus = if ([FirmwareDriverStoreProbe]::VerifyCatalog($primary, $payload.catalogName)) { 'valid' } else { 'invalid' }
+      } catch {}
+    }
+    if ($signatureStatus -is [string] -and $signatureStatus -ceq 'invalid') { throw 'UNTRUSTED_CATALOG' }
+    if ($signatureStatus -isnot [string] -or $signatureStatus -cne 'valid') {
+      $result.code = 'signature-check-unavailable'
+      throw 'SIGNATURE_CHECK_UNAVAILABLE'
+    }
     $executable = Join-Path $env:SystemRoot 'System32\pnputil.exe'
     $arguments = @('/add-driver', ('"' + $primary + '"'), '/install')
   } elseif ($payload.platform -eq 'mtk' -and $name -eq 'DriverInstall.exe') {
