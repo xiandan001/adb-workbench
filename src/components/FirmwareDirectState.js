@@ -10,6 +10,7 @@ function stateFrom(previous, response) {
     modes: Array.isArray(response.modes) ? response.modes : previous?.modes,
     job: Object.hasOwn(response, 'job') ? response.job : previous?.job,
     globalBusy: typeof response.busy === 'boolean' ? response.busy : previous?.globalBusy,
+    savedTarget: Object.hasOwn(response, 'savedTarget') ? response.savedTarget : previous?.savedTarget,
   };
 }
 
@@ -92,6 +93,7 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
     busy, running, cancelling, unavailable: !api?.firmwareDirectState,
     arm: value => request(() => api?.firmwareDirectArm?.(platform, value)),
     choose: value => request(() => api?.firmwareDirectChoose?.(platform, value)),
+    enterLoader: id => request(() => api?.firmwareDirectEnterLoader?.(platform, id)),
     cancel: id => request(() => api?.firmwareDirectCancel?.(platform, id), true),
   };
 }

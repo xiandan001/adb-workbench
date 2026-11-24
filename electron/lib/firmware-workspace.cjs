@@ -4,6 +4,7 @@ const { atomicWriteAsync } = require('./ai-workspace-store-async.cjs');
 const { tr } = require('./localization.cjs');
 const { inspectSignedDriver, signedDriverInfName } = require('./firmware-driver-package.cjs');
 const { registerFirmwareDirectWorkspace } = require('./firmware-direct-workspace.cjs');
+const { createMtkBindingStore } = require('./firmware-direct-binding.cjs');
 
 const PLATFORMS = Object.freeze({
   rk: ['img'],
@@ -28,6 +29,7 @@ function register(ipcMain, options = {}) {
   const preflight = options.preflight || require('./firmware-preflight.cjs').preflightFirmware;
   const isWindows = (options.hostPlatform || process.platform) === 'win32';
   const configFile = path.join(app.getPath('userData'), 'firmware-tools.v1.json');
+  const mtkBindings = createMtkBindingStore(path.join(app.getPath('userData'), 'firmware-direct-mtk-binding.v1.json'));
   let configuring = false;
   let installing = false;
   let openingVendor = false;
@@ -71,6 +73,7 @@ function register(ipcMain, options = {}) {
   };
   const operationResult = response => response.message && !response.error ? { ...response, error: response.message } : response;
   const direct = registerFirmwareDirectWorkspace(ipcMain, {
+    mtkBindings,
     ownerFor, isWindows, getOwnerFrame: () => getMainWindow()?.webContents?.mainFrame,
     canStart: () => !configuring && !installing && !openingVendor && options.canStartDirect?.() !== false,
     toolRoot: async platform => await localDirectory((await readToolConfig())[platform + 'Direct']) || toolRoot(platform),

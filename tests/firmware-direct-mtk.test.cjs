@@ -75,13 +75,19 @@ test('MTK reports preparation, connection and writes separately and never forwar
 test('V6 trace parses exact current PID, COM scanner scope, host echo and written marker', () => {
   const line = (body, source) => '11/24/2026 16:42:07.187 SPFlashToolV6[2100][2101][D]: ' + body + '(' + source + '.cpp,72)';
   const scanner = body => line('Connection::scan_com_port(): ' + body, 'Connection');
+  const mode = value => line('ConsoleMode::CommandSetting::createCmdSettingFromArgs(): current input command name: ' + value, 'CommandSetting');
+  for (const command of ['download', 'firmware-upgrade', 'format-download']) {
+    assert.deepEqual(parseMtkTraceLine(mode(command), 2100), { phase: 'input-mode', command });
+  }
   assert.deepEqual(parseMtkTraceLine(scanner('scan device START, timeout set as 120000 ms.'), 2100), { phase: 'scan', timeoutMs: 120000 });
   assert.equal(parseMtkTraceLine(scanner('scan device START, timeout set as 120000 ms.'), 2101), null);
   assert.deepEqual(parseMtkTraceLine(scanner('com port clue: COM://COM3.'), 2100), { phase: 'clue', port: 'COM3' });
   assert.deepEqual(parseMtkTraceLine(scanner('com port clue: COM://.'), 2100), { phase: 'clue', port: null });
   assert.deepEqual(parseMtkTraceLine(line('ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://usb#fixture@MediaTek PreLoader USB VCOM (Android) (COM3)@fixture', 'ConsoleModeCallBack'), 2100), { phase: 'tool-target', port: 'COM3' });
-  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:WRITE-PARTITIONS command execute successed.', 'CmdExecutor'), 2100), { phase: 'partitions-written' });
-  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): current command name: CMD:ERASE-FLASH,	command XML:', 'CmdExecutor'), 2100), { phase: 'mode-mismatch' });
+  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:WRITE-PARTITIONS command execute successed.', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'WRITE-PARTITIONS', outcome: 'success' });
+  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): current command name: CMD:ERASE-FLASH,	command XML:', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'ERASE-FLASH', outcome: 'request' });
+  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:FLASH-UPDATE command execute failed, return error code: -3', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'FLASH-UPDATE', outcome: 'failure' });
+  assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:FLASH-ALL command execute successed.', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'FLASH-ALL', outcome: 'success' });
   assert.deepEqual(parseMtkTraceLine(line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry'), 2100), { phase: 'tool-completed' });
   assert.equal(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:GET-SYS-PROPERTY@DA.DUI command execute failed, return error code: -3', 'CmdExecutor'), 2100), null);
 });

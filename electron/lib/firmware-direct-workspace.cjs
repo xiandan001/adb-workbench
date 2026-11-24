@@ -6,7 +6,7 @@ const { createFirmwareDirectFlow } = require('./firmware-direct-flow.cjs');
 const { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware } = require('./firmware-direct-receipt.cjs');
 const { acceptedFlashProfiles } = require('./firmware-direct-profiles.cjs');
 const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
-const { explicitTransport, selectQualifiedUsbAnchor, queryMtkPortHistory, nativeFlashToolsIdle } = require('./firmware-direct-binding.cjs');
+const { explicitTransport, selectQualifiedUsbAnchor, queryMtkPortHistory, nativeFlashToolsIdle, sanitizeMtkBinding } = require('./firmware-direct-binding.cjs');
 
 const modesByPlatform = { rk: ['upgrade'], mtk: ['download-only', 'firmware-upgrade', 'format-all-download'] };
 const modeLabels = {
@@ -20,6 +20,12 @@ const sameSerial = (left, right) => serialValue(left) && serialValue(right) && l
 const formatMode = 'format-all-download';
 const fail = code => ({ ok: false, code });
 const idText = value => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value);
+
+function mtkAnchorIsUnchanged(inventory, anchor, allowDisconnected) {
+  if (!inventory?.ok || inventory.mtk.length || inventory.rk.length) return false;
+  const atPort = inventory.adb.filter(row => row.location === anchor.location);
+  return !atPort.length ? allowDisconnected : atPort.length === 1 && atPort[0].identity === anchor.identity;
+}
 
 function trustedModes(profiles, platform) {
   const active = profiles.filter(profile => profile.platform === platform);
@@ -113,12 +119,13 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
     profiles = acceptedFlashProfiles, ask = require('./app-message-dialog.cjs').ask,
     backend, targetProvider, firmware = { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware },
     runAdb = require('./adb-runtime.cjs').runAdb, createFlow = createFirmwareDirectFlow,
-    resolveMtkPort = queryMtkPortHistory, toolsIdle = nativeFlashToolsIdle,
+    resolveMtkPort = queryMtkPortHistory, toolsIdle = nativeFlashToolsIdle, mtkBindings,
   } = options;
   const getBackend = () => backend || (defaultBackend ||= require('./firmware-direct-backends.cjs').createDirectFlashBackends());
   const getTargets = () => targetProvider || require('./firmware-direct-targets.cjs');
   let defaultBackend;
   const selections = new Map();
+  const readSavedMtk = async () => sanitizeMtkBinding(await mtkBindings?.read());
   const writeOptions = plan => ({ mode: plan.mode, reboot: plan.profile.reboot === true, permitFormatAll: plan.mode === formatMode });
   const scanQualifiedRk = async (plan, location) => {
     const targets = getTargets();
@@ -130,7 +137,7 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
   const flow = createFlow({
     services: {
       canStart: frame => canStart() && (!frame || frame === getOwnerFrame()),
-      async prepare({ platform, filePath, mode, targetHint, frame, owner }, { signal }) {
+      async prepare({ platform, filePath, mode, targetHint, frame, owner, useSavedTarget }, { signal }) {
         const receipt = await firmware.prepareDirectFirmware(platform, filePath, { signal });
         const matching = profiles.filter(profile => profile.platform === platform && profile.mode === mode &&
           (profile.contentSha256 ? profile.contentSha256 === receipt.contentSha256 : profile.firmwareSha256 === receipt.sha256) &&
@@ -139,15 +146,25 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
         const profile = matching[0];
         const elevatedMtk = platform === 'mtk' && Boolean(profile.product);
         let anchor, boundMtk;
+        if (useSavedTarget && !elevatedMtk) return fail('flash-invalid-request');
         if (profile.product) {
           const baseline = await getTargets().queryDirectUsb({ signal });
           if (!baseline?.ok || baseline.rk.length || baseline.mtk.length) return fail('flash-anchor-required');
-          anchor = await selectQualifiedUsbAnchor(baseline, profile, targetHint, runAdb);
+          const saved = useSavedTarget ? await readSavedMtk() : null;
+          if (useSavedTarget) {
+            if (!saved || saved.product !== profile.product || !mtkAnchorIsUnchanged(baseline, saved, true)) return fail('flash-anchor-required');
+            anchor = { ...saved, label: profile.board + ' · ' + saved.port };
+          } else {
+            anchor = await selectQualifiedUsbAnchor(baseline, profile, targetHint, runAdb);
+          }
           if (!anchor) return fail('flash-anchor-required');
           if (!await toolsIdle()) return fail('flash-vendor-busy');
           if (elevatedMtk) {
             boundMtk = await resolveMtkPort(anchor, { signal });
             if (!boundMtk) return fail('flash-mtk-port-unknown');
+            if (saved && (saved.port !== boundMtk.port || saved.instanceId.toUpperCase() !== boundMtk.instanceId.toUpperCase())) {
+              return fail('flash-plan-changed');
+            }
           }
         }
         let tool = await getBackend().inspect(platform, await toolRoot(platform));
@@ -159,7 +176,7 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
           }
         }
         if (!tool.ok || tool.tool.version !== profile.toolVersion) return fail('flash-tool-unavailable');
-        return { ok: true, platform, mode, targetHint, receipt, tool: tool.tool, profile, anchor, elevatedMtk, boundMtk };
+        return { ok: true, platform, mode, targetHint, receipt, tool: tool.tool, profile, anchor, elevatedMtk, boundMtk, useSavedTarget };
       },
       async scan(plan, { signal }) {
         const targets = getTargets();
@@ -169,7 +186,8 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
         const adbMatches = plan.targetHint ? inventory.adb.filter(item => sameSerial(item.serial, plan.targetHint)) : [];
         const rows = plan.platform === 'rk' ? targets.reconcileRkTargets(inventory.rk, rockusb.devices) : inventory.mtk;
         if (plan.profile.product) {
-          const anchor = inventory.adb.find(item => item.location === plan.anchor.location && item.identity === plan.anchor.identity) ? plan.anchor : null;
+          const anchor = plan.useSavedTarget ? (mtkAnchorIsUnchanged(inventory, plan.anchor, true) ? plan.anchor : null)
+            : inventory.adb.find(item => item.location === plan.anchor.location && item.identity === plan.anchor.identity) ? plan.anchor : null;
           const candidates = inventory.rk.length <= 1 && inventory.mtk.length <= 1 ?
             uniqueTargetRows(plan, rows, inventory).filter(row => row.location === plan.anchor.location) : [];
           return { ok: true, anchor, candidates };
@@ -191,7 +209,9 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
             plan.profile.board, path.basename(plan.receipt.path), modeLabels[plan.mode](),
             targetLabel ? tr('目标：{0}', { 0: targetLabel }) : tr('目标尚未绑定，识别到刷机设备后需要选择目标。'),
             ...(plan.profile.product ? [tr('保持目标设备接在原 USB 口，不要换线或更换设备。')] : []),
-            tr('确认后可能覆盖设备上的系统和数据。'),
+            dangerous ? tr('格式化后下载会先清除存储，可能影响设备配置和校准数据。')
+              : plan.mode === 'firmware-upgrade' ? tr('固件升级可能改写分区并清除数据，请先备份。')
+                : tr('确认后可能覆盖设备上的系统和数据。'),
           ].join('\n'),
           buttons: [tr('取消'), tr('开始刷机')], defaultId: 0, cancelId: 0,
           ...(dangerous ? { checkboxLabel: tr('我已了解格式化会清除设备数据') } : {}),
@@ -209,10 +229,22 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
           const port = await resolveMtkPort(anchor, {});
           if (!port || port.port !== plan.boundMtk.port || port.instanceId.toLowerCase() !== plan.boundMtk.instanceId.toLowerCase()) return false;
           const live = await getTargets().queryDirectUsb({});
-          const exact = live.ok && !live.mtk.length && !live.rk.length &&
-            live.adb.some(row => row.location === anchor.location && row.identity === anchor.identity);
-          return exact && context.beforeDispatch() && await toolsIdle();
+          if (!mtkAnchorIsUnchanged(live, anchor, plan.useSavedTarget === true) || !context.beforeDispatch() || !await toolsIdle()) return false;
+          if (!plan.useSavedTarget && mtkBindings) {
+            // The approved, still-live ADB target and its Windows port reservation were checked together.
+            await mtkBindings.remember({ ...anchor, product: plan.profile.product, instanceId: port.instanceId, port: port.port }).catch(() => {});
+          }
+          return context.beforeDispatch();
         }});
+      },
+      async enterLoader(plan, anchor, canSend) {
+        const live = await getTargets().queryDirectUsb({});
+        if (!mtkAnchorIsUnchanged(live, anchor, false)) return false;
+        const attached = await selectQualifiedUsbAnchor(live, plan.profile, anchor.serial, runAdb);
+        if (!attached || attached.identity !== anchor.identity || attached.location !== anchor.location || !canSend()) return false;
+        // Windows may briefly lose ADB before its reply returns. Never send this command a second time.
+        try { await runAdb(['-t', attached.transport, 'reboot', 'loader'], { timeoutMs: 9000 }); } catch { /* The request may already have arrived. */ }
+        return true;
       },
       async write(plan, target, staged, context) {
         const backend = getBackend(), options = writeOptions(plan);
@@ -240,9 +272,13 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
     },
   });
   const enabledModes = platform => isWindows ? trustedModes(profiles, platform) : [];
-  const respond = platform => {
+  const respond = async platform => {
     const modes = enabledModes(platform);
-    return { ok: true, enabled: modes.length > 0, modes, ...(modes.length ? {} : { code: 'flash-profile-unverified' }), ...flow.status(platform) };
+    const saved = platform === 'mtk' && mtkBindings && modes.length ? await readSavedMtk() : null;
+    const product = saved && profiles.find(row => row.platform === platform && row.product === saved.product);
+    const display = product ? { label: product.board, port: saved.port } : null;
+    return { ok: true, enabled: modes.length > 0, modes, ...(modes.length ? {} : { code: 'flash-profile-unverified' }),
+      ...(platform === 'mtk' && mtkBindings ? { savedTarget: display } : {}), ...flow.status(platform) };
   };
 
   function handle(action, call) {
@@ -260,11 +296,15 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
     const saved = selections.get(platform);
     if (!idText(payload?.firmwareId) || saved?.id !== payload.firmwareId || saved.frame !== frame) return fail('flash-firmware-unavailable');
     if (!modes.includes(payload.mode) || (payload.targetHint !== undefined && payload.targetHint !== null && !serialValue(payload.targetHint))) return fail('flash-invalid-request');
-    return flow.arm({ platform, filePath: saved.filePath, mode: payload.mode, targetHint: payload.targetHint || '', frame, owner }, frame);
+    if ((payload.useSavedTarget !== undefined && typeof payload.useSavedTarget !== 'boolean') ||
+      payload.useSavedTarget === true && (platform !== 'mtk' || payload.targetHint)) return fail('flash-invalid-request');
+    return flow.arm({ platform, filePath: saved.filePath, mode: payload.mode, targetHint: payload.targetHint || '',
+      useSavedTarget: payload.useSavedTarget === true, frame, owner }, frame);
   });
   handle('choose', (platform, payload, frame) => idText(payload?.jobId) && typeof payload.targetId === 'string' && payload.targetId.length <= 512
     ? flow.choose(platform, payload.jobId, payload.targetId, frame) : fail('flash-invalid-request'));
   handle('cancel', (platform, jobId, frame) => idText(jobId) ? flow.cancel(platform, jobId, frame) : fail('flash-invalid-request'));
+  handle('enter-loader', (platform, jobId, frame) => idText(jobId) ? flow.enterLoader(platform, jobId, frame) : fail('flash-invalid-request'));
 
   return {
     rememberFile(platform, filePath, frame) {

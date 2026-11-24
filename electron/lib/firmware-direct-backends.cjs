@@ -364,7 +364,8 @@ function createDirectFlashBackends({
     if (beforeDispatch && !beforeConfirmed) return failure('flash-plan-changed');
     if (platform === 'mtk' && options.elevated === true) {
       if (!beforeConfirmed) return failure('flash-plan-changed');
-      return elevatedMtk({ tool: fresh, args, target }, { onReady, onProgress });
+      return elevatedMtk({ tool: fresh, args, target, mode: options.mode, permitFormatAll: options.permitFormatAll === true },
+        { onReady, onProgress });
     }
     return platform === 'rk' ? writeRk(spawnProcess, fresh, args, onProgress, guarded && beforeConfirmed) : writeMtk(spawnProcess, fresh, args, onProgress);
   }

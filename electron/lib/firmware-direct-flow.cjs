@@ -14,7 +14,11 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
   const status = platform => {
     if (current?.platform !== platform) return { busy: active(), job: null };
     const { id, phase, percent, code, deadline, targetLabel, candidates } = current;
-    return { busy: active(), job: { id, platform, phase, percent, code, deadline, targetLabel, candidates: candidates.map(publicTarget) } };
+    const entry = current.plan?.elevatedMtk ? {
+      entryAvailable: phase === 'armed' && !current.plan.useSavedTarget && !expired(current),
+      entryRequested: current.entryRequested === true,
+    } : {};
+    return { busy: active(), job: { id, platform, phase, percent, code, deadline, targetLabel, candidates: candidates.map(publicTarget), ...entry } };
   };
   const expired = job => job.deadline !== undefined && now() >= job.deadline;
 
@@ -175,7 +179,12 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     job.targetLabel = job.anchor.label;
     const result = await services.armVendor(job.plan, job.anchor, job.staged, {
       beforeDispatch: () => alive(job) && services.canStart(job.owner),
-      onReady: () => { if (alive(job) && job.phase === 'authorizing') job.phase = 'armed'; },
+      onReady: info => {
+        if (alive(job) && job.phase === 'authorizing') {
+          job.phase = 'armed';
+          if (Number.isInteger(info?.timeoutMs) && info.timeoutMs > 0) job.deadline = now() + Math.min(info.timeoutMs, waitMs);
+        }
+      },
       onProgress: value => {
         if (!alive(job) || !['armed', 'writing'].includes(job.phase)) return;
         if (value === null) { job.phase = 'writing'; return; }
@@ -191,7 +200,7 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     if (result?.transferCompleted !== true) {
       const safeCodes = new Set(['flash-plan-changed', 'flash-mtk-port-unknown', 'flash-cancelled', 'flash-wait-expired',
         'flash-tool-unavailable', 'flash-rk-storage-unverified', 'flash-target-unavailable', 'flash-busy', 'flash-vendor-busy']);
-      const nativeCodes = { 'mtk-uac-cancelled': 'flash-cancelled', 'mtk-target-mismatch': 'flash-plan-changed',
+      const nativeCodes = { 'mtk-uac-cancelled': 'flash-cancelled', 'mtk-target-mismatch': 'flash-plan-changed', 'mtk-mode-mismatch': 'flash-mode-mismatch',
         'mtk-tool-start-failed': 'flash-tool-unavailable', 'mtk-wait-expired': 'flash-wait-expired' };
       const code = safeCodes.has(result?.code) ? result.code :
         Object.hasOwn(nativeCodes, result?.code) ? nativeCodes[result.code] : 'flash-completion-unconfirmed';
@@ -202,6 +211,21 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     job.phase = 'verifying';
     const verified = await services.verify(job.plan, target, result).catch(() => false);
     finish(job, verified ? 'verified' : 'written', verified ? undefined : 'flash-boot-unverified');
+  }
+
+  async function enterLoader(platform, jobId, owner) {
+    const job = current;
+    const canSend = () => alive(job) && job.phase === 'armed' && !expired(job) && services.canStart(job.owner);
+    if (!job || platform !== 'mtk' || job.platform !== platform || job.id !== jobId || job.owner !== owner ||
+      !job.plan?.elevatedMtk || job.plan.useSavedTarget || !job.anchor || job.entryRequested ||
+      typeof services.enterLoader !== 'function' || !canSend()) return failure('flash-loader-request-failed');
+    job.entryRequested = true;
+    let attempted = false;
+    try {
+      attempted = await services.enterLoader(job.plan, job.anchor, canSend);
+    } catch { /* No second request is sent by the flow. */ }
+    if (!attempted && current === job && job.phase === 'armed') job.entryRequested = false;
+    return attempted ? { ok: true, ...status(platform) } : failure('flash-loader-request-failed');
   }
 
   function cancel(platform, jobId, owner) {
@@ -215,7 +239,7 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     if (active() && !isProtected()) finish(current, 'cancelled', 'flash-cancelled');
   }
 
-  return { arm, choose, cancel, status, active, isProtected, cancelPending };
+  return { arm, choose, cancel, enterLoader, status, active, isProtected, cancelPending };
 }
 
 module.exports = { createFirmwareDirectFlow };

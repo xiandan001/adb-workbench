@@ -1,7 +1,9 @@
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { execFile } = require('node:child_process');
+const fs = require('node:fs/promises');
 const { parseAdbDeviceRows } = require('./adb-device-parser.cjs');
+const { atomicWriteAsync } = require('./ai-workspace-store-async.cjs');
 
 const run = promisify(execFile);
 const portPattern = /^COM([1-9][0-9]{0,3})$/i;
@@ -61,8 +63,9 @@ function Read-Port($id) {
   $key='HKLM:\SYSTEM\CurrentControlSet\Enum\'+$id+'\Device Parameters'
   if (Test-Path -LiteralPath $key) { (Get-ItemProperty -LiteralPath $key -ErrorAction Stop).PortName }
 }
-$mtk = @(Get-PnpDevice -Class Ports | Where-Object { $_.InstanceId -match '^USB\\VID_0E8D&PID_2000\\' })
-if ($mtk.Count -gt 128) { @{complete=$false} | ConvertTo-Json -Compress; exit }
+$ports = @(Get-PnpDevice -Class Ports)
+$mtk = @($ports | Where-Object { $_.InstanceId -match '^USB\\VID_0E8D&PID_2000\\' })
+if ($mtk.Count -gt 128 -or @($ports | Where-Object { $null -eq $_.Present }).Count) { @{complete=$false} | ConvertTo-Json -Compress; exit }
 $nodes=@(foreach($d in $mtk){
   try {
     $props=Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_LocationPaths','DEVPKEY_Device_Service','DEVPKEY_Device_DriverInfPath'
@@ -71,7 +74,7 @@ $nodes=@(foreach($d in $mtk){
     if($usb.Count -eq 1){ @{id=$d.InstanceId;location=$usb[0];port=(Read-Port $d.InstanceId);service=$map['DEVPKEY_Device_Service'];inf=$map['DEVPKEY_Device_DriverInfPath']} }
   } catch { throw }
 })
-$active=@(Get-PnpDevice -Class Ports -PresentOnly | ForEach-Object { Read-Port $_.InstanceId })
+$active=@($ports | Where-Object { $_.Present -eq $true } | ForEach-Object { Read-Port $_.InstanceId })
 @{complete=$true;nodes=$nodes;activePorts=$active} | ConvertTo-Json -Depth 4 -Compress
 `;
 
@@ -93,4 +96,39 @@ async function nativeFlashToolsIdle({ exec = run } = {}) {
   } catch { return false; }
 }
 
-module.exports = { explicitTransport, selectQualifiedUsbAnchor, matchMtkPortHistory, queryMtkPortHistory, nativeFlashToolsIdle };
+function sanitizeMtkBinding(value) {
+  if (!value || typeof value.product !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.product) ||
+    typeof value.location !== 'string' || !/^[A-Za-z0-9_#().-]{5,512}$/.test(value.location) ||
+    !value.location.includes('#USB(') || typeof value.serial !== 'string' || !adbSerial.test(value.serial) ||
+    typeof value.identity !== 'string' || !/^[a-f0-9]{64}$/.test(value.identity) ||
+    typeof value.instanceId !== 'string' || !mtkInstance.test(value.instanceId) ||
+    !normalizePort(value.port)) return null;
+  const { product, location, serial, identity, instanceId } = value;
+  return { product, location, serial, identity, instanceId, port: normalizePort(value.port) };
+}
+
+function createMtkBindingStore(filename, { io = fs, atomicWrite = atomicWriteAsync } = {}) {
+  let loaded;
+  const read = () => loaded ||= (async () => {
+    try {
+      const meta = await io.lstat(filename);
+      if (!meta.isFile() || meta.isSymbolicLink() || meta.size > 2048) return null;
+      const raw = await io.readFile(filename);
+      if (raw.length > 2048) return null;
+      const value = JSON.parse(raw.toString('utf8'));
+      return value?.version === 1 ? sanitizeMtkBinding(value.target) : null;
+    } catch { return null; }
+  })();
+  async function remember(value) {
+    const target = sanitizeMtkBinding(value);
+    if (!target) return false;
+    await io.mkdir(path.dirname(filename), { recursive: true });
+    await atomicWrite(filename, JSON.stringify({ version: 1, target }));
+    loaded = Promise.resolve(target);
+    return true;
+  }
+  return { read, remember };
+}
+
+module.exports = { explicitTransport, selectQualifiedUsbAnchor, matchMtkPortHistory, queryMtkPortHistory, nativeFlashToolsIdle,
+  sanitizeMtkBinding, createMtkBindingStore };

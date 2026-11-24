@@ -20,12 +20,27 @@ const args = buildMtkFlashArgs({
 const request = { tool, target, args };
 const line = (text, source = 'Connection', id = pid) =>
   '11/24/2026 16:42:07.187 SPFlashToolV6[' + id + '][3232][D]: ' + text + '(' + source + '.cpp,72)\r\n';
-const scan = port => [
+const modeLine = value => line('ConsoleMode::CommandSetting::createCmdSettingFromArgs(): current input command name: ' + value, 'CommandSetting');
+const scan = (port, vendorMode = 'download') => [
+  vendorMode === null ? '' : modeLine(vendorMode),
   line('Connection::scan_com_port(): scan device START, timeout set as 120000 ms.'),
   line('Connection::scan_com_port(): com port clue: COM://' + port + '.'),
 ].join('');
 const echo = port => line('ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://usb#fixture@MediaTek PreLoader USB VCOM (Android) (' + port + ')@fixture', 'ConsoleModeCallBack');
 const nativeEcho = usb => line('ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://\\\\?\\usb#vid_0e8d&pid_2000#' + usb + '#{a5dcbf10-6530-11d2-901f-00c04fb951ed}@MediaTek PreLoader USB VCOM (Android) (COM3)@' + usb, 'ConsoleModeCallBack');
+const commandResult = (name, successful = true) => line('CmdExecutor::execute(): CMD:' + name + (successful ? ' command execute successed.' : ' command execute failed, return error code: -3'), 'CmdExecutor');
+const terminal = line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry');
+const erase = (partition = 'ALL', successful = true) => [
+  line('CmdExecutor::execute(): current command name: CMD:ERASE-FLASH, command XML:', 'CmdExecutor'),
+  '<da>\r\n<command>CMD:ERASE-FLASH</command>\r\n<arg>\r\n<partition>' + partition + '</partition>\r\n<offset>0x0</offset>\r\n<length>MAX</length>\r\n</arg>\r\n</da>\r\n',
+  commandResult('ERASE-FLASH', successful),
+].join('');
+const forMode = (mode, permitFormatAll = false) => ({
+  tool, target, mode, permitFormatAll, args: buildMtkFlashArgs({
+    executableVersion: MTK_VERSION, target, mode, permitFormatAll,
+    firmware: { verified: true, manifestPath: 'D:/isolated stage/download_agent/flash.xml' },
+  }),
+});
 const done = [
   line('ConsoleMode::ConsoleModeRunner::cbDownloadProgress(): 31% of [super [23/24]] data has been sent (about 1.97G)', 'ConsoleModeRunner'),
   line('CmdExecutor::execute(): CMD:WRITE-PARTITIONS command execute successed.', 'CmdExecutor'),
@@ -68,7 +83,7 @@ test('elevated Download Only announces only current exact COM readiness, not ano
     },
   });
   assert.deepEqual(readiness, [{ port: 'COM3', timeoutMs: 120000 }]);
-  assert.deepEqual(progress, [[null, { part: 23, total: 24, partPercent: 31 }]]);
+  assert.deepEqual(progress, [[null, { stage: 'connecting' }], [null, { part: 23, total: 24, partPercent: 31 }]]);
   assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
 });
 
@@ -80,6 +95,10 @@ test('elevated Download Only rejects stale markers, generic scans, wrong target 
     [scan('COM3') + echo('COM3') + line('CmdExecutor::execute(): current command name: CMD:ERASE-FLASH, command XML:', 'CmdExecutor') + '<partition>ALL</partition>\r\n' + done, 'mtk-mode-mismatch'],
     [scan('COM3') + done, 'mtk-write-unverified'],
     [scan('COM3') + echo('COM3') + line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry'), 'mtk-write-unverified'],
+    [scan('COM3', null) + echo('COM3') + done, 'mtk-write-unverified'],
+    [scan('COM3', null) + modeLine('download') + echo('COM3') + done, 'mtk-write-unverified'],
+    [scan('COM3', 'format-download') + echo('COM3') + done, 'mtk-mode-mismatch'],
+    [scan('COM3') + echo('COM3') + commandResult('FLASH-ALL') + terminal, 'mtk-mode-mismatch'],
   ];
   for (const [trace, code] of cases) {
     const f = await setup(t);
@@ -93,6 +112,63 @@ test('elevated Download Only rejects stale markers, generic scans, wrong target 
       },
     });
     assert.deepEqual(result, { transferCompleted: false, code });
+  }
+});
+
+test('firmware upgrade accepts only the exact mode and the distinct FLASH-UPDATE result', async t => {
+  const request = forMode('firmware-upgrade');
+  for (const [commands, expected] of [
+    [commandResult('FLASH-UPDATE'), { transferCompleted: true, code: 'mtk-tool-reported-success' }],
+    [commandResult('WRITE-PARTITIONS'), { transferCompleted: false, code: 'mtk-mode-mismatch' }],
+    [commandResult('FLASH-ALL'), { transferCompleted: false, code: 'mtk-mode-mismatch' }],
+    [erase() + commandResult('FLASH-UPDATE'), { transferCompleted: false, code: 'mtk-mode-mismatch' }],
+    [commandResult('FLASH-UPDATE', false), { transferCompleted: false, code: 'mtk-write-failed' }],
+  ]) {
+    const f = await setup(t);
+    const result = await writeElevatedMtk(request, {}, {
+      ...f,
+      async launch(toolArg, argsArg, onPid) {
+        assert.equal(argsArg[1], 'firmware-upgrade');
+        onPid(pid);
+        await f.add(scan('COM3', 'firmware-upgrade') + echo('COM3') + commands + terminal);
+        return { exitCode: 0 };
+      },
+    });
+    assert.deepEqual(result, expected);
+  }
+});
+
+test('format-download needs literal permission, complete full erase, distinct image write, and clean completion', async t => {
+  const request = forMode('format-all-download', true);
+  const f = await setup(t);
+  for (const permitFormatAll of [undefined, false, 1, 'true']) {
+    assert.deepEqual(await writeElevatedMtk({ ...request, permitFormatAll }, {}, {
+      ...f,
+      launch: () => { assert.fail('must not request UAC for unapproved formatting'); },
+    }), { transferCompleted: false, code: 'mtk-tool-start-failed' });
+  }
+  for (const [commands, expected] of [
+    [erase() + commandResult('FLASH-ALL'), { transferCompleted: true, code: 'mtk-tool-reported-success' }],
+    [erase(), { transferCompleted: false, code: 'mtk-write-unverified' }],
+    [commandResult('FLASH-ALL'), { transferCompleted: false, code: 'mtk-write-unverified' }],
+    [erase('userdata') + commandResult('FLASH-ALL'), { transferCompleted: false, code: 'mtk-write-unverified' }],
+    [erase('ALL', false) + commandResult('FLASH-ALL'), { transferCompleted: false, code: 'mtk-write-failed' }],
+    [commandResult('FLASH-ALL') + erase(), { transferCompleted: false, code: 'mtk-write-unverified' }],
+    [erase() + commandResult('FLASH-ALL') + erase(), { transferCompleted: false, code: 'mtk-mode-mismatch' }],
+    [erase() + commandResult('FLASH-ALL', false), { transferCompleted: false, code: 'mtk-write-failed' }],
+    [erase() + commandResult('WRITE-PARTITIONS'), { transferCompleted: false, code: 'mtk-mode-mismatch' }],
+  ]) {
+    const logs = await setup(t);
+    const result = await writeElevatedMtk(request, {}, {
+      ...logs,
+      async launch(toolArg, argsArg, onPid) {
+        assert.equal(argsArg[1], 'format-download');
+        onPid(pid);
+        await logs.add(scan('COM3', 'format-download') + echo('COM3') + commands + terminal);
+        return { exitCode: 0 };
+      },
+    });
+    assert.deepEqual(result, expected);
   }
 });
 

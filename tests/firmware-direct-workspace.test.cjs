@@ -49,28 +49,35 @@ test('no configured profile rejects direct arm before touching files or hardware
   assert.deepEqual(f.writes, []);
 });
 
-test('the release admits only the hardware-tested modes with no host-specific target identity', async () => {
-  assert.deepEqual(await fixture().call('state'), { ok: true, enabled: true, modes: ['download-only'], busy: false, job: null });
+const mtkModes = ['download-only', 'firmware-upgrade', 'format-all-download'];
+test('the enrolled board offers all three MTK modes without a host-specific target identity', async () => {
+  assert.deepEqual(await fixture().call('state'), { ok: true, enabled: true, modes: mtkModes, busy: false, job: null });
   assert.deepEqual(acceptedFlashProfiles.map(row => [row.product, row.mode]), [
-    ['IFPD-G520', 'download-only'], ['IFPD3576_Pro', 'upgrade'],
+    ...mtkModes.map(mode => ['IFPD-G520', mode]), ['IFPD3576_Pro', 'upgrade'],
   ]);
   assert.ok(acceptedFlashProfiles.every(row => !row.usb.serial && !row.usb.port && !row.bootSerial));
 });
 
-test('qualified MTK flow arms only verified COM history and continues without sending a reboot', async () => {
-  const def = acceptedFlashProfiles.find(row => row.platform === 'mtk');
+function qualifiedMtk({ mode, useSavedTarget = false, checkboxChecked = false } = {}) {
+  const def = acceptedFlashProfiles.find(row => row.platform === 'mtk' && row.mode === mode);
   const handlers = new Map(), asks = [], requests = [];
-  const frame = {}, owner = {}, loc = 'usb-g520';
-  const anchor = { location: loc, vid: '0e8d', serial: 'old-serial', identity: 'old-anchor' };
+  const frame = {}, owner = {}, loc = 'PCIROOT(0)#USBROOT(0)#USB(1)';
+  const anchor = { location: loc, vid: '0e8d', serial: 'old-serial', identity: 'a'.repeat(64) };
   const history = { location: loc, instanceId: 'USB\\VID_0E8D&PID_2000\\FIXTURE', port: 'COM3', stage: 'preloader', verified: true };
-  let attached = anchor, settle;
+  let attached = useSavedTarget ? null : anchor, settle, remembered;
+  const savedRecord = { ...anchor, instanceId: history.instanceId, port: history.port, product: def.product };
   const api = registerFirmwareDirectWorkspace({ handle: (key, value) => handlers.set(key, value) }, {
     ownerFor: () => owner, getOwnerFrame: () => frame, isWindows: true,
     toolsIdle: async () => true, toolRoot: async () => 'C:/tool', canStart: () => true,
-    ask: async value => { asks.push(value); return { response: 1 }; },
+    ask: async value => { asks.push(value); return { response: 1, checkboxChecked }; },
+    mtkBindings: { read: async () => remembered ?? (useSavedTarget ? savedRecord : null), remember: async value => { remembered = value; } },
     resolveMtkPort: async forUsb => forUsb.location === loc && history,
     runAdb: async args => {
       requests.push(args);
+      if (args[2] === 'reboot') {
+        assert.deepEqual(args, ['-t', '7', 'reboot', 'loader']);
+        return { ok: false };
+      }
       if (args[0] === 'devices') return { ok: true, stdout: `List of devices attached\n${attached.serial} device product:IFPD-G520 transport_id:7\n` };
       assert.deepEqual(args.slice(0, 3), ['-t', '7', 'shell']);
       const stdout = args[3].includes('fingerprint') ? [...Object.values(def.boot), '1'].join('\n') : 'IFPD-G520\nmt8189\n1\n';
@@ -81,12 +88,14 @@ test('qualified MTK flow arms only verified COM history and continues without se
       async write(params, ctx) {
         assert.equal(params.target.port, 'COM3');
         assert.equal(params.options.elevated, true);
+        assert.equal(params.options.mode, mode);
+        assert.equal(params.options.permitFormatAll, mode === 'format-all-download');
         assert.equal(await ctx.beforeDispatch(), true);
         ctx.onReady();
         return new Promise(resolve => { settle = () => { attached = { ...anchor, serial: 'new-serial', identity: 'post-flash' }; resolve({ transferCompleted: true }); }; });
       },
     },
-    targetProvider: { queryDirectUsb: async () => ({ ok: true, adb: [attached], mtk: [], rk: [] }) },
+    targetProvider: { queryDirectUsb: async () => ({ ok: true, adb: attached ? [attached] : [], mtk: [], rk: [] }) },
     firmware: {
       prepareDirectFirmware: async () => ({ chip: def.chip, sha256: def.firmwareSha256, project: def.project, path: 'C:/input/flash.xml' }),
       revalidateDirectFirmware: async () => true,
@@ -95,17 +104,64 @@ test('qualified MTK flow arms only verified COM history and continues without se
   });
   const call = (verb, payload) => handlers.get('firmware:direct:' + verb)({ senderFrame: frame }, 'mtk', payload);
   const id = api.rememberFile('mtk', 'C:/input/flash.xml', frame);
-  assert.equal((await call('arm', { firmwareId: id, mode: 'download-only', com: 'COM99' })).ok, true);
+  return { api, call, asks, requests, settle: () => settle(), armed: () => typeof settle === 'function',
+    arm: extra => call('arm', { firmwareId: id, mode, useSavedTarget, com: 'COM99', ...extra }),
+    attach: value => { attached = value; },
+  };
+}
+
+for (const mode of mtkModes) test('qualified MTK mode arms the reserved COM before any explicit device transition: ' + mode, async () => {
+  const real = qualifiedMtk({ mode, checkboxChecked: mode === 'format-all-download' });
+  const { api, call, requests, asks } = real;
+  assert.equal((await real.arm()).ok, true);
   await flush();
   const waiting = (await call('state')).job;
   assert.equal(waiting.phase, 'armed');
   assert.equal(api.isProtected(), true);
   assert.equal((await call('cancel', waiting.id)).ok, false);
-  settle();
+  assert.equal(Boolean(asks[0].checkboxLabel), mode === 'format-all-download');
+  assert.ok(requests.every(args => !args.includes('reboot')));
+  if (mode === 'download-only') {
+    assert.equal(waiting.entryAvailable, true);
+    assert.equal((await call('enter-loader', waiting.id)).ok, true);
+    assert.equal((await call('enter-loader', waiting.id)).ok, false);
+    assert.equal(requests.filter(args => args.includes('reboot')).length, 1);
+    assert.equal((await call('state')).job.entryRequested, true);
+  }
+  real.settle();
   await flush();
   assert.equal((await call('state')).job.phase, 'verified');
   assert.equal(asks.length, 1);
-  assert.ok(requests.every(args => !args.includes('reboot')));
+});
+
+test('a saved MTK target can arm while offline and never offers an ADB reboot', async () => {
+  const f = qualifiedMtk({ mode: 'download-only', useSavedTarget: true });
+  assert.deepEqual((await f.call('state')).savedTarget, { label: 'IFPD-G520', port: 'COM3' });
+  assert.equal((await f.arm()).ok, true);
+  await flush();
+  assert.ok(f.armed());
+  const job = (await f.call('state')).job;
+  assert.equal(job.phase, 'armed');
+  assert.equal(job.entryAvailable, false);
+  assert.equal((await f.call('enter-loader', job.id)).ok, false);
+  assert.deepEqual(f.requests, []);
+  f.settle();
+  await flush();
+  assert.equal((await f.call('state')).job.phase, 'verified');
+});
+
+test('a different device at the saved port and a missing format acknowledgement never arm the backend', async () => {
+  const cold = qualifiedMtk({ mode: 'download-only', useSavedTarget: true });
+  cold.attach({ serial: 'different', location: 'PCIROOT(0)#USBROOT(0)#USB(1)', identity: 'different' });
+  await cold.arm();
+  await flush();
+  assert.equal((await cold.call('state')).job.code, 'flash-anchor-required');
+  assert.equal(cold.armed(), false);
+  const formatted = qualifiedMtk({ mode: 'format-all-download' });
+  await formatted.arm({ permitFormatAll: true });
+  await flush();
+  assert.equal((await formatted.call('state')).job.phase, 'cancelled');
+  assert.equal(formatted.armed(), false);
 });
 
 test('the bridge rejects non-owner IPC and uses only the remembered native picker file, plus an independent format checkbox', async () => {

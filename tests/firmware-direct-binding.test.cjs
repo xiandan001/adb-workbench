@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { matchMtkPortHistory, selectQualifiedUsbAnchor } = require('../electron/lib/firmware-direct-binding.cjs');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { tmpdir } = require('node:os');
+const { matchMtkPortHistory, selectQualifiedUsbAnchor, createMtkBindingStore } = require('../electron/lib/firmware-direct-binding.cjs');
 
 const target = { location: 'PCIROOT(0)#USBROOT(0)#USB(3)', label: 'IFPD-G520' };
 const instance = 'USB\\VID_0E8D&PID_2000\\8&FIXTURE&0&1';
@@ -34,4 +37,21 @@ test('ADB anchoring requires a single matching USB transport and real board iden
   assert.equal(await selectQualifiedUsbAnchor(inv, profile, '192.0.2.10:5555', adb), null);
   assert.equal(await selectQualifiedUsbAnchor(inv, profile, '', async args => args[0] === 'devices' ?
     adb(args) : { ok: true, stdout: 'NotThatProduct\nmt8189\n1\n' }), null);
+});
+
+test('the saved USB target persists across app lifetimes without arbitrary executable or path fields', async t => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'veylo-mtk-binding-'));
+  const filename = path.join(directory, 'binding.json');
+  t.after(async () => {
+    await fs.unlink(filename).catch(() => {});
+    await fs.rmdir(directory);
+  });
+  const store = createMtkBindingStore(filename);
+  assert.equal(await store.read(), null);
+  const record = { product: profile.product, location: target.location, serial: 'target',
+    identity: 'f'.repeat(64), instanceId: instance, port: 'COM3' };
+  assert.equal(await store.remember({ ...record, executable: 'bad.exe' }), true);
+  assert.deepEqual(await createMtkBindingStore(filename).read(), record);
+  assert.equal(await store.remember({ ...record, port: 'COM8888' }), false);
+  assert.deepEqual(await createMtkBindingStore(filename).read(), record);
 });

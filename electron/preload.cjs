@@ -156,6 +156,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   firmwareDirectArm: (platform, request) => ipcRenderer.invoke('firmware:direct:arm', platform, request),
   firmwareDirectChoose: (platform, request) => ipcRenderer.invoke('firmware:direct:choose', platform, request),
   firmwareDirectCancel: (platform, jobId) => ipcRenderer.invoke('firmware:direct:cancel', platform, jobId),
+  firmwareDirectEnterLoader: (platform, jobId) => ipcRenderer.invoke('firmware:direct:enter-loader', platform, jobId),
   startScrcpy: (deviceId, settings, options) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings, ...(options ? { options } : {}) }),
   mirrorGetState: () => ipcRenderer.invoke('mirror:state'),
   mirrorConfirmProfile: args => ipcRenderer.invoke('mirror:confirm', args),

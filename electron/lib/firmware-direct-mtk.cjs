@@ -87,6 +87,8 @@ function parseMtkTraceLine(line, pid) {
   const record = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}\.\d{3} SPFlashToolV6\[(\d{1,10})\]\[\d{1,10}\]\[[A-Z]\]: (.*?)(?:\([a-z0-9_]+\.cpp,\d+\))?$/i.exec(line);
   if (!record || Number(record[1]) !== pid) return null;
   const body = record[2];
+  const mode = /^ConsoleMode::CommandSetting::createCmdSettingFromArgs\(\): current input command name: ([a-z0-9_-]{1,40})\.?$/i.exec(body);
+  if (mode) return { phase: 'input-mode', command: mode[1].toLowerCase() };
   const scan = /^Connection::scan_com_port\(\): scan device START, timeout set as (\d{1,7}) ms\.$/.exec(body);
   if (scan) return { phase: 'scan', timeoutMs: Number(scan[1]) };
   const clue = /^Connection::scan_com_port\(\): com port clue: COM:\/\/([^.]*)\.$/i.exec(body);
@@ -97,9 +99,10 @@ function parseMtkTraceLine(line, pid) {
     const usb = /^com port friendly name: COM:\/\/\\\\\?\\usb#(vid_[a-f0-9]{4}&pid_[a-f0-9]{4}(?:&mi_[a-f0-9]{2})?)#([a-z0-9._&-]{1,160})#\{[a-f0-9-]{36}\}@/i.exec(friendly[1]);
     return target && usb ? { ...target, instanceId: ['USB', usb[1], usb[2]].join('\\').toUpperCase() } : target;
   }
-  if (/^CmdExecutor::execute\(\): .*?\bCMD:(?:ERASE-FLASH|FLASH-ALL)\b/.test(body)) return { phase: 'mode-mismatch' };
-  if (body === 'CmdExecutor::execute(): CMD:WRITE-PARTITIONS command execute successed.') return { phase: 'partitions-written' };
-  if (/^CmdExecutor::execute\(\): CMD:WRITE-PARTITIONS command execute failed\b/.test(body)) return { phase: 'tool-error' };
+  const start = /^CmdExecutor::execute\(\): current command name: CMD:(ERASE-FLASH|FLASH-ALL|FLASH-UPDATE|WRITE-PARTITIONS),\s*command XML:\s*$/.exec(body);
+  if (start) return { phase: 'device-command', command: start[1], outcome: 'request' };
+  const end = /^CmdExecutor::execute\(\): CMD:(ERASE-FLASH|FLASH-ALL|FLASH-UPDATE|WRITE-PARTITIONS) command execute (successed\.|failed\b.*)$/.exec(body);
+  if (end) return { phase: 'device-command', command: end[1], outcome: end[2] === 'successed.' ? 'success' : 'failure' };
   if (body === 'ConsoleMode::ConsoleModeEntry::run(): All command exec done!') return { phase: 'tool-completed' };
   const message = /^(?:ConsoleMode::ConsoleModeRunner::cbDownloadProgress|ConsoleMode::ConsoleModeEntry::run)\(\): (.*)$/.exec(body);
   return message ? parseMtkFlashLine(message[1]) : null;

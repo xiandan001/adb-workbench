@@ -9,10 +9,16 @@ const dumpName = /^SP_FT_V6_Dump_\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2}$/;
 const traceFile = 'QT_FLASH_TOOL_V6.log';
 const maxTraceBytes = 2 * 1024 * 1024;
 const winPath = path.win32;
+const writeCommand = Object.freeze({
+  'download-only': 'WRITE-PARTITIONS',
+  'firmware-upgrade': 'FLASH-UPDATE',
+  'format-all-download': 'FLASH-ALL',
+});
+const formatMode = 'format-all-download';
 const failure = code => ({ transferCompleted: false, code });
 const notify = (callback, ...args) => { try { callback?.(...args); } catch { /* UI cannot stop the flasher. */ } };
 
-function isApprovedInvocation(tool, args, target) {
+function isApprovedInvocation(tool, args, target, mode, permitFormatAll) {
   const local = value => typeof value === 'string' && /^[a-z]:[\\/]/i.test(value) &&
     value.length <= 1024 && !/[\x00-\x1f\x7f"<>|?*]/.test(value) && !value.slice(2).includes(':');
   if (tool?.version !== MTK_VERSION || !/^[a-f0-9]{64}$/.test(tool.sha256) ||
@@ -23,11 +29,43 @@ function isApprovedInvocation(tool, args, target) {
         !/^USB\\VID_0E8D&PID_2000(?:&MI_[a-f0-9]{2})?\\[a-z0-9._&-]{1,160}$/i.test(target.instanceId)))) return false;
   try {
     const expected = buildMtkFlashArgs({
-      executableVersion: tool.version, target, mode: 'download-only', battery: args[7],
+      executableVersion: tool.version, target, mode, permitFormatAll, battery: args[7],
       firmware: { verified: true, manifestPath: args[3] }, reboot: args[9] === '-b',
     });
     return expected.length === args.length && expected.every((token, index) => token === args[index]);
   } catch { return false; }
+}
+
+// Only accept a full-format XML block that directly follows this PID's erase command.
+// Do not retain or forward payload filenames or other vendor log content.
+function traceEvent(line, pid, tail) {
+  const event = parseMtkTraceLine(line, pid);
+  if (event?.command === 'ERASE-FLASH' && event.outcome === 'request') {
+    tail.erase = { remaining: 14, fields: new Map() };
+    return event;
+  }
+  if (!tail.erase) return event;
+  if (event || / SPFlashToolV6\[/.test(line) || tail.erase.remaining-- <= 0) {
+    tail.erase = undefined;
+    return event;
+  }
+  const xml = line.trim();
+  const member = /^<(command|partition|offset|length)>([a-z0-9_-]{1,48})<\/\1>$/i.exec(xml);
+  if (member) {
+    const fields = tail.erase.fields;
+    fields.set(member[1], fields.has(member[1]) ? null : member[2]);
+  } else if (xml === '<command>CMD:ERASE-FLASH</command>') {
+    tail.erase.fields.set('erase-command', true);
+  } else if (xml === '</da>') {
+    const fields = tail.erase.fields;
+    tail.erase = undefined;
+    return {
+      phase: 'erase-scope',
+      full: fields.get('erase-command') === true && fields.get('partition') === 'ALL' &&
+        fields.get('offset') === '0x0' && fields.get('length') === 'MAX',
+    };
+  }
+  return null;
 }
 
 function elevatedCommand(tool, args) {
@@ -141,7 +179,9 @@ function createTraceTail(io, root, previous) {
     const events = [];
     for (const name of names) {
       try {
-        const current = (await readTrace(name)).map(line => parseMtkTraceLine(line, pid)).filter(Boolean);
+        const lines = await readTrace(name);
+        const state = seen.get(name);
+        const current = lines.map(line => traceEvent(line, pid, state)).filter(Boolean);
         if (current.length && selected && selected !== name) throw traceError('ambiguous-traces');
         if (current.length) { selected = name; events.push(...current); }
       } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -150,13 +190,38 @@ function createTraceTail(io, root, previous) {
   };
 }
 
-function watchEvidence(port, instanceId, { onReady, onProgress } = {}) {
-  let scan, ready = false, actual = false, written = false, completed = false, reason;
+function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgress } = {}) {
+  let scan, modeConfirmed = false, ready = false, actual = false, written = false, completed = false, reason;
+  let fullErase = false, formatted = false;
   let lastUpdate = 0, lastPart = 0;
+  function deviceCommand(event) {
+    if (completed || (written && event.command === 'ERASE-FLASH')) {
+      reason = 'mtk-mode-mismatch';
+      return;
+    }
+    if (event.command === 'ERASE-FLASH') {
+      if (mode !== formatMode) reason = 'mtk-mode-mismatch';
+      else if (event.outcome === 'request') {
+        fullErase = false;
+        formatted = false;
+      } else if (event.outcome === 'failure') reason ||= 'mtk-write-failed';
+      else formatted = actual && fullErase && !reason;
+      return;
+    }
+    if (event.command !== writeCommand[mode]) reason = 'mtk-mode-mismatch';
+    else if (event.outcome === 'failure') reason ||= 'mtk-write-failed';
+    else if (event.outcome === 'request') written = false;
+    else if (event.outcome === 'success') written = actual && !reason && (mode !== formatMode || formatted);
+  }
+
   function consume(events, running) {
     for (const event of events) {
       switch (event.phase) {
-        case 'scan': scan = event.timeoutMs > 0 && event.timeoutMs <= 300000 ? event.timeoutMs : undefined; break;
+        case 'input-mode':
+          if (event.command !== expectedMode) reason = 'mtk-mode-mismatch';
+          else modeConfirmed = true;
+          break;
+        case 'scan': scan = modeConfirmed && event.timeoutMs > 0 && event.timeoutMs <= 300000 ? event.timeoutMs : undefined; break;
         case 'clue':
           if (event.port !== port) reason = 'mtk-target-mismatch';
           else if (scan && !ready && !reason) {
@@ -167,10 +232,19 @@ function watchEvidence(port, instanceId, { onReady, onProgress } = {}) {
         case 'tool-target':
           if (event.port !== port) reason = 'mtk-target-mismatch';
           else if (instanceId && event.instanceId !== instanceId.toUpperCase()) reason = 'mtk-write-unverified';
-          else if (ready) actual = true;
+          else if (ready && !actual && !reason) {
+            actual = true;
+            // Once the target appears, stop asking for another power cycle even before write progress.
+            notify(onProgress, null, { stage: 'connecting' });
+          }
           break;
-        case 'mode-mismatch': reason = 'mtk-mode-mismatch'; break;
+        case 'erase-scope': fullErase = event.full; break;
+        case 'device-command': deviceCommand(event); break;
         case 'tool-error': reason ||= 'mtk-write-failed'; break;
+        case 'formatting':
+          if (mode !== formatMode) reason = 'mtk-mode-mismatch';
+          else if (actual && !reason) notify(onProgress, null, { stage: 'formatting' });
+          break;
         case 'writing':
           if (actual && !reason && (event.part !== lastPart || Date.now() - lastUpdate >= 250)) {
             lastPart = event.part;
@@ -179,26 +253,25 @@ function watchEvidence(port, instanceId, { onReady, onProgress } = {}) {
               { part: event.part, total: event.total, partPercent: event.percentage });
           }
           break;
-        case 'partitions-written': written = actual && !reason; break;
         case 'tool-completed': completed = written; break;
       }
     }
   }
-  return { consume, result: () => ({ confirmed: ready && actual && written && completed, reason }) };
+  return { consume, result: () => ({ confirmed: modeConfirmed && ready && actual && written && completed, reason }) };
 }
 
-async function writeElevatedMtk({ tool, args, target } = {}, callbacks = {}, {
+async function writeElevatedMtk({ tool, args, target, mode = 'download-only', permitFormatAll } = {}, callbacks = {}, {
   io = fs, launch,
   spawnProcess,
   logRoot = path.join(process.env.ProgramData || 'C:\\ProgramData', 'SP_FT_V6_Logs'),
   pollMs = 250,
 } = {}) {
-  if (!isApprovedInvocation(tool, args, target)) return failure('mtk-tool-start-failed');
+  if (!isApprovedInvocation(tool, args, target, mode, permitFormatAll)) return failure('mtk-tool-start-failed');
   let previous;
   try { previous = new Set(await traceDirectories(io, logRoot)); }
   catch { return failure('mtk-write-unverified'); }
   const tail = createTraceTail(io, logRoot, previous);
-  const evidence = watchEvidence(args[5], target.instanceId, callbacks);
+  const evidence = watchEvidence(args[5], target.instanceId, mode, args[1], callbacks);
   const stopPolling = new AbortController();
   let pid, end, damagedTrace = false;
   const vendor = launch || ((exe, argv, register) => launchWindows(exe, argv, register, spawnProcess));

@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.9.2': {
+    title: 'v4.9.2',
+    date: '2026-11-24',
+    items: [
+      { type: 'feature', get text() { return tr('MTK 应用内直刷支持仅下载、固件升级和格式化后下载。'); } },
+      { type: 'improve', get text() { return tr('MTK 可使用已保存的 USB 目标先等待，再接 Touch 线并给设备重新上电。'); } },
+      { type: 'improve', get text() { return tr('固件升级和格式化后下载已完成软件回归，尚未进行真机写入验收。'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.9.1': {
     title: 'v4.9.1',
     date: '2026-11-24',

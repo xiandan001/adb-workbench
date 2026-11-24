@@ -1,8 +1,6 @@
-// Admission is release data, not a hidden setting or a renderer capability.
-// Add a profile only with witnessed USB, tool, write and boot evidence for its exact combination.
-const acceptedFlashProfiles = Object.freeze([
-  {
-    platform: 'mtk', mode: 'download-only', board: 'IFPD-G520', product: 'IFPD-G520', boardPlatform: 'mt8189',
+// Keep hardware/firmware admission in the main process, independent of renderer choices.
+const mtkG520 = {
+    platform: 'mtk', board: 'IFPD-G520', product: 'IFPD-G520', boardPlatform: 'mt8189',
     chip: 'MT8189', project: 'aiot8391p2_64_bsp', adbVids: ['046d', '0e8d'],
     firmwareSha256: '91c552437cc325ddb7cd5825debc40f86b660f88dcbf9c05eaf47016ca9e2109',
     toolVersion: '6.2444.00.000', usb: { vid: '0e8d', pid: '2000', stage: 'preloader' }, reboot: true,
@@ -12,7 +10,10 @@ const acceptedFlashProfiles = Object.freeze([
       vendor: 'LANGO/IFPD-G520/IFPD-G520:14/UP1A.231005.007/20261124:userdebug/release-keys',
       avb: '35559a9ae8c78fb10d7ade9a32c5afe880a389e61f2a2ac18d0c741430b4c2fa',
     },
-  },
+};
+
+const acceptedFlashProfiles = Object.freeze([
+  ...['download-only', 'firmware-upgrade', 'format-all-download'].map(mode => ({ ...mtkG520, mode })),
   {
     platform: 'rk', mode: 'upgrade', board: 'IFPD3576_Pro', product: 'IFPD3576_Pro', boardPlatform: 'rk3576',
     chip: '0x33353736', adbVids: ['2207'],
