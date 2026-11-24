@@ -10,16 +10,32 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 function mount(electronAPI, entryDevice) {
   let cursor = 0;
   let props = { active: true, entryDevice };
-  const slots = [], effects = [], timers = [];
+  const slots = [], effects = [];
+  const timers = new Set();
   const values = new Map();
+  function changed(old = [], next = []) {
+    return old.length !== next.length || next.some((value, index) => !Object.is(value, old[index]));
+  }
   const runtime = {
     tr: value => value,
-    window: { electronAPI, addEventListener() {}, removeEventListener() {} },
+    window: { electronAPI },
     localStorage: { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) },
     navigator: { clipboard: { writeText: async () => {} } },
-    setTimeout: callback => timers.push(callback), clearTimeout: () => {},
-    useCallback: fn => fn,
-    useEffect: effect => effects.push(effect),
+    setTimeout: callback => timers.add(callback) && callback,
+    clearTimeout: callback => timers.delete(callback),
+    useCallback(fn, deps) {
+      const index = cursor++;
+      if (!slots[index] || changed(slots[index].deps, deps)) slots[index] = { fn, deps };
+      return slots[index].fn;
+    },
+    useEffect(effect, deps) {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || changed(previous.deps, deps)) effects.push(() => {
+        previous?.cleanup?.();
+        slots[index] = { deps, cleanup: effect() };
+      });
+    },
     useRef: value => (slots[cursor++] ??= { current: value }),
     useState(initial) {
       const slot = slots[cursor++] ??= { value: typeof initial === 'function' ? initial() : initial };
@@ -27,11 +43,20 @@ function mount(electronAPI, entryDevice) {
     },
   };
   const model = runInNewContext(`(function(){${source};return { useFirmwareWorkspace, readFirmwarePlatform };})()`, runtime);
-  const view = () => { cursor = 0; return model.useFirmwareWorkspace(props); };
+  const view = () => {
+    cursor = 0;
+    const value = model.useFirmwareWorkspace(props);
+    for (const effect of effects.splice(0)) effect();
+    for (const timer of Array.from(timers)) { timers.delete(timer); timer(); }
+    return value;
+  };
   view();
-  const cleanups = effects.splice(0).map(effect => effect());
-  for (const timer of timers.splice(0)) timer();
-  return { view, model, entry: next => { props = { ...props, entryDevice: next }; }, unmount: () => cleanups.forEach(fn => fn?.()) };
+  return {
+    view, model,
+    entry: next => { props = { ...props, entryDevice: next }; },
+    active: next => { props = { ...props, active: next }; },
+    unmount: () => slots.forEach(slot => slot?.cleanup?.()),
+  };
 }
 
 const vendorStatus = state => ({ ok: true, state, devices: [], installer: { available: true }, tool: { available: true } });
@@ -117,5 +142,59 @@ test('uses the post-install probe without a second query and identifies an untru
   assert.equal(checks, 1);
   await ui.view().act('vendor');
   assert.match(ui.view().error, /校验未通过/);
+  ui.unmount();
+});
+
+test('page reentry reuses status and only an explicit refresh forces a new driver probe', async () => {
+  const calls = [];
+  const ui = mount({
+    firmwareStatus: async (platform, force) => { calls.push([platform, force]); return vendorStatus('installed'); },
+  });
+  await flush();
+  ui.view();
+  ui.active(false);
+  ui.view();
+  ui.active(true);
+  ui.view();
+  assert.deepEqual(calls, [['rk', false]]);
+  ui.view().changePlatform('mtk');
+  ui.view();
+  await flush();
+  assert.deepEqual(calls, [['rk', false], ['mtk', false]]);
+  await ui.view().refresh();
+  assert.deepEqual(calls.at(-1), ['mtk', true]);
+  ui.view().changePlatform('rk');
+  ui.view();
+  assert.deepEqual(calls.at(-1), ['rk', false]);
+  await flush();
+  ui.view().changePlatform('mtk');
+  ui.view();
+  assert.equal(calls.length, 4);
+  ui.unmount();
+});
+
+test('the single vendor button selects tools only when needed and never opens after a cancelled picker', async () => {
+  const calls = [];
+  let picked = { cancelled: true };
+  let opened = { ok: true };
+  const ui = mount({
+    firmwareStatus: async () => ({ ...vendorStatus('installed'), tool: { available: false } }),
+    firmwareChooseTools: async () => { calls.push('pick'); return picked; },
+    firmwareOpenTool: async () => { calls.push('open'); return opened; },
+  });
+  await flush();
+  await ui.view().act('vendor');
+  assert.deepEqual(calls, ['pick']);
+  picked = vendorStatus('installed');
+  await ui.view().act('vendor');
+  assert.deepEqual(calls, ['pick', 'pick', 'open']);
+  await ui.view().act('vendor');
+  assert.deepEqual(calls.slice(-2), ['open', 'open']);
+  opened = { ok: false, code: 'tool-unavailable' };
+  await ui.view().act('vendor');
+  assert.equal(ui.view().status.tool.available, false);
+  picked = { cancelled: true };
+  await ui.view().act('vendor');
+  assert.equal(calls.at(-1), 'pick');
   ui.unmount();
 });

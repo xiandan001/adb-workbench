@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.9.0': {
+    title: 'v4.9.0',
+    date: '2026-11-24',
+    items: [
+      { type: 'improve', get text() { return tr('固件刷机支持启动时检测驱动、选择已签名的本机驱动包和按需打开厂商工具。'); } },
+      { type: 'improve', get text() { return tr('优化应用性能'); } },
+      { type: 'fix', get text() { return tr('修复部分错误'); } },
+    ],
+  },
   '4.8.8': {
     title: 'v4.8.8',
     date: '2026-11-24',

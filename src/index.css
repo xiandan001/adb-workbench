@@ -25,6 +25,12 @@ html[data-reduced-motion="true"] *::after {
   transition-delay: 0ms !important;
 }
 
+/* Keep in-progress feedback visible while reducing decorative motion. */
+html[data-reduced-motion="true"] .animate-spin {
+  animation-duration: 2s !important;
+  animation-iteration-count: infinite !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html, *, *::before, *::after {
     scroll-behavior: auto !important;
@@ -32,6 +38,11 @@ html[data-reduced-motion="true"] *::after {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
+  }
+
+  .animate-spin {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

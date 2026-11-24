@@ -260,7 +260,7 @@ app.whenReady().then(async () => {
   workbenchWorksets.register(diagnosticIpc);
   reproduction.register(diagnosticIpc);
   environmentCheck.register(diagnosticIpc);
-  firmwareWorkspace.register(diagnosticIpc);
+  const firmware = firmwareWorkspace.register(diagnosticIpc);
   regressionReport.register(diagnosticIpc);
   acceptanceSuite.register(diagnosticIpc);
   deviceGuard.register(diagnosticIpc);
@@ -268,6 +268,7 @@ app.whenReady().then(async () => {
   vip.preload();
 
   createWindow();
+  void firmware.warmup();
   void startupSettings.initialize();
   void mcp.initMcpServer().catch(error => console.error('[MCP] Server failed:', error));
 

@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { CheckCircle2, ChevronDown, Copy, Download, ExternalLink, FileSearch, FolderOpen, Loader2, Plug, RefreshCw, Usb } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Copy, Download, ExternalLink, FileSearch, Loader2, Plug, RefreshCw, Usb } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { isDarkTheme } from '../shared/theme.js';
 import { formatBytes } from '../shared/artifactWorkspace.js';
@@ -60,7 +60,7 @@ function DriverStep({ view, theme }) {
   const deviceRows = Array.isArray(status?.devices) ? status.devices : [];
   const info = driverPackageText(status?.driverPackage);
   const state = readError ? 'unknown' : status?.state;
-  const showInstall = (state === 'missing' || state === 'problem') && status?.installer?.available;
+  const showInstall = (state === 'missing' || state === 'problem') && (status?.installer?.available || status?.installer?.canChoose);
   const muted = theme.textMuted;
   return <Step id={1} title={tr('工具与驱动')} theme={theme}>
     <div className="space-y-3">
@@ -80,12 +80,10 @@ function DriverStep({ view, theme }) {
         {showInstall && <Action icon={Download} processing={busy === 'install'} className={theme.button.primary}
           disabled={Boolean(busy || checking)} onClick={() => view.setConfirm(true)}>{busy === 'install' ? tr('正在安装驱动…') : tr('安装驱动')}</Action>}
         <Action icon={RefreshCw} className={theme.button.secondary} disabled={Boolean(busy || checking)} onClick={view.refresh}>{tr('刷新')}</Action>
-        <Action icon={FolderOpen} processing={busy === 'tools'} className={theme.button.secondary} disabled={Boolean(busy || view.confirm)}
-          onClick={() => view.act('tools')}>{status?.toolRoot ? tr('更换工具目录') : tr('选择工具目录')}</Action>
       </div>
-      {(state === 'missing' || state === 'problem') && !status?.installer?.available && <p className={`text-xs ${muted}`}>{status?.installer?.code === 'untrusted-package' ? tr('工具文件校验未通过，请使用受支持的工具包。') : tr('未找到驱动安装包。')}</p>}
+      {showInstall && !status?.installer?.available && <p className={`text-xs ${muted}`}>{tr('安装时可选择本机已签名的驱动 INF 文件。')}</p>}
       {state === 'problem' && <p className={`text-xs ${muted}`}>{tr('未确认驱动绑定，请重新连接设备后刷新。')}</p>}
-      <Feedback view={view} actions={['tools', 'install']} theme={theme} />
+      <Feedback view={view} actions={['install']} theme={theme} />
       <div className="border-t border-current/10 pt-3">
         <p className="text-xs font-medium">{tr('刷机 USB 设备')}</p>
         {(status || !checking) && <p className={`mt-1 text-xs ${muted}`}>{deviceRows.length ? tr('刷机 USB 设备独立识别。') : tr('未检测到刷机 USB 设备。')}</p>}
@@ -102,10 +100,6 @@ function DriverStep({ view, theme }) {
           </li>)}
         </ul>}
       </div>
-      {status?.toolRoot && <details className={`min-w-0 rounded-lg border ${theme.input}`}>
-        <summary className="flex cursor-pointer items-center gap-2 px-2.5 py-2 text-xs font-medium"><ChevronDown size={14} aria-hidden="true" />{tr('工具目录')}</summary>
-        <p className={`break-all px-3 pb-2 text-xs ${muted}`}>{status.toolRoot}</p>
-      </details>}
     </div>
   </Step>;
 }
@@ -159,17 +153,19 @@ function VendorStep({ view, theme }) {
         <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('在厂商工具中确认目标与固件后开始写入。')}</p>
         {!view.checking && !status?.tool?.available && <p className={`text-xs ${warningText(theme)}`}>
           {status?.tool?.code === 'untrusted-package' ? tr('工具文件校验未通过，请使用受支持的工具包。')
-            : status?.toolRoot ? tr('未找到厂商工具。') : tr('未配置工具目录。请选择包含厂商工具的本机目录。')}
+            : status?.toolRoot ? tr('未找到厂商工具。') : tr('首次打开时请选择厂商工具所在目录。')}
         </p>}
+        {status?.toolRoot && <details className={`min-w-0 rounded-lg border ${theme.input}`}>
+          <summary className="flex cursor-pointer items-center gap-2 px-2.5 py-2 text-xs font-medium"><ChevronDown size={14} aria-hidden="true" />{tr('工具目录')}</summary>
+          <p className={`break-all px-3 pb-2 text-xs ${theme.textMuted}`}>{status.toolRoot}</p>
+        </details>}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Action icon={ExternalLink} className={theme.button.secondary} disabled={Boolean(busy || view.confirm)}
-          onClick={() => view.act('help')}>{tr('厂商获取说明')}</Action>
         <Action icon={ExternalLink} processing={busy === 'vendor'} className={theme.button.primary}
-          disabled={Boolean(busy || view.confirm || view.checking || !status?.tool?.available)} onClick={() => view.act('vendor')}>{tr('打开厂商工具')}</Action>
+          disabled={Boolean(busy || view.confirm || view.checking)} onClick={() => view.act('vendor')}>{tr('打开厂商工具')}</Action>
       </div>
     </div>
-    <div className="mt-2 empty:hidden"><Feedback view={view} actions={['vendor', 'help']} theme={theme} /></div>
+    <div className="mt-2 empty:hidden"><Feedback view={view} actions={['vendor']} theme={theme} /></div>
   </Step>;
 }
 

@@ -1,12 +1,5 @@
 [
   {
-    "file": "electron/lib/firmware-workspace.cjs",
-    "id": "87998cc7cdfba37acea89b49",
-    "kind": "machine",
-    "reason": "Fixed on-disk name of the existing local vendor tools folder; changing languages must not change the path.",
-    "source": "烧录"
-  },
-  {
     "file": "src/components/InitialLanguageDialog.jsx",
     "id": "4bb79d431df2b1816810dd57",
     "kind": "raw",

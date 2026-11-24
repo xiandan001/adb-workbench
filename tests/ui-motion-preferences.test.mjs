@@ -29,6 +29,25 @@ test('motion changes apply immediately and never override system reduced-motion 
   assert.equal(target.dataset.reducedMotion, 'false');
 });
 
+test('reduced motion suppresses decorative animation but keeps loading spinners running slowly', () => {
+  const source = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+  const css = require('postcss').parse(source);
+  const media = css.nodes.find(node => node.name === 'media' && node.params === '(prefers-reduced-motion: reduce)');
+  const appSelector = 'html[data-reduced-motion="true"]';
+  for (const [scope, spinner, decorative] of [
+    [css, appSelector + ' .animate-spin', appSelector + ' *'],
+    [media, '.animate-spin', '*'],
+  ]) {
+    const declarations = selector => Object.fromEntries(scope.nodes
+      .find(node => node.type === 'rule' && node.selectors.includes(selector)).nodes
+      .map(node => [node.prop, [node.value, node.important === true]]));
+    assert.deepEqual(declarations(spinner)['animation-duration'], ['2s', true]);
+    assert.deepEqual(declarations(spinner)['animation-iteration-count'], ['infinite', true]);
+    assert.deepEqual(declarations(decorative)['animation-iteration-count'], ['1', true]);
+    assert.deepEqual(declarations(decorative)['transition-duration'], ['0.01ms', true]);
+  }
+});
+
 test('pre-style startup preference script agrees with React defaults and avoids writes or a disabled-animation flash', () => {
   const code = readFileSync(new URL('../public/startup-preferences.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');

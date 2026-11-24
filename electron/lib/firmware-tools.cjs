@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const { createHash } = require('node:crypto');
 const { queryWindowsDrivers, installWindowsDriver, launchWindowsTool } = require('./firmware-tools-windows.cjs');
 const vendorFiles = require('./firmware-tools-vendor.json');
+const { inspectSignedDriver } = require('./firmware-driver-package.cjs');
 
 const profiles = {
   rk: {
@@ -151,13 +152,16 @@ async function inspectTools(platform, root, io) {
 
 async function withStagedInstaller(files, action, io, tempDirectory) {
   const staging = await io.mkdtemp(path.join(tempDirectory, 'veylo-driver-'));
-  const staged = files.map(file => ({ ...file, path: path.join(staging, path.basename(file.path)) }));
+  const staged = files.map(file => ({ ...file, path: path.join(staging, file.relative || path.basename(file.path)) }));
+  const directories = [...new Set(staged.map(file => path.dirname(file.path)))].filter(folder => folder !== staging);
   try {
+    for (const folder of directories) await io.mkdir(folder, { recursive: true });
     for (let index = 0; index < files.length; index++) await io.copyFile(files[index].path, staged[index].path);
     return await action(staged);
   } catch { return failure('install-failed'); }
   finally {
     await Promise.all(staged.map(file => io.unlink(file.path).catch(() => {})));
+    for (const folder of directories.sort((a, b) => b.length - a.length)) await io.rmdir(folder).catch(() => {});
     await io.rmdir(staging).catch(() => {});
   }
 }
@@ -165,30 +169,53 @@ async function withStagedInstaller(files, action, io, tempDirectory) {
 function createFirmwareTools({ platform: host = process.platform, arch = process.arch, io = fs,
   query = queryWindowsDrivers, elevate = installWindowsDriver, launch = launchWindowsTool, inspect = inspectTools,
   tempDirectory = os.tmpdir() } = {}) {
-  let pendingQuery, installing = false;
-  const supported = platform => host === 'win32' && arch === 'x64' && Boolean(knownProfile(platform));
-  const inventory = () => {
-    if (!pendingQuery) pendingQuery = Promise.resolve().then(query).catch(() => null).finally(() => { pendingQuery = null; });
-    return pendingQuery;
-  };
+  let probe, installing = false;
+  const windowsX64 = host === 'win32' && arch === 'x64';
+  const supported = platform => windowsX64 && Boolean(knownProfile(platform));
 
-  async function status(platform, root) {
-    if (!supported(platform)) return { ...describeDriver(platform, null), errorCode: 'unsupported-platform',
-      installer: { available: false, needsConfirmation: false }, tool: { available: false } };
-    const [snapshot, { installer, tool }] = await Promise.all([inventory(), inspect(platform, root, io)]);
-    return { ...describeDriver(platform, snapshot), installer, tool };
+  function startProbe() {
+    const next = { pending: true };
+    next.result = Promise.resolve().then(query).catch(() => null).finally(() => { next.pending = false; });
+    probe = next;
+    return next.result;
   }
 
-  async function install(platform, root, { confirmed = false } = {}) {
+  function inventory(refresh = false) {
+    return probe && (!refresh || probe.pending) ? probe.result : startProbe();
+  }
+
+  function warmup() {
+    return windowsX64 ? inventory() : Promise.resolve(null);
+  }
+
+  async function resolvedTools(platform, root, driverDirectory) {
+    const result = await inspect(platform, root, io);
+    const files = driverDirectory ? await inspectSignedDriver(platform, driverDirectory, io) : [];
+    if (!files.length) return result;
+    return {
+      ...result, installer: { available: true, needsConfirmation: false, name: result.installer.name }, paths: { ...result.paths, files }
+    };
+  }
+
+  async function status(platform, root, { refresh = false, driverDirectory } = {}) {
+    if (!supported(platform)) return { ...describeDriver(platform, null), errorCode: 'unsupported-platform',
+      installer: { available: false, needsConfirmation: false }, tool: { available: false } };
+    const [snapshot, { installer, tool }] = await Promise.all([inventory(refresh), resolvedTools(platform, root, driverDirectory)]);
+    return { ...describeDriver(platform, snapshot), installer: { ...installer, canChoose: true }, tool };
+  }
+
+  async function install(platform, root, { confirmed = false, driverDirectory } = {}) {
     if (!supported(platform)) return failure('unsupported-platform');
     if (installing) return failure('busy');
     installing = true;
     try {
-      const { installer, paths } = await inspect(platform, root, io);
+      const { installer, paths } = await resolvedTools(platform, root, driverDirectory);
       if (!installer.available) return failure(installer.code);
       if (installer.needsConfirmation && confirmed !== true) return failure('confirmation-required');
       const result = await withStagedInstaller(paths.files, staged => elevate(platform, staged), io, tempDirectory);
-      const current = await status(platform, root);
+      // A probe started before installation cannot confirm its result.
+      startProbe();
+      const current = await status(platform, root, { driverDirectory });
       if (result.code === 'uac-cancelled') return { ...failure(result.code), cancelled: true, status: current };
       const available = current.driverPackage || current.state === 'bound';
       if (result.ok && !available && result.code !== 'restart-required') {
@@ -204,10 +231,15 @@ function createFirmwareTools({ platform: host = process.platform, arch = process
     const { tool, paths } = await inspect(platform, root, io);
     if (!tool.available) return failure(tool.code);
     try { await launch(paths.tool); return { ok: true }; }
-    catch { return failure('tool-launch-failed'); }
+    catch (error) {
+      const code = ['tool-access-denied', 'tool-exited-early', 'tool-unavailable'].includes(error?.code)
+        ? error.code : 'tool-launch-failed';
+      console.warn('[firmware] vendor tool launch failed', platform, code);
+      return failure(code);
+    }
   }
 
-  return { status, install, open };
+  return { warmup, status, install, open };
 }
 
 module.exports = { createFirmwareTools, describeDriver, inspectFile, inspectVendorFiles };

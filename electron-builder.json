@@ -26,7 +26,8 @@
     }
   ],
   "extraResources": [
-    { "from": "build/generated/installer-ui/VeyloInstallWait.exe", "to": "installer-wait.exe" }
+    { "from": "build/generated/installer-ui/VeyloInstallWait.exe", "to": "installer-wait.exe" },
+    { "from": "build/firmware-drivers", "to": "firmware-drivers", "filter": ["**/*.inf", "**/*.cat", "**/*.sys"] }
   ],
   "win": {
     "target": [

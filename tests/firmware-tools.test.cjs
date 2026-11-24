@@ -4,8 +4,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { createHash } = require('node:crypto');
+const { EventEmitter } = require('node:events');
 const { createFirmwareTools, describeDriver, inspectFile, inspectVendorFiles } = require('../electron/lib/firmware-tools.cjs');
-const { installWindowsDriver } = require('../electron/lib/firmware-tools-windows.cjs');
+const { installWindowsDriver, launchWindowsTool } = require('../electron/lib/firmware-tools-windows.cjs');
 
 const rkPackage = { inf: 'rockusb.inf', published: 'oem41.inf', provider: 'Fuzhou Rockchip', signer: 'Windows publisher' };
 const mtkPackage = { inf: 'cdc-acm.inf', published: 'oem16.inf', provider: 'MediaTek Inc.', signer: 'Windows publisher' };
@@ -72,6 +73,50 @@ test('vendor inspection checks executable, DLL and Qt plugin identity without to
   assert.deepEqual(await check(), { code: 'untrusted-package' });
 });
 
+test('startup and both platforms share a cached inventory until an explicit refresh', async () => {
+  let queryCount = 0;
+  let release;
+  const mock = createFirmwareTools({
+    platform: 'win32', arch: 'x64', inspect: async () => ({ installer: {}, tool: {} }),
+    query: () => ++queryCount === 1 ? new Promise(resolve => { release = resolve; }) : { ...empty, packages: [mtkPackage] },
+  });
+  const warming = mock.warmup();
+  const rk = mock.status('rk', 'first-tools-folder');
+  const mtk = mock.status('mtk', 'second-tools-folder');
+  const overlappingRefresh = mock.status('rk', 'first-tools-folder', { refresh: true });
+  await Promise.resolve();
+  assert.equal(queryCount, 1);
+  release({ ...empty, packages: [rkPackage] });
+  await warming;
+  assert.equal((await rk).state, 'installed');
+  assert.equal((await mtk).state, 'missing');
+  assert.equal((await overlappingRefresh).state, 'installed');
+  assert.equal((await mock.status('rk', 'changed-tools-folder')).state, 'installed');
+  assert.equal(queryCount, 1);
+  assert.equal((await mock.status('mtk', 'second-tools-folder', { refresh: true })).state, 'installed');
+  assert.equal((await mock.status('rk', 'first-tools-folder')).state, 'missing');
+  assert.equal(queryCount, 2);
+});
+
+test('a failed startup inventory is retained until manual retry, and unsupported hosts do not probe', async () => {
+  let attempts = 0;
+  const options = {
+    arch: 'x64', inspect: async () => ({ installer: {}, tool: {} }),
+    query: async () => { if (++attempts === 1) throw new Error('Unavailable'); return empty; },
+  };
+  const unsupported = createFirmwareTools({ ...options, platform: 'linux' });
+  assert.equal(await unsupported.warmup(), null);
+  assert.equal((await unsupported.status('rk')).errorCode, 'unsupported-platform');
+  assert.equal(attempts, 0);
+  const mock = createFirmwareTools({ ...options, platform: 'win32' });
+  await mock.warmup();
+  assert.equal((await mock.status('rk')).state, 'unknown');
+  assert.equal((await mock.status('mtk')).state, 'unknown');
+  assert.equal(attempts, 1);
+  assert.equal((await mock.status('mtk', '', { refresh: true })).state, 'missing');
+  assert.equal(attempts, 2);
+});
+
 test('only explicit MTK consent may elevate and completion is followed by a fresh status', async t => {
   const { dir, file, sha256, bytes } = await fixture(t);
   let queryCount = 0;
@@ -100,6 +145,27 @@ test('only explicit MTK consent may elevate and completion is followed by a fres
   assert.equal(result.status.state, 'installed');
   assert.equal(queryCount, 2);
   await assert.rejects(fs.stat(stagedPath), { code: 'ENOENT' });
+});
+
+test('a post-installation probe supersedes an in-flight startup probe', async t => {
+  const { dir, file, sha256 } = await fixture(t);
+  let queryCount = 0;
+  let release;
+  const mock = createFirmwareTools({
+    platform: 'win32', arch: 'x64', tempDirectory: dir,
+    inspect: async () => ({ installer: { available: true }, tool: {}, paths: { files: [{ path: file, sha256 }] } }),
+    query: () => ++queryCount === 1 ? new Promise(resolve => { release = resolve; }) : { ...empty, packages: [rkPackage] },
+    elevate: async () => ({ ok: true, code: 'installer-exited' }),
+  });
+  const warming = mock.warmup();
+  const result = await mock.install('rk', dir);
+  assert.equal(result.ok, true);
+  assert.equal(result.status.state, 'installed');
+  assert.equal(queryCount, 2);
+  release(empty);
+  await warming;
+  assert.equal((await mock.status('rk', dir)).state, 'installed');
+  assert.equal(queryCount, 2);
 });
 
 test('driver cancellation, unreported install and failure do not claim success', async t => {
@@ -134,6 +200,52 @@ test('vendor launch accepts only validated executable path, no firmware argument
   assert.deepEqual(await mock.open('mtk', dir), { ok: false, code: 'untrusted-package' });
   assert.deepEqual(await mock.open('unknown', dir), { ok: false, code: 'unsupported-platform' });
   assert.deepEqual(calls, [[file]]);
+});
+
+test('vendor launch only uses the graphical Windows fallback before process start and never passes firmware arguments', async () => {
+  const executable = path.resolve('local tools', 'SPFlashToolV6.exe');
+  const cases = [
+    { spawnError: 'EINVAL', shell: { ok: true } },
+    { spawnError: 'UNKNOWN', shell: { ok: false, code: 'tool-access-denied' }, failure: 'tool-access-denied' },
+    { spawnError: 'ENOENT', failure: 'tool-unavailable' },
+    { spawnError: 'EACCES', failure: 'tool-access-denied' },
+    { exitCode: 13, failure: 'tool-exited-early' },
+    { exitCode: 0 },
+    {},
+  ];
+  for (const sample of cases) {
+    let fallbackCalls = 0;
+    let unrefCalls = 0;
+    const spawnProcess = (file, args, options) => {
+      assert.equal(file, executable);
+      assert.deepEqual(args, []);
+      assert.equal(options.cwd, path.dirname(executable));
+      assert.equal(options.windowsHide, false);
+      const child = new EventEmitter();
+      child.unref = () => { unrefCalls++; };
+      queueMicrotask(() => {
+        if (sample.spawnError) child.emit('error', Object.assign(Error('private launch details'), { code: sample.spawnError }));
+        else {
+          child.emit('spawn');
+          if (Number.isInteger(sample.exitCode)) child.emit('exit', sample.exitCode, null);
+        }
+      });
+      return child;
+    };
+    const runPowerShell = async script => {
+      fallbackCalls++;
+      const encoded = /\$data = '([^']+)'/.exec(script)?.[1];
+      assert.equal(Buffer.from(encoded, 'base64').toString('utf8'), executable);
+      assert.match(script, /-WorkingDirectory \$workingDirectory -Verb Open/);
+      assert.doesNotMatch(script, /RunAs|ArgumentList|WaitForExit\(\)/);
+      return sample.shell;
+    };
+    const result = launchWindowsTool(executable, { spawnProcess, runPowerShell, startupMs: 5 });
+    if (sample.failure) await assert.rejects(result, { code: sample.failure });
+    else await result;
+    assert.equal(fallbackCalls, sample.shell ? 1 : 0);
+    assert.equal(unrefCalls, !sample.spawnError && !Number.isInteger(sample.exitCode) ? 1 : 0);
+  }
 });
 
 test('the Windows helper rejects an altered installer before requesting elevated execution', { skip: process.platform !== 'win32' }, async t => {

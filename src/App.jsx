@@ -99,6 +99,7 @@ function App() {
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
   const [firmwareEntry, setFirmwareEntry] = useState(null);
+  const [firmwareVisited, setFirmwareVisited] = useState(activeTab === 'firmware');
   const [aiUsageTarget, setAiUsageTarget] = useState(null);
   const [membershipOrigin, setMembershipOrigin] = useState(null);
   const membershipOriginRef = useRef(null);
@@ -130,6 +131,11 @@ function App() {
       return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
     });
   }, [rememberMembershipOrigin]);
+  const openFirmware = (entry = null) => {
+    setFirmwareEntry(entry);
+    setFirmwareVisited(true);
+    setActiveTab('firmware');
+  };
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [wifiIp, setWifiIp] = useState('');
@@ -1843,7 +1849,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => { setFirmwareEntry(null); setActiveTab('firmware'); }}
+            onClick={() => openFirmware()}
             aria-current={activeTab === 'firmware' ? 'page' : undefined}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'firmware' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
             style={{ WebkitAppRegion: 'no-drag' }}
@@ -2189,8 +2195,7 @@ function App() {
                         const hint = [device.model, device.manufacturer, device.board].filter(Boolean).join(' ');
                         const platformHint = /rockchip|\brk\d{4}\b/i.test(hint) ? 'rk'
                           : /mediatek|\bmt\d{4}\b/i.test(hint) ? 'mtk' : null;
-                        setFirmwareEntry({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, requestId: crypto.randomUUID() });
-                        setActiveTab('firmware');
+                        openFirmware({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, requestId: crypto.randomUUID() });
                       }}
                       onUnlock={() => handleUnlock(device.id)}
                       onRoot={() => handleRoot(device.id)}
@@ -2253,10 +2258,12 @@ function App() {
             </>
           )}
 
-          {activeTab === 'firmware' && (
-            <Suspense fallback={<Loader2 className="animate-spin" />}>
-              <FirmwareWorkspace theme={t} entryDevice={firmwareEntry} />
-            </Suspense>
+          {firmwareVisited && (
+            <div hidden={activeTab !== 'firmware'}>
+              <Suspense fallback={<Loader2 className="animate-spin" />}>
+                <FirmwareWorkspace theme={t} active={activeTab === 'firmware'} entryDevice={firmwareEntry} />
+              </Suspense>
+            </div>
           )}
           {activeTab === 'serial' && <SerialPanel theme={t} showToast={showToast} worksetRequest={worksetRequest} onWorksetContext={rememberWorksetContext} navigationRequest={serialNavigation} onNavigationHandled={setSerialNavigation} />}
           {aiVisited && <div hidden={activeTab !== 'ai-workspace'}>
