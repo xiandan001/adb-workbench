@@ -23,6 +23,7 @@ import LogInlineAnalysisScope from './LogInlineAnalysisScope.jsx';
 import LogExportDialog from './LogExportDialog.jsx';
 import AppMessageDialogHost from './AppMessageDialogHost.jsx';
 import MembershipDialog from './MembershipDialog.jsx';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements.js';
 import useMembershipStatus from '../shared/useMembershipStatus.js';
 import useLogViewPreferences from '../shared/useLogViewPreferences.js';
 import useLogViewEngine from '../shared/useLogViewEngine.js';
@@ -106,12 +107,13 @@ export default function LogAnalyzer({ theme }) {
     input: isDark ? 'border-slate-600 bg-[#2D2F33] text-slate-100' : 'border-slate-200 bg-slate-50 text-slate-700',
     button: { primary: 'bg-emerald-600 text-white hover:bg-emerald-500', secondary: isDark ? 'border-slate-600 bg-[#202124] text-slate-200 hover:bg-[#3E4145]' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' } }), [isDark]);
   const { status: vipStatus, refresh: refreshVipStatus, acceptVerifiedStatus } = useMembershipStatus();
-  const isVip = vipStatus.activated;
+  const isVip = canUseMembershipFeature(vipStatus, 'ai-analysis');
+  const canUseMcp = canUseMembershipFeature(vipStatus, 'mcp');
   const [membershipOrigin, setMembershipOrigin] = useState(null);
   const membershipOriginRef = useRef(null);
-  const showVipBlock = feature => {
+  const showVipBlock = (feature, capability = 'ai-analysis') => {
     if (membershipOriginRef.current) return;
-    const origin = { feature, deviceId: source === 'realtime' ? captureDeviceId || deviceId : '', documentId };
+    const origin = { feature, capability, deviceId: source === 'realtime' ? captureDeviceId || deviceId : '', documentId };
     membershipOriginRef.current = origin;
     setMembershipOrigin(origin);
     void refreshVipStatus();
@@ -126,7 +128,7 @@ export default function LogAnalyzer({ theme }) {
     }
   };
   const activateMembership = status => {
-    if (acceptVerifiedStatus(status)) returnFromMembership();
+    if (acceptVerifiedStatus(status) && canUseMembershipFeature(status, membershipOriginRef.current?.capability)) returnFromMembership();
   };
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState('');
@@ -186,6 +188,16 @@ export default function LogAnalyzer({ theme }) {
   const [mcpPort, setMcpPort] = useState(49321);
   const [mcpHelpVisible, setMcpHelpVisible] = useState(false);
   const [mcpConfigTab, setMcpConfigTab] = useState('trae');
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const info = await window.electronAPI?.mcpGetInfo?.();
+        if (active && info) { setMcpRunning(info.running); setMcpPort(info.port); }
+      } catch { /* Optional MCP metadata. */ }
+    })();
+    return () => { active = false; };
+  }, [vipStatus]);
   // AI 分析状态
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [usageTarget, setUsageTarget] = useState(null);
@@ -720,9 +732,6 @@ export default function LogAnalyzer({ theme }) {
     commitResetRef.current = commitReset;
     async function loadInitialState() {
       const revision = sourceEventRevision.current;
-      void (async () => {
-        try { const info = await window.electronAPI?.mcpGetInfo?.(); if (!disposed && info) { setMcpRunning(info.running); setMcpPort(info.port); } } catch { /* Optional MCP metadata. */ }
-      })();
       try {
         if (!window.electronAPI?.logGetState) {
           if (!window.electronAPI) { hydratedRef.current = true; setInitialLogStateLoaded(true); return; }
@@ -1193,8 +1202,8 @@ export default function LogAnalyzer({ theme }) {
   }
 
   async function onToggleMcp() {
-    if (!isVip) {
-      showVipBlock(tr('MCP 服务集成'));
+    if (!mcpRunning && !canUseMcp) {
+      showVipBlock(tr('MCP 服务集成'), 'mcp');
       return;
     }
     if (window.electronAPI && window.electronAPI.mcpStop && window.electronAPI.mcpStart) {
@@ -1204,6 +1213,7 @@ export default function LogAnalyzer({ theme }) {
       } else {
         const res = await window.electronAPI.mcpStart();
         setMcpRunning(res.running);
+        if (!res.ok) setNote(res.error || tr('未知错误'));
       }
     }
   }
@@ -1464,7 +1474,8 @@ export default function LogAnalyzer({ theme }) {
         advancedControls={<>
           <button type="button" onClick={onToggleAutoDiagnose} className="rounded-lg border border-current/20 px-3 py-2">{tr('自动诊断: ')}{autoDiagnoseEnabled ? 'ON' : 'OFF'}</button>
           <button type="button" onClick={() => setRuleLibraryOpen(true)} className="rounded-lg border border-current/20 px-3 py-2">{tr('规则库')}</button>
-          {isVip && <><button type="button" onClick={onToggleMcp} className="rounded-lg border border-current/20 px-3 py-2">{tr('MCP:')}{mcpRunning ? 'ON' : 'OFF'}</button><button type="button" onClick={() => setMcpHelpVisible(true)} className="rounded-lg border border-current/20 px-3 py-2">{tr('查看 MCP 使用说明')}</button></>}
+          <button type="button" onClick={onToggleMcp} className="rounded-lg border border-current/20 px-3 py-2">{tr('MCP:')}{mcpRunning ? 'ON' : 'OFF'}</button>
+          {canUseMcp && <button type="button" onClick={() => setMcpHelpVisible(true)} className="rounded-lg border border-current/20 px-3 py-2">{tr('查看 MCP 使用说明')}</button>}
           <LogFilterHandoff rows={filtered} deviceId={captureDeviceId} sourceTruncated={snapshotTruncated} isDark={isDark} label={tr('在完整 AI 工作区继续')} />
         </>} />
       </div>
@@ -2055,11 +2066,11 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
         theme={t}
         open={ruleLibraryOpen}
         onClose={() => { setRuleLibraryOpen(false); void refreshRules(); }}
-        isVip={isVip}
-        onVipRequired={showVipBlock}
+        isVip={canUseMembershipFeature(vipStatus, 'log-rules')}
+        onVipRequired={feature => showVipBlock(feature, 'log-rules')}
       />
 
-      {membershipOrigin && <MembershipDialog feature={membershipOrigin.feature} theme={logTheme} status={vipStatus}
+      {membershipOrigin && <MembershipDialog feature={membershipOrigin.feature} capability={membershipOrigin.capability} theme={logTheme} status={vipStatus}
         onRetry={refreshVipStatus} onReturn={returnFromMembership}
         showToast={message => { setNoteType('info'); setNote(message); }}
         onActivated={activateMembership} />}

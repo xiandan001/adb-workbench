@@ -27,12 +27,22 @@ export default function useMembershipStatus() {
 
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onVipStatusChanged?.(refresh);
+    window.addEventListener('focus', refresh);
     void refresh();
     return () => {
       revision.current += 1;
       unsubscribe?.();
+      window.removeEventListener('focus', refresh);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!status.activated || status.type !== 'subscription' || !Number.isFinite(status.expiresAt) || status.expiresAt <= 0) return;
+    const boundary = (Math.floor(status.expiresAt) + 1) * 1000;
+    const delay = Math.min(2_147_483_647, Math.max(1, boundary - Date.now()));
+    const timer = setTimeout(refresh, delay);
+    return () => clearTimeout(timer);
+  }, [status, refresh]);
 
   return { status, refresh, acceptVerifiedStatus };
 }

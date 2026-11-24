@@ -246,6 +246,7 @@ test('repeated diagnosed stack lines do not log or snapshot again inside the deb
       if (name === './vip.cjs') return {};
       if (name === './ai-outbound-transport.cjs') return { protectIpc: ipc => ipc };
       if (name === './log-diagnostic-matcher.cjs') return require('../electron/lib/log-diagnostic-matcher.cjs');
+      if (name === './membership-entitlements.cjs') return require('../electron/lib/membership-entitlements.cjs');
       if (name === './log-analyzer.cjs') return { getLogStore: () => { snapshots += 1; return { realtime: [{ raw: 'FATAL EXCEPTION' }] }; } };
       return require(name);
     }

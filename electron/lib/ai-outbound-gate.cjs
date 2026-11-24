@@ -2,6 +2,7 @@ const { randomUUID } = require('node:crypto');
 const { tr } = require('./localization.cjs');
 const { LIMITS, fail } = require('./ai-outbound-policy.cjs');
 const { pendingReviewBytes } = require('./ai-context-limits.json');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 
 const cancelled = () => Object.assign(fail('AI_SEND_CANCELLED', tr('AI 发送已取消。')), { name: 'AbortError', cancelled: true });
 function createOutboundGate({ prepare, membership, publish = () => {}, activity = {}, now = Date.now } = {}) {
@@ -168,7 +169,7 @@ function createOutboundGate({ prepare, membership, publish = () => {}, activity 
     value.state = 'deciding';
     try {
       const entitled = await membership();
-      if (!entitled?.activated || entitled.scope !== 'vip') throw fail('AI_SEND_VIP', tr('AI 分析需要有效会员授权。'));
+      if (!canUseMembershipFeature(entitled, 'ai-analysis')) throw fail('AI_SEND_VIP', tr('AI 分析需要有效会员授权。'));
       if (value.operation.controller.signal.aborted || !live(owner) || now() >= value.expiresAt) throw cancelled();
       value.state = 'authorized'; previews.delete(value.id); clearTimeout(value.timer); releaseReview(value);
       drain(value); notice(owner); return { ok: true, operationId: value.operation.id };

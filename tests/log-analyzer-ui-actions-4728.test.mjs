@@ -13,6 +13,7 @@ import * as stream from '../src/shared/logStream.js';
 import * as model from '../src/shared/logWorkbenchModel.js';
 import { prepareInlineLogAnalysis } from '../src/shared/logInlineAnalysis.js';
 import * as analysisHelpers from '../src/shared/logAnalysisState.js';
+import { canUseMembershipFeature } from '../src/shared/membershipEntitlements.js';
 
 test('same-length changed AI text, reasoning or evidence ref is dirty without putting the answer in uiRevision', () => {
   const turn = { header: 'same header', content: 'secret-A', reasoning: 'think-A', evidenceRefs: ['L1'] };
@@ -66,7 +67,7 @@ function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const emit = (name, payload) => { for (const listener of listeners.get(name) || []) listener(structuredClone(payload)); };
   const handlers = {
     adbListDevices: async () => [{ id: 'A', model: 'A', status: 'device' }, { id: 'B', model: 'B', status: 'device' }],
-    logGetState: async () => structuredClone(state), mcpGetInfo: async () => ({ running: false, port: 49321 }), vipGetStatus: async () => ({ activated: true }),
+    logGetState: async () => structuredClone(state), mcpGetInfo: async () => ({ running: false, port: 49321 }), vipGetStatus: async () => ({ activated: true, scope: 'vip' }),
     autoDiagnoseStatus: async () => ({ ok: true, enabled: true }), autoDiagnoseRulesList: async () => ({ ok: true, rules: [] }), logAnalyzerGetContext: async () => null,
     aiClearConversation: async () => ({ ok: true }), aiStopAnalyze: async () => ({ ok: true }), aiGetContextUsage: async () => ({ ok: true, percent: 0 }),
     smartSearchStop: async () => ({ ok: true }),
@@ -90,7 +91,7 @@ function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const statusHook = fs.readFileSync(new URL('../src/shared/useMembershipStatus.js', import.meta.url), 'utf8')
     .replace(/^import .+;\r?\n/gm, '').replace('export default function useMembershipStatus', 'function useMembershipStatus');
   const component = vm.runInNewContext(statusHook + '\n' + prefix + '\nreturn { showVipBlock, returnFromMembership, activateMembership, membershipOrigin, aiCustomPrompt, setAiCustomPrompt, onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme }; }\nLogAnalyzer', {
-    ...snapshots, ...workspace, ...markers, ...stream, ...model, ...analysisHelpers, prepareInlineLogAnalysis,
+    ...snapshots, ...workspace, ...markers, ...stream, ...model, ...analysisHelpers, prepareInlineLogAnalysis, canUseMembershipFeature,
     crypto: { randomUUID }, window: { electronAPI: api, addEventListener() {}, removeEventListener() {}, innerHeight: 900 },
     document: { addEventListener() {}, removeEventListener() {}, body: { style: {} } }, navigator: { clipboard: { writeText: async value => clipboard.push(value) } }, performance,
     setTimeout, clearTimeout, requestAnimationFrame: callback => { const timer = setTimeout(() => callback(performance.now()), 0); timers.add(timer); return timer; }, cancelAnimationFrame: clearTimeout,
@@ -158,13 +159,16 @@ test('membership activation and cancellation preserve the actual log window, sel
   await h.ui().onAiAnalyze(); await h.drain();
   h.ui().activateMembership({ activated: false }); await h.drain();
   assert.equal(h.ui().membershipOrigin.deviceId, 'A');
+  h.ui().activateMembership({ activated: true, scope: 'free' }); await h.drain();
+  assert.equal(h.ui().membershipOrigin.deviceId, 'A');
   h.ui().activateMembership({ activated: true, scope: 'vip' }); await h.drain();
   assert.equal(h.ui().membershipOrigin, null);
   assert.equal(h.ui().aiCustomPrompt, 'draft on A');
   assert.equal(h.ui().deviceId, 'A');
   assert.equal(h.ui().documentId, documentId);
   assert.equal(h.ui().sourceIdentity, sourceIdentity);
-  assert.deepEqual(h.calls.map(value => value.method), ['vipGetStatus', 'vipGetStatus']);
+  assert.equal(h.calls.filter(value => value.method === 'vipGetStatus').length, 2);
+  assert.ok(h.calls.every(value => ['vipGetStatus', 'mcpGetInfo'].includes(value.method)));
 });
 test('actual local clear never invokes device clear and clipboard preserves original raw text', async t => {
   const h = uiHarness(); t.after(h.dispose); await h.mount(); await h.ui().onCopyAll(); assert.deepEqual(h.clipboard, ['old raw']); await h.ui().onClear(); await h.drain(); assert.equal(h.calls.filter(call => call.method === 'logClear').length, 1); assert.equal(h.calls.filter(call => call.method === 'logClearDevice').length, 0);

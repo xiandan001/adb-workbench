@@ -19,17 +19,38 @@ function registerDiscoveredDevices(transport, devices) {
   const result = devices.map(value => {
     const id = transport === 'hdc' ? hdcDeviceId(value.targetKey || deviceTarget(value.id)) : value.id;
     const previous = registry.get(id);
-    const generation = (previous?.generation || 0) + (previous && previous.status !== value.status ? 1 : 0);
+    const lastStatus = previous?.status === 'unconfirmed' ? previous.confirmedStatus : previous?.status;
+    const generation = (previous?.generation || 0) + (previous && lastStatus !== value.status ? 1 : 0);
     const retained = previous?.generation === generation ? previous : {};
-    const ref = normalizeDeviceDescriptor({ ...retained, ...value, id, transport, generation });
+    const { confirmedStatus: _confirmedStatus, ...metadata } = retained;
+    const ref = normalizeDeviceDescriptor({ ...metadata, ...value, id, transport, generation });
     current.add(id); registry.set(id, ref); return ref;
   });
-  for (const [id, previous] of registry) if (previous.transport === transport && !current.has(id) && previous.status === 'device') {
-    registry.set(id, normalizeDeviceDescriptor({ ...previous, status: 'disconnected', generation: previous.generation + 1 }));
+  for (const [id, previous] of registry) if (previous.transport === transport && !current.has(id) && previous.status !== 'disconnected') {
+    const { confirmedStatus: _confirmedStatus, ...metadata } = previous;
+    registry.set(id, normalizeDeviceDescriptor({ ...metadata, status: 'disconnected', generation: previous.generation + 1 }));
   }
   return result;
 }
+function markDeviceDiscoveryUnconfirmed(transport) {
+  const retained = [];
+  for (const [id, previous] of registry) {
+    if (previous.transport !== transport || previous.status === 'disconnected') continue;
+    const ref = previous.status === 'unconfirmed' ? previous : normalizeDeviceDescriptor({
+      ...previous, status: 'unconfirmed', confirmedStatus: previous.status
+    });
+    registry.set(id, ref);
+    retained.push(ref);
+  }
+  return retained;
+}
+function assertDeviceDiscoveryConfirmed(deviceId) {
+  if (registry.get(deviceId)?.status === 'unconfirmed') {
+    throw Object.assign(new Error(tr('暂时无法确认设备连接，请等待刷新后重试。')), { code: 'DEVICE_UNCONFIRMED', safe: true });
+  }
+}
 function resolveDeviceRef(deviceId, { deviceRef, allowOffline = false } = {}) {
+  if (!allowOffline) assertDeviceDiscoveryConfirmed(deviceId);
   let ref;
   if (deviceRef) {
     ref = normalizeDeviceDescriptor(deviceRef);
@@ -41,4 +62,4 @@ function resolveDeviceRef(deviceId, { deviceRef, allowOffline = false } = {}) {
   return ref;
 }
 function knownDevices() { return [...registry.values()]; }
-module.exports = { normalizeDeviceDescriptor, registerDiscoveredDevices, resolveDeviceRef, knownDevices };
+module.exports = { normalizeDeviceDescriptor, registerDiscoveredDevices, markDeviceDiscoveryUnconfirmed, assertDeviceDiscoveryConfirmed, resolveDeviceRef, knownDevices };

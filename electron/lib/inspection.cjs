@@ -8,6 +8,7 @@ const path = require('path');
 
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAppVersion } = require('./version.cjs');
@@ -52,7 +53,7 @@ function register(ipcMain) {
       return { ok: false, error: tr("已有巡检任务正在执行，请先等待或取消当前任务") };
     }
     const status = await vip.getStatusAsync();
-    if (!status.activated) {
+    if (!canUseMembershipFeature(status, 'inspection')) {
       return { ok: false, code: 'vip_required', error: tr("设备巡检为会员专属功能，请先开通会员") };
     }
     const deviceId = String(args?.deviceId || '').trim();

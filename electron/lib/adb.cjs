@@ -14,6 +14,7 @@ const { recordMedia } = require('./device-media.cjs');
 const { isHarmonyDevice, unsupportedDeviceOperation } = require('./device-platform.cjs');
 const applicationLog = require('./application-log.cjs');
 const { createMirrorDiagnostics } = require('./mirror-diagnostics.cjs');
+const { assertDeviceDiscoveryConfirmed } = require('./device-registry.cjs');
 
 // 终端 shell 执行：记录运行中的进程，支持主动中断
 // key: requestId, value: { proc, deviceId, timer, settle }
@@ -322,12 +323,20 @@ function register(ipcMain, mirrorWorkflow = null) {
   require('./harmony-media-window.cjs').register(ipcMain, mirrorWorkflow);
   ipcMain.handle('adb:screenshotAction', (_event, args) => screenshots.perform(args));
   // IPC Handlers for ADB
-  ipcMain.handle('adb:getDevices', async () => {
+  ipcMain.handle('adb:getDevices', async (event, requestId) => {
+    const requestingFrame = event?.senderFrame;
+    const mainWindow = Number.isSafeInteger(requestId) && requestId > 0 && require('./app-context.cjs').getMainWindow();
+    const progressive = mainWindow && requestingFrame
+      && event.sender === mainWindow.webContents && requestingFrame === mainWindow.webContents.mainFrame;
     try {
-      const result = await require('./device-discovery.cjs').discoverDevices();
-      if (!result.available) throw new Error(tr('无法读取设备列表，请运行环境自检。'));
+      const result = await require('./device-discovery.cjs').discoverDevices({}, progressive ? snapshot => {
+        try { requestingFrame.send('adb:devicesProgress', requestId, { devices: snapshot.devices, channels: snapshot.channels }); }
+        catch { /* The requesting frame can close before probing completes. */ }
+      } : undefined);
+      if (!result.available && !progressive) throw new Error(tr('无法读取设备列表，请运行环境自检。'));
       require('./performance-monitor.cjs').syncDeviceConnections(result.devices);
-      return fillMissingDeviceModels(result.devices);
+      const devices = await fillMissingDeviceModels(result.devices);
+      return progressive ? { devices, channels: result.channels } : devices;
     } catch (error) {
       console.error('ADB error:', error);
       throw new Error(tr('无法读取设备列表，请运行环境自检。'));
@@ -337,10 +346,14 @@ function register(ipcMain, mirrorWorkflow = null) {
   ipcMain.handle('scrcpy:start', async (event, { deviceId, settings, options }) => {
     let prepared;
     try {
+      assertDeviceDiscoveryConfirmed(deviceId);
       prepared = mirrorWorkflow ? await mirrorWorkflow.prepare(event, deviceId, settings, options) : { settings };
       if (prepared.alreadyActive) return { success: true, alreadyActive: true, message: tr('此设备的投屏会话仍在运行，请先核对现有窗口。') };
       const observe = mirrorWorkflow ? row => mirrorWorkflow.observe(prepared.ticket, row) : undefined;
-      const assertCurrent = mirrorWorkflow ? () => mirrorWorkflow.guard(prepared.ticket) : undefined;
+      const assertCurrent = () => {
+        assertDeviceDiscoveryConfirmed(deviceId);
+        if (mirrorWorkflow) mirrorWorkflow.guard(prepared.ticket);
+      };
       const onAudioFallback = mirrorWorkflow ? attempt => mirrorWorkflow.beginAudioFallback(prepared.ticket, attempt) : undefined;
       assertCurrent?.();
       if (isHarmonyDevice(deviceId)) {

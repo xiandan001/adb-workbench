@@ -59,9 +59,9 @@ test('real device discovery passes through rows without filtering IDs', async ()
   assert.deepEqual(state.devices, devices);
   assert.equal(state.active, devices[0].id);
 });
-test('device discovery errors retain known rows offline and release the loading state', async () => {
+test('device discovery errors retain known rows as unconfirmed and release the loading state', async () => {
   const state = await fetchState({ getDevices: async () => { throw new Error('discovery unavailable'); } }, [{ id: 'actual-device', status: 'device' }], 'actual-device');
-  assert.deepEqual(state.devices, [{ id: 'actual-device', status: 'offline' }]);
+  assert.deepEqual(state.devices, [{ id: 'actual-device', status: 'unconfirmed' }]);
   assert.match(state.error, /discovery unavailable/);
   assert.equal(state.loading, false);
   assert.equal(state.active, 'actual-device');
@@ -118,6 +118,34 @@ test('startup discovery rejection is not treated as proof the remembered device 
   const result = await fetchState({ getDevices: async () => { throw new Error('ADB unavailable'); } }, [], 'remembered-wifi');
   assert.equal(result.active, 'remembered-wifi');
   assert.match(result.error, /ADB unavailable/);
+});
+
+test('progressive discovery keeps a saved device when its channel is pending or unsuccessful', async () => {
+  const android = { id: 'USB-ONLINE', status: 'device' };
+  const native = { id: 'hdc:PREVIOUS', status: 'unconfirmed' };
+  const probe = async onProgress => {
+    onProgress({ devices: [android], channels: { adb: 'ready', hdc: 'pending' } });
+    return { devices: [android, native], channels: { adb: 'ready', hdc: 'unconfirmed' } };
+  };
+  const pending = await fetchState({ getDevices: probe }, [], native.id);
+  assert.equal(pending.active, native.id);
+  assert.deepEqual(pending.devices, [android, native]);
+  assert.match(pending.error, /HDC/);
+  assert.equal(pending.loading, false);
+
+  const established = { ...native, status: 'device' };
+  const recovered = await fetchState({ getDevices: async () => ({
+    devices: [android, established], channels: { adb: 'ready', hdc: 'ready' }
+  }) }, pending.devices, pending.active);
+  assert.equal(recovered.active, native.id);
+  assert.equal(recovered.devices[1].status, 'device');
+  assert.equal(recovered.error, '');
+
+  const disconnected = await fetchState({ getDevices: async () => ({
+    devices: [android], channels: { adb: 'ready', hdc: 'ready' }
+  }) }, recovered.devices, recovered.active);
+  assert.equal(disconnected.active, android.id);
+  assert.deepEqual(disconnected.devices, [android]);
 });
 
 test('empty current selection removes only its persistence key and keeps history, names and pins', () => {

@@ -1,5 +1,6 @@
 const { randomUUID, createHash } = require('node:crypto');
 const { tr, getLocale, withLocale } = require('./localization.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const { sanitize, checks } = require('./ai-workspace-evidence.cjs');
 const { normalizeSelection } = require('./ai-workspace-selection.cjs');
 const { APP_CHECKS, normalizeDiagnostic, diagnosticPresets } = require('./ai-workspace-diagnostics.cjs');
@@ -69,7 +70,7 @@ function createAiWorkspaceService({ client, batchClient, evidence, membership, s
   }
   async function entitled() {
     const status = await membership();
-    if (!status?.activated || status.scope !== 'vip') throw fail('AI_MEMBERSHIP', tr('此功能使用现有会员权益，请先在会员中心激活。'));
+    if (!canUseMembershipFeature(status, 'ai-workspace')) throw fail('AI_MEMBERSHIP', tr('此功能使用现有会员权益，请先在会员中心激活。'));
   }
   async function operate(args, action) {
     const state = getCase(args.caseId);
@@ -155,7 +156,7 @@ function createAiWorkspaceService({ client, batchClient, evidence, membership, s
       const status = await membership();
       const platform = devicePlatform(args.deviceId);
       const capabilities = platform === 'harmony' ? require('./device-registry.cjs').resolveDeviceRef(args.deviceId, { allowOffline: true }).capabilities : undefined;
-      return { sources: evidence.list(), checks: checks(platform, capabilities), platform, diagnosticPresets: diagnosticPresets(), entitled: Boolean(status?.activated && status.scope === 'vip') };
+      return { sources: evidence.list(), checks: checks(platform, capabilities), platform, diagnosticPresets: diagnosticPresets(), entitled: canUseMembershipFeature(status, 'ai-workspace') };
     },
     plan: args => operate(args, async (state, signal, assertCurrent) => {
       const question = shortText(args.question);

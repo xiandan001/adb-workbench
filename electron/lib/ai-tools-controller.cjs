@@ -1,5 +1,6 @@
 const { tr } = require('./localization.cjs');
 const { validateArguments, validateCommandName } = require('./ai-tools-policy.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 
 const COMMANDS = Object.freeze([
   'snapshot', 'provider_save', 'provider_remove', 'provider_test', 'provider_probe', 'models_list', 'quota_query',
@@ -35,7 +36,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
       if (operations.size >= 16) throw fail('AI_TOOLS_BUSY', tr("AI 工具操作过多，请等待当前操作完成"));
       operations.add(abort);
       const status = await getMembership(); authorize(event);
-      const activated = status?.activated === true && status.scope === 'vip';
+      const activated = canUseMembershipFeature(status, 'ai-tools');
       const membership = { activated, reason: activated ? null : status?.reason || 'membership_required' };
       const recovery = command === 'backups_list' || command === 'backup_preview_restore' || command === 'config_apply' && restoreTokens.has(args.token) || command === 'router_stop'
         || command === 'resources_backups_list' || command === 'resources_backup_preview_restore' || command === 'resources_apply' && resourceRestoreTokens.has(args.token)
@@ -45,7 +46,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
         const data = activated ? await store.snapshot() : { providers: [], persistent: null, warning: '' };
         return { success: true, result: { ...data, membership, tools, capabilities, quota: activated ? quota.list() : [] } };
       }
-      if (!activated && !recovery) throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("AI 工具管理使用卓控台现有会员权益，请前往会员中心激活"));
+      if (!canUseMembershipFeature(status, recovery ? 'recovery' : 'ai-tools')) throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("AI 工具管理使用卓控台现有会员权益，请前往会员中心激活"));
       let result;
       switch (command) {
         case 'provider_save': {
@@ -65,7 +66,7 @@ function createAiToolsController({ store, config, quota, models, probe, confirmP
           if (abort.signal.aborted) throw fail('AI_TOOLS_CANCELLED', tr("测试已取消"));
           if (!['inference', 'read-only'].includes(mode)) { result = { cancelled: true }; break; }
           const membershipNow = await getMembership(); authorize(event);
-          if (membershipNow?.activated !== true || membershipNow.scope !== 'vip') throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("会员状态已变化，未执行测试"));
+          if (!canUseMembershipFeature(membershipNow, 'ai-tools')) throw fail('AI_TOOLS_MEMBERSHIP_REQUIRED', tr("会员状态已变化，未执行测试"));
           if (JSON.stringify(await store.getProvider(args.providerId)) !== fingerprint) throw fail('AI_TOOLS_PROVIDER_CHANGED', tr("供应商配置已变化，请重新确认测试"));
           result = mode === 'inference' ? await probe.run(provider, { signal: abort.signal }) : await models.test(provider, { signal: abort.signal }); break;
         }

@@ -8,6 +8,7 @@ import { getChangelog } from './data/changelogs';
 import DeviceCard from './components/DeviceCard';
 import MemberCenter from './components/MemberCenter';
 import MembershipDialog from './components/MembershipDialog';
+import { canUseMembershipFeature } from './shared/membershipEntitlements';
 import useMembershipStatus from './shared/useMembershipStatus';
 import membershipLimits from '../electron/lib/membership-limits.json' with { type: 'json' };
 // 性能监控面板
@@ -376,11 +377,11 @@ function App() {
   // VIP 会员状态
   const { status: vipStatus, refresh: refreshVipStatus, acceptVerifiedStatus } = useMembershipStatus();
 
-  const openMembership = ({ deviceId = activeDeviceId, feature } = {}) => {
+  const openMembership = ({ deviceId = activeDeviceId, feature, capability } = {}) => {
     if (membershipOriginRef.current?.open) return;
     const selectedId = activeTab === 'troubleshoot' ? deviceId : activeDeviceId;
     rememberMembershipOrigin({
-      open: true, feature, deviceId, activeDeviceId: selectedId,
+      open: true, feature, capability, deviceId, activeDeviceId: selectedId,
       devices: devicesRef.current.filter(device => device.id === deviceId || device.id === selectedId)
     });
     if (selectedId !== activeDeviceId) setActiveDeviceId(selectedId);
@@ -395,7 +396,9 @@ function App() {
     }
   };
   const activateMembership = status => {
-    if (acceptVerifiedStatus(status)) returnFromMembership();
+    if (!acceptVerifiedStatus(status)) return;
+    const origin = membershipOriginRef.current;
+    if (!origin?.capability || canUseMembershipFeature(status, origin.capability)) returnFromMembership();
   };
 
   const allThemes = { ...themes, ...Object.fromEntries(customThemes.map(t => [t.key, t])) };
@@ -488,25 +491,33 @@ function App() {
 
   const fetchDevices = useMemo(() => singleFlight(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
-    try {
-      const nextDevices = window.electronAPI
-        ? await window.electronAPI.getDevices()
-        : [];
+    const applyDiscovery = snapshot => {
+      const { devices: nextDevices, channels } = Array.isArray(snapshot) ? { devices: snapshot } : snapshot;
       devicesRef.current = nextDevices;
       setDevices(previous => JSON.stringify(previous) === JSON.stringify(nextDevices) ? previous : nextDevices);
       setActiveDeviceId(previous => {
         const origin = membershipOriginRef.current;
         if (origin) return origin.activeDeviceId;
         const target = worksetTargetRef.current;
-        if (!target) return resolveActiveDeviceId(previous, nextDevices);
-        if (nextDevices.some(device => device.id === target && device.status === 'device')) return target;
-        return '';
+        if (!target) return resolveActiveDeviceId(previous, nextDevices, channels);
+        const row = nextDevices.find(device => device.id === target);
+        if (row) return ['device', 'unconfirmed'].includes(row.status) ? target : '';
+        return previous === target && resolveActiveDeviceId(target, nextDevices, channels) === target ? target : '';
       });
-      setError('');
+      if (!channels || !Object.values(channels).includes('pending')) {
+        const unavailable = Object.entries(channels || {}).filter(([, value]) => value === 'unconfirmed').map(([key]) => key.toUpperCase());
+        setError(unavailable.length ? tr('{0} 探测未完成，已保留原设备选择。请等待自动刷新或运行环境自检。', { 0: unavailable.join(' / ') }) : '');
+      }
+    };
+    try {
+      const snapshot = window.electronAPI
+        ? await window.electronAPI.getDevices(applyDiscovery)
+        : [];
+      applyDiscovery(snapshot);
     } catch (err) {
       setError(tr("设备状态刷新失败：{0}。已保留设备选择，请运行环境自检。", { 0: err.message || tr("请检查 ADB 环境") }));
-      devicesRef.current = devicesRef.current.map(device => ({ ...device, status: 'offline' }));
-      setDevices(previous => previous.map(device => ({ ...device, status: 'offline' })));
+      devicesRef.current = devicesRef.current.map(device => ({ ...device, status: 'unconfirmed' }));
+      setDevices(previous => previous.map(device => ({ ...device, status: 'unconfirmed' })));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -1539,7 +1550,7 @@ function App() {
   const activeDevice = deviceCards.find(device => device.id === activeDeviceId);
   const hasOnlineDevice = devices.some(device => device.status === 'device');
   const showConnectionForm = connectionFormOpen || !hasOnlineDevice;
-  const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
+  const isVipOrLoading = canUseMembershipFeature(vipStatus, 'devices') || vipStatus.reason === 'loading';
   const eligibleDevices = isVipOrLoading ? deviceCards : [activeDevice || deviceCards[0]].filter(Boolean);
   const visibleDevices = filterDeviceCards(eligibleDevices, { query: deviceQuery, names: deviceNames, pinnedIds: pinnedDeviceIds });
   const lockedCount = deviceCards.length - eligibleDevices.length;
@@ -1628,7 +1639,7 @@ function App() {
     <div className={`workbench-shell flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
       <AppMessageDialogHost theme={t} isDark={isDark} />
       <AiOutboundPreviewHost isDark={isDark} />
-      {membershipOrigin?.open && <MembershipDialog feature={membershipOrigin.feature} theme={t}
+      {membershipOrigin?.open && <MembershipDialog feature={membershipOrigin.feature} capability={membershipOrigin.capability} theme={t}
         status={vipStatus} onRetry={refreshVipStatus} onActivated={activateMembership} onReturn={returnFromMembership} showToast={showToast} />}
       {reproductionTarget && <ReproductionDialog key={`${reproductionTarget.deviceId}:${reproductionTarget.sessionId || ''}`} theme={t} devices={devices}
         deviceId={reproductionTarget.deviceId} sessionId={reproductionTarget.sessionId} onClose={() => setReproductionTarget(null)} />}
@@ -2206,13 +2217,13 @@ function App() {
                       vipStatus={vipStatus}
                       inspectionPath={inspectionPath}
                       onInspectionPathChange={setInspectionPath}
-                      onOpenMemberCenter={feature => openMembership({ deviceId: device.id, feature })}
+                      onOpenMemberCenter={(feature, capability) => openMembership({ deviceId: device.id, feature, capability })}
                     />
                   ))}
                   {lockedCount > 0 && (
                     <div className={`col-span-full flex items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                       <Lock size={20} className="text-amber-400" />
-                      <span className={`text-sm ${t.textMuted}`}>{tr('基础版可管理 {0} 台设备。', { 0: membershipLimits.freeDeviceLimit })}{' '}<button type="button" onClick={() => openMembership({ feature: tr('同时管理设备数量') })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
+                      <span className={`text-sm ${t.textMuted}`}>{tr('基础版可管理 {0} 台设备。', { 0: membershipLimits.freeDeviceLimit })}{' '}<button type="button" onClick={() => openMembership({ feature: tr('同时管理设备数量'), capability: 'devices' })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
                     </div>
                   )}
                   </>
@@ -2227,7 +2238,7 @@ function App() {
               <AiWorkspace active={activeTab === 'ai-workspace'} theme={t} devices={devices} activeDeviceId={activeDeviceId} applicationContext={applicationContext} incomingHandoffId={incomingHandoffId}
                 incomingReportRef={incomingReportRef}
                 onOpenRelatedTask={({ runId, scriptId }) => { if (runId) openTaskRun(runId); else if (scriptId) { setActivityTaskId(''); setAiTaskId(scriptId); setActiveTab('tasks'); } }}
-                showToast={showToast} onOpenMembership={openMembership} membershipActive={vipStatus.activated && vipStatus.scope === 'vip'}
+                showToast={showToast} onOpenMembership={openMembership} membershipActive={canUseMembershipFeature(vipStatus, 'ai-workspace')}
                 onOpenTasks={id => { setActivityTaskId(''); setAiTaskId(id); setActiveTab('tasks'); }} />
             </Suspense>
           </div>}
@@ -2238,7 +2249,7 @@ function App() {
           </div>}
           {aiToolsVisited && <div hidden={activeTab !== 'ai-tools'}>
             <Suspense fallback={<div className={t.textMuted}>{tr("正在加载 AI 工具管理…")}</div>}>
-              <AiToolsWorkspace active={activeTab === 'ai-tools'} incomingTabRequest={searchDestination?.kind === 'ai-tool' ? searchDestination : null} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => openMembership({ deviceId: '' })} membershipActive={vipStatus.activated && vipStatus.scope === 'vip'} />
+              <AiToolsWorkspace active={activeTab === 'ai-tools'} incomingTabRequest={searchDestination?.kind === 'ai-tool' ? searchDestination : null} theme={t} isDark={isDark} showToast={showToast} onRequest={requestAiTools} onOpenMembership={() => openMembership({ deviceId: '', feature: tr('AI 工具管理'), capability: 'ai-tools' })} membershipActive={canUseMembershipFeature(vipStatus, 'ai-tools')} />
             </Suspense>
           </div>}
           {activeTab === 'troubleshoot' && (
@@ -2326,7 +2337,7 @@ function App() {
                 ) : (
                   <div className="workbench-history-grid">
                     {(() => {
-                      const isVipOrLoading = vipStatus.activated || vipStatus.reason === 'loading';
+                      const isVipOrLoading = canUseMembershipFeature(vipStatus, 'connection-history') || vipStatus.reason === 'loading';
                       const storedHistory = connectionHistory.slice(0, membershipLimits.storedConnectionHistoryLimit);
                       const visibleHistory = isVipOrLoading ? storedHistory : storedHistory.slice(0, membershipLimits.freeConnectionHistoryLimit);
                       const lockedHistoryCount = storedHistory.length - visibleHistory.length;
@@ -2400,7 +2411,7 @@ function App() {
                     {lockedHistoryCount > 0 && (
                       <div className={`col-span-full flex items-center justify-center gap-3 p-5 rounded-xl border-2 border-dashed ${isDarkTheme(t) ? 'border-[#3E4145] bg-slate-800/40' : 'border-slate-300 bg-slate-50'}`}>
                         <Lock size={18} className="text-amber-400" />
-                        <span className={`text-sm ${t.textMuted}`}>{tr('基础版可查看最近 {0} 条连接记录。本机还保存了 {1} 条。', { 0: membershipLimits.freeConnectionHistoryLimit, 1: lockedHistoryCount })}{' '}<button type="button" onClick={() => openMembership({ deviceId: '', feature: tr('连接历史记录') })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
+                        <span className={`text-sm ${t.textMuted}`}>{tr('基础版可查看最近 {0} 条连接记录。本机还保存了 {1} 条。', { 0: membershipLimits.freeConnectionHistoryLimit, 1: lockedHistoryCount })}{' '}<button type="button" onClick={() => openMembership({ deviceId: '', feature: tr('连接历史记录'), capability: 'connection-history' })} className="text-amber-500 hover:underline font-medium">{tr('查看会员权益')}</button></span>
                       </div>
                     )}
                         </>

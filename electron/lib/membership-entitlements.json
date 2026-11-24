@@ -1,0 +1,13 @@
+{
+  "devices": "activated",
+  "connection-history": "activated",
+  "packages": "activated",
+  "inspection": "activated",
+  "performance": "activated",
+  "log-rules": "activated",
+  "mcp": "activated",
+  "ai-analysis": "vip",
+  "ai-workspace": "vip",
+  "ai-tools": "vip",
+  "recovery": "available"
+}

@@ -16,6 +16,7 @@ const zlib = require('zlib');
 
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const inspection = require('./inspection.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
@@ -538,7 +539,7 @@ async function bridgePerformanceSnapshot(payload) {
   if (!deviceId) return { ok: false, error: 'device_required' };
   const status = await vip.getStatusAsync();
   try {
-    const snapshot = await performanceMonitor.collectSnapshot(deviceId, status.activated === true, { timeoutMs: payload?.timeoutMs || 12000 });
+    const snapshot = await performanceMonitor.collectSnapshot(deviceId, canUseMembershipFeature(status, 'performance'), { timeoutMs: payload?.timeoutMs || 12000 });
     return { ok: true, snapshot };
   } catch (error) {
     return { ok: false, error: error.message || 'snapshot_failed' };
@@ -550,7 +551,7 @@ async function bridgeInspection(payload) {
   const deviceId = normalizeDeviceId(payload?.deviceId);
   if (!taskId || !deviceId) return { ok: false, error: 'task_or_device_required' };
   const status = await vip.getStatusAsync();
-  if (!status.activated) {
+  if (!canUseMembershipFeature(status, 'inspection')) {
     return { ok: false, error: tr("设备巡检为会员专属功能，请先开通会员"), code: 'vip_required' };
   }
   const bridgeTask = createBridgeInspectionTask(taskId, deviceId);
@@ -996,7 +997,7 @@ async function compareScreenshot(task, deviceId, step) {
 async function capturePerformance(task, deviceId, step) {
   const artifactDir = await ensureTaskArtifactDir(task, 'performance');
   const status = await vip.getStatusAsync();
-  const snapshot = await performanceMonitor.collectSnapshot(deviceId, status.activated === true);
+  const snapshot = await performanceMonitor.collectSnapshot(deviceId, canUseMembershipFeature(status, 'performance'));
   const filePath = path.join(artifactDir, `performance-${sanitizeName(deviceId)}-${formatStamp(new Date())}.json`);
   await fs.promises.writeFile(filePath, JSON.stringify({ deviceId, capturedAt: new Date().toISOString(), snapshot }, null, 2), 'utf8');
   const summary = [
@@ -1087,7 +1088,7 @@ async function assertText(task, deviceId, step) {
 
 async function captureInspectionSummary(task, deviceId, step) {
   const status = await vip.getStatusAsync();
-  if (!status.activated) {
+  if (!canUseMembershipFeature(status, 'inspection')) {
     return { ok: false, error: tr("设备巡检为会员专属功能，请先开通会员"), code: 'vip_required' };
   }
   const outputBaseDir = await ensureTaskArtifactDir(task, 'inspection');

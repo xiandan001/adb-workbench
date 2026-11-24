@@ -23,6 +23,7 @@ import {
 import { isDarkTheme } from '../shared/theme';
 import { deviceStatusLabel } from '../shared/deviceWorkflow';
 import { nextTroubleshootingContext } from '../shared/troubleshootingContext';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements';
 
 const ISSUE_OPTIONS = () => ([
   { id: 'crash', label: tr("应用闪退/崩溃"), icon: ShieldAlert },
@@ -38,15 +39,13 @@ const DEFAULT_STEPS = () => ([
   { id: 'package', label: tr("应用信息"), status: 'pending', detail: '' },
   { id: 'performance', label: tr("性能快照"), status: 'pending', detail: '' },
   { id: 'logs', label: tr("关键日志"), status: 'pending', detail: '' },
-  { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' },
-  { id: 'aiSummary', label: tr("AI 总结"), status: 'pending', detail: '' }
+  { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' }
 ]);
 
 function filterProgressSteps(sourceSteps, options) {
   const list = Array.isArray(sourceSteps) && sourceSteps.length > 0 ? sourceSteps : DEFAULT_STEPS();
   return list.filter(step => {
     if (step.id === 'inspection') return options.includeInspection === true;
-    if (step.id === 'aiSummary') return options.includeAiSummary === true;
     return true;
   });
 }
@@ -66,10 +65,10 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const [packageItems, setPackageItems] = useState([]);
   const [packageDeviceId, setPackageDeviceId] = useState('');
   const [includeInspection, setIncludeInspection] = useState(true);
-  const [includeAiSummary, setIncludeAiSummary] = useState(true);
   const [steps, setSteps] = useState(DEFAULT_STEPS());
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
+  const [savedReport, setSavedReport] = useState(null);
   const [error, setError] = useState('');
   const [evidenceDeviceId, setEvidenceDeviceId] = useState(activeDeviceId || '');
   const [taskStateLoaded, setTaskStateLoaded] = useState(false);
@@ -78,7 +77,8 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
   const contextDeviceRef = useRef(activeDeviceId || '');
   const packageRequestRef = useRef(0);
 
-  const hasVip = vipStatus?.activated === true;
+  const hasVip = canUseMembershipFeature(vipStatus, 'inspection');
+  const canGenerateSummary = canUseMembershipFeature(vipStatus, 'ai-analysis');
   const isVipLoading = vipStatus?.reason === 'loading';
   const selectedDeviceId = running ? runningDeviceId || activeDeviceId : activeDeviceId;
   const selectedDevice = onlineDevices.find(device => device.id === selectedDeviceId);
@@ -147,7 +147,6 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       if (event.deviceId) setRunningDeviceId(event.deviceId);
       if (event.deviceId) setEvidenceDeviceId(event.deviceId);
       if (typeof event.includeInspection === 'boolean') setIncludeInspection(event.includeInspection);
-      if (typeof event.includeAiSummary === 'boolean') setIncludeAiSummary(event.includeAiSummary);
       if (Array.isArray(event.steps)) setSteps(event.steps);
     });
     const offDone = window.electronAPI.onTroubleshootingDone((event) => {
@@ -155,9 +154,9 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
       setRunning(false);
       if (event.deviceId) setEvidenceDeviceId(event.deviceId);
       if (typeof event.includeInspection === 'boolean') setIncludeInspection(event.includeInspection);
-      if (typeof event.includeAiSummary === 'boolean') setIncludeAiSummary(event.includeAiSummary);
       if (Array.isArray(event.steps)) setSteps(event.steps);
       setResult(event.result || null);
+      if (event.result?.ok) setSavedReport(event.result);
       if (!event.result?.ok && !event.result?.cancelled) setError(event.result?.error || tr("排查失败，请查看执行步骤"));
       if (event.result?.ok) showToast?.(tr("一键问题排查完成"));
       else if (event.result?.cancelled) showToast?.(tr("一键问题排查已取消"));
@@ -165,6 +164,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     });
     Promise.resolve(window.electronAPI.troubleshootingState?.()).then(res => {
       if (!alive || receivedUpdate) return;
+      if (res?.savedReport) setSavedReport(res.savedReport);
       const task = res?.task;
       if (!task) return;
       const taskRunning = task.status === 'running' || task.status === 'cancelling';
@@ -177,7 +177,6 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         setPackageSearch(task.packageName || '');
       }
       if (typeof task.includeInspection === 'boolean') setIncludeInspection(task.includeInspection);
-      if (typeof task.includeAiSummary === 'boolean') setIncludeAiSummary(task.includeAiSummary);
       if (Array.isArray(task.steps)) setSteps(task.steps);
       if (task.result) setResult(task.result);
     }).catch(() => {
@@ -239,8 +238,7 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
         deviceLabel: selectedDevice?.model || selectedDevice?.name || selectedDeviceId,
         issueType,
         packageName: packageName.trim(),
-        includeInspection: hasVip && includeInspection,
-        includeAiSummary
+        includeInspection: hasVip && includeInspection
       });
       if (!res.ok) throw new Error(res.error || tr("启动失败"));
       if (res.task?.steps) setSteps(res.task.steps);
@@ -306,9 +304,20 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
     if (res && !res.ok) showToast?.(tr("打开失败：{0}", { 0: res.error || tr("未知错误") }));
   };
 
+  const updateAiSummary = (taskId, aiSummary) => {
+    const update = report => report?.taskId === taskId ? { ...report, aiSummary } : report;
+    setResult(update);
+    setSavedReport(update);
+  };
+  const openSummaryMembership = report => onOpenMemberCenter?.({
+    deviceId: report.deviceId, feature: tr('AI 总结'), capability: 'ai-analysis'
+  });
+  const reportPanelProps = { isDark, text, muted, soft, onOpenPath: openPath, canGenerateSummary,
+    isVipLoading, onOpenSummaryMembership: openSummaryMembership, onAiSummary: updateAiSummary };
+  const visibleResult = result && evidenceDeviceId === selectedDeviceId ? result : null;
   const visibleSteps = useMemo(
-    () => { void locale; return filterProgressSteps(evidenceDeviceId === selectedDeviceId ? steps : DEFAULT_STEPS(), { includeInspection: hasVip && includeInspection, includeAiSummary }); },
-    [steps, evidenceDeviceId, selectedDeviceId, hasVip, includeInspection, includeAiSummary, locale]
+    () => { void locale; return filterProgressSteps(evidenceDeviceId === selectedDeviceId ? steps : DEFAULT_STEPS(), { includeInspection: hasVip && includeInspection }); },
+    [steps, evidenceDeviceId, selectedDeviceId, hasVip, includeInspection, locale]
   );
   const completedCount = visibleSteps.filter(step => ['success', 'failed', 'skipped'].includes(step.status)).length;
   const progressTotal = visibleSteps.length;
@@ -463,26 +472,11 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
               {!hasVip && !isVipLoading && (
                 <button
                   type="button"
-                  onClick={() => onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: tr('设备巡检报告与证据包') })}
+                  onClick={() => onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: tr('设备巡检报告与证据包'), capability: 'inspection' })}
                   className="text-xs text-amber-400 flex items-center gap-1"
                 >
                   <Lock size={12} />{tr("会员")}</button>
               )}
-            </label>
-
-            <label className={`flex items-start gap-3 rounded-lg border p-3 ${soft}`}>
-              <input
-                type="checkbox"
-                checked={includeAiSummary}
-                disabled={running}
-                onChange={(event) => setIncludeAiSummary(event.target.checked)}
-                className="mt-1 w-4 h-4 accent-emerald-500"
-              />
-              <span className="flex-1">
-                <span className={`block text-sm font-medium ${text}`}>{tr("报告包含 AI 总结")}</span>
-                <span className={`block text-xs mt-1 ${muted}`}>{tr("勾选后会在问题排查报告末尾追加 AI 总结")}</span>
-              </span>
-              <Sparkles size={15} className="mt-0.5 text-emerald-400" />
             </label>
 
             <div className="flex gap-2">
@@ -532,8 +526,15 @@ function TroubleshootingWizard({ devices, theme, vipStatus, showToast, onOpenMem
               </div>
             )}
 
-            {result && evidenceDeviceId === selectedDeviceId && (
-              <ResultPanel result={result} isDark={isDark} text={text} muted={muted} soft={soft} onOpenPath={openPath} />
+            {visibleResult && (
+              <ResultPanel key={visibleResult.taskId || 'result'} result={visibleResult} {...reportPanelProps} />
+            )}
+            {!running && savedReport && visibleResult?.taskId !== savedReport.taskId && (
+              <details className={`rounded-xl border p-4 ${soft}`}>
+                <summary className={`cursor-pointer text-sm font-medium ${text}`}>{tr('查看最近排查报告')}</summary>
+                <div className={`mt-2 break-all text-xs ${muted}`}>{savedReport.deviceLabel || savedReport.deviceId}</div>
+                <div className="mt-3"><ResultPanel key={savedReport.taskId} result={savedReport} {...reportPanelProps} /></div>
+              </details>
             )}
           </div>
         </div>
@@ -562,7 +563,7 @@ function StepTile({ step, isDark }) {
   );
 }
 
-function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
+function ResultPanel({ result, isDark, text, muted, soft, onOpenPath, ...summaryProps }) {
   useLocale();
   const ok = result.ok && !result.cancelled;
   return (
@@ -603,8 +604,52 @@ function ResultPanel({ result, isDark, text, muted, soft, onOpenPath }) {
             <FolderOpen size={15} />{tr("打开目录")}</button>
         )}
       </div>
+      {ok && result.aiSummaryAvailable === true && (
+        <ReportSummaryAction result={result} muted={muted} isDark={isDark} {...summaryProps} />
+      )}
     </div>
   );
+}
+
+function ReportSummaryAction({ result, muted, isDark, canGenerateSummary, isVipLoading, onOpenSummaryMembership, onAiSummary }) {
+  const [pending, setPending] = useState(false);
+  const [failure, setFailure] = useState('');
+  const running = useRef(false);
+
+  const generate = async () => {
+    if (running.current || !result.reportRef) return;
+    if (!canGenerateSummary) {
+      onOpenSummaryMembership(result);
+      return;
+    }
+    running.current = true;
+    setPending(true);
+    setFailure('');
+    try {
+      const response = await window.electronAPI?.troubleshootingGenerateSummary?.(result.reportRef);
+      if (response?.ok && response.taskId === result.taskId) onAiSummary(response.taskId, response.aiSummary);
+      else setFailure(response?.cancelled ? tr('AI 发送已取消。') : response?.error || tr('AI 总结异常'));
+    } catch { setFailure(tr('AI 总结异常')); }
+    finally { running.current = false; setPending(false); }
+  };
+  const cancel = async () => {
+    try { await window.electronAPI?.troubleshootingCancelSummary?.(result.taskId); }
+    catch { setFailure(tr('AI 总结异常')); }
+  };
+  const button = `px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-2 disabled:opacity-50 ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-100'}`;
+  return <div className="mt-4 border-t border-current/10 pt-3" aria-busy={pending}>
+    {result.aiSummary?.ok ? <p role="status" className={`text-sm ${muted}`}>{tr('AI 总结已写入报告')}</p> : <>
+      <p className={`mb-2 text-xs ${muted}`}>{tr('报告已保存。可使用本次证据生成 AI 总结，无需重新采集。')}</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={generate} disabled={pending || isVipLoading} className={button}>
+          {pending ? <Loader2 size={15} className="animate-spin" /> : canGenerateSummary ? <Sparkles size={15} /> : <Lock size={15} />}
+          {pending ? tr('正在生成 AI 总结') : failure ? tr('重试 AI 总结') : tr('生成 AI 总结')}
+        </button>
+        {pending && <button type="button" onClick={cancel} className={button}>{tr('取消')}</button>}
+      </div>
+      {failure && <p role="status" className="mt-2 text-xs text-amber-500">{failure}</p>}
+    </>}
+  </div>;
 }
 
 function DeviceSelect({ value, options, isDark, disabled, onChange }) {

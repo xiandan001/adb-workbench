@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
+const { EventEmitter } = require('node:events');
 const nativeData = require('../electron/lib/harmony-quality-data.cjs');
 const nativeQuality = require('../electron/lib/harmony-quality-native.cjs');
 
@@ -20,6 +21,7 @@ const qualitySnapshot = () => ({ deviceId: 'hdc:QA', platform: 'harmony', device
 async function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'awb-harmony-quality-'));
   const state = { legacyCalls: [], nativeCalls: [], modelCalls: 0, metric: metric(), log: { ok: true, stdout: 'I Fixture no fault event' }, online: true };
+  const owner = Object.assign(new EventEmitter(), { mainFrame: {}, isDestroyed: () => false, send() {} });
   const cache = new Map();
   const deviceRef = { id: 'hdc:QA', targetKey: 'QA', transport: 'hdc', status: 'device', generation: 0 };
   function load(name) {
@@ -29,11 +31,15 @@ async function fixture(t) {
       require(request) {
         if (request === 'electron') return { app: { getPath: () => directory }, shell: { openPath: async () => '' } };
         if (request === 'child_process') return { execFile() { throw new Error('No real child process allowed'); } };
-        if (request === './app-context.cjs') return { broadcastToAllWindows() {}, getMainWindow: () => null };
+        if (request === './app-context.cjs') return { broadcastToAllWindows() {}, getMainWindow: () => ({ isDestroyed: () => false, webContents: owner }) };
         if (request === './version.cjs') return { getAppVersion: () => 'fixture' };
-        if (request === './vip.cjs') return { getStatusAsync: async () => ({ activated: true }) };
+        if (request === './vip.cjs') return { getStatusAsync: async () => state.membership ?? ({ activated: true, scope: 'vip' }) };
         if (request === './ai-source-lifecycle.cjs') return { bindSummaryLifetime: () => ({ dispose() {} }) };
-        if (request === './ai-analyze.cjs') return { generateAiSummary() { state.modelCalls++; throw new Error('No model invocation allowed'); } };
+        if (request === './ai-analyze.cjs') return { generateAiSummary(args) {
+          state.modelCalls++;
+          if (!state.generateSummary) throw new Error('No model invocation allowed');
+          return state.generateSummary(args);
+        } };
         if (request === './adb-runtime.cjs') return { runAdb: async args => { state.legacyCalls.push(args); if (state.allowAndroid) return { ok: true, stdout: args.at(-1) === 'getprop' ? '[ro.product.model]: [Android Fixture]\n[ro.build.version.release]: [13]' : '' }; throw new Error('Harmony must not call Android collectors'); } };
         if (request === './performance-monitor.cjs') return { collectSnapshot: async () => { if (state.allowAndroid) return { cpu: { usage: 12 }, memory: { usage: 25 }, disk: [] }; throw new Error('No Android metrics collector allowed'); } };
         if (request === './package-manager.cjs') return { listPackages: async () => { if (state.allowAndroid) return []; throw new Error('No Android package collector allowed'); }, getPackageDetail: async () => { throw new Error('No Android detail collector allowed'); } };
@@ -44,7 +50,10 @@ async function fixture(t) {
         if (request === './harmony-media.cjs') return { captureScreenshot: async (id, file) => { state.nativeCalls.push({ id, screenshot: file }); fs.writeFileSync(file, 'fixture png'); return { ok: true, path: file }; } };
         if (request === './harmony-quality-native.cjs') return { ...nativeQuality,
           taskReadOptions: (task, id, options = {}) => ({ ...options, deviceRef: { ...deviceRef, id, targetKey: id.slice(4) }, isCancelled: () => task?.cancelled === true }),
-          checkHarmonyDevice: async () => ({ ok: state.online, error: state.online ? '' : 'fixture offline' }),
+          checkHarmonyDevice: async () => {
+            state.deviceChecks = (state.deviceChecks || 0) + 1;
+            return { ok: state.online, error: state.online ? '' : 'fixture offline' };
+          },
           readHarmonyDeviceInfo: async () => ({ props: { ...params }, errors: [], device: { model: 'Fixture Phone', platform: 'harmony', systemVersion: 'Fixture OS 1', apiVersion: 18 } }),
           collectHarmonyQualitySnapshot: async () => qualitySnapshot() };
         if (request === './harmony-inspection.cjs') return load('harmony-inspection.cjs').module.exports;
@@ -60,7 +69,7 @@ async function fixture(t) {
     assert.equal(path.dirname(directory), path.resolve(os.tmpdir())); assert.ok(path.basename(directory).startsWith('awb-harmony-quality-'));
     fs.rmSync(directory, { recursive: true, force: true });
   });
-  return { directory, state, load, deviceRef };
+  return { directory, state, load, deviceRef, owner };
 }
 
 test('native quality collection uses real param names and records unknown versions/metrics rather than Android text or zeros', async t => {
@@ -139,4 +148,68 @@ test('native guard retains unknown values, recognizes native fault labels and ig
   assert.equal(guard.nativeController.signal.aborted, true);
   resolve(metric()); await next; assert.equal(guard.samples.length, count);
   assert.equal(h.state.legacyCalls.length, 0);
+});
+
+test('report saves first and AI retries select only that saved report without collecting again', async t => {
+  const h = await fixture(t), model = h.load('troubleshooting.cjs'), callbacks = new Map();
+  model.module.exports.register({ handle: (channel, handler) => callbacks.set(channel, handler) });
+  const event = { sender: h.owner, senderFrame: h.owner.mainFrame };
+  const generate = callbacks.get('troubleshooting:generateSummary');
+  const cancel = callbacks.get('troubleshooting:cancelSummary');
+  const collect = id => model.runTroubleshootingBody({
+    id, deviceId: 'hdc:QA', deviceLabel: 'Fixture', issueType: 'generic', packageName: 'com.fixture.app',
+    includeInspection: false, includeAiSummary: true, cancelled: false, startedAt: new Date().toISOString(),
+    steps: model.createStepState({ includeInspection: false })
+  });
+  const first = await collect('trouble-first');
+  await new Promise(resolve => setTimeout(resolve, 4));
+  const other = await collect('trouble-other');
+  const initialReport = fs.readFileSync(first.reportPath, 'utf8');
+  const initialSummary = fs.readFileSync(first.summaryPath, 'utf8');
+  const untouchedReport = fs.readFileSync(other.reportPath, 'utf8');
+  assert.equal(h.state.modelCalls, 0);
+  assert.equal(first.aiSummaryAvailable, true);
+  assert.equal((await callbacks.get('troubleshooting:state')()).savedReport.taskId, other.taskId);
+  h.state.online = false;
+  assert.equal((await generate(event, { ...first.reportRef, directory: '../elsewhere' })).ok, false);
+  assert.equal((await generate(event, { ...first.reportRef, taskId: other.taskId })).ok, false);
+  assert.equal((await generate({ ...event, senderFrame: {} }, first.reportRef)).ok, false);
+  h.state.membership = { activated: true, scope: 'free' };
+  assert.equal((await generate(event, first.reportRef)).code, 'AI_SEND_VIP');
+  h.state.membership = null;
+
+  let entered;
+  const awaitingModel = new Promise(resolve => { entered = resolve; });
+  h.state.generateSummary = ({ userContent, signal }) => {
+    assert.match(userContent, /Fixture Phone/);
+    entered();
+    return new Promise(resolve => signal.addEventListener('abort', () => resolve({ ok: false, cancelled: true }), { once: true }));
+  };
+  const pending = generate(event, first.reportRef);
+  await awaitingModel;
+  assert.equal((await generate(event, first.reportRef)).ok, false);
+  assert.equal((await cancel(event, first.taskId)).cancelled, true);
+  assert.equal((await pending).cancelled, true);
+  assert.equal(fs.readFileSync(first.reportPath, 'utf8'), initialReport);
+  assert.equal(fs.readFileSync(first.summaryPath, 'utf8'), initialSummary);
+
+  h.state.generateSummary = async () => ({ ok: false, error: 'Fixture request failed.' });
+  assert.equal((await generate(event, first.reportRef)).ok, false);
+  assert.equal(fs.readFileSync(first.reportPath, 'utf8'), initialReport);
+  h.state.generateSummary = async () => {
+    fs.appendFileSync(first.reportPath, 'Manually updated while waiting.');
+    return { ok: true, summary: 'This summary must not be written.' };
+  };
+  assert.equal((await generate(event, first.reportRef)).ok, false);
+  assert.equal(fs.readFileSync(first.reportPath, 'utf8'), initialReport + 'Manually updated while waiting.');
+  assert.equal(fs.readFileSync(first.summaryPath, 'utf8'), initialSummary);
+  fs.writeFileSync(first.reportPath, initialReport);
+  h.state.generateSummary = async () => ({ ok: true, summary: 'Confirmed summary.' });
+  const complete = await generate(event, first.reportRef);
+  assert.equal(complete.taskId, first.taskId);
+  assert.match(fs.readFileSync(first.reportPath, 'utf8'), /Confirmed summary/);
+  assert.equal(JSON.parse(fs.readFileSync(first.summaryPath, 'utf8')).aiSummary.summary, 'Confirmed summary.');
+  assert.equal(fs.readFileSync(other.reportPath, 'utf8'), untouchedReport);
+  assert.equal(h.state.deviceChecks, 2);
+  assert.equal(h.state.modelCalls, 4);
 });

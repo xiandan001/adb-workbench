@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { transformSync } from 'rolldown/utils';
+import { canUseMembershipFeature } from '../src/shared/membershipEntitlements.js';
 
 const source = fs.readFileSync(new URL('../src/components/MemberCenter.jsx', import.meta.url), 'utf8')
   .replace(/^import .+;\r?\n/gm, '')
@@ -22,6 +23,7 @@ function mount(api = {}, vipStatus = free, onReturn) {
   const props = { theme: {}, vipStatus, onActivated: status => statuses.push(status), onReturn, showToast: value => toasts.push(value) };
   let cursor;
   const runtime = {
+    canUseMembershipFeature,
     window: { electronAPI: api },
     navigator: { clipboard: { writeText: async value => { copied.push(value); } } },
     tr: (str, args = {}) => str.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all),
@@ -92,6 +94,18 @@ test('manual opening and copying are separate from activation and advanced recor
   assert.deepEqual(ui.statuses, []);
   ui.button('会员记录与重签').props.onClick();
   assert.ok(ui.get('ActivationRecordsPanel'));
+});
+
+test('a verified legacy license receives an accurate message when the feature still needs full VIP', async () => {
+  const legacy = { activated: true, scope: 'free', type: 'lifetime' };
+  const ui = mount({ vipActivate: async () => ({ success: true, status: legacy }) }, free, () => {});
+  ui.props.capability = 'ai-analysis';
+  ui.change('legacy-code');
+  await ui.submit();
+  assert.deepEqual(ui.statuses, [legacy]);
+  assert.deepEqual(ui.toasts, []);
+  assert.match(label(ui.get('p', node => node.props.role === 'alert')), /未解锁当前功能/);
+  assert.ok(ui.get('textarea'));
 });
 
 test('loading, expired, read failure, active and contextual cancellation each present the corresponding actions', async () => {

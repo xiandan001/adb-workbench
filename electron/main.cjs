@@ -223,7 +223,7 @@ app.whenReady().then(async () => {
   autoDiagnose.register(diagnosticIpc);
   aiAnalyze.register(diagnosticIpc);
   smartSearch.register(diagnosticIpc);
-  vip.register(diagnosticIpc);
+  vip.register(diagnosticIpc, mcp.synchronizeMcpMembership);
   // 注册设备巡检报告、App 包管理与性能监控模块
   inspection.register(diagnosticIpc);
   troubleshooting.register(diagnosticIpc);
@@ -267,7 +267,7 @@ app.whenReady().then(async () => {
 
   createWindow();
   void startupSettings.initialize();
-  mcp.initMcpServer();
+  void mcp.initMcpServer().catch(error => console.error('[MCP] Server failed:', error));
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

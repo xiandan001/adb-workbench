@@ -1,14 +1,22 @@
 import { tr } from './i18n.js';
-export function resolveActiveDeviceId(currentId, devices) {
-  if (devices.some(device => device.id === currentId && device.status === 'device')) return currentId;
-  return devices.find(device => device.status === 'device')?.id || devices.find(device => device.id === currentId)?.id || devices[0]?.id || '';
+import { isHarmonyDevice } from './devicePlatform.js';
+
+export function resolveActiveDeviceId(currentId, devices, channels) {
+  if (currentId && ['pending', 'unconfirmed'].includes(channels?.[isHarmonyDevice(currentId) ? 'hdc' : 'adb'])) return currentId;
+  if (devices.some(device => device.id === currentId && ['device', 'unconfirmed'].includes(device.status))) return currentId;
+  const confirmed = devices.filter(device => !channels || channels[isHarmonyDevice(device) ? 'hdc' : 'adb'] === 'ready');
+  return confirmed.find(device => device.status === 'device')?.id
+    || devices.find(device => device.id === currentId)?.id
+    || confirmed.find(device => device.status !== 'unconfirmed')?.id || '';
 }
 
 export function deviceStatusLabel(status) {
-  return { device: tr("在线"), offline: tr("离线"), unauthorized: tr("未授权"), disconnected: tr("已断开") }[status] || tr("不可用");
+  return { device: tr("在线"), offline: tr("离线"), unauthorized: tr("未授权"), disconnected: tr("已断开"),
+    unconfirmed: tr('暂无法确认') }[status] || tr("不可用");
 }
 
 export function deviceConnectionHint(status) {
+  if (status === 'unconfirmed') return tr('暂时无法确认设备连接，已保留原设备。连接恢复后可继续操作。');
   if (status === 'unauthorized') return tr("请解锁设备，在 USB 调试授权弹窗中允许此电脑；未出现弹窗时重新插拔 USB。");
   return tr("请检查 USB 连接、设备电源或 Wi-Fi 地址；恢复连接后会自动更新状态。");
 }

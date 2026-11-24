@@ -3,6 +3,7 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { createRouterConfig } = require('./ai-tools-router-config.cjs');
 const { fail } = require('./ai-tools-file-safety.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 
 function createAiToolsRouter({ getMembership, saveProvider, ...options }) {
   const config = createRouterConfig(options); let worker; let starting; let disposed = false; let port; let metrics = []; let requests = 0; let lastError = '';
@@ -22,7 +23,7 @@ function createAiToolsRouter({ getMembership, saveProvider, ...options }) {
         if (message.type === 'metrics') { metrics = message.metrics; requests = message.requests; }
         if (message.type === 'authorize') {
           let allowed = false;
-          try { const status = await getMembership(); allowed = !disposed && status?.activated === true && status.scope === 'vip'; } catch { /* Fail closed; no upstream request. */ }
+          try { const status = await getMembership(); allowed = !disposed && canUseMembershipFeature(status, 'ai-tools'); } catch { /* Fail closed; no upstream request. */ }
           if (worker === instance) instance.postMessage({ type: 'authorization', id: message.id, allowed });
         }
       });

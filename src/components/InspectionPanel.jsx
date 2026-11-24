@@ -1,5 +1,6 @@
 import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements';
 // 设备巡检报告与证据包导出 UI：只负责交互和进度展示，采集逻辑在 main 进程
 
 import { useEffect, useState } from 'react';
@@ -12,7 +13,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
   const isDark = isDarkTheme(t);
   const isOnline = device?.status === 'device';
   const isVipLoading = !vipStatus || vipStatus.reason === 'loading';
-  const isVip = vipStatus?.activated === true;
+  const isVip = canUseMembershipFeature(vipStatus, 'inspection');
   const [includeBugreport, setIncludeBugreport] = useState(false);
   const [includeAiSummary, setIncludeAiSummary] = useState(true);
   const [running, setRunning] = useState(false);
@@ -183,7 +184,7 @@ export default function InspectionPanel({ open, device, theme, vipStatus, inspec
                 <div className="workbench-dialog-actions mt-5">
                   <button onClick={closePanel} className={`px-4 py-2 text-sm rounded-lg border ${isDark ? 'border-[#5F6368] hover:bg-[#3E4145]' : 'border-slate-200 hover:bg-slate-50'}`}>{tr("知道了")}</button>
                   <button
-                    onClick={() => onOpenMemberCenter?.(tr('设备巡检'))}
+                    onClick={() => onOpenMemberCenter?.(tr('设备巡检'), 'inspection')}
                     className="px-4 py-2 text-sm rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-medium"
                   >{tr("去开通")}</button>
                 </div>

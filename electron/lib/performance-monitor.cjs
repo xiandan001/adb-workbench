@@ -8,6 +8,7 @@ const path = require('path');
 
 const ctx = require('./app-context.cjs');
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
 const { getAdbCommand, runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
@@ -60,7 +61,7 @@ function register(ipcMain) {
     const deviceId = normalizeDeviceId(args?.deviceId);
     if (!deviceId) return { ok: false, error: 'device_required' };
     const status = await vip.getStatusAsync();
-    const isVip = status.activated === true;
+    const isVip = canUseMembershipFeature(status, 'performance');
     const requestedIntervalMs = Number(args?.intervalMs) || DEFAULT_INTERVAL_MS;
     if (!isVip && requestedIntervalMs < FREE_MIN_INTERVAL_MS) {
       return { ok: false, code: 'vip_required', error: tr("3 秒及更高频性能采样为会员专属功能，请先开通会员") };
@@ -106,8 +107,9 @@ function register(ipcMain) {
     if (!deviceId) return { ok: false, error: 'device_required' };
     const status = await vip.getStatusAsync();
     try {
-      const snapshot = await collectSnapshot(deviceId, status.activated === true, { timeoutMs: 12000 });
-      appendHistory(deviceId, snapshot, status.activated === true);
+      const isVip = canUseMembershipFeature(status, 'performance');
+      const snapshot = await collectSnapshot(deviceId, isVip, { timeoutMs: 12000 });
+      appendHistory(deviceId, snapshot, isVip);
       return { ok: true, snapshot };
     } catch (error) {
       return { ok: false, error: error.message || 'snapshot_failed' };
@@ -196,7 +198,7 @@ function register(ipcMain) {
 
 async function withVip(action) {
   const status = await vip.getStatusAsync();
-  if (!status.activated) {
+  if (!canUseMembershipFeature(status, 'performance')) {
     return { ok: false, code: 'vip_required', error: tr("VIP 会员专属功能，请先开通会员") };
   }
   try {
@@ -737,7 +739,7 @@ function syncDeviceConnections(devices) {
   for (const monitor of monitors.values()) {
     if (!isHarmonyDevice(monitor.deviceId)) continue;
     const current = devices.find(device => device.id === monitor.deviceId);
-    if (current?.status === 'device' && current.generation === monitor.deviceRef?.generation) continue;
+    if (['device', 'unconfirmed'].includes(current?.status) && current.generation === monitor.deviceRef?.generation) continue;
     void stopMonitor(monitor.deviceId).catch(() => {});
     historyByDevice.delete(monitor.deviceId);
     lastSnapshotByDevice.delete(monitor.deviceId);

@@ -18,6 +18,16 @@ const safeListener = (callback) => (event, ...args) => {
   }
 };
 
+let deviceDiscoveryRequest = 0;
+async function getDevices(onProgress) {
+  if (typeof onProgress !== 'function') return ipcRenderer.invoke('adb:getDevices');
+  const requestId = ++deviceDiscoveryRequest;
+  const listener = safeListener((id, result) => { if (id === requestId) onProgress(result); });
+  ipcRenderer.on('adb:devicesProgress', listener);
+  try { return await ipcRenderer.invoke('adb:getDevices', requestId); }
+  finally { ipcRenderer.off('adb:devicesProgress', listener); }
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   initialLanguage,
   initialLanguagePending,
@@ -136,7 +146,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('serial:changed', listener);
     return () => ipcRenderer.off('serial:changed', listener);
   },
-  getDevices: () => ipcRenderer.invoke('adb:getDevices'),
+  getDevices,
   startScrcpy: (deviceId, settings, options) => ipcRenderer.invoke('scrcpy:start', { deviceId, settings, ...(options ? { options } : {}) }),
   mirrorGetState: () => ipcRenderer.invoke('mirror:state'),
   mirrorConfirmProfile: args => ipcRenderer.invoke('mirror:confirm', args),
@@ -525,6 +535,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   troubleshootingStart: (args) => ipcRenderer.invoke('troubleshooting:start', args),
   troubleshootingCancel: () => ipcRenderer.invoke('troubleshooting:cancel'),
   troubleshootingState: () => ipcRenderer.invoke('troubleshooting:state'),
+  troubleshootingGenerateSummary: (report) => ipcRenderer.invoke('troubleshooting:generateSummary', report),
+  troubleshootingCancelSummary: (taskId) => ipcRenderer.invoke('troubleshooting:cancelSummary', taskId),
   troubleshootingOpenFolder: (folderPath) => ipcRenderer.invoke('troubleshooting:openFolder', folderPath),
   onTroubleshootingProgress: (callback) => {
     const listener = safeListener(callback);

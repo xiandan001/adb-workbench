@@ -17,6 +17,7 @@ const { createDiagnosticMatcher, MATCH_LIMITS } = require('./log-diagnostic-matc
 const ctx = require('./app-context.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const {
   AGNES_API_URL,
   AGNES_API_KEYS,
@@ -300,7 +301,7 @@ function normalizeRegexFlags(flags) {
 
 async function ensureVipForRules() {
   const status = await vip.getStatusAsync();
-  return status.activated === true;
+  return canUseMembershipFeature(status, 'log-rules');
 }
 
 function publicRules() {

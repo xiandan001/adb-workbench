@@ -18,6 +18,7 @@ function loadSource(name, task, handlers) {
     require: id => {
       if (id === './localization.cjs') return require('../electron/lib/localization.cjs');
       if (id === './ai-source-lifecycle.cjs') return { bindSummaryLifetime };
+      if (id === './troubleshooting-summary.cjs') return { createTroubleshootingSummary: () => ({}) };
       if (id === './app-context.cjs') return { broadcastToAllWindows() {} };
       if (id === './version.cjs') return { getAppVersion: () => 'fixture' };
       if (id === 'electron') return { app: { getPath: () => assert.fail('No real profile access') }, shell: {} };

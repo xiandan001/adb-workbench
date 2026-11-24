@@ -104,7 +104,7 @@ test('failed page-entry refresh keeps prior identities and selection and the nex
   const h = fixture({ initialRows: rows, discover: async () => { if (reject) throw Error('isolated discovery failure'); return rows; } }); t.after(h.dispose); await flush();
   reject = true; h.click('settings'); h.click('devices'); await flush();
   assert.equal(h.calls.length, 2); assert.equal(h.state.devices.length, 1); assert.equal(h.state.devices[0].id, rows[0].id);
-  assert.equal(h.state.devices[0].model, rows[0].model); assert.equal(h.state.devices[0].status, 'offline');
+  assert.equal(h.state.devices[0].model, rows[0].model); assert.equal(h.state.devices[0].status, 'unconfirmed');
   assert.equal(h.state.active, rows[0].id); assert.equal(h.state.loading, false); assert.match(h.state.error, /isolated discovery failure/);
   reject = false; h.click('serial'); h.click('devices'); await flush(); assert.equal(h.calls.length, 3);
   assert.deepEqual(h.state.devices, rows); assert.equal(h.state.error, '');

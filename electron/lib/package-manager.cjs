@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 const { isHarmonyDevice } = require('./device-platform.cjs');
 const harmonyApps = require('./harmony-apps.cjs');
@@ -126,7 +127,7 @@ function register(ipcMain) {
 
 async function withVip(action) {
   const status = await vip.getStatusAsync();
-  if (!status.activated) {
+  if (!canUseMembershipFeature(status, 'packages')) {
     return { ok: false, code: 'vip_required', error: tr("VIP 会员专属功能，请先开通会员") };
   }
   try {

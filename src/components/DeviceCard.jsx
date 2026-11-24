@@ -563,7 +563,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                 <FolderOpen size={14} />{tr("选择")}</button>
               <button
                 onClick={onInstallApk}
-                disabled={!apkInstallPath || isLoading(`install_${device.id}`)}
+                disabled={!isOnline || !apkInstallPath || isLoading(`install_${device.id}`)}
                 className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}
               >
                 {isLoading(`install_${device.id}`) ? (
@@ -620,7 +620,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
               </div>
               <button
                 onClick={onPushApk}
-                disabled={!apkPushPath || isLoading(`push_${device.id}`)}
+                disabled={!isOnline || !apkPushPath || isLoading(`push_${device.id}`)}
                 className={`px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-1 ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} disabled:opacity-50`}
               >
                 {isLoading(`push_${device.id}`) ? (
@@ -657,22 +657,26 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
             <div className="flex items-center gap-2">
               <button
                 onClick={() => onBrowsePath?.('/')}
+                disabled={!isOnline}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
               >{tr("/ (根目录)")}</button>
               <button
                 onClick={() => onBrowsePath?.('/system/app')}
+                disabled={!isOnline}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
               >
                 /system/app
               </button>
             <button
                 onClick={() => onBrowsePath?.('/system_ext/app')}
+                disabled={!isOnline}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
               >
                 /system_ext/app
               </button>
               <button
                 onClick={() => onBrowsePath?.('/data/app')}
+                disabled={!isOnline}
                 className={`px-3 py-2 text-sm border rounded-lg transition-colors ${t.button.secondary}`}
               >
                 /data/app
@@ -691,7 +695,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                     <div
                       key={index}
                       className={`px-3 py-2 flex items-center justify-between cursor-pointer group ${isDarkTheme(t) ? 'hover:bg-[#3E4145]' : 'hover:bg-slate-50'}`}
-                      onClick={() => item.isDirectory && item.name !== '.' && onBrowsePath?.(item.path)}
+                      onClick={() => isOnline && item.isDirectory && item.name !== '.' && onBrowsePath?.(item.path)}
                     >
                       <div className="flex items-center gap-2">
                         {item.name === '.' ? (
@@ -726,7 +730,7 @@ function DeviceCard({ device, deviceName, onNameChange, onStart, onScreenshot, o
                               e.stopPropagation();
                               onPullFile?.(item.path);
                             }}
-                            disabled={isLoading(`pull_${device.id}_${item.path}`)}
+                            disabled={!isOnline || isLoading(`pull_${device.id}_${item.path}`)}
                             className={`px-2 py-1 text-xs border rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ${t.button.secondary} disabled:opacity-50`}
                           >
                             {isLoading(`pull_${device.id}_${item.path}`) ? (

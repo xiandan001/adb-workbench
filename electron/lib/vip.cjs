@@ -205,10 +205,18 @@ function notifyVipStatusChanged(sender) {
   }
 }
 
-function register(ipcMain) {
+function register(ipcMain, onStatus) {
+  let changeRevision = 0;
+  async function publishStatus(status, revision) {
+    if (revision !== changeRevision) return;
+    try { await onStatus?.(status); } catch { /* A service failure cannot invalidate a verified license. */ }
+  }
   // 返回当前会员状态（异步，不阻塞）
   ipcMain.handle('vip:getStatus', async () => {
-    return computeStatusAsync();
+    const revision = changeRevision;
+    const status = await computeStatusAsync();
+    await publishStatus(status, revision);
+    return status;
   });
 
   // 返回本机机器码（异步）
@@ -240,11 +248,13 @@ function register(ipcMain) {
     } catch (e) {
       return { success: false, error: 'write_failed', detail: e.message };
     }
+    const revision = ++changeRevision;
     rememberMachineId(payload.m);
     // Ancillary history cannot turn a durably saved license into a failed
     // activation; it is not used for authorization or identity recovery.
     try { appendActivationRecord(payload, mid.machineId, token); } catch { /* best effort */ }
     const status = await computeStatusAsync();
+    await publishStatus(status, revision);
     if (status.activated) notifyVipStatusChanged(event?.sender);
     return { success: true, status };
   });
@@ -254,7 +264,9 @@ function register(ipcMain) {
     try {
       fs.unlinkSync(getTokenPath());
     } catch (e) { /* 文件不存在无碍 */ }
+    const revision = ++changeRevision;
     const status = await computeStatusAsync();
+    await publishStatus(status, revision);
     notifyVipStatusChanged(event?.sender);
     return { success: true, status };
   });

@@ -11,6 +11,9 @@ const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
 const aiAnalyze = require('./ai-analyze.cjs');
 const { bindSummaryLifetime } = require('./ai-source-lifecycle.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
+const { AI_SECTION, createTroubleshootingSummary, writeSummaryMaterial } = require('./troubleshooting-summary.cjs');
+const { getMainWindow } = require('./app-context.cjs');
 const { getAppVersion } = require('./version.cjs');
 const { runAdb: runRuntimeAdb } = require('./adb-runtime.cjs');
 const { isHarmonyDevice } = require('./device-platform.cjs');
@@ -51,6 +54,13 @@ const ISSUE_TYPES = {
 
 let currentTask = null;
 let lastTask = null;
+const getReportRoot = () => path.join(app.getPath('userData'), 'troubleshooting');
+const reportSummary = createTroubleshootingSummary({
+  getRoot: getReportRoot,
+  getStatus: vip.getStatusAsync,
+  generate: buildTroubleshootingAiSummary,
+  formatLines: formatAiSummaryLines
+});
 
 function register(ipcMain) {
   ipcMain.handle('troubleshooting:start', async (event, args) => {
@@ -67,14 +77,12 @@ function register(ipcMain) {
       issueType: ISSUE_TYPES[args?.issueType] ? args.issueType : 'generic',
       packageName: normalizePackageName(args?.packageName),
       includeInspection: args?.includeInspection !== false,
-      includeAiSummary: args?.includeAiSummary === true,
       cancelled: false,
       currentProc: null,
       status: 'running',
       startedAt: new Date().toISOString(),
       steps: createStepState({
-        includeInspection: args?.includeInspection !== false,
-        includeAiSummary: args?.includeAiSummary === true
+        includeInspection: args?.includeInspection !== false
       }),
       result: null
     };
@@ -116,7 +124,28 @@ function register(ipcMain) {
   });
 
   ipcMain.handle('troubleshooting:state', async () => {
-    return { ok: true, task: currentTask ? publicTask(currentTask) : lastTask };
+    const savedReport = await reportSummary.latest();
+    return { ok: true, task: currentTask ? publicTask(currentTask) : lastTask, savedReport };
+  });
+
+  function ownsReportActions(event) {
+    const owner = getMainWindow();
+    return owner && !owner.isDestroyed() && owner.webContents.mainFrame &&
+      owner.webContents === event.sender && owner.webContents.mainFrame === event.senderFrame;
+  }
+
+  ipcMain.handle('troubleshooting:generateSummary', async (event, ref) => {
+    if (!ownsReportActions(event)) return { ok: false };
+    const response = await reportSummary.run(ref, event.sender);
+    if (response.ok && lastTask?.result?.taskId === response.taskId) {
+      lastTask = { ...lastTask, result: { ...lastTask.result, aiSummary: response.aiSummary } };
+    }
+    return response;
+  });
+
+  ipcMain.handle('troubleshooting:cancelSummary', async (event, taskId) => {
+    if (!ownsReportActions(event)) return { ok: false };
+    return reportSummary.cancel(taskId, event.sender);
   });
 
   ipcMain.handle('troubleshooting:openFolder', async (event, folderPath) => {
@@ -134,6 +163,8 @@ async function runTroubleshooting(task) {
 
 async function runTroubleshootingBody(task) {
   const vipStatus = await vip.getStatusAsync();
+  const inspectionAllowed = canUseMembershipFeature(vipStatus, 'inspection');
+  const extendedPerformance = canUseMembershipFeature(vipStatus, 'performance');
   const outputDir = await createOutputDir(task);
   const rawDir = path.join(outputDir, 'raw');
   await fs.promises.mkdir(rawDir, { recursive: true });
@@ -150,8 +181,7 @@ async function runTroubleshootingBody(task) {
     startedAt: task.startedAt,
     outputDir,
     rawDir,
-    vip: vipStatus.activated === true,
-    includeAiSummary: task.includeAiSummary,
+    vip: extendedPerformance,
     artifacts: [],
     checks: []
   };
@@ -164,7 +194,6 @@ async function runTroubleshootingBody(task) {
     ...(context.platform === 'harmony' ? { platform: 'harmony' } : {}),
     issueType: task.issueType,
     packageName: task.packageName,
-    includeAiSummary: task.includeAiSummary,
     startedAt: task.startedAt
   });
 
@@ -222,7 +251,7 @@ async function runTroubleshootingBody(task) {
   if (task.cancelled) return finishCancelled(task, context);
 
   await runStep(task, 'performance', tr("采集性能快照"), async () => {
-    const snapshot = context.platform === 'harmony' ? await collectHarmonySnapshot(task.deviceId, taskReadOptions(task, task.deviceId, { timeoutMs: 12000 })) : await performanceMonitor.collectSnapshot(task.deviceId, vipStatus.activated === true, {
+    const snapshot = context.platform === 'harmony' ? await collectHarmonySnapshot(task.deviceId, taskReadOptions(task, task.deviceId, { timeoutMs: 12000 })) : await performanceMonitor.collectSnapshot(task.deviceId, extendedPerformance, {
       timeoutMs: 12000,
       fallbackToLegacy: true
     });
@@ -273,7 +302,7 @@ async function runTroubleshootingBody(task) {
 
   if (task.cancelled) return finishCancelled(task, context);
 
-  if (task.includeInspection && vipStatus.activated === true) {
+  if (task.includeInspection && inspectionAllowed) {
     await runStep(task, 'inspection', tr("生成巡检报告和证据包"), async () => {
       const inspectionTask = createSilentInspectionTask(task);
       const result = await inspection.runInspection(inspectionTask, {
@@ -295,12 +324,11 @@ async function runTroubleshootingBody(task) {
       return { detail: result.reportPath || tr("巡检完成") };
     });
   } else {
-    const detail = vipStatus.activated === true ? tr("已按用户选择跳过巡检") : tr("当前为基础版，巡检证据包需会员版");
+    const detail = inspectionAllowed ? tr("已按用户选择跳过巡检") : tr("当前为基础版，巡检证据包需会员版");
     markStep(task, 'inspection', 'skipped', detail);
     context.checks.push({ key: 'inspection', ok: true, skipped: true, label: tr("巡检已跳过"), detail });
   }
 
-  await prepareAiSummary(task, context);
   if (task.cancelled) return finishCancelled(task, context);
   return finishTask(task, context);
 }
@@ -322,32 +350,13 @@ async function runStep(task, stepId, label, action) {
   }
 }
 
-async function prepareAiSummary(task, context) {
-  if (!task.includeAiSummary) {
-    context.aiSummary = { ok: false, skipped: true, summary: '' };
-    markStep(task, 'aiSummary', 'skipped', tr("未勾选 AI 总结"));
-    return;
-  }
-
-  markStep(task, 'aiSummary', 'running', tr("正在生成 AI 总结"));
-  try {
-    context.aiSummary = await buildTroubleshootingAiSummary(context, task.aiSummarySignal);
-    if (context.aiSummary?.ok) {
-      markStep(task, 'aiSummary', 'success', tr("AI 总结已写入报告"));
-    } else {
-      markStep(task, 'aiSummary', 'skipped', tr("AI 总结未生成：{0}", { 0: context.aiSummary?.error || tr("未知错误") }));
-    }
-  } catch (error) {
-    context.aiSummary = { ok: false, error: error.message || tr("AI 总结异常"), summary: '' };
-    markStep(task, 'aiSummary', 'skipped', tr("AI 总结未生成：{0}", { 0: context.aiSummary.error }));
-  }
-}
-
 async function finishTask(task, context) {
   const endedAt = new Date().toISOString();
   const conclusion = buildConclusion(context);
   const summary = {
-    ...(context.platform === 'harmony' ? { platform: 'harmony', deviceId: context.deviceId, logScope: context.logScope } : {}),
+    deviceId: context.deviceId,
+    deviceLabel: context.deviceLabel,
+    ...(context.platform === 'harmony' ? { platform: 'harmony', logScope: context.logScope } : {}),
     ok: true,
     cancelled: false,
     taskId: task.id,
@@ -360,12 +369,19 @@ async function finishTask(task, context) {
     summaryPath: path.join(context.outputDir, 'troubleshooting-summary.json'),
     checks: context.checks,
     artifacts: context.artifacts,
-    aiSummary: context.aiSummary,
+    aiSummary: null,
     startedAt: context.startedAt,
     endedAt
   };
-  await writeJson(summary.summaryPath, summary);
   await writeText(summary.reportPath, buildReport(context, summary));
+  try {
+    await writeSummaryMaterial(context.outputDir, {
+      taskId: summary.taskId, platform: context.platform || 'android', payload: summaryPayload(context)
+    });
+    summary.aiSummaryAvailable = true;
+    summary.reportRef = { taskId: summary.taskId, directory: path.basename(context.outputDir) };
+  } catch { summary.aiSummaryAvailable = false; }
+  await writeJson(summary.summaryPath, summary);
   return summary;
 }
 
@@ -508,13 +524,13 @@ function buildReport(context, summary) {
     }
   }
 
-  lines.push('', tr("## AI 总结"), '', ...formatAiSummaryLines(summary.aiSummary), '');
+  lines.push('', tr("## AI 总结"), AI_SECTION, '', ...formatAiSummaryLines(summary.aiSummary), '');
 
   return `${lines.join('\n')}\n`;
 }
 
 function formatAiSummaryLines(aiSummary) {
-  if (!aiSummary) return [tr("- 未勾选 AI 总结")];
+  if (!aiSummary) return [tr("- 尚未生成 AI 总结。")];
   if (aiSummary.skipped) return [`- ${aiSummary.error || tr("未勾选 AI 总结")}`];
   if (!aiSummary.ok) return [tr("- AI 总结未生成：{0}", { 0: aiSummary.error || tr("未知错误") })];
   const lines = String(aiSummary.summary || '')
@@ -524,45 +540,54 @@ function formatAiSummaryLines(aiSummary) {
   return lines.some(Boolean) ? lines : [tr("- AI 总结为空")];
 }
 
-function buildTroubleshootingAiSummary(context, signal) {
-  const checks = (context.checks || []).map(item => ({
-    label: item.label,
+function summaryPayload(context) {
+  const text = (value, max) => String(value ?? '').slice(0, max);
+  const checks = (context.checks || []).slice(0, 40).map(item => ({
+    label: text(item.label, 160),
     ok: item.ok,
     skipped: item.skipped,
-    detail: item.detail
+    detail: item.key === 'device' || item.key === 'inspection' ? '' : text(item.detail, 1200)
   }));
-  const payload = {
-    issueType: context.issueLabel,
-    device: context.device || null,
-    packageName: context.packageName || '',
+  return {
+    issueType: text(context.issueLabel, 160),
+    device: context.device ? {
+      model: text(context.device.model, 160),
+      build: text(context.device.build, 160),
+      systemVersion: text(context.device.systemVersion || context.device.android, 160)
+    } : null,
+    packageName: text(context.packageName, 255),
     packageDetail: context.packageDetail ? {
-      packageName: context.packageDetail.packageName,
-      versionName: context.packageDetail.versionName,
-      versionCode: context.packageDetail.versionCode,
-      apkPath: context.packageDetail.apkPath || context.packageDetail.path
+      packageName: text(context.packageDetail.packageName, 255),
+      versionName: text(context.packageDetail.versionName, 160),
+      versionCode: text(context.packageDetail.versionCode, 80)
     } : null,
     checks,
     performance: context.performance ? {
       summary: summarizePerformance(context.performance),
-      warnings: Array.isArray(context.performance.warnings) ? context.performance.warnings.slice(0, 20) : []
+      warnings: Array.isArray(context.performance.warnings) ? context.performance.warnings.slice(0, 20).map(item => ({
+        label: text(item.label || item.type, 160), value: text(item.value, 80), limit: text(item.limit, 80)
+      })) : []
     } : null,
     logSummary: context.logSummary ? {
       matchedCount: context.logSummary.matchedCount,
-      topPatterns: context.logSummary.topPatterns,
-      matchedLines: context.logSummary.matchedLines.slice(0, 30)
+      topPatterns: context.logSummary.topPatterns.slice(0, 20).map(line => text(line, 160)),
+      matchedLines: context.logSummary.matchedLines.slice(0, 30).map(line => text(line, 1600))
     } : null,
-    inspectionReport: context.inspection?.reportPath || '',
-    artifacts: (context.artifacts || []).map(item => ({ label: item.label, path: item.path }))
+    inspectionAvailable: Boolean(context.inspection?.reportPath),
+    artifacts: (context.artifacts || []).slice(0, 40).map(item => text(item.label, 160))
   };
+}
+
+function buildTroubleshootingAiSummary({ platform, payload }, signal) {
   return aiAnalyze.generateAiSummary({
     signal,
     timeoutMs: 60000,
     temperature: 0.2,
-    systemPrompt: context.platform === 'harmony' ? tr('你是 Harmony/OpenHarmony 排查助手，只根据证据总结；不可用项目和未归属到应用的日志不能作为确定结论。') : tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
+    systemPrompt: platform === 'harmony' ? tr('你是 Harmony/OpenHarmony 排查助手，只根据证据总结；不可用项目和未归属到应用的日志不能作为确定结论。') : tr("你是 Android 问题排查助手。只能根据提供的结构化证据输出中文总结，不要编造未提供的数据。"),
     userContent: [
       tr("请为以下一键问题排查报告生成可直接追加到 Markdown 报告末尾的 AI 总结。"),
       tr("输出要求："),
-      context.platform === 'harmony' ? tr('1. 回答语言：{0}。', { 0: getLocale() }) : tr("1. 使用简体中文。"),
+      platform === 'harmony' ? tr('1. 回答语言：{0}。', { 0: getLocale() }) : tr("1. 使用简体中文。"),
       tr("2. 包含：总体判断、关键证据、优先排查建议。"),
       tr("3. 不要输出 Markdown 一级/二级标题，报告中已有“AI 总结”标题。"),
       tr("4. 不要编造未提供的数据。"),
@@ -627,11 +652,9 @@ function createStepState(options = {}) {
     { id: 'package', label: tr("应用信息"), status: 'pending', detail: '' },
     { id: 'performance', label: tr("性能快照"), status: 'pending', detail: '' },
     { id: 'logs', label: tr("关键日志"), status: 'pending', detail: '' },
-    { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' },
-    { id: 'aiSummary', label: tr("AI 总结"), status: 'pending', detail: '' }
+    { id: 'inspection', label: tr("巡检证据"), status: 'pending', detail: '' }
   ].filter(step => {
     if (step.id === 'inspection') return options.includeInspection !== false;
-    if (step.id === 'aiSummary') return options.includeAiSummary === true;
     return true;
   });
 }
@@ -651,7 +674,6 @@ function sendProgress(task, stepId, status, detail) {
     deviceId: task.deviceId,
     status: task.status,
     includeInspection: task.includeInspection,
-    includeAiSummary: task.includeAiSummary,
     stepId,
     stepStatus: status,
     detail: detail || '',
@@ -665,7 +687,6 @@ function sendDone(task, result) {
     deviceId: task.deviceId,
     status: task.status,
     includeInspection: task.includeInspection,
-    includeAiSummary: task.includeAiSummary,
     steps: task.steps,
     result
   });
@@ -687,7 +708,6 @@ function publicTask(task) {
     issueType: task.issueType,
     packageName: task.packageName,
     includeInspection: task.includeInspection,
-    includeAiSummary: task.includeAiSummary,
     status: task.status,
     startedAt: task.startedAt,
     steps: task.steps,
@@ -711,7 +731,7 @@ function createSilentInspectionTask(parentTask) {
 }
 
 async function createOutputDir(task) {
-  const baseDir = path.join(app.getPath('userData'), 'troubleshooting');
+  const baseDir = getReportRoot();
   await fs.promises.mkdir(baseDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const name = `${stamp}-${sanitizeName(task.deviceLabel || task.deviceId)}-${sanitizeName(task.issueType)}`;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import { canUseMembershipFeature } from '../src/shared/membershipEntitlements.js';
 
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser');
@@ -25,7 +26,7 @@ function appContext({ activeTab, activeDeviceId, devices }) {
   const membershipOriginRef = { current: null };
   const devicesRef = { current: devices };
   const effects = [];
-  const context = { activeTab, activeDeviceId, devicesRef, membershipOriginRef, tr: value => value,
+  const context = { activeTab, activeDeviceId, devicesRef, membershipOriginRef, canUseMembershipFeature, tr: value => value,
     rememberMembershipOrigin: origin => { membershipOriginRef.current = origin; },
     setActiveDeviceId: id => effects.push(['select', id]),
     refreshVipStatus: () => effects.push('read-license'),
@@ -54,10 +55,12 @@ test('a contextual cancellation retains the origin device even when it disappear
 
 test('only a verified activation returns to the origin, without running a device or AI operation', () => {
   const context = appContext({ activeTab: 'ai-workspace', activeDeviceId: 'A', devices: [{ id: 'A', status: 'device' }] });
-  context.openMembership({ deviceId: 'A' });
+  context.openMembership({ deviceId: 'A', capability: 'ai-workspace' });
   context.activateMembership({ activated: false });
   assert.equal(context.membershipOriginRef.current.open, true);
-  context.activateMembership({ activated: true });
+  context.activateMembership({ activated: true, scope: 'free' });
+  assert.equal(context.membershipOriginRef.current.open, true);
+  context.activateMembership({ activated: true, scope: 'vip' });
   assert.equal(context.membershipOriginRef.current.open, false);
   assert.deepEqual(context.effects, ['read-license']);
   assert.match(app, /if \(origin\) return origin\.activeDeviceId;\s+const target = worksetTargetRef\.current/);
@@ -69,7 +72,7 @@ test('direct membership page has no return action and feature dialogs use the li
   assert.match(app, /<AiWorkspace[\s\S]{0,1200}onOpenMembership=\{openMembership\}/);
   assert.match(app, /<AiToolsWorkspace[^\n]*onOpenMembership=\{\(\) => openMembership/);
   const inspection = read('../src/components/InspectionPanel.jsx');
-  assert.match(inspection, /onClick=\{\(\) => onOpenMemberCenter\?\.\(tr\('设备巡检'\)\)\}/);
+  assert.match(inspection, /onClick=\{\(\) => onOpenMemberCenter\?\.\(tr\('设备巡检'\), 'inspection'\)\}/);
   assert.match(inspection, /onClick=\{startInspection\} disabled=\{!isOnline\}/);
 });
 

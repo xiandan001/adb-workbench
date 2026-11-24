@@ -14,6 +14,7 @@ const packageManager = require('./package-manager.cjs');
 const performanceMonitor = require('./performance-monitor.cjs');
 const inspection = require('./inspection.cjs');
 const vip = require('./vip.cjs');
+const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const { getAppVersion } = require('./version.cjs');
 const {
   AGNES_API_URL,
@@ -29,6 +30,11 @@ const MCP_SERVER_VERSION = getAppVersion();
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 let mcpPort = 49321;
 let mcpServerInstance = null;
+let mcpStarting = null;
+let launchCheck = null;
+let mcpEnabled = false;
+let mcpRevision = 0;
+let mcpExpiryTimer = null;
 const mcpSessions = new Map();
 const mcpAiRequests = new Map();
 // MCP 会话清理定时器需要随服务生命周期启停，避免反复启动/停止后累积 interval。
@@ -317,7 +323,7 @@ async function callMcpTool(name, args, signal) {
     const deviceId = normalizeMcpDeviceId(args.deviceId);
     if (!deviceId) return mcpText({ ok: false, error: 'device_required' });
     const status = await vip.getStatusAsync();
-    const includeProcesses = status.activated === true && args.includeProcesses !== false;
+    const includeProcesses = canUseMembershipFeature(status, 'performance') && args.includeProcesses !== false;
     const snapshot = await performanceMonitor.collectSnapshot(deviceId, includeProcesses);
     return mcpText({ ok: !snapshot.sampleError, deviceId, snapshot });
   }
@@ -326,7 +332,7 @@ async function callMcpTool(name, args, signal) {
     const deviceId = normalizeMcpDeviceId(args.deviceId);
     if (!deviceId) return mcpText({ ok: false, error: 'device_required' });
     const status = await vip.getStatusAsync();
-    if (!status.activated) {
+    if (!canUseMembershipFeature(status, 'inspection')) {
       return mcpText({ ok: false, code: 'vip_required', error: tr("设备巡检为会员专属功能，请先开通会员") });
     }
     const task = { id: `mcp-inspection-${Date.now()}`, deviceId, sender: null, cancelled: false, currentProc: null };
@@ -598,6 +604,17 @@ function startMcpHttpServer() {
           res.end(JSON.stringify(jsonRpcResult(id, { tools }))); return;
         }
         if (body.method === 'tools/call') {
+          const revision = mcpRevision;
+          const permitted = canUseMembershipFeature(await readMcpMembership(), 'mcp');
+          if (!permitted || !mcpEnabled || revision !== mcpRevision) {
+            if (!permitted) res.once('finish', () => {
+              if (revision === mcpRevision) synchronizeMcpMembership(null);
+            });
+            res.statusCode = 403;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(jsonRpcError(id, -32000, tr("VIP 会员专属功能，请先开通会员"))));
+            return;
+          }
           const toolName = body.params?.name;
           const toolArgs = body.params?.arguments ?? {};
           if (!toolName) {
@@ -658,19 +675,32 @@ function startMcpHttpServer() {
   return server;
 }
 
-function initMcpServer() {
+function startMcpListener() {
+  if (mcpStarting) return mcpStarting;
+  if (mcpServerInstance?.listening) return Promise.resolve(true);
   const server = startMcpHttpServer();
-  server.on('error', (error) => {
-    if (error?.code === 'EADDRINUSE') {
-      console.warn(`[MCP] Server port ${mcpPort} is already in use, skip starting local MCP server.`);
-      return;
-    }
-    console.error('[MCP] Server failed:', error);
+  mcpServerInstance = server;
+  const ready = new Promise(resolve => {
+    server.on('error', error => {
+      console.error('[MCP] Server failed:', error);
+      if (mcpServerInstance === server) closeMcpServer();
+      resolve(false);
+    });
+    server.once('close', () => resolve(false));
+    server.listen(mcpPort, '127.0.0.1', () => {
+      if (mcpServerInstance !== server || !mcpEnabled) { server.close(); resolve(false); return; }
+      console.log(`[MCP] Server listening on http://127.0.0.1:${mcpPort}`);
+      startMcpSessionCleanup();
+      resolve(true);
+    });
   });
-  server.listen(mcpPort, '127.0.0.1', () => {
-    console.log(`[MCP] Server listening on http://127.0.0.1:${mcpPort}`);
-    mcpServerInstance = server;
-  });
+  mcpStarting = ready;
+  const clear = () => { if (mcpStarting === ready) mcpStarting = null; };
+  void ready.then(clear, clear);
+  return ready;
+}
+
+function startMcpSessionCleanup() {
   if (!mcpSessionCleanupTimer) {
     mcpSessionCleanupTimer = setInterval(() => {
       const now = Date.now();
@@ -682,19 +712,65 @@ function initMcpServer() {
   }
 }
 
+async function readMcpMembership() {
+  try { return await vip.getStatusAsync(); } catch { return null; }
+}
+
+function synchronizeMcpMembership(status) {
+  if (!canUseMembershipFeature(status, 'mcp')) {
+    if (mcpEnabled || mcpServerInstance) closeMcpServer();
+    return false;
+  }
+  if (!mcpEnabled) return false;
+  clearTimeout(mcpExpiryTimer);
+  mcpExpiryTimer = null;
+  if (status.type === 'subscription' && Number.isFinite(status.expiresAt) && status.expiresAt > 0) {
+    const boundary = (Math.floor(status.expiresAt) + 1) * 1000;
+    const delay = Math.min(2_147_483_647, Math.max(1, boundary - Date.now()));
+    mcpExpiryTimer = setTimeout(async () => {
+      const revision = mcpRevision;
+      const refreshed = await readMcpMembership();
+      if (revision === mcpRevision) synchronizeMcpMembership(refreshed);
+    }, delay);
+    mcpExpiryTimer.unref?.();
+  }
+  return startMcpListener();
+}
+
+async function startMcpAtLaunch() {
+  const revision = mcpRevision;
+  const status = await readMcpMembership();
+  if (revision !== mcpRevision || !canUseMembershipFeature(status, 'mcp')) return false;
+  mcpEnabled = true;
+  return synchronizeMcpMembership(status);
+}
+
+function initMcpServer() {
+  if (launchCheck) return launchCheck;
+  const check = startMcpAtLaunch();
+  launchCheck = check;
+  const clear = () => { if (launchCheck === check) launchCheck = null; };
+  void check.then(clear, clear);
+  return check;
+}
+
 function register(ipcMain) {
   ipcMain.handle('mcp:getInfo', async () => {
-    return { port: mcpPort, url: `http://127.0.0.1:${mcpPort}/mcp`, running: !!mcpServerInstance };
+    await launchCheck;
+    return { port: mcpPort, url: `http://127.0.0.1:${mcpPort}/mcp`, running: mcpServerInstance?.listening === true };
   });
 
   ipcMain.handle('mcp:start', async () => {
     try {
-      const status = vip.getStatus();
-      if (!status.activated) {
+      const revision = mcpRevision;
+      const status = await readMcpMembership();
+      if (!canUseMembershipFeature(status, 'mcp')) {
         return { ok: false, running: false, error: tr("VIP 会员专属功能，请先开通会员"), code: 'vip_required' };
       }
-      if (!mcpServerInstance) initMcpServer();
-      return { ok: true, running: true };
+      if (revision !== mcpRevision) return { ok: false, running: false };
+      mcpEnabled = true;
+      const running = await synchronizeMcpMembership(status);
+      return { ok: running, running };
     } catch (e) {
       return { ok: false, running: false, error: e.message };
     }
@@ -708,11 +784,17 @@ function register(ipcMain) {
 
 // 供 main 进程退出时调用，关闭 MCP HTTP server
 function closeMcpServer() {
+  mcpEnabled = false;
+  mcpRevision += 1;
+  clearTimeout(mcpExpiryTimer);
+  mcpExpiryTimer = null;
+  mcpStarting = null;
   for (const controller of mcpAiRequests.values()) controller.abort();
   mcpAiRequests.clear();
   if (mcpServerInstance) {
     try {
       mcpServerInstance.close();
+      mcpServerInstance.closeAllConnections();
     } catch (e) { /* ignore */ }
     mcpServerInstance = null;
   }
@@ -736,4 +818,5 @@ module.exports = {
   register,
   initMcpServer,
   closeMcpServer,
+  synchronizeMcpMembership,
 };

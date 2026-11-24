@@ -4,7 +4,7 @@ const path = require('path');
 
 const { findExecutable } = require('./android-tool-cleanup.cjs');
 const { isHdcInvocation, compileHdcOperation, deviceIdFromAdbArgs } = require('./device-invocation.cjs');
-const { resolveDeviceRef } = require('./device-registry.cjs');
+const { resolveDeviceRef, assertDeviceDiscoveryConfirmed } = require('./device-registry.cjs');
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
@@ -25,13 +25,16 @@ function getAdbCommand() {
 function runAdb(args, options = {}) {
   const normalizedArgs = normalizeArgs(args);
   if (isHdcInvocation(normalizedArgs)) return runHarmonyEquivalent(normalizedArgs, options);
+  const targetId = getDeviceIdFromArgs(normalizedArgs);
   const action = () => {
     if (isCancelled(options)) return Promise.resolve(cancelledResult(options));
+    try { assertDeviceDiscoveryConfirmed(targetId); }
+    catch (error) { return Promise.resolve({ ok: false, stdout: '', stderr: '', error: error.message, code: error.code, safe: true }); }
     return execAdb(normalizedArgs, options);
   };
   if (options.queue === false) return action();
 
-  const deviceId = options.deviceId || getDeviceIdFromArgs(normalizedArgs);
+  const deviceId = options.deviceId || targetId;
   if (!deviceId && options.queueGlobal !== true) return action();
 
   return enqueue(deviceId || GLOBAL_QUEUE_KEY, action, options.concurrency || DEFAULT_DEVICE_CONCURRENCY);
@@ -45,7 +48,8 @@ function spawnAdb(args, options = {}) {
     const plan = compileHdcOperation(normalized.slice(normalized.indexOf('-s') + 2), ref);
     return require('./hdc-runtime.cjs').spawnHdc(deviceId, plan.args, options);
   }
-  return spawn(getAdbCommand(), normalizeArgs(args), {
+  assertDeviceDiscoveryConfirmed(getDeviceIdFromArgs(normalized));
+  return spawn(getAdbCommand(), normalized, {
     windowsHide: true,
     ...options
   });

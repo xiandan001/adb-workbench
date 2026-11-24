@@ -1,4 +1,5 @@
 import { tr, useLocale } from '../shared/i18n';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements';
 // 性能监控面板：设备指标实时采样、曲线、阈值、告警和会员导出。
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -18,7 +19,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
-  const hasVipAccess = vipStatus?.activated === true;
+  const hasVipAccess = canUseMembershipFeature(vipStatus, 'performance');
   const isVipLoading = vipStatus?.reason === 'loading';
   const isVip = hasVipAccess || isVipLoading;
   const [localDeviceId, setLocalDeviceId] = useState(() => activeDeviceId ?? devices.find(device => device.status === 'device')?.id ?? '');
@@ -209,7 +210,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const requireVip = (featureName) => {
     if (hasVipAccess) return true;
     if (isVipLoading) return false;
-    onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: featureName });
+    onOpenMemberCenter?.({ deviceId: selectedDeviceId, feature: featureName, capability: 'performance' });
     return false;
   };
 

@@ -2,6 +2,7 @@ import { useId, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, Copy, Crown, KeyRound, Loader2, Lock, RefreshCw } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements';
 import ActivationRecordsPanel from './ActivationRecordsPanel';
 import MembershipBenefits from './MembershipBenefits';
 
@@ -18,6 +19,7 @@ function activationErrorMessage(error) {
     case 'machine_id_failed': return tr('机器码暂不可用，请重试。');
     case 'write_failed': return tr('激活码未能保存，请重试。');
     case 'status_unverified': return tr('授权尚未生效，请重新读取会员状态。');
+    case 'feature_locked': return tr('此授权已验证，但未解锁当前功能。可继续输入适用的激活码。');
     default: return tr('激活失败，请重试。');
   }
 }
@@ -29,7 +31,7 @@ function getMembershipStatus(status, locale) {
   }
   if (status.activated) {
     if (status.scope === 'free') {
-      return { title: tr('已验证基础授权'), detail: tr('此授权不包含会员 AI 分析或 AI 工具权限。') };
+      return { title: tr('已验证基础授权'), detail: tr('旧版基础授权保留已有权益。需要完整会员授权的功能仍需升级。') };
     }
     const expirationDate = status.expiresAt > 0 ? new Date(status.expiresAt * 1000) : null;
     const expiry = expirationDate && Number.isFinite(+expirationDate)
@@ -50,7 +52,7 @@ function getMembershipStatus(status, locale) {
   return { title: tr('基础版'), detail };
 }
 
-export default function MemberCenter({ theme, vipStatus, onActivated, onReturn, onRetry, showToast }) {
+export default function MemberCenter({ theme, vipStatus, capability, onActivated, onReturn, onRetry, showToast }) {
   const locale = useLocale();
   const dark = isDarkTheme(theme);
   const status = getMembershipStatus(vipStatus, locale);
@@ -100,7 +102,8 @@ export default function MemberCenter({ theme, vipStatus, onActivated, onReturn, 
     setToken('');
     setManualOpen(false);
     setRecordsRefresh(previous => previous + 1);
-    showToast?.(result.status.scope === 'free' ? tr('已验证基础授权') : tr('会员激活成功，感谢支持！'));
+    if (capability && !canUseMembershipFeature(result.status, capability)) setError('feature_locked');
+    else showToast?.(result.status.scope === 'free' ? tr('已验证基础授权') : tr('会员激活成功，感谢支持！'));
     onActivated?.(result.status);
   }
 

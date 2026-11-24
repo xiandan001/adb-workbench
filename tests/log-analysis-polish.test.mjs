@@ -17,6 +17,7 @@ import * as stream from '../src/shared/logStream.js';
 import * as model from '../src/shared/logWorkbenchModel.js';
 import { prepareInlineLogAnalysis } from '../src/shared/logInlineAnalysis.js';
 import * as analysisHelpers from '../src/shared/logAnalysisState.js';
+import { canUseMembershipFeature } from '../src/shared/membershipEntitlements.js';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const fixtureRow = (id, raw, deviceId = 'A') => ({ id, raw, message: raw, deviceId, level: 'E', pkg: 'com.fixture', tag: 'A', ts: 1000, receivedAt: 1100, clockBasis: 'source-local' });
@@ -25,7 +26,7 @@ function fixture(overrides = {}) {
   const node = parse(source, { sourceType: 'module', plugins: ['jsx'] }).program.body.find(item => item.type === 'FunctionDeclaration' && item.id.name === 'uiHarness');
   const code = source.slice(node.start, node.end).replaceAll('import.meta.url', JSON.stringify(file.href)).replace('note, logTheme };', 'note, logTheme, aiError, aiAnalyzing, aiCustomPrompt, setAiCustomPrompt, setAiThinkingMode, conversationReady, resetBackendConversation, analysisStates: typeof analysisStates === "undefined" ? [] : analysisStates };');
   const create = vm.runInNewContext(code + '\nuiHarness', { fs, vm, assert, randomUUID, URL, performance, setTimeout, clearTimeout, structuredClone, pause, fixtureRow,
-    snapshots, workspace, markers, stream, model, analysisHelpers, prepareInlineLogAnalysis });
+    snapshots, workspace, markers, stream, model, analysisHelpers, prepareInlineLogAnalysis, canUseMembershipFeature });
   const h = create({ aiAnalyzeLog: async () => ({ ok: true }), ...overrides });
   h.enterPrompt = (expression, value) => { const callback = vm.runInNewContext('(' + expression + ')', { setAiCustomPrompt: h.ui().setAiCustomPrompt }); callback(expression === 'setAiCustomPrompt' ? value : { target: { value } }); };
   return h;

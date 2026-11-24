@@ -1,4 +1,5 @@
 import { tr, useLocale } from '../shared/i18n';
+import { canUseMembershipFeature } from '../shared/membershipEntitlements';
 // App 包管理增强面板：保留安装/推送/浏览，并新增应用列表、详情和会员操作。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -90,7 +91,7 @@ function PackageManagerPanel({
   const locale = useLocale();
   const t = theme;
   const isDark = isDarkTheme(t);
-  const isVip = vipStatus?.activated === true;
+  const isVip = canUseMembershipFeature(vipStatus, 'packages');
   const isOnline = device.status === 'device';
   const isHarmony = harmonyPackages(device);
   const [capabilities, setCapabilities] = useState(null);
@@ -249,7 +250,7 @@ function PackageManagerPanel({
 
   const requireVip = () => {
     if (isVip) return true;
-    onOpenMemberCenter?.(tr('应用详情、权限和批量操作'));
+    onOpenMemberCenter?.(tr('应用权限面板、批量管理及 APK 导出'), 'packages');
     return false;
   };
 
