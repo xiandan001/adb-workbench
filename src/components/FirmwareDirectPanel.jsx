@@ -28,6 +28,10 @@ const phaseLabels = {
   failed: () => tr('刷机未完成'),
   cancelled: () => tr('刷机等待已取消'),
 };
+const preparationLabels = {
+  'checking-environment': () => tr('正在检查工具、USB 和磁盘空间…'),
+  'staging-firmware': () => tr('正在准备固件文件…'),
+};
 const keepConnectedBeforeReady = () => tr('工具就绪前请保持 USB 连接和供电，不要重启或断电。');
 const errors = {
   'flash-profile-unverified': () => tr('此平台尚未开放直刷，请使用厂商工具。'),
@@ -45,6 +49,11 @@ const errors = {
   'flash-vendor-busy': () => tr('厂商刷机工具仍在运行。请等待现有任务结束并关闭工具。'),
   'flash-mode-mismatch': () => tr('刷机工具执行模式与所选模式不一致，未确认刷写结果。'),
   'flash-loader-request-failed': () => tr('暂时无法进入刷机模式，请检查目标设备的 USB 调试连接。'),
+  'flash-firmware-missing-files': () => tr('固件缺少配套文件，请解压完整固件包后重新选择。'),
+  'flash-firmware-space': () => tr('准备固件所需的磁盘空间不足，请释放空间后重试。'),
+  'flash-firmware-read-failed': () => tr('无法读取固件，请检查文件是否可读，或复制到本机后重试。'),
+  'flash-firmware-changed': () => tr('固件文件已变化，请重新选择并预检。'),
+  'flash-platform-mismatch': () => tr('当前选择与固件或设备的刷机平台不匹配，未启动写入。'),
   'flash-completion-unconfirmed': () => tr('写入结果未确认，请检查设备和厂商工具。'),
   'flash-boot-unverified': () => tr('请检查设备能否启动，并核对固件版本。'),
   'flash-wait-expired': () => tr('等待刷机设备超时，可再次开始。'),
@@ -56,16 +65,20 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   const title = useId();
   const [choice, setChoice] = useState(null);
   const [savedTargetChoice, setSavedTargetChoice] = useState(null);
-  const { enabled, job, busy, running, error, unavailable, savedTarget } = direct;
+  const [rkColdStart, setRkColdStart] = useState(false);
+  const { enabled, job, busy, running, error, unavailable, savedTarget, registeringTarget } = direct;
   const modes = (direct.modes || []).filter(mode => Object.hasOwn(modeLabels, mode));
   const defaultMode = defaultModes[platform];
   const preferred = choice?.platform === platform ? choice.mode : defaultMode;
   const mode = modes.includes(preferred) ? preferred : modes.includes(defaultMode) ? defaultMode : undefined;
   const fixedMode = modes.length === 1 && modes[0] === defaultMode;
   const ready = file?.ok && typeof file.firmwareId === 'string' && file.firmwareId.length > 0;
-  const canArm = enabled && ready && mode && !busy && !running && !blocked;
-  const status = Object.hasOwn(phaseLabels, job?.phase) ? phaseLabels[job.phase]() : '';
+  const preparation = job?.phase === 'preparing' && job.preparation;
+  const status = Object.hasOwn(preparationLabels, preparation) ? preparationLabels[preparation]()
+    : Object.hasOwn(phaseLabels, job?.phase) ? phaseLabels[job.phase]() : '';
   const percent = Number.isFinite(job?.percent) && job.percent >= 0 && job.percent <= 100 ? Math.trunc(job.percent) : undefined;
+  const preparationPercent = Number.isFinite(job?.preparationPercent) && job.preparationPercent >= 0 && job.preparationPercent <= 100
+    ? Math.trunc(job.preparationPercent) : undefined;
   const dark = isDarkTheme(theme);
   const accent = dark ? 'text-amber-300' : 'text-amber-700';
   const button = 'inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50';
@@ -77,9 +90,13 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   const modeRiskId = `${title}-mode-risk`;
   const entryButtonVisible = job?.phase === 'armed' && job.entryAvailable && typeof direct.enterLoader === 'function';
   const entryBlocked = Boolean(busy || blocked || job?.entryRequested);
-  const savedTargetKey = platform === 'mtk' && savedTarget?.label && savedTarget?.port
-    ? JSON.stringify([savedTarget.label, savedTarget.port]) : null;
+  const savedTargetKey = savedTarget?.label ? JSON.stringify([platform, savedTarget.label, savedTarget.port]) : null;
   const useSavedTarget = Boolean(savedTargetKey && savedTargetChoice === savedTargetKey);
+  const coldStart = platform === 'rk' && rkColdStart && !useSavedTarget;
+  const target = useSavedTarget ? { useSavedTarget: true } : coldStart ? { coldStart: true } : targetHint ? { targetHint } : {};
+  const targetBlocked = Boolean(busy || blocked);
+  const canArm = Boolean(enabled && ready && mode && !running && !targetBlocked);
+  const mismatch = (error ? error.code : job?.code) === 'flash-platform-mismatch';
   return <section className={`mb-4 min-w-0 space-y-3 rounded-lg border p-3 ${theme.input}`} aria-labelledby={title}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
@@ -97,28 +114,55 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
         <button type="button" disabled={!canArm} className={`${button} ${theme.button.primary}`}
           aria-describedby={modeRisk ? modeRiskId : undefined}
           onClick={() => {
-            if (canArm) void direct.arm({ firmwareId: file.firmwareId, mode, ...(useSavedTarget ? { useSavedTarget: true } : targetHint ? { targetHint } : {}) });
+            if (!canArm) return;
+            void direct.arm({ firmwareId: file.firmwareId, mode, ...target });
           }}>
-          {busy ? <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" /> : <Download size={15} className="shrink-0" aria-hidden="true" />}
+          {busy && !registeringTarget ? <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" /> : <Download size={15} className="shrink-0" aria-hidden="true" />}
           {tr('开始刷机')}
         </button>
       </div>}
     </div>
+    {available && !running && direct.registerTarget && <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <button type="button" disabled={targetBlocked} aria-busy={registeringTarget} className={`${button} ${theme.button.secondary}`}
+        onClick={() => {
+          if (targetBlocked) return;
+          setSavedTargetChoice(null);
+          if (platform === 'rk') setRkColdStart(false);
+          void direct.registerTarget();
+        }}>
+        {registeringTarget && <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin" />}
+        {tr('登记当前 USB 目标')}
+      </button>
+      <p className={`min-w-0 text-xs leading-5 ${theme.textMuted}`}>
+        {tr('先通过 USB 调试连接目标设备，再登记。之后可在设备未连接时使用已保存的目标。')}
+      </p>
+    </div>}
     {available && !running && savedTargetKey && <label className="flex w-fit max-w-full items-start gap-2 text-xs leading-5">
-      <input type="checkbox" checked={useSavedTarget} disabled={Boolean(busy || blocked)}
+      <input type="checkbox" checked={useSavedTarget} disabled={targetBlocked}
         className="mt-1 shrink-0 accent-emerald-500"
-        onChange={event => setSavedTargetChoice(event.currentTarget.checked ? savedTargetKey : null)} />
+        onChange={event => {
+          if (event.currentTarget.checked && platform === 'rk') setRkColdStart(false);
+          setSavedTargetChoice(event.currentTarget.checked ? savedTargetKey : null);
+        }} />
       <span className="min-w-0">
         <span className="block font-medium">{tr('使用已保存的 USB 目标（设备可未连接）')}</span>
-        <span className={`block break-words ${theme.textMuted}`}>{savedTarget.label} · {savedTarget.port}</span>
+        <span className={`block break-words ${theme.textMuted}`}>{[savedTarget.label, savedTarget.port].filter(Boolean).join(' · ')}</span>
       </span>
+    </label>}
+    {available && !running && platform === 'rk' && <label className="flex w-fit max-w-full items-start gap-2 text-xs leading-5">
+      <input type="checkbox" checked={coldStart} disabled={targetBlocked} className="mt-1 shrink-0 accent-emerald-500"
+        onChange={event => {
+          if (event.currentTarget.checked) setSavedTargetChoice(null);
+          setRkColdStart(event.currentTarget.checked);
+        }} />
+      <span>{tr('未登记的 RK 板卡（无需 ADB，识别后手动选择）')}</span>
     </label>}
     {modeRisk && <p id={modeRiskId} role="status" className={`flex items-start gap-2 rounded-md px-2.5 py-2 text-xs leading-5 ${formatsStorage
       ? `bg-red-500/10 ${dark ? 'text-red-300' : 'text-red-800'}` : `bg-amber-500/10 ${accent}`}`}>
       <TriangleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
       {modeRisk}
     </p>}
-    {busy && !status && <div role="status" className={`space-y-1 text-xs ${theme.textMuted}`}>
+    {busy && !registeringTarget && !status && <div role="status" className={`space-y-1 text-xs ${theme.textMuted}`}>
       <p>{phaseLabels.preparing()}</p>
       <p className={accent}>{keepConnectedBeforeReady()}</p>
     </div>}
@@ -139,7 +183,19 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
         </div>
       </div>
       {['preparing', 'confirming', 'authorizing'].includes(job.phase) && <p className={`text-xs leading-5 ${accent}`}>{keepConnectedBeforeReady()}</p>}
-      {job.phase === 'waiting' && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('请手动让目标设备进入刷机模式。')}</p>}
+      {preparation === 'staging-firmware' && <>
+        <progress className="h-2 w-full accent-cyan-500" max={100} value={preparationPercent} aria-label={tr('固件准备进度')} />
+        <p className={`flex flex-wrap justify-between gap-2 text-xs ${theme.textMuted}`}>
+          <span>{tr('正在准备文件，尚未写入设备。')}</span>
+          {preparationPercent !== undefined && <span>{preparationPercent}%</span>}
+        </p>
+      </>}
+      {job.phase === 'waiting' && <p className={`text-xs leading-5 ${theme.textMuted}`}>
+        {platform === 'rk' ? (job.coldStart
+          ? tr('按板卡要求断电上电或长按电源键进入 Loader / Maskrom，识别后选定目标。')
+          : tr('保持同一 USB 口，按板卡要求断电上电或长按电源键进入 Loader / Maskrom。'))
+          : tr('请手动让目标设备进入刷机模式。')}
+      </p>}
       {job.phase === 'authorizing' && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('如出现 Windows 管理员授权，请手动确认；工具就绪后再让设备进入刷机模式。')}</p>}
       {job.phase === 'armed' && <div role="status" className={`space-y-1 text-xs leading-5 ${theme.textMuted}`}>
         <p>{job.entryRequested ? tr('已请求进入刷机模式，正在等待设备出现。') : platform === 'mtk'
@@ -147,6 +203,8 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
         {!job.entryRequested && entryButtonVisible && <p>{tr('也可点击「进入刷机模式」，无需手动重启设备。')}</p>}
         {job.entryRequested && <p>{tr('保持目标设备接在原 USB 口，不要换线或更换设备。')}</p>}
       </div>}
+      {job.phase === 'choice-required' && platform === 'rk' && job.coldStart &&
+        <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('请核对板卡后选择；选定目标并确认前不会写入。')}</p>}
       {job.phase === 'choice-required' && <ul className="max-h-48 space-y-2 overflow-y-auto">
         {(job.candidates || []).map(candidate => <li key={candidate.id}>
           <button type="button" className={`${button} w-full justify-start text-left ${theme.button.secondary}`} disabled={busy}
@@ -163,8 +221,12 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
         {percent !== undefined && <p className={`text-right text-xs ${theme.textMuted}`}>{percent}%</p>}
         <p className={`text-xs ${accent}`}>{tr('写入期间请保持 USB 连接和供电。')}</p>
       </>}
-      {job.code && (job.phase !== 'cancelled' || job.code === 'flash-wait-expired') && <p className={`text-xs ${job.phase === 'failed' ? accent : theme.textMuted}`}>{errorText(job.code)}</p>}
+      {job.code && job.code !== 'flash-platform-mismatch' && (job.phase !== 'cancelled' || job.code === 'flash-wait-expired') &&
+        <p className={`text-xs ${job.phase === 'failed' ? accent : theme.textMuted}`}>{errorText(job.code)}</p>}
     </div>}
-    {error && <p role="alert" className={`text-xs ${accent}`}>{errorText(error.code)}</p>}
+    {mismatch ? <p role="alert" className={`flex items-start gap-2 rounded-md bg-amber-500/10 px-2.5 py-2 text-xs leading-5 ${accent}`}>
+      <TriangleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
+      {errors['flash-platform-mismatch']()}
+    </p> : error && <p role="alert" className={`text-xs ${accent}`}>{errorText(error.code)}</p>}
   </section>;
 }

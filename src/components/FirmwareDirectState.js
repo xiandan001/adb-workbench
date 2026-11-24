@@ -20,6 +20,7 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [readError, setReadError] = useState(null);
+  const [registeringTarget, setRegisteringTarget] = useState(false);
   const revision = useRef(0);
   const command = useRef({ active: false, cancelling: false, sequence: 0 });
   const lastState = useRef({});
@@ -87,6 +88,17 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
     }
   }
 
+  async function registerTarget() {
+    if (!active || !['rk', 'mtk'].includes(platform) || !api?.firmwareDirectRegisterTarget || running ||
+      command.current.active || command.current.cancelling) return;
+    setRegisteringTarget(true);
+    try {
+      await request(() => api.firmwareDirectRegisterTarget(platform));
+    } finally {
+      if (mounted.current) setRegisteringTarget(false);
+    }
+  }
+
   return {
     ...snapshot,
     error: actionError?.platform === platform ? actionError : readError?.platform === platform ? readError : null,
@@ -95,5 +107,7 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
     choose: value => request(() => api?.firmwareDirectChoose?.(platform, value)),
     enterLoader: id => request(() => api?.firmwareDirectEnterLoader?.(platform, id)),
     cancel: id => request(() => api?.firmwareDirectCancel?.(platform, id), true),
+    registerTarget: api?.firmwareDirectRegisterTarget ? registerTarget : undefined,
+    registeringTarget,
   };
 }

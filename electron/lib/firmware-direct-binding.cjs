@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { promisify } = require('node:util');
 const { execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
@@ -11,6 +12,8 @@ const mtkInstance = /^USB\\VID_0E8D&PID_2000\\[A-Z0-9._&-]{1,160}$/i;
 const adbSerial = /^[A-Za-z0-9_-]{1,128}$/;
 const lower = value => typeof value === 'string' ? value.toLowerCase() : '';
 const normalizePort = value => typeof value === 'string' && portPattern.test(value) && Number(value.slice(3)) <= 4096 ? value.toUpperCase() : '';
+const canonicalLocation = value => typeof value === 'string' && value.length <= 384 &&
+  /^[A-Z0-9_.#()-]+#USBROOT\([A-F0-9]{1,4}\)(?:#USB\([A-F0-9]{1,4}\))+$/i.test(value) ? value.toUpperCase() : '';
 
 function explicitTransport(list, serial) {
   if (!list?.ok || !adbSerial.test(serial)) return null;
@@ -39,21 +42,32 @@ async function selectQualifiedUsbAnchor(inventory, profile, hint, runAdb) {
   return { ...anchor, label: profile.board, product: profile.product };
 }
 
-function matchMtkPortHistory(snapshot, anchor) {
-  const candidates = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
-  if (snapshot?.complete !== true || candidates.length > 128 || !Array.isArray(snapshot.activePorts) || !anchor?.location) return null;
+function listMtkPortReservationsFromSnapshot(snapshot) {
+  if (snapshot?.complete !== true || !Array.isArray(snapshot.nodes) || snapshot.nodes.length > 128 ||
+    !Array.isArray(snapshot.activePorts) || snapshot.activePorts.length > 4096) return [];
   // Detached Windows PnP port reservations are hints tied to an exact physical USB path.
   // Never treat the COM number alone as a USB target and never arm an occupied COM.
-  const anchored = candidates.filter(row => mtkInstance.test(row?.id || '') &&
-    lower(row.location) === lower(anchor.location) && typeof row.service === 'string' &&
-    /^(?:wdm_usb|usb2ser)$/i.test(row.service) && /^oem\d+\.inf$/i.test(row.inf || '') &&
-    normalizePort(row.port));
-  if (anchored.length !== 1) return null;
-  const row = anchored[0];
-  const port = normalizePort(row.port);
-  if (candidates.some(candidate => normalizePort(candidate?.port) === port && lower(candidate.id) !== lower(row.id)) ||
-    snapshot.activePorts.some(value => normalizePort(value) === port)) return null;
-  return { instanceId: row.id, port, selector: port, location: anchor.location, label: anchor.label, stage: 'preloader', verified: true };
+  const busy = new Set(snapshot.activePorts.map(normalizePort));
+  const rows = snapshot.nodes.map(row => ({
+    instanceId: typeof row?.id === 'string' ? row.id.toUpperCase() : '',
+    location: canonicalLocation(row?.location), port: normalizePort(row?.port),
+    service: lower(row?.service), inf: lower(row?.inf),
+  }));
+  return rows.flatMap(row => {
+    const { instanceId, location, port, service, inf } = row;
+    if (!mtkInstance.test(instanceId) || !location || !port || busy.has(port) ||
+      !['wdm_usb', 'usb2ser'].includes(service) || !/^oem\d+\.inf$/.test(inf)) return [];
+    if (rows.some(other => other !== row && (other.port === port || other.location === location || other.instanceId === instanceId))) return [];
+    const id = createHash('sha256').update(JSON.stringify([instanceId, location, port, service, inf])).digest('hex');
+    return [{ id, instanceId, port, location, selector: port, stage: 'preloader', verified: true }];
+  }).sort((left, right) => Number(left.port.slice(3)) - Number(right.port.slice(3)));
+}
+
+function matchMtkPortHistory(snapshot, anchor) {
+  const found = listMtkPortReservationsFromSnapshot(snapshot).find(row => row.location === canonicalLocation(anchor?.location));
+  if (!found) return null;
+  const { instanceId, port, selector, stage, verified } = found;
+  return { instanceId, port, selector, location: anchor.location, label: anchor.label, stage, verified };
 }
 
 const historyScript = String.raw`
@@ -71,21 +85,31 @@ $nodes=@(foreach($d in $mtk){
     $props=Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_LocationPaths','DEVPKEY_Device_Service','DEVPKEY_Device_DriverInfPath'
     $map=@{}; foreach($p in $props){$map[$p.KeyName]=$p.Data}
     $usb=@($map['DEVPKEY_Device_LocationPaths'] | Where-Object { $_ -match '^PCI.*#USBROOT\(' })
-    if($usb.Count -eq 1){ @{id=$d.InstanceId;location=$usb[0];port=(Read-Port $d.InstanceId);service=$map['DEVPKEY_Device_Service'];inf=$map['DEVPKEY_Device_DriverInfPath']} }
+    $location=$null
+    if($usb.Count -eq 1){ $location=$usb[0] }
+    @{id=$d.InstanceId;location=$location;port=(Read-Port $d.InstanceId);service=$map['DEVPKEY_Device_Service'];inf=$map['DEVPKEY_Device_DriverInfPath']}
   } catch { throw }
 })
 $active=@($ports | Where-Object { $_.Present -eq $true } | ForEach-Object { Read-Port $_.InstanceId })
 @{complete=$true;nodes=$nodes;activePorts=$active} | ConvertTo-Json -Depth 4 -Compress
 `;
 
-async function queryMtkPortHistory(anchor, { signal, exec = run } = {}) {
+async function readMtkPortHistory({ signal, exec = run } = {}) {
   if (process.platform !== 'win32' || signal?.aborted) return null;
   const shell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
   try {
     const { stdout } = await exec(shell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(historyScript, 'utf16le').toString('base64')],
       { windowsHide: true, timeout: 18000, maxBuffer: 65536, encoding: 'utf8', signal });
-    return matchMtkPortHistory(JSON.parse(stdout), anchor);
+    return signal?.aborted ? null : JSON.parse(stdout);
   } catch { return null; }
+}
+
+async function listMtkPortReservations(options) {
+  return listMtkPortReservationsFromSnapshot(await readMtkPortHistory(options));
+}
+
+async function queryMtkPortHistory(anchor, options) {
+  return matchMtkPortHistory(await readMtkPortHistory(options), anchor);
 }
 
 async function nativeFlashToolsIdle({ exec = run } = {}) {
@@ -96,18 +120,22 @@ async function nativeFlashToolsIdle({ exec = run } = {}) {
   } catch { return false; }
 }
 
-function sanitizeMtkBinding(value) {
+function sanitizeRkBinding(value) {
   if (!value || typeof value.product !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value.product) ||
     typeof value.location !== 'string' || !/^[A-Za-z0-9_#().-]{5,512}$/.test(value.location) ||
     !value.location.includes('#USB(') || typeof value.serial !== 'string' || !adbSerial.test(value.serial) ||
-    typeof value.identity !== 'string' || !/^[a-f0-9]{64}$/.test(value.identity) ||
-    typeof value.instanceId !== 'string' || !mtkInstance.test(value.instanceId) ||
-    !normalizePort(value.port)) return null;
-  const { product, location, serial, identity, instanceId } = value;
-  return { product, location, serial, identity, instanceId, port: normalizePort(value.port) };
+    typeof value.identity !== 'string' || !/^[a-f0-9]{64}$/.test(value.identity)) return null;
+  const { product, location, serial, identity } = value;
+  return { product, location, serial, identity };
 }
 
-function createMtkBindingStore(filename, { io = fs, atomicWrite = atomicWriteAsync } = {}) {
+function sanitizeMtkBinding(value) {
+  const common = sanitizeRkBinding(value);
+  if (!common || typeof value.instanceId !== 'string' || !mtkInstance.test(value.instanceId) || !normalizePort(value.port)) return null;
+  return { ...common, instanceId: value.instanceId, port: normalizePort(value.port) };
+}
+
+function createBindingStore(filename, sanitize, { io = fs, atomicWrite = atomicWriteAsync } = {}) {
   let loaded;
   const read = () => loaded ||= (async () => {
     try {
@@ -116,11 +144,11 @@ function createMtkBindingStore(filename, { io = fs, atomicWrite = atomicWriteAsy
       const raw = await io.readFile(filename);
       if (raw.length > 2048) return null;
       const value = JSON.parse(raw.toString('utf8'));
-      return value?.version === 1 ? sanitizeMtkBinding(value.target) : null;
+      return value?.version === 1 ? sanitize(value.target) : null;
     } catch { return null; }
   })();
   async function remember(value) {
-    const target = sanitizeMtkBinding(value);
+    const target = sanitize(value);
     if (!target) return false;
     await io.mkdir(path.dirname(filename), { recursive: true });
     await atomicWrite(filename, JSON.stringify({ version: 1, target }));
@@ -130,5 +158,10 @@ function createMtkBindingStore(filename, { io = fs, atomicWrite = atomicWriteAsy
   return { read, remember };
 }
 
-module.exports = { explicitTransport, selectQualifiedUsbAnchor, matchMtkPortHistory, queryMtkPortHistory, nativeFlashToolsIdle,
-  sanitizeMtkBinding, createMtkBindingStore };
+const createMtkBindingStore = (filename, options) => createBindingStore(filename, sanitizeMtkBinding, options);
+const createRkBindingStore = (filename, options) => createBindingStore(filename, sanitizeRkBinding, options);
+
+module.exports = {
+  explicitTransport, selectQualifiedUsbAnchor, matchMtkPortHistory, queryMtkPortHistory,
+  listMtkPortReservationsFromSnapshot, listMtkPortReservations, nativeFlashToolsIdle,
+  sanitizeMtkBinding, createMtkBindingStore, sanitizeRkBinding, createRkBindingStore };

@@ -16,6 +16,7 @@ const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.p
 const text = node => typeof node === 'string' || typeof node === 'number' ? String(node)
   : !node || typeof node !== 'object' ? '' : [node.props?.children].flat(Infinity).map(text).join(' ');
 const button = (tree, label) => nodes(tree).find(node => node.type === 'button' && text(node).trim() === label);
+const checkbox = tree => nodes(tree).find(node => node.type === 'input' && node.props.type === 'checkbox');
 
 function mount(api, options = {}) {
   let platform = options.platform || 'mtk';
@@ -162,6 +163,139 @@ test('an explicitly saved MTK target starts a cold wait without forwarding the l
   await flush();
   assert.deepEqual(calls, [['mtk', { firmwareId: 'private-receipt', mode: 'download-only', useSavedTarget: true }]]);
   assert.doesNotMatch(text(app.render().tree), /使用已保存的 USB 目标/);
+});
+
+test('RK cold start sends no ADB hint and requires explicit selection of a detected board', async () => {
+  const calls = [];
+  let job = null;
+  const app = mount({
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: ['upgrade'], job }),
+    firmwareDirectArm: async (platform, input) => {
+      calls.push(['arm', platform, copy(input)]);
+      job = { id: 'job', phase: 'waiting', coldStart: true };
+      return { ok: true, job };
+    },
+    firmwareDirectChoose: async (platform, input) => {
+      calls.push(['choose', platform, copy(input)]);
+      return { ok: true, job };
+    },
+  }, { platform: 'rk' });
+  await flush();
+  const initial = app.render().tree;
+  assert.match(text(initial), /未登记的 RK 板卡（无需 ADB，识别后手动选择）/);
+  assert.equal(checkbox(initial).props.checked, false);
+  checkbox(initial).props.onChange({ currentTarget: { checked: true } });
+  assert.deepEqual(calls, []);
+  button(app.render().tree, '开始刷机').props.onClick();
+  app.render();
+  await flush();
+  assert.deepEqual(calls, [['arm', 'rk', { firmwareId: 'private-receipt', mode: 'upgrade', coldStart: true }]]);
+  assert.match(text(app.render().tree), /断电上电或长按电源键进入 Loader \/ Maskrom/);
+  await flush();
+  job = { ...job, phase: 'choice-required', candidates: [{ id: 'rk-port', label: 'RK G520' }] };
+  app.tick();
+  await flush();
+  const choice = app.render().tree;
+  assert.match(text(choice), /选定目标并确认前不会写入/);
+  assert.equal(calls.length, 1);
+  button(choice, 'RK G520').props.onClick();
+  await flush();
+  assert.deepEqual(calls[1], ['choose', 'rk', { jobId: 'job', targetId: 'rk-port' }]);
+});
+
+for (const platform of ['mtk', 'rk']) test(`registering a ${platform} target needs no firmware and does not arm until explicitly selected`, async () => {
+  const calls = [];
+  const rk = platform === 'rk';
+  const mode = rk ? 'upgrade' : 'download-only';
+  let savedTarget = null;
+  let finishRegistration;
+  const registration = new Promise(resolve => { finishRegistration = resolve; });
+  const app = mount({
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: [mode], job: null, savedTarget }),
+    firmwareDirectRegisterTarget: async (...args) => {
+      calls.push(['register', ...args]);
+      return registration;
+    },
+    firmwareDirectArm: async (platform, input) => {
+      calls.push(['arm', platform, copy(input)]);
+      return { ok: true, job: { id: 'job', phase: rk ? 'waiting' : 'authorizing' } };
+    },
+  }, { platform });
+  await flush();
+  const initial = app.render({ ok: false }).tree;
+  assert.deepEqual(calls, []);
+  assert.equal(button(initial, '开始刷机').props.disabled, true);
+  assert.doesNotMatch(text(initial), /使用已保存的 USB 目标/);
+  assert.match(text(initial), /先通过 USB 调试连接目标设备，再登记/);
+  const register = button(initial, '登记当前 USB 目标');
+  assert.equal(register.props.disabled, false);
+  register.props.onClick();
+  register.props.onClick();
+  const pending = app.render({ ok: false }).tree;
+  assert.equal(button(pending, '登记当前 USB 目标').props['aria-busy'], true);
+  assert.doesNotMatch(text(pending), /正在核对刷机固件/);
+
+  savedTarget = rk ? { label: 'Verified G520' } : { label: 'Verified G520', port: 'COM5' };
+  finishRegistration({ ok: true, savedTarget });
+  await flush();
+  const ready = app.render().tree;
+  assert.match(text(ready), rk ? /Verified G520/ : /Verified G520\s*·\s*COM5/);
+  assert.equal(checkbox(ready).props.checked, false);
+  assert.deepEqual(calls, [['register', platform]]);
+  const rkManual = tree => nodes(tree).filter(node => node.type === 'input' && node.props.type === 'checkbox')[1];
+  if (rk) rkManual(ready).props.onChange({ currentTarget: { checked: true } });
+  checkbox(ready).props.onChange({ currentTarget: { checked: true } });
+  if (rk) assert.equal(rkManual(app.render().tree).props.checked, false);
+  button(app.render().tree, '开始刷机').props.onClick();
+  await flush();
+  assert.deepEqual(calls, [['register', platform], ['arm', platform, { firmwareId: 'private-receipt', mode, useSavedTarget: true }]]);
+  const waiting = app.render().tree;
+  assert.equal(button(waiting, '登记当前 USB 目标'), undefined);
+  if (rk) {
+    assert.match(text(waiting), /保持同一 USB 口.*进入 Loader \/ Maskrom/);
+    assert.doesNotMatch(text(waiting), /识别后选定目标/);
+  }
+});
+
+test('environment checks and firmware staging are distinct from device write progress', async () => {
+  let job = { id: 'job', phase: 'preparing', preparation: 'checking-environment' };
+  const app = mount({ firmwareDirectState: async () => ({ ok: true, enabled: true, modes: modeOptions, job }) });
+  await flush();
+  const checking = app.render().tree;
+  assert.match(text(checking), /正在检查工具、USB 和磁盘空间/);
+  assert.equal(nodes(checking).find(node => node.type === 'progress'), undefined);
+  job = { ...job, preparation: 'staging-firmware', preparationPercent: 48.7 };
+  app.tick();
+  await flush();
+  const staging = app.render().tree;
+  const progress = nodes(staging).find(node => node.type === 'progress');
+  assert.equal(progress.props['aria-label'], '固件准备进度');
+  assert.equal(progress.props.value, 48);
+  assert.match(text(staging), /正在准备文件，尚未写入设备/);
+  assert.match(text(staging), /工具就绪前请保持 USB 连接和供电，不要重启或断电/);
+  job = { ...job, phase: 'writing', percent: 10 };
+  app.tick();
+  await flush();
+  const writing = app.render().tree;
+  assert.equal(nodes(writing).find(node => node.type === 'progress').props['aria-label'], '刷机进度');
+  assert.doesNotMatch(text(writing), /尚未写入设备|48%/);
+});
+
+test('a cross-platform rejection shows one no-write alert and no write progress', async () => {
+  const app = mount({
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: ['upgrade'], job: null }),
+    firmwareDirectArm: async () => ({
+      ok: false, code: 'flash-platform-mismatch', job: { id: 'job', phase: 'failed', code: 'flash-platform-mismatch' },
+    }),
+  }, { platform: 'rk' });
+  await flush();
+  button(app.render().tree, '开始刷机').props.onClick();
+  await flush();
+  const failed = app.render().tree;
+  const notices = nodes(failed).filter(node => node.props.role === 'alert');
+  assert.equal(notices.length, 1);
+  assert.match(text(notices[0]), /固件或设备的刷机平台不匹配，未启动写入/);
+  assert.equal(nodes(failed).find(node => node.type === 'progress'), undefined);
 });
 
 test('one waiting job can be polled and chosen without another arm or automatic selection', async () => {

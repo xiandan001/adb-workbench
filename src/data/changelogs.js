@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '4.9.3': {
+    title: 'v4.9.3',
+    date: '2026-11-24',
+    items: [
+      { type: 'improve', get text() { return tr('刷机提前检查设备和工具，并显示固件准备进度。'); } },
+      { type: 'feature', get text() { return tr('MTK 和 RK 可登记 USB 目标后按冷启动流程刷机。'); } },
+      { type: 'improve', get text() { return tr('固件或设备与所选刷机平台不匹配时阻止写入。'); } },
+    ],
+  },
   '4.9.2': {
     title: 'v4.9.2',
     date: '2026-11-24',

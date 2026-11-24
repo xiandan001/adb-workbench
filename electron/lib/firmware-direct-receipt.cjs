@@ -3,6 +3,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { tmpdir } = require('node:os');
 const { pipeline } = require('node:stream/promises');
+const { Transform } = require('node:stream');
 const { createReadStream, createWriteStream } = require('node:fs');
 const { preflightFirmware } = require('./firmware-preflight.cjs');
 
@@ -21,11 +22,13 @@ function packageRoot(platform, file) {
   return directory;
 }
 
-async function identity(file) {
+async function fileSnapshot(file) {
   const [resolved, stat] = await Promise.all([fs.realpath(file), fs.lstat(file, { bigint: true })]);
   if (comparable(resolved) !== comparable(file) || !stat.isFile() || stat.size <= 0n) throw error('firmware-changed');
-  return stamp(stat);
+  return { identity: stamp(stat), size: stat.size };
 }
+
+const identity = async file => (await fileSnapshot(file)).identity;
 
 async function hashFile(file, expected, signal) {
   const opened = await fs.open(file, 'r');
@@ -48,11 +51,7 @@ function safeMember(root, name) {
   return file;
 }
 
-/**
- * Build an internal evidence receipt from the main-window file picker.
- * It proves identity of the selected files, not compatibility with a device.
- */
-async function prepareDirectFirmware(platform, filePath, { signal, onProgress = () => {} } = {}) {
+async function snapshotFirmware(platform, filePath, signal) {
   abort(signal);
   const preflight = await preflightFirmware(platform, filePath);
   if (!preflight.ok) throw error(preflight.code || 'firmware-unavailable');
@@ -64,7 +63,7 @@ async function prepareDirectFirmware(platform, filePath, { signal, onProgress = 
   if (schema && !dependencies.some(member => comparable(member) === comparable(schema))) dependencies.push(schema);
   const members = [...new Map(dependencies.map(member => [comparable(member), member])).values()];
   const before = await Promise.all(members.map(async member => {
-    try { return await identity(member); }
+    try { return { path: member, ...await fileSnapshot(member) }; }
     catch (cause) {
       if (schema && comparable(member) === comparable(schema) && cause.code === 'ENOENT') throw error('missing-files');
       throw cause;
@@ -73,20 +72,33 @@ async function prepareDirectFirmware(platform, filePath, { signal, onProgress = 
   // A changed manifest must not invalidate the dependency snapshot.
   const checkedAgain = await preflightFirmware(platform, file);
   if (JSON.stringify(checkedAgain) !== JSON.stringify(preflight)) throw error('firmware-changed');
-  const parts = [];
-  for (let index = 0; index < members.length; index++) {
-    abort(signal);
-    const digest = await hashFile(members[index], before[index], signal);
-    parts.push([path.relative(root, members[index]), digest]);
-    onProgress({ checked: index + 1, total: members.length });
-  }
-  const files = members.map((member, index) => ({ path: member, identity: before[index] }));
-  const receipt = {
+  abort(signal);
+  return { preflight, file, root, before };
+}
+
+function receiptFor(platform, file, preflight, parts, files) {
+  return {
     path: file, chip: preflight.chip, project: preflight.project,
     sha256: createHash('sha256').update(JSON.stringify(parts)).digest('hex'),
     ...(platform === 'rk' ? { contentSha256: parts[0][1] } : {}),
-    files
+    files,
   };
+}
+
+/**
+ * Build an internal evidence receipt from the main-window file picker.
+ * It proves identity of the selected files, not compatibility with a device.
+ */
+async function prepareDirectFirmware(platform, filePath, { signal, onProgress = () => {} } = {}) {
+  const { preflight, file, root, before } = await snapshotFirmware(platform, filePath, signal);
+  const parts = [];
+  for (const member of before) {
+    abort(signal);
+    const digest = await hashFile(member.path, member.identity, signal);
+    parts.push([path.relative(root, member.path), digest]);
+    onProgress({ checked: parts.length, total: before.length });
+  }
+  const receipt = receiptFor(platform, file, preflight, parts, before.map(({ path, identity }) => ({ path, identity })));
   if (!await revalidateDirectFirmware(receipt)) throw error('firmware-changed');
   return receipt;
 }
@@ -99,15 +111,20 @@ async function revalidateDirectFirmware(receipt) {
   } catch { return false; }
 }
 
-async function stageDirectFirmware(platform, receipt, { signal, stagingBase = tmpdir() } = {}) {
-  abort(signal);
-  if (!await revalidateDirectFirmware(receipt)) throw error('firmware-changed');
+async function createStaging(stagingBase) {
   const base = await fs.realpath(stagingBase);
   const stage = await fs.mkdtemp(path.join(base, 'veylo-flash-'));
   const release = async () => {
     if (comparable(path.dirname(stage)) !== comparable(base) || !/^veylo-flash-[\w-]+$/.test(path.basename(stage))) return;
     await fs.rm(stage, { recursive: true, force: true });
   };
+  return { stage, release };
+}
+
+async function stageDirectFirmware(platform, receipt, { signal, stagingBase = tmpdir() } = {}) {
+  abort(signal);
+  if (!await revalidateDirectFirmware(receipt)) throw error('firmware-changed');
+  const { stage, release } = await createStaging(stagingBase);
   try {
     const root = packageRoot(platform, receipt.path);
     for (const original of receipt.files) {
@@ -126,4 +143,94 @@ async function stageDirectFirmware(platform, receipt, { signal, stagingBase = tm
   }
 }
 
-module.exports = { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware };
+async function requireStableSource(member, handle) {
+  try {
+    if (stamp(await handle.stat({ bigint: true })) === member.identity && await identity(member.path) === member.identity) return;
+  } catch { /* A disappeared or replaced source cannot be used in this job. */ }
+  throw error('firmware-changed');
+}
+
+async function copyHashedMember(member, destination, { signal, report }) {
+  const chunkSize = 1024 * 1024;
+  let source;
+  try { source = await fs.open(member.path, 'r'); }
+  catch { throw error('firmware-changed'); }
+  try {
+    await requireStableSource(member, source);
+    abort(signal);
+    const size = Number(member.size);
+    const hash = createHash('sha256');
+    const writer = createWriteStream(destination, { flags: 'wx', mode: 0o600, highWaterMark: chunkSize });
+    let received = 0;
+    const meter = new Transform({
+      transform(bytes, _encoding, done) {
+        received += bytes.length;
+        if (received > size) { done(error('firmware-changed')); return; }
+        try {
+          abort(signal);
+          hash.update(bytes);
+          report(writer.bytesWritten);
+          done(null, bytes);
+        } catch (cause) { done(cause); }
+      }
+    });
+    await pipeline(source.createReadStream({ autoClose: false, highWaterMark: chunkSize }), meter, writer, { signal });
+    await requireStableSource(member, source);
+    if (received !== size) throw error('firmware-changed');
+    const staged = await fileSnapshot(destination);
+    if (staged.size !== member.size || writer.bytesWritten !== size) throw error('firmware-staging-unavailable');
+    report(writer.bytesWritten);
+    return { path: destination, identity: staged.identity, digest: hash.digest('hex') };
+  } finally { await source.close(); }
+}
+
+function stagingError(cause, signal) {
+  if (signal?.aborted || cause.name === 'AbortError') return error('cancelled');
+  if (cause.code === 'ENOSPC' || cause.code === 'EDQUOT') return error('firmware-disk-full');
+  if (cause.code === 'firmware-changed' || cause.code === 'firmware-staging-unavailable') return cause;
+  return error('firmware-staging-unavailable');
+}
+
+async function prepareStagedDirectFirmware(platform, filename, { signal, onProgress = () => {}, stagingBase = tmpdir() } = {}) {
+  const { file, root, before, preflight } = await snapshotFirmware(platform, filename, signal);
+  const total = before.reduce((sum, member) => sum + member.size, 0n);
+  if (total > BigInt(Number.MAX_SAFE_INTEGER)) throw error('firmware-size-unsupported');
+  const totalBytes = Number(total);
+  let staging;
+  try {
+    staging = await createStaging(stagingBase);
+    let copiedBytes = 0, last = -1;
+    const report = extra => {
+      const current = copiedBytes + extra;
+      if (current > last && current <= totalBytes) {
+        last = current;
+        onProgress({ copiedBytes: current, totalBytes });
+      }
+    };
+    report(0);
+    const files = [], parts = [];
+    for (const member of before) {
+      abort(signal);
+      const relative = path.relative(root, member.path);
+      const destination = safeMember(staging.stage, relative);
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      const { digest, ...staged } = await copyHashedMember(member, destination, { signal, report });
+      copiedBytes += Number(member.size);
+      files.push(staged);
+      parts.push([relative, digest]);
+    }
+    abort(signal);
+    const stagedPath = safeMember(staging.stage, path.relative(root, file));
+    const checked = await preflightFirmware(platform, stagedPath);
+    const firmware = receiptFor(platform, stagedPath, preflight, parts, files);
+    if (JSON.stringify(checked) !== JSON.stringify(preflight) ||
+        !await revalidateDirectFirmware({ files: before }) || !await revalidateDirectFirmware(firmware)) throw error('firmware-changed');
+    abort(signal);
+    return { firmware, release: staging.release };
+  } catch (cause) {
+    if (staging) await staging.release().catch(() => {});
+    throw stagingError(cause, signal);
+  }
+}
+
+module.exports = { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware };
