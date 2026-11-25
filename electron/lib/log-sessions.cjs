@@ -69,6 +69,7 @@ function normalizeEntries(entries, limit, withReferences = false) {
       if (!/^L[1-9]\d*$/.test(entry.ref) || seen.has(entry.ref)) throw new Error(tr("证据编号无效或重复"));
       seen.add(entry.ref);
       next.ref = entry.ref;
+      if (entry.locatableInSession === true) next.locatableInSession = true;
     }
     return next;
   });

@@ -90,7 +90,7 @@ function uiHarness(overrides = {}, visibleWindow, { engineError = '' } = {}) {
   const prefix = text.slice(0, cut).replace(/^import .+;\r?\n/gm, '').replace('export default function LogAnalyzer', 'function LogAnalyzer');
   const statusHook = fs.readFileSync(new URL('../src/shared/useMembershipStatus.js', import.meta.url), 'utf8')
     .replace(/^import .+;\r?\n/gm, '').replace('export default function useMembershipStatus', 'function useMembershipStatus');
-  const component = vm.runInNewContext(statusHook + '\n' + prefix + '\nreturn { showVipBlock, returnFromMembership, activateMembership, membershipOrigin, aiCustomPrompt, setAiCustomPrompt, onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme }; }\nLogAnalyzer', {
+  const component = vm.runInNewContext(statusHook + '\n' + prefix + '\nreturn { showVipBlock, returnFromMembership, activateMembership, membershipOrigin, aiCustomPrompt, setAiCustomPrompt, onStart, onStop, stopCaptureAndImport, onOpenFile, cancelImport, onClear, clearDeviceBuffers, onCopyAll, togglePause, onAiAnalyze, onAiStop, onAiClear, onSmartSearch, onSmartSearchStop, restoreSession, getSnapshot, sessionSaved, configureDevice, toggleBuffer, applyContext, changeText, filter, buffers, scopeBuffers, captureDeviceId, deviceId, entries, filtered, aiTurns, aiHistoryReadOnly, hasUnsaved, documentId, sourceIdentity, importState, source, note, logTheme, locateEvidence, evidence, aiFullscreen, setAiFullscreen, logScrollRef, virtualLogRows, autoScrollRef, locatedEvidence, paused, timeRange }; }\nLogAnalyzer', {
     ...snapshots, ...workspace, ...markers, ...stream, ...model, ...analysisHelpers, prepareInlineLogAnalysis, canUseMembershipFeature,
     crypto: { randomUUID }, window: { electronAPI: api, addEventListener() {}, removeEventListener() {}, innerHeight: 900 },
     document: { addEventListener() {}, removeEventListener() {}, body: { style: {} } }, navigator: { clipboard: { writeText: async value => clipboard.push(value) } }, performance,
@@ -145,6 +145,55 @@ test('actual inline callback sends the bounded frozen raw scope through legacy I
   h.ui().restoreSession({ name: 'saved C', source: 'file', sourceLabel: 'C.log', deviceId: '', entries: [fixtureRow('c', 'C原文', '')], filter: {}, buffers: [], evidence: [], markers: [], aiTurns: [{ header: 'saved', content: 'historic', reasoning: '', evidenceRefs: [] }], truncated: false }, { sourceIdentity: 'source-C' }); await h.drain();
   h.emit('onAiStreamChunk', { requestId: 'old-request', text: 'LATE', type: 'content' }); h.emit('onAiStreamEnd', { requestId: 'old-request' }); finish({ ok: true }); await pending; await pause(80); await h.drain();
   assert.equal(h.ui().aiTurns[0].content, 'historic'); assert.equal(h.ui().aiHistoryReadOnly, true); assert.equal(h.ui().sourceIdentity, 'source-C');
+});
+
+test('AI evidence jumps to the unique virtual row, exits fullscreen and preserves a hidden old-source preview', async t => {
+  const h = uiHarness({ aiAnalyzeLog: async () => ({ ok: true }) }); t.after(h.dispose);
+  const entries = Array.from({ length: 240 }, (_, index) => fixtureRow('record-' + index, index === 201 || index === 199 ? 'same raw' : 'another record'));
+  const source = { source: 'realtime', deviceId: 'A', captureId: 'cap-A', sourceIdentity: 'source-A', running: true, buffers: ['main'], entries };
+  h.setState(source); await h.mount();
+  let focused = 0;
+  const scroll = { scrollTop: 0, scrollHeight: entries.length * 28, clientHeight: 280,
+    focus(options) { assert.equal(options.preventScroll, true); focused++; } };
+  h.ui().logScrollRef.current = scroll;
+  h.ui().setAiFullscreen(true); await h.drain();
+  await h.ui().onAiAnalyze('where exactly', [entries[201]]); await h.drain();
+  const [original] = h.ui().evidence;
+  assert.match(original.evidenceScopeKey, /source-A/);
+  assert.equal(h.ui().locateEvidence(original), true);
+  scroll.clientHeight = 140; // Viewport shrinks after leaving fullscreen.
+  await h.drain();
+  assert.equal(h.ui().aiFullscreen, false);
+  assert.equal(h.ui().paused, true);
+  assert.equal(h.ui().autoScrollRef.current, false);
+  assert.equal(h.ui().locatedEvidence.id, 'record-201');
+  assert.equal(scroll.scrollTop, 201 * 28 - 140 / 3);
+  assert.equal(focused, 1);
+  assert.ok(h.ui().virtualLogRows.entries.some(row => row.id === 'record-201'));
+  assert.equal(h.calls.filter(call => call.method === 'adbStopLog').length, 0);
+  assert.equal(h.ui().timeRange.kind, 'all');
+
+  h.ui().changeText('another record'); await h.drain();
+  assert.equal(h.ui().locateEvidence(original), '日志视图尚未就绪，请稍后再试。');
+  await pause(350); await h.drain();
+  assert.equal(h.ui().locateEvidence(original), '原始日志被当前筛选或时间范围隐藏，请调整后重试。');
+  assert.equal(h.ui().filter.text, 'another record');
+  const saved = h.ui().getSnapshot('loaded');
+  assert.equal(saved.evidence[0].locatableInSession, true);
+  assert.equal(saved.evidence[0].evidenceScopeKey, undefined);
+  const filteredSnapshot = h.ui().getSnapshot('filtered');
+  assert.equal(filteredSnapshot.evidence[0].locatableInSession, undefined);
+  h.emit('onLogReset', { ...source, reason: 'capture-started', captureId: 'cap-new', sourceIdentity: 'source-new' }); await h.drain();
+  assert.equal(h.ui().locateEvidence(original), '日志来源已变化，无法在当前列表中定位。');
+
+  h.ui().restoreSession({ ...saved, filter: {}, evidence: [...saved.evidence, { ...saved.evidence[0], locatableInSession: undefined, ref: 'L2' }] },
+    { sourceIdentity: 'source-restored' });
+  await h.drain();
+  const [rebased, legacy] = h.ui().evidence;
+  assert.match(rebased.evidenceScopeKey, /source-restored/);
+  assert.notEqual(rebased.evidenceScopeKey, original.evidenceScopeKey);
+  assert.equal(h.ui().locateEvidence(rebased), true);
+  assert.equal(h.ui().locateEvidence(legacy), '此证据没有可定位的原始记录。');
 });
 test('membership activation and cancellation preserve the actual log window, selected device and AI draft', async t => {
   const h = uiHarness({ vipGetStatus: async () => ({ activated: false }) }); t.after(h.dispose); await h.mount();

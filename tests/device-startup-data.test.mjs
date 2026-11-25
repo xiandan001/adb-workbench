@@ -41,6 +41,7 @@ async function fetchState(api, previous = [], active = '', worksetTarget = '', m
     worksetTargetRef: { current: worksetTarget },
     devicesRef: { current: previous },
     setError: value => { state.error = value; },
+    setTaskDiscoveryWarning() {},
   });
   await callback();
   return JSON.parse(JSON.stringify(state));

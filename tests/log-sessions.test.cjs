@@ -42,6 +42,24 @@ test('session round-trip preserves raw logs, filters, sources, AI references and
   assert.deepEqual(listing.errors, []);
 });
 
+test('only literal opt-in on saved evidence survives normalization; runtime source keys never persist', async t => {
+  const { store } = tempStore(t);
+  const data = fixture();
+  data.entries = [{ ...data.entries[0], locatableInSession: true, evidenceScopeKey: 'ephemeral' }];
+  data.evidence = [
+    { ...data.evidence[0], locatableInSession: true, evidenceScopeKey: 'ephemeral' },
+    { ...data.evidence[0], ref: 'L2', locatableInSession: 'true' },
+    { ...data.evidence[0], ref: 'L3', locatableInSession: false },
+  ];
+  const saved = await store.save(data);
+  const loaded = await store.read(saved.id);
+  assert.equal(loaded.entries[0].locatableInSession, undefined);
+  assert.equal(loaded.evidence[0].evidenceScopeKey, undefined);
+  assert.equal(loaded.evidence[0].locatableInSession, true);
+  assert.equal(loaded.evidence[1].locatableInSession, undefined);
+  assert.equal(loaded.evidence[2].locatableInSession, undefined);
+});
+
 test('saving enforces limits and rejects missing evidence instead of truncating', () => {
   assert.throws(() => normalizeSession({ ...fixture(), entries: Array(50001).fill(fixture().entries[0]) }), /50,000/);
   assert.throws(() => normalizeSession({ ...fixture(), aiTurns: Array(501).fill(fixture().aiTurns[0]) }), /500/);

@@ -83,3 +83,22 @@ test('same Harmony connection can operate without a reported UDID but identity c
   const blocked = await h.model.runAdb(job, ['-s', 'hdc:old', 'shell', 'input keyevent 3']);
   assert.equal(blocked.ok, false); assert.equal(h.state.processes.length, 0);
 });
+
+test('Android recording and worker replay preserve intermediate curve points and the chosen device', async () => {
+  const { model, state } = workerModel();
+  const recorded = model.buildRecordedStep('swipe', {
+    x: 29, y: 24, endX: 98, endY: 25, durationMs: 520,
+    points: [{ x: 29, y: 24 }, { x: 56, y: 84 }, { x: 98, y: 25 }],
+  });
+  const job = task('curve', 'android-fixture');
+  job.script = model.normalizeScript({ ...job.script, steps: [recorded] });
+  await model.handleWorkerMessage({ action: 'run', adbPath: '/fixture/android-curve', task: job });
+  const [queued] = state.jobs;
+  const result = await model.executeStep(queued, 'android-fixture', queued.script.steps[0]);
+  assert.equal(result.ok, true);
+  assert.equal(state.processes.length, 1);
+  const [call] = state.processes;
+  assert.equal(call.command, '/fixture/android-curve');
+  assert.deepEqual(Array.from(call.args.slice(0, 3)), ['-s', 'android-fixture', 'shell']);
+  assert.match(call.args[3], /motionevent DOWN 29 24; .*motionevent MOVE 56 84; .*motionevent UP 98 25/);
+});

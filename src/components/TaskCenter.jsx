@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
 import { draftFingerprint, readTaskDraft, writeTaskDraft, resolveScriptAfterSave } from '../shared/taskCenterWorkspace';
+import { appendRecorderGesturePoint, classifyRecorderGesture, recorderPreviewPoint } from '../shared/taskRecorderGesture.js';
 import { taskPlatformForDevice, taskPlatformMismatch, adaptPristineBuiltin, createHarmonyTaskTemplate } from '../shared/taskPlatform';
 import {
   advanceOnboardingStage,
@@ -78,7 +79,6 @@ const STEP_TYPES = (platform = 'android') => ([
   ...(item.value === 'keyevent' ? { description: tr('发送鸿蒙逻辑按键或显式原生键码') } : {})
 } : item);
 
-const LONG_PRESS_RECORD_THRESHOLD_MS = 600;
 const RECORD_ACTIONS_REFRESH_SNAPSHOT = new Set(['tap', 'longPress', 'swipe', 'input', 'keyevent']);
 const RECORDER_BACKGROUND_REFRESH_DELAY_MS = 300;
 
@@ -888,6 +888,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     return refreshed;
   };
 
+  const recordingHarmony = taskPlatformForDevice(recorder.deviceId) === 'harmony';
+  const recordingTapOnly = onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORD_TAP;
   const recordFromRecordingWorkspace = async (action, extra = {}) => {
     const step = await recordAction(action, extra, { skipRefresh: true });
     if (step && action === 'tap' && onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORD_TAP) {
@@ -1152,6 +1154,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       ) : workspaceView === 'recording' ? (
         <TaskCenterRecordingWorkspace
           theme={t}
+          tapOnly={recordingTapOnly}
+          harmony={recordingHarmony}
           draft={draft}
           saving={saving}
           task={recordingTaskView}
@@ -1168,7 +1172,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
               isDark={isDark}
               softClass={softClass}
               focusedMode
-              tapOnly
+              tapOnly={recordingTapOnly}
               onChange={changeRecordingDevice}
               onRefresh={refreshRecordingSnapshot}
               onRefreshDevices={onRefreshDevices}
@@ -1944,7 +1948,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
     if (!detachedOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return;
-      pointerRef.current = null;
+      clearRecorderPointer(pointerRef);
       setGesture(null);
       setDetachedOpen(false);
     };
@@ -1980,65 +1984,67 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
 
   useEffect(() => {
     if (!recorderBusy) return undefined;
-    pointerRef.current = null;
+    clearRecorderPointer(pointerRef);
     const frameId = requestAnimationFrame(() => setGesture(null));
     return () => cancelAnimationFrame(frameId);
   }, [recorderBusy]);
 
   const closeDetachedPreview = () => {
-    pointerRef.current = null;
+    clearRecorderPointer(pointerRef);
     setGesture(null);
     setDetachedOpen(false);
   };
 
   const handlePreviewPointerDown = (event, element) => {
-    if (!hasScreenshot || recorderBusy) return;
+    if (!hasScreenshot || recorderBusy || pointerRef.current || event.button !== 0 || event.isPrimary === false) return;
     const point = getPreviewDevicePoint(event, element, recorder);
     if (!point) return;
-    pointerRef.current = { ...point, pointerId: event.pointerId, startedAt: Date.now(), points: [point] };
+    pointerRef.current = { point, pointerId: event.pointerId, startedAt: performance.now(), points: [point],
+      deviceId: recorder.deviceId, screenshot: recorder.screenshotDataUrl, captureTarget: event.currentTarget };
     setGesture({ start: point, current: point, points: [point] });
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   const handlePreviewPointerMove = (event, element) => {
     const start = pointerRef.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    const point = getPreviewDevicePoint(event, element, recorder);
+    if (!start || start.pointerId !== event.pointerId || recorderBusy) return;
+    const point = getPreviewDevicePoint(event, element, recorder, true);
     if (!point) return;
-    start.points = appendGesturePoint(start.points, point);
-    setGesture({ start, current: point, points: start.points });
+    start.points = appendRecorderGesturePoint(start.points, point);
+    setGesture({ start: start.point, current: point, points: start.points });
+  };
+
+  const handlePreviewPointerCancel = event => {
+    if (pointerRef.current?.pointerId !== event.pointerId) return;
+    clearRecorderPointer(pointerRef);
+    setGesture(null);
   };
 
   const handlePreviewPointerUp = (event, element) => {
     const start = pointerRef.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    const end = getPreviewDevicePoint(event, element, recorder) || start;
-    const points = simplifyGesturePoints(appendGesturePoint(start.points, end, true));
-    pointerRef.current = null;
-    setGesture(null);
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-    const clickThreshold = Math.max(12, Math.min(recorder.screenshotWidth, recorder.screenshotHeight) * 0.01);
-    if (distance <= clickThreshold) {
-      const node = findNodeAtPoint(recorder.nodes, end);
-      const durationMs = Math.max(300, Math.min(10000, Date.now() - start.startedAt || recorder.longPress.durationMs || 800));
-      if (node) onChange({ selectedNodeIndex: node.index });
-      if (tapOnly) {
-        onRecord('tap', { node: null, x: end.x, y: end.y });
-        return;
-      }
-      if (durationMs >= LONG_PRESS_RECORD_THRESHOLD_MS) {
-        onChange({ longPress: { ...recorder.longPress, x: end.x, y: end.y, durationMs } });
-        onRecord('longPress', { node: null, x: end.x, y: end.y, durationMs });
-        return;
-      }
-      onRecord('tap', { node: null, x: end.x, y: end.y });
+    handlePreviewPointerCancel(event);
+    if (recorderBusy || start.deviceId !== recorder.deviceId || start.screenshot !== recorder.screenshotDataUrl) return;
+    const end = getPreviewDevicePoint(event, element, recorder, true);
+    if (!end) return;
+    const recorded = classifyRecorderGesture({ points: appendRecorderGesturePoint(start.points, end, true),
+      elapsedMs: performance.now() - start.startedAt, width: recorder.screenshotWidth, height: recorder.screenshotHeight, tapOnly, harmony });
+    if (!recorded) return;
+    if (recorded.unsupported === 'curve') {
+      onChange({ error: tr('鸿蒙 UITest 不能保持曲线手势，请改用直线滑动步骤。') });
       return;
     }
-    if (tapOnly) return;
-    const durationMs = Math.max(80, Math.min(10000, Date.now() - start.startedAt || recorder.swipe.durationMs || 300));
-    onChange({ swipe: { ...recorder.swipe, x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs, points } });
-    onRecord('swipe', { x: start.x, y: start.y, endX: end.x, endY: end.y, durationMs, points, curve: points.length > 2 });
+    const { action, args } = recorded;
+    if (action === 'swipe') {
+      const { x, y, endX, endY, durationMs, points } = args;
+      onChange({ swipe: { ...recorder.swipe, x, y, endX, endY, durationMs, points } });
+    } else {
+      const node = findNodeAtPoint(recorder.nodes, end);
+      if (node) onChange({ selectedNodeIndex: node.index });
+      if (action === 'longPress') onChange({ longPress: { ...recorder.longPress, x: args.x, y: args.y,
+        ...(args.durationMs !== null ? { durationMs: args.durationMs } : {}) } });
+    }
+    onRecord(action, args);
   };
 
   const detachedPreview = hasScreenshot && detachedOpen && typeof document !== 'undefined' ? createPortal(
@@ -2063,12 +2069,13 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             busy={recorderBusy}
             busyLabel={recorderBusyLabel}
             isDark={isDark}
+            tapOnly={tapOnly}
             className={`relative mx-auto overflow-hidden rounded-lg border touch-none select-none shadow-xl ${recorderBusy ? 'cursor-wait' : 'cursor-crosshair'} ${isDark ? 'border-[#3E4145] bg-black' : 'border-slate-200 bg-slate-100'}`}
             style={getDetachedPreviewStyle(recorder, detachedViewportSize)}
             onPointerDown={(event) => handlePreviewPointerDown(event, detachedPreviewRef.current)}
             onPointerMove={(event) => handlePreviewPointerMove(event, detachedPreviewRef.current)}
             onPointerUp={(event) => handlePreviewPointerUp(event, detachedPreviewRef.current)}
-            onPointerCancel={() => { pointerRef.current = null; setGesture(null); }}
+            onPointerCancel={handlePreviewPointerCancel}
           />
         </div>
       </div>
@@ -2082,9 +2089,12 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
         <div>
           <div className={`font-semibold ${text}`}>{tr("录制回放")}</div>
           <div className={`text-xs mt-1 ${muted}`}>
-            {focusedMode
+            {tapOnly
               ? tr("选择设备并读取界面后，点击一个安全位置即可录制。")
-              : simpleMode
+              : focusedMode
+                ? harmony ? tr("鸿蒙支持点击、原生长按和直线滑动，不录制曲线。")
+                  : tr("在设备画面上点击、长按，或拖出直线和曲线路径；录制会执行一次该操作。")
+                : simpleMode
                 ? tr("读取界面后，直接点击、长按或拖拽设备画面生成步骤。")
                 : tr("读取设备 UI 层级，执行一次操作并追加为可回放步骤。")}
           </div>
@@ -2160,21 +2170,23 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                 busy={recorderBusy}
                 busyLabel={recorderBusyLabel}
                 isDark={isDark}
+                tapOnly={tapOnly}
                 guideTarget={focusedMode ? 'preview' : undefined}
                 showNodeOverlays={!focusedMode}
-                className={`relative mx-auto max-h-[460px] max-w-full overflow-hidden rounded-lg border touch-none select-none ${recorderBusy ? 'cursor-wait' : 'cursor-crosshair'} ${isDark ? 'border-[#3E4145] bg-black' : 'border-slate-200 bg-slate-100'}`}
-                style={{ aspectRatio: `${recorder.screenshotWidth} / ${recorder.screenshotHeight}` }}
+                className={`relative mx-auto w-full overflow-hidden rounded-lg border touch-none select-none ${recorderBusy ? 'cursor-wait' : 'cursor-crosshair'} ${isDark ? 'border-[#3E4145] bg-black' : 'border-slate-200 bg-slate-100'}`}
+                style={{ aspectRatio: `${recorder.screenshotWidth} / ${recorder.screenshotHeight}`,
+                  maxWidth: Math.floor(460 * recorder.screenshotWidth / recorder.screenshotHeight) }}
                 onPointerDown={(event) => handlePreviewPointerDown(event, previewRef.current)}
                 onPointerMove={(event) => handlePreviewPointerMove(event, previewRef.current)}
                 onPointerUp={(event) => handlePreviewPointerUp(event, previewRef.current)}
-                onPointerCancel={() => { pointerRef.current = null; setGesture(null); }}
+                onPointerCancel={handlePreviewPointerCancel}
               />
             ) : (
               <div className={`py-16 text-center text-sm ${muted}`}>
                 {recorder.loading ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 size={16} className="animate-spin" />{tr("正在读取设备画面...")}</span>
-                ) : focusedMode ? tr("点击“读取界面”后，可在真实设备画面上录制一次点击。") : tr("点击“读取界面”后，可直接在设备画面上点击、长按或拖拽录制。")}
+                ) : tapOnly ? tr("点击“读取界面”后，可在真实设备画面上录制一次点击。") : tr("点击“读取界面”后，可直接在设备画面上点击、长按或拖拽录制。")}
               </div>
             )}
           </div>
@@ -2257,7 +2269,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
           <div>
             <div className={`text-sm font-semibold ${text}`}>{tr("手势与等待")}</div>
             <div className={`text-xs mt-1 ${muted}`}>{tr("在设备画面上点击会记录点击，拖拽会记录滑动；手动坐标只作为兜底。")}</div>
-            {harmony && <p className="mt-1 text-xs text-amber-500">{tr('鸿蒙长按请使用原生长按按钮；曲线手势不自动转换。')}</p>}
+            {harmony && <p className="mt-1 text-xs text-amber-500">{tr('鸿蒙 UITest 不能保持曲线手势，请改用直线滑动步骤。')}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <button disabled={recorderBusy} onClick={() => onRecord('delay', { durationMs: recorder.delayMs })} className={recorderButtonClass(isDark)}>
@@ -2297,7 +2309,7 @@ function recorderButtonClass(isDark, full = false) {
   return `${full ? 'w-full ' : ''}inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`;
 }
 
-function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, busyLabel = tr("正在读取设备画面..."), isDark = false, guideTarget, showNodeOverlays = true, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
+function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, busyLabel = tr("正在读取设备画面..."), isDark = false, tapOnly = false, guideTarget, showNodeOverlays = true, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
   useLocale();
   return (
     <div
@@ -2310,9 +2322,10 @@ function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, b
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onPointerCancel}
       className={className}
       style={style}
-      title={tr("点击记录点击动作，长按记录长按动作，拖拽记录滑动动作")}
+      title={tapOnly ? tr("点击") : tr("点击记录点击动作，长按记录长按动作，拖拽记录滑动动作")}
     >
       <img
         src={recorder.screenshotDataUrl}
@@ -2362,36 +2375,18 @@ function getDetachedPreviewStyle(recorder, viewportSize) {
   };
 }
 
-function getPreviewDevicePoint(event, element, recorder) {
-  if (!element || !recorder.screenshotWidth || !recorder.screenshotHeight) return null;
+function clearRecorderPointer(pointerRef) {
+  const active = pointerRef.current;
+  pointerRef.current = null;
+  if (active?.captureTarget?.hasPointerCapture?.(active.pointerId)) active.captureTarget.releasePointerCapture(active.pointerId);
+}
+
+function getPreviewDevicePoint(event, element, recorder, clamp = false) {
+  if (!element) return null;
   const rect = element.getBoundingClientRect();
-  if (!rect.width || !rect.height) return null;
-  const x = Math.max(0, Math.min(recorder.screenshotWidth, Math.round((event.clientX - rect.left) / rect.width * recorder.screenshotWidth)));
-  const y = Math.max(0, Math.min(recorder.screenshotHeight, Math.round((event.clientY - rect.top) / rect.height * recorder.screenshotHeight)));
-  return { x, y };
-}
-
-function appendGesturePoint(points, point, force = false) {
-  const nextPoint = { x: Math.round(point.x), y: Math.round(point.y) };
-  const source = Array.isArray(points) ? points : [];
-  const last = source[source.length - 1];
-  if (!force && last && Math.hypot(nextPoint.x - last.x, nextPoint.y - last.y) < 8) return source;
-  if (last && last.x === nextPoint.x && last.y === nextPoint.y) return source;
-  return [...source, nextPoint].slice(-120);
-}
-
-function simplifyGesturePoints(points, maxPoints = 48) {
-  const source = (Array.isArray(points) ? points : [])
-    .map(point => ({ x: Math.round(Number(point.x)), y: Math.round(Number(point.y)) }))
-    .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
-  if (source.length <= maxPoints) return source;
-  const result = [source[0]];
-  const step = (source.length - 1) / (maxPoints - 1);
-  for (let i = 1; i < maxPoints - 1; i += 1) {
-    result.push(source[Math.round(i * step)]);
-  }
-  result.push(source[source.length - 1]);
-  return result;
+  return recorderPreviewPoint(event, { left: rect.left + (element.clientLeft || 0), top: rect.top + (element.clientTop || 0),
+    width: element.clientWidth || rect.width, height: element.clientHeight || rect.height },
+  recorder.screenshotWidth, recorder.screenshotHeight, clamp);
 }
 
 function formatSvgPoints(points) {

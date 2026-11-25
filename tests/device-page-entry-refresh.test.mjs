@@ -36,18 +36,22 @@ traverse(ast, {
 
 test('only the device discovery notice is suppressed in the independent firmware workspace', () => {
   assert.ok(discoveryNoticeGate, 'Evaluate the actual discovery banner render gate');
-  const available = (activeTab, error) => Boolean(runInNewContext(discoveryNoticeGate, { activeTab, error }));
+  const available = (activeTab, error) => noticeVisible(activeTab, error, { visible: true });
   for (const page of ['firmware', 'serial', 'ssh']) assert.equal(available(page, 'ADB unavailable'), false, page);
   for (const page of ['devices', 'settings', 'tasks']) assert.equal(available(page, 'ADB unavailable'), true, page);
   assert.equal(available('devices', ''), false);
 });
+const noticeVisible = (activeTab, error, taskDiscoveryWarning) =>
+  Boolean(runInNewContext(discoveryNoticeGate, { activeTab, error, taskDiscoveryWarning }));
+
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function fixture({ page = 'devices', initialRows = [], discover = async () => initialRows } = {}) {
   assert.ok(declarations.get('previousDevicePageRef'), 'App must fence a real device-page transition');
   assert.equal(effects.length, 3, 'Execute the actual entry, startup and polling effects');
   const ordered = [...declarations.values(), ...effects].sort((first, second) => first.start - second.start);
   const effectSlots = [], refs = [], memoSlots = [], jobs = [], listeners = new Map(), timers = new Map(), calls = [];
-  const state = { devices: initialRows, active: initialRows[0]?.id || '', loading: false, error: '' };
+  const state = { devices: initialRows, active: initialRows[0]?.id || '', loading: false, error: '',
+    taskDiscoveryWarning: { failures: 0, visible: false } };
   let navigation = { activeTab: page, sshVisited: false, aiToolsVisited: false, aiVisited: false }, effectIndex, refIndex, memoIndex, timerId = 0;
   const target = name => ({ addEventListener: (event, callback) => listeners.set(name + ':' + event, callback), removeEventListener: event => listeners.delete(name + ':' + event) });
   const membershipOriginRef = { current: null };
@@ -56,11 +60,12 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
     membershipOriginRef, rememberMembershipOrigin: origin => { membershipOriginRef.current = origin; },
     document: { ...target('document'), visibilityState: 'visible' },
     window: { ...target('window'), electronAPI: {
-      getDevices: async () => { calls.push('getDevices'); return discover(); }, loadAllSettings: async () => ({ success: true, data: {} }),
+      getDevices: async progress => { calls.push('getDevices'); return discover(progress); }, loadAllSettings: async () => ({ success: true, data: {} }),
       loadConnectionHistory: async () => ({ success: true, data: [] }), loadTerminalHistory: async () => ({ success: true, data: [] }),
     } },
     setNavigation: update => { navigation = update(navigation); }, setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); }, setLoading: value => { state.loading = value; }, setError: value => { state.error = value; },
+    setTaskDiscoveryWarning: update => { state.taskDiscoveryWarning = update(state.taskDiscoveryWarning); },
     useCallback(callback, deps) {
       const index = memoIndex++, previous = memoSlots[index];
       if (previous && deps.every((value, i) => value === previous.deps[i])) return previous.callback;
@@ -83,6 +88,7 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
   const render = () => { effectIndex = 0; refIndex = 0; memoIndex = 0; current = renderActual(navigation); for (const job of jobs.splice(0)) job(); return current; };
   render();
   return { state, calls, render, manual: () => current.fetchDevices(),
+    notice: (page = navigation.activeTab) => noticeVisible(page, state.error, state.taskDiscoveryWarning),
     click: next => { assert.ok(current.sidebar[next]); current.sidebar[next](); render(); },
     fire: event => { assert.ok(listeners.has(event)); listeners.get(event)(); },
     tick: () => { const [id, job] = timers.entries().next().value; assert.equal(job.delay, 5000); timers.delete(id); return job.callback(); },
@@ -95,6 +101,54 @@ test('initial startup remains one discovery and actual same-page navigation or r
     const h = fixture({ page }); t.after(h.dispose); await flush(); assert.equal(h.calls.length, 1);
     h.render(); h.click(page); h.render(); await flush(); assert.equal(h.calls.length, 1);
   }
+});
+
+test('Task Center waits for a second complete background failure, not duplicate terminal progress', async t => {
+  const online = { id: 'USB-A', model: 'Retained device', status: 'device' };
+  const healthy = { devices: [online], channels: { adb: 'ready', hdc: 'ready' } };
+  const unavailable = { devices: [{ ...online, status: 'unconfirmed' }], channels: { adb: 'unconfirmed', hdc: 'ready' } };
+  let response = healthy;
+  const h = fixture({ page: 'tasks', initialRows: [online], discover: async report => {
+    report(response);
+    report(response);
+    return response;
+  } });
+  t.after(h.dispose);
+  await flush();
+  response = unavailable;
+  await h.tick();
+  assert.equal(h.state.taskDiscoveryWarning.failures, 1);
+  assert.equal(h.notice(), false);
+  assert.equal(h.notice('devices'), true);
+  assert.equal(h.state.active, online.id);
+  assert.equal(h.state.devices[0].status, 'unconfirmed', 'Presentation must not mark a failed ADB transport confirmed');
+  await h.tick();
+  assert.equal(h.state.taskDiscoveryWarning.failures, 2);
+  assert.equal(h.notice(), true);
+  response = healthy;
+  await h.tick();
+  assert.equal(h.state.taskDiscoveryWarning.failures, 0);
+  assert.equal(h.notice(), false);
+  assert.equal(h.state.devices[0].status, 'device');
+  response = unavailable;
+  await h.manual();
+  assert.equal(h.state.taskDiscoveryWarning.failures, 1);
+  assert.equal(h.notice(), true, 'Explicit refresh still reports a failed probe immediately');
+});
+
+test('Task Center does not suppress a background failure when there is no retained confirmed device', async t => {
+  let fail = false;
+  const h = fixture({ page: 'tasks', discover: async () => {
+    if (fail) throw new Error('ADB unavailable');
+    return [];
+  } });
+  t.after(h.dispose);
+  await flush();
+  fail = true;
+  await h.tick();
+  assert.equal(h.state.taskDiscoveryWarning.failures, 1);
+  assert.equal(h.notice(), true);
+  assert.deepEqual(h.state.devices, []);
 });
 
 test('each committed other-page to devices transition uses the actual sidebar callback exactly once', async t => {

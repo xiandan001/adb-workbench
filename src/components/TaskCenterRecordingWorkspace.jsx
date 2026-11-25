@@ -13,6 +13,8 @@ import { isDarkTheme } from '../shared/theme';
 
 function TaskCenterRecordingWorkspace({
   theme,
+  tapOnly,
+  harmony,
   draft,
   recorderPanel,
   saving,
@@ -43,7 +45,10 @@ function TaskCenterRecordingWorkspace({
             </button>
             <div>
               <h3 className={`text-lg font-semibold ${textClass}`}>{tr("录制操作")}</h3>
-              <p className={`mt-1 text-sm ${mutedClass}`}>{tr("选择设备并读取界面，直接点击设备画面即可生成回放步骤。")}</p>
+              <p className={`mt-1 text-sm ${mutedClass}`}>{tapOnly
+                ? tr("选择设备并读取界面，直接点击设备画面即可生成回放步骤。")
+                : harmony ? tr("鸿蒙支持点击、原生长按和直线滑动，不录制曲线。")
+                  : tr("在设备画面上点击、长按，或拖出直线和曲线路径；录制会执行一次该操作。")}</p>
             </div>
           </div>
           <button type="button" onClick={onOpenAdvanced} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`}>
@@ -69,12 +74,14 @@ function TaskCenterRecordingWorkspace({
         </div>
         <div className="mt-4 space-y-2">
           {steps.length === 0 ? (
-            <div className={`rounded-lg border border-dashed px-4 py-8 text-center text-sm ${isDark ? 'border-[#5F6368]' : 'border-slate-300'} ${mutedClass}`}>{tr("读取界面后，在设备画面中点击一个安全位置。")}</div>
+            <div className={`rounded-lg border border-dashed px-4 py-8 text-center text-sm ${isDark ? 'border-[#5F6368]' : 'border-slate-300'} ${mutedClass}`}>{tapOnly
+              ? tr("读取界面后，在设备画面中点击一个安全位置。")
+              : tr("读取界面后，直接点击、长按或拖拽设备画面生成步骤。")}</div>
           ) : steps.map((step, index) => (
             <div key={step.id || index} className={`flex items-center gap-3 rounded-lg border p-3 ${softClass}`}>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-xs font-semibold text-emerald-500">{index + 1}</span>
               <div className="min-w-0 flex-1">
-                <div className={`truncate text-sm font-medium ${textClass}`}>{step.label || stepTypeLabel(step.type)}</div>
+                <div className={`truncate text-sm font-medium ${textClass}`}>{step.label || stepTypeLabel(step)}</div>
                 <div className={`mt-1 text-xs ${mutedClass}`}>{stepSummary(step)}</div>
               </div>
             </div>
@@ -115,19 +122,25 @@ function TaskCenterRecordingWorkspace({
   );
 }
 
-function stepTypeLabel(type) {
+function stepTypeLabel({ type, points }) {
   if (type === 'tap') return tr("点击");
   if (type === 'longPress') return tr("长按");
-  if (type === 'swipe') return tr("滑动");
+  if (type === 'swipe') return Array.isArray(points) && points.length > 2 ? tr("曲线滑动") : tr("滑动");
   if (type === 'input') return tr("输入文本");
   return tr("操作步骤");
 }
 
 function stepSummary(step) {
   if (step.type === 'tap') return tr("点击坐标 {0}, {1}", { 0: step.x ?? '-', 1: step.y ?? '-' });
-  if (step.type === 'longPress') return tr("长按坐标 {0}, {1}", { 0: step.x ?? '-', 1: step.y ?? '-' });
-  if (step.type === 'swipe') return tr("从 {0},{1} 滑动到 {2},{3}", { 0: step.x ?? '-', 1: step.y ?? '-', 2: step.endX ?? '-', 3: step.endY ?? '-' });
-  return step.description || step.command || stepTypeLabel(step.type);
+  const duration = Number.isFinite(step.durationMs) ? ` · ${step.durationMs} ms` : '';
+  if (step.type === 'longPress') return tr("长按坐标 {0}, {1}", { 0: step.x ?? '-', 1: step.y ?? '-' }) + duration;
+  if (step.type === 'swipe') {
+    const { x, y, endX, endY, points } = step;
+    return (Array.isArray(points) && points.length > 2
+      ? tr("从 {0},{1} 经过 {2} 个轨迹点到 {3},{4}", { 0: x ?? '-', 1: y ?? '-', 2: points.length, 3: endX ?? '-', 4: endY ?? '-' })
+      : tr("从 {0},{1} 滑动到 {2},{3}", { 0: x ?? '-', 1: y ?? '-', 2: endX ?? '-', 3: endY ?? '-' })) + duration;
+  }
+  return step.description || step.command || stepTypeLabel(step);
 }
 
 function taskStatusLabel(status) {

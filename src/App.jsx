@@ -95,6 +95,7 @@ function App() {
   const applicationContext = { deviceId: activeDeviceId, packageName: selectedApplication };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [taskDiscoveryWarning, setTaskDiscoveryWarning] = useState({ failures: 0, visible: false });
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
@@ -501,6 +502,16 @@ function App() {
 
   const fetchDevices = useMemo(() => singleFlight(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
+    const previouslyOnline = new Set(devicesRef.current.filter(device => device.status === 'device').map(device => device.id));
+    const reportTaskDiscovery = failed => {
+      const retained = devicesRef.current.some(device => previouslyOnline.has(device.id) &&
+        ['device', 'unconfirmed'].includes(device.status));
+      setTaskDiscoveryWarning(previous => {
+        const failures = failed ? Math.min(previous.failures + 1, 2) : 0;
+        const visible = failed && (!silent || !retained || failures === 2);
+        return previous.failures === failures && previous.visible === visible ? previous : { failures, visible };
+      });
+    };
     const applyDiscovery = snapshot => {
       const { devices: nextDevices, channels } = Array.isArray(snapshot) ? { devices: snapshot } : snapshot;
       devicesRef.current = nextDevices;
@@ -517,17 +528,22 @@ function App() {
       if (!channels || !Object.values(channels).includes('pending')) {
         const unavailable = Object.entries(channels || {}).filter(([, value]) => value === 'unconfirmed').map(([key]) => key.toUpperCase());
         setError(unavailable.length ? tr('{0} 探测未完成，已保留原设备选择。请等待自动刷新或运行环境自检。', { 0: unavailable.join(' / ') }) : '');
+        return unavailable.length > 0;
       }
+      return undefined;
     };
     try {
       const snapshot = window.electronAPI
         ? await window.electronAPI.getDevices(applyDiscovery)
         : [];
-      applyDiscovery(snapshot);
+      const failed = applyDiscovery(snapshot);
+      // Progress can already carry the final channels, so only the IPC return updates the warning streak.
+      if (failed !== undefined) reportTaskDiscovery(failed);
     } catch (err) {
       setError(tr("设备状态刷新失败：{0}。已保留设备选择，请运行环境自检。", { 0: err.message || tr("请检查 ADB 环境") }));
       devicesRef.current = devicesRef.current.map(device => ({ ...device, status: 'unconfirmed' }));
       setDevices(previous => previous.map(device => ({ ...device, status: 'unconfirmed' })));
+      reportTaskDiscovery(true);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -2050,7 +2066,7 @@ function App() {
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
           {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
           {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
-          {error && !['serial', 'ssh', 'firmware'].includes(activeTab) && (
+          {error && !['serial', 'ssh', 'firmware'].includes(activeTab) && (activeTab !== 'tasks' || taskDiscoveryWarning.visible) && (
             <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {tr(error)}
             </div>

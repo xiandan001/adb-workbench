@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   LOG_PRESETS_KEY, captureLogEvidence, deleteLogPreset, findEvidenceReferences,
-  fingerprintLogLines, normalizeLogFilter, readLogPresets, saveLogPreset
+  fingerprintLogLines, logEvidenceScopeKey, normalizeLogFilter, readLogPresets, resolveLogEvidenceRow, saveLogPreset
 } from '../src/shared/logWorkspace.js';
 import { PERFORMANCE_METRICS, makePerformancePath, performanceAxisMax, performanceSampleIndex } from '../src/shared/performanceChart.js';
 
@@ -62,6 +62,28 @@ test('identical IDs and text on different devices or sources get independent evi
   assert.equal(deviceB.evidence[1].deviceId, 'device-b');
   const file = captureLogEvidence([{ ...entry, source: 'file' }], deviceB.evidence, 'device-b');
   assert.equal(file.references.get('reused'), 'L3');
+});
+
+test('exact evidence navigation distinguishes reused capture data from hidden and evicted rows', () => {
+  const wanted = { id: 'reused', raw: 'an exact line', ts: 2, receivedAt: 10, source: 'realtime' };
+  const older = { ...wanted, ts: 1 }, differentText = { ...wanted, raw: 'changed after analysis' };
+  const sameDevice = 'device-a';
+  const scopeKey = logEvidenceScopeKey('document-a', 'source-a');
+  const otherDocument = logEvidenceScopeKey('document-b', 'source-a');
+  const { evidence: [frozen], evidence } = captureLogEvidence([wanted], [], sameDevice, scopeKey);
+  assert.equal(captureLogEvidence([wanted], evidence, sameDevice, scopeKey).references.get(wanted.id), frozen.ref);
+  assert.equal(captureLogEvidence([wanted], evidence, sameDevice, otherDocument).references.get(wanted.id), 'L2');
+  assert.deepEqual(resolveLogEvidenceRow(frozen, { scopeKey, deviceId: sameDevice, filtered: [older, wanted] }),
+    { status: 'visible', index: 1, row: wanted });
+  assert.deepEqual(resolveLogEvidenceRow(frozen, { scopeKey, deviceId: sameDevice, filtered: [wanted, { ...wanted }] }),
+    { status: 'unsupported' });
+  const context = { scopeKey, deviceId: sameDevice, filtered: [older, differentText], entries: [wanted] };
+  assert.deepEqual(resolveLogEvidenceRow(frozen, context), { status: 'hidden' });
+  assert.deepEqual(resolveLogEvidenceRow(frozen, { ...context, entries: [] }), { status: 'evicted' });
+  assert.deepEqual(resolveLogEvidenceRow(frozen, { ...context, queryBlocked: true }), { status: 'not-ready' });
+  assert.deepEqual(resolveLogEvidenceRow(frozen, { ...context, scopeKey: otherDocument }), { status: 'source-changed' });
+  assert.deepEqual(resolveLogEvidenceRow({ ...frozen, evidenceScopeKey: '' }, context), { status: 'unsupported' });
+  assert.deepEqual(resolveLogEvidenceRow({ ...frozen, source: 'diagnostic-snapshot' }, context), { status: 'unsupported' });
 });
 
 test('same length log changes do not reuse a stale conversation fingerprint', () => {

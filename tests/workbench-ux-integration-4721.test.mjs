@@ -116,7 +116,7 @@ test('workset restoration rechecks current discovery and pins its explicit devic
   const state = { device: '', devices: [{ id: 'A', status: 'device' }] }, devicesRef = { current: state.devices }, worksetTargetRef = { current: '' };
   const scope = { devices: state.devices, devicesRef, worksetTargetRef, membershipOriginRef: { current: null }, resolveActiveDeviceId, useMemo: fn => fn(), singleFlight: fn => fn,
     window: { electronAPI: { logAnalyzerApplyContext: () => new Promise(resolve => { finish = resolve; }), getDevices: async () => devicesRef.current } },
-    setActiveDeviceId: value => { state.device = typeof value === 'function' ? value(state.device) : value; }, setDevices: update => { state.devices = update(state.devices); }, setNavigationContext() {}, setWorksetRequest() {}, setLoading() {}, setError() {},
+    setActiveDeviceId: value => { state.device = typeof value === 'function' ? value(state.device) : value; }, setDevices: update => { state.devices = update(state.devices); }, setNavigationContext() {}, setWorksetRequest() {}, setLoading() {}, setError() {}, setTaskDiscoveryWarning() {},
     setActiveTab: value => { state.page = value; }, setDeviceQuery() {}, setWorksetNotice() {}, rememberWorksetContext: async () => {}, crypto: { randomUUID: () => 'request' }, tr: value => value };
   const restore = runInNewContext(`(${initializer('src/App.jsx', 'restoreWorkset')})`, scope);
   const pending = restore({ deviceId: 'A', packageName: 'com.a', page: 'quality' });

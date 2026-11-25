@@ -3,7 +3,7 @@ import { tr, useLocale, getLocale } from '../shared/i18n';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
 import { Copy, Terminal, Radio, X, Sparkles, Loader2, Maximize2, Minimize2, FileDown, Brain, ChevronDown, BookmarkPlus } from "lucide-react";
 import { isDarkTheme } from '../shared/theme';
-import { fingerprintLogLines, normalizeLogBuffers, normalizeLogFilter } from '../shared/logWorkspace';
+import { fingerprintLogLines, logEvidenceScopeKey, normalizeLogBuffers, normalizeLogFilter, resolveLogEvidenceRow, restoreLogEvidenceFromSession, sameLogEvidenceRow } from '../shared/logWorkspace';
 import LogFilterPresets from './LogFilterPresets';
 import LogSessionManager from './LogSessionManager';
 import LogMarkers from './LogMarkers';
@@ -174,6 +174,8 @@ export default function LogAnalyzer({ theme }) {
   const [markers, setMarkers] = useState([]);
   const [markerDraft, setMarkerDraft] = useState(null);
   const [locatedMarkerIdentity, setLocatedMarkerIdentity] = useState('');
+  const [locatedEvidence, setLocatedEvidence] = useState(null);
+  const evidenceScopeKey = logEvidenceScopeKey(documentId, sourceIdentity);
   const markerIdentities = useMemo(() => { void locale; return new Set(markers.map(marker => logEntryIdentity(marker.entry))); }, [markers, locale]);
   const markerEntryIds = useMemo(() => { void locale; return new Set(markers.map(marker => marker.entry.id)); }, [markers, locale]);
   const evidenceByRef = useMemo(() => { void locale; return new Map(evidence.map(entry => [entry.ref, entry])); }, [evidence, locale]);
@@ -431,6 +433,8 @@ export default function LogAnalyzer({ theme }) {
   }, [applyContext]);
 
   const restoreSession = (session, response) => {
+    const restoredId = crypto.randomUUID();
+    const identity = typeof response?.sourceIdentity === 'string' ? response.sourceIdentity : '';
     sourceEventRevision.current++;
     logBatchBufferRef.current?.reset();
     aiStreamEpochRef.current += 1;
@@ -452,10 +456,11 @@ export default function LogAnalyzer({ theme }) {
     explicitPreference.current = JSON.stringify([session.source === 'file' ? '' : session.deviceId || '', session.source]);
     setTargetField(session.source === 'file' ? '' : session.deviceId || '', session.source, 'filter', normalizeLogFilter(session.filter));
     setTargetField(session.source === 'file' ? '' : session.deviceId || '', session.source, 'buffers', Array.isArray(session.buffers) ? [...session.buffers] : ['main']);
-    setEvidence(session.evidence);
+    setEvidence(restoreLogEvidenceFromSession(session.evidence, logEvidenceScopeKey(restoredId, identity)));
     setMarkers(session.markers || []);
     setMarkerDraft(null);
     setLocatedMarkerIdentity('');
+    setLocatedEvidence(null);
     aiTurnsRef.current = session.aiTurns;
     analysisAttemptRef.current = null; setAnalysisStates([]);
     setAiTurns(session.aiTurns);
@@ -466,15 +471,15 @@ export default function LogAnalyzer({ theme }) {
     setAiError('');
     setContextUsage(null);
     setPaused(false); setTimeRange(session.timeRange || { kind: 'all' }); setSelectedIssue(null); setDetailEntry(null); setAnalysisScope(null);
-    captureSessionRef.current = { captureId: '', deviceId: session.deviceId || '', source: session.source, sourceIdentity: response?.sourceIdentity || '' };
-    setSourceIdentity(response?.sourceIdentity || ''); hydratedRef.current = true; setInitialLogStateLoaded(true); setHydrateError('');
+    captureSessionRef.current = { captureId: '', deviceId: session.deviceId || '', source: session.source, sourceIdentity: identity };
+    setSourceIdentity(identity); hydratedRef.current = true; setInitialLogStateLoaded(true); setHydrateError('');
     runningRef.current = false; aiRequestRef.current.active = false;
     setRunning(false);
     setAiHistoryReadOnly(session.aiTurns.length > 0);
     setRestoredSessionName(session.name);
     setAiPanelOpen(session.aiTurns.length > 0);
     conversationEpoch.current++; conversationBound.current = false; setConversationReady(true);
-    const restoredId = crypto.randomUUID(); setDocumentId(restoredId);
+    setDocumentId(restoredId);
     setSavedDocumentKey(logDocumentKey({ ...session, documentId: restoredId, aiRevision: aiContentVersionRef.current.revision, timeRange: session.timeRange || { kind: 'all' } }));
     setNote(tr("已恢复“{0}”，没有启动采集或 AI 请求", { 0: session.name }));
   };
@@ -565,7 +570,7 @@ export default function LogAnalyzer({ theme }) {
     [documentId, markers, filter, scopeBuffers, aiTurns.length, timeRange]);
   useLayoutEffect(() => {
     latestDocument.current = { name: restoredSessionName || tr('日志分析 {0}', { 0: new Date().toLocaleString(getLocale()) }), documentId, documentKey, hasUnsaved, aiRevision,
-      entries, windowRows: viewEngine.windowRows, filtered, source, sourceLabel, deviceId: captureDeviceId, filter: { ...filter, text: filterTextInput || undefined },
+      entries, windowRows: viewEngine.windowRows, filtered, source, sourceIdentity, sourceLabel, deviceId: captureDeviceId, filter: { ...filter, text: filterTextInput || undefined },
       buffers: scopeBuffers, aiTurns: aiTurnsRef.current, evidence, markers, timeRange, truncated: snapshotTruncated, paused, selectedIssue, queryBlocked };
   });
   const close = useLogCloseProtection({ documentId, sourceIdentity, reviewKey, dirty: hasUnsaved, ready: initialLogStateLoaded, getSnapshot,
@@ -589,14 +594,45 @@ export default function LogAnalyzer({ theme }) {
     const identity = logEntryIdentity(marker.entry);
     const index = filtered.findIndex(entry => entry.id === marker.entry.id && logEntryIdentity(entry, captureDeviceId) === identity);
     if (index < 0) return tr("原日志不在当前视图中，可能被过滤或已超过显示上限。下方仍保留标记时的上下文；可关闭窗口调整过滤条件后再定位。");
+    if (!scrollToLogRow(index)) return tr("日志视图尚未就绪，请稍后再试。");
+    setLocatedMarkerIdentity(identity);
+    return true;
+  }
+
+  function scrollToLogRow(index) {
     const scroll = logScrollRef.current;
-    if (!scroll) return tr("日志视图尚未就绪，请稍后再试。");
+    if (!scroll) return false;
     autoScrollRef.current = false;
     if (logAutoScrollRafRef.current != null) cancelAnimationFrame(logAutoScrollRafRef.current);
     logAutoScrollRafRef.current = null;
     scroll.scrollTop = Math.max(0, index * LOG_ROW_HEIGHT - scroll.clientHeight / 3);
     syncLogViewport(scroll.scrollTop, scroll.clientHeight);
-    setLocatedMarkerIdentity(identity);
+    return true;
+  }
+
+  function locateEvidence(entry) {
+    const doc = latestDocument.current;
+    const scopeKey = doc?.sourceIdentity === captureSessionRef.current.sourceIdentity
+      ? logEvidenceScopeKey(doc?.documentId, doc?.sourceIdentity) : '';
+    const match = resolveLogEvidenceRow(entry, { ...doc, scopeKey });
+    if (match.status === 'unsupported') return tr("此证据没有可定位的原始记录。");
+    if (match.status === 'source-changed') return tr("日志来源已变化，无法在当前列表中定位。");
+    if (match.status === 'hidden') return tr("原始日志被当前筛选或时间范围隐藏，请调整后重试。");
+    if (match.status === 'evicted') return tr("原始日志已不在当前保留范围内。");
+    if (match.status !== 'visible' || !scrollToLogRow(match.index)) return tr("日志视图尚未就绪，请稍后再试。");
+    if (runningRef.current) setPaused(true);
+    setAiFullscreen(false);
+    setLocatedEvidence(entry);
+    requestAnimationFrame(() => {
+      const latest = latestDocument.current;
+      if (scopeKey === logEvidenceScopeKey(latest?.documentId, captureSessionRef.current.sourceIdentity)) {
+        if (aiFullscreen) {
+          const realigned = resolveLogEvidenceRow(entry, { ...latest, scopeKey });
+          if (realigned.status !== 'visible' || !scrollToLogRow(realigned.index)) return;
+        }
+        logScrollRef.current?.focus?.({ preventScroll: true });
+      }
+    });
     return true;
   }
 
@@ -1240,6 +1276,7 @@ export default function LogAnalyzer({ theme }) {
     let prepared;
     try {
       prepared = prepareInlineLogAnalysis(rows, { deviceId: captureDeviceId, previousEvidence: evidence, sourceTruncated: snapshotTruncated,
+        evidenceScopeKey: latestDocument.current?.sourceIdentity === captureSessionRef.current.sourceIdentity ? evidenceScopeKey : '',
         scopeLabel: sourceLabel || tr('当前显示范围') });
       if (!prepared.selectedEntries.length) throw new Error(tr('所选记录均超过单次分析范围，请查看原文或改用导出。'));
       setAnalysisScope(prepared.scope); setAiPanelOpen(true);
@@ -1578,6 +1615,7 @@ export default function LogAnalyzer({ theme }) {
 
           <div
             ref={logScrollRef}
+            tabIndex={-1}
             className="flex-1 overflow-y-auto font-mono text-xs"
             onWheel={() => { scrollIntentUntil.current = performance.now() + 500; }}
             onTouchMove={() => { scrollIntentUntil.current = performance.now() + 500; }}
@@ -1629,7 +1667,9 @@ export default function LogAnalyzer({ theme }) {
                       entry={entry}
                       isDark={isDark}
                       colWidths={colWidths}
-                      highlighted={smartSearchMatchedIds.has(entry.id) || (locatedMarkerIdentity && markerEntryIds.has(entry.id) && locatedMarkerIdentity === logEntryIdentity(entry, captureDeviceId))}
+                      highlighted={smartSearchMatchedIds.has(entry.id) ||
+                        (locatedMarkerIdentity && markerEntryIds.has(entry.id) && locatedMarkerIdentity === logEntryIdentity(entry, captureDeviceId)) ||
+                        (locatedEvidence && locatedEvidence.evidenceScopeKey === evidenceScopeKey && sameLogEvidenceRow(entry, locatedEvidence, captureDeviceId))}
                       marked={markerEntryIds.has(entry.id) && markerIdentities.has(logEntryIdentity(entry, captureDeviceId))}
                       onMark={addMarker}
                       onDetail={showDetail}
@@ -1806,7 +1846,7 @@ export default function LogAnalyzer({ theme }) {
                         {/* 本轮回答内容 */}
                         {turn.content ? (
                           <div className={`text-sm leading-relaxed ${isDark ? 'text-[#E8EAED]' : 'text-slate-700'}`}>
-                            <LogInlineAnalysisResult content={turn.content} allowedRefs={turn.evidenceRefs} evidence={evidenceByRef} isDark={isDark} renderMarkdown={content => <AiMarkdownRender content={content} isDark={isDark} />} />
+                            <LogInlineAnalysisResult content={turn.content} allowedRefs={turn.evidenceRefs} evidence={evidenceByRef} isDark={isDark} onLocateEvidence={locateEvidence} renderMarkdown={content => <AiMarkdownRender content={content} isDark={isDark} />} />
                             {showThinking && (
                               <span className="inline-block w-2 h-4 ml-0.5 bg-purple-400 animate-pulse align-middle" />
                             )}

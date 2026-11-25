@@ -62,6 +62,7 @@ function appDiscoveryHarness(initialRows = []) {
     setDevices: update => { state.devices = update(state.devices); },
     setActiveDeviceId: update => { state.active = update(state.active); },
     setError: value => { state.error = value; },
+    setTaskDiscoveryWarning() {},
   });
   return { ...pollHarness(() => fetch({ silent: true })), state, fetch,
     setRows: rows => { backendRows = rows; } };

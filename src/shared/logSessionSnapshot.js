@@ -1,4 +1,5 @@
 import { tr } from './i18n.js';
+import { saveLogEvidenceInSession } from './logWorkspace.js';
 
 export const LOG_CLIPBOARD_BYTES = 8 * 1024 * 1024;
 export function logListPreview(value, limit = 2048) {
@@ -39,7 +40,7 @@ export function logDocumentKey({ documentId, entries, markers, aiTurns, aiRevisi
 export function freezeLogSessionSnapshot(value, { rows = value.entries, name = value.name, uiRevision } = {}) {
   return { name, source: value.source, sourceLabel: value.sourceLabel || '', deviceId: value.deviceId || '',
     entries: [...rows], filter: { ...value.filter }, buffers: [...value.buffers], timeRange: { ...(value.timeRange || { kind: 'all' }) },
-    evidence: [...value.evidence], markers: value.markers.map(marker => ({ ...marker, context: [...marker.context] })),
+    evidence: saveLogEvidenceInSession(value.evidence, rows, value), markers: value.markers.map(marker => ({ ...marker, context: [...marker.context] })),
     aiTurns: value.aiTurns.map(turn => ({ ...turn, evidenceRefs: [...(turn.evidenceRefs || [])] })),
     truncated: value.truncated === true, aiRevision: value.aiRevision || 0, uiRevision };
 }

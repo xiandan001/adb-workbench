@@ -4,6 +4,7 @@ import {
   TASK_DRAFT_KEY, draftFingerprint, readTaskDraft, writeTaskDraft,
   getMatchingBaseline, getAcceptanceErrors, qualityErrorMessage, resolveScriptAfterSave
 } from '../src/shared/taskCenterWorkspace.js';
+import { createSingleReplayScript } from '../src/shared/taskCenterOnboarding.js';
 
 test('draft and saved checkpoint survive storage round-trip', () => {
   const entries = new Map();
@@ -17,6 +18,21 @@ test('draft and saved checkpoint survive storage round-trip', () => {
   assert.notEqual(draftFingerprint(restored.draft), restored.savedFingerprint);
   assert.equal(restored.workspaceView, 'recording');
   assert.ok(entries.has(TASK_DRAFT_KEY));
+});
+
+test('recording draft restoration keeps long-press duration and curved replay waypoints', () => {
+  const entries = new Map();
+  const storage = { getItem: key => entries.get(key), setItem: (key, value) => entries.set(key, value) };
+  const steps = [
+    { id: 'hold', type: 'longPress', x: 20, y: 30, durationMs: 800 },
+    { id: 'curve', type: 'swipe', x: 28, y: 32, endX: 91, endY: 58, durationMs: 480,
+      points: [{ x: 28, y: 32 }, { x: 51, y: 92 }, { x: 91, y: 58 }] },
+  ];
+  assert.equal(writeTaskDraft({ draft: { steps }, workspaceView: 'recording' }, storage), '');
+  const replay = createSingleReplayScript(readTaskDraft(storage).workspace.draft);
+  assert.equal(replay.mode, 'replay');
+  assert.equal(replay.loop.count, 1);
+  assert.deepEqual(replay.steps, steps);
 });
 
 test('save then continue to the same script uses the fresh saved object, not the captured old selection', () => {

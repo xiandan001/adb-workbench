@@ -41,19 +41,74 @@ export function deleteLogPreset(storage, presets, id) {
   return next;
 }
 
+export function logEvidenceScopeKey(documentId, sourceIdentity) {
+  return typeof documentId === 'string' && documentId && typeof sourceIdentity === 'string' && sourceIdentity
+    ? JSON.stringify([documentId, sourceIdentity]) : '';
+}
+
+export function sameLogEvidenceRow(row, evidence, deviceId = '') {
+  return row.id === evidence.id && row.raw === evidence.raw && (row.source || '') === (evidence.source || '') &&
+    (row.ts ?? null) === (evidence.ts ?? null) && (row.receivedAt ?? null) === (evidence.receivedAt ?? null) &&
+    (row.deviceId || deviceId) === (evidence.deviceId || '');
+}
+
+export function resolveLogEvidenceRow(evidence, { scopeKey, filtered = [], windowRows = [], entries = [], deviceId = '', queryBlocked } = {}) {
+  if (!evidence?.evidenceScopeKey || evidence.source === 'diagnostic-snapshot' || evidence.id == null || evidence.id === '') return { status: 'unsupported' };
+  if (scopeKey !== evidence.evidenceScopeKey) return { status: 'source-changed' };
+  if (queryBlocked) return { status: 'not-ready' };
+  const matches = row => sameLogEvidenceRow(row, evidence, deviceId);
+  const index = filtered.findIndex(matches);
+  if (index >= 0) return filtered.some((row, at) => at > index && matches(row))
+    ? { status: 'unsupported' } : { status: 'visible', index, row: filtered[index] };
+  return { status: windowRows.some(matches) || entries.some(matches) ? 'hidden' : 'evicted' };
+}
+
+export function saveLogEvidenceInSession(evidence, rows, { documentId, sourceIdentity, deviceId } = {}) {
+  const scope = logEvidenceScopeKey(documentId, sourceIdentity);
+  const byId = new Map();
+  if (scope && evidence.some(entry => entry.evidenceScopeKey === scope)) {
+    for (const row of rows) byId.set(row.id, byId.has(row.id) ? null : row);
+  }
+  return evidence.map(item => {
+    if (!Object.hasOwn(item, 'evidenceScopeKey') && !Object.hasOwn(item, 'locatableInSession')) return item;
+    const entry = { ...item };
+    delete entry.evidenceScopeKey;
+    delete entry.locatableInSession;
+    const row = byId.get(entry.id);
+    if (scope && item.evidenceScopeKey === scope && row && entry.source !== 'diagnostic-snapshot' &&
+        sameLogEvidenceRow(row, entry, deviceId)) entry.locatableInSession = true;
+    return entry;
+  });
+}
+
+export function restoreLogEvidenceFromSession(evidence, scopeKey) {
+  return evidence.map(item => {
+    if (!Object.hasOwn(item, 'evidenceScopeKey') && !Object.hasOwn(item, 'locatableInSession')) return item;
+    const entry = { ...item };
+    delete entry.evidenceScopeKey;
+    delete entry.locatableInSession;
+    if (item.locatableInSession === true && scopeKey && entry.source !== 'diagnostic-snapshot') entry.evidenceScopeKey = scopeKey;
+    return entry;
+  });
+}
+
 // References belong to captured raw entries, never to a filtered row index.
-export function captureLogEvidence(entries, previous = [], deviceId = '') {
+export function captureLogEvidence(entries, previous = [], deviceId = '', scopeKey = '') {
   const evidence = [...previous];
-  const identityOf = (entry, device) => JSON.stringify([entry.id, entry.raw, entry.source || '', device || '']);
-  const byIdentity = new Map(previous.map(item => [identityOf(item, item.deviceId), item]));
+  const identityOf = (entry, device, scope) => JSON.stringify([entry.id, entry.raw, entry.source || '', device || '',
+    entry.ts ?? null, entry.receivedAt ?? null, scope || '']);
+  const byIdentity = new Map(previous.map(item => [identityOf(item, item.deviceId, item.evidenceScopeKey), item]));
   const references = new Map();
   let nextNumber = previous.reduce((max, item) => Math.max(max, Number(item.ref?.slice(1)) || 0), 0) + 1;
   for (const entry of entries) {
-    const identity = identityOf(entry, deviceId);
+    const savedDevice = entry.deviceId || deviceId;
+    const identity = identityOf(entry, savedDevice, scopeKey);
     let saved = byIdentity.get(identity);
     if (!saved) {
       if (evidence.length >= MAX_EVIDENCE_ENTRIES) throw new Error(tr("证据已达 100,000 条上限，请保存本次会话后清空 AI 对话再开始新分析；未丢弃任何证据"));
-      saved = { ...entry, ref: `L${nextNumber++}`, deviceId };
+      saved = { ...entry, ref: `L${nextNumber++}`, deviceId: savedDevice };
+      if (scopeKey) saved.evidenceScopeKey = scopeKey;
+      else delete saved.evidenceScopeKey;
       evidence.push(saved);
       byIdentity.set(identity, saved);
     }

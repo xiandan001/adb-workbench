@@ -24,7 +24,8 @@ const fixtureRow = (id, raw, deviceId = 'A') => ({ id, raw, message: raw, device
 function fixture(overrides = {}) {
   const file = new URL('./log-analyzer-ui-actions-4728.test.mjs', import.meta.url), source = fs.readFileSync(file, 'utf8');
   const node = parse(source, { sourceType: 'module', plugins: ['jsx'] }).program.body.find(item => item.type === 'FunctionDeclaration' && item.id.name === 'uiHarness');
-  const code = source.slice(node.start, node.end).replaceAll('import.meta.url', JSON.stringify(file.href)).replace('note, logTheme };', 'note, logTheme, aiError, aiAnalyzing, aiCustomPrompt, setAiCustomPrompt, setAiThinkingMode, conversationReady, resetBackendConversation, analysisStates: typeof analysisStates === "undefined" ? [] : analysisStates };');
+  const code = source.slice(node.start, node.end).replaceAll('import.meta.url', JSON.stringify(file.href))
+    .replace('note, logTheme', 'note, logTheme, aiError, aiAnalyzing, setAiThinkingMode, conversationReady, resetBackendConversation, analysisStates');
   const create = vm.runInNewContext(code + '\nuiHarness', { fs, vm, assert, randomUUID, URL, performance, setTimeout, clearTimeout, structuredClone, pause, fixtureRow,
     snapshots, workspace, markers, stream, model, analysisHelpers, prepareInlineLogAnalysis, canUseMembershipFeature });
   const h = create({ aiAnalyzeLog: async () => ({ ok: true }), ...overrides });

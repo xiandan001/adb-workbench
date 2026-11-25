@@ -5,7 +5,7 @@ import { AI_CONTEXT_BYTES } from './aiContextTextWindow.js';
 export const INLINE_LOG_LINES = 2000;
 export const INLINE_LOG_BYTES = AI_CONTEXT_BYTES;
 const encoder = new TextEncoder();
-export function prepareInlineLogAnalysis(rows, { deviceId = '', previousEvidence = [], sourceTruncated = false, scopeLabel = '' } = {}) {
+export function prepareInlineLogAnalysis(rows, { deviceId = '', previousEvidence = [], sourceTruncated = false, scopeLabel = '', evidenceScopeKey = '' } = {}) {
   const selected = []; let bytes = 0, retainedLines = 0, omittedOversized = 0, first = rows.length, last = -1;
   for (let index = rows.length - 1; index >= 0 && selected.length < INLINE_LOG_LINES; index--) {
     const entry = rows[index]; if (typeof entry?.raw !== 'string') continue;
@@ -17,7 +17,7 @@ export function prepareInlineLogAnalysis(rows, { deviceId = '', previousEvidence
     if (bytes + size > INLINE_LOG_BYTES || retainedLines + lines > INLINE_LOG_LINES) break;
     selected.push(Object.freeze({ ...entry })); bytes += size; retainedLines += lines; first = index; if (last < 0) last = index;
   }
-  const selectedEntries = Object.freeze(selected.reverse()), captured = captureLogEvidence(selectedEntries, previousEvidence, deviceId);
+  const selectedEntries = Object.freeze(selected.reverse()), captured = captureLogEvidence(selectedEntries, previousEvidence, deviceId, evidenceScopeKey);
   const lines = Object.freeze(selectedEntries.map(entry => `[${captured.references.get(entry.id)}] ${entry.raw}`));
   const actualBytes = encoder.encode(lines.join('\n')).byteLength;
   if (actualBytes > INLINE_LOG_BYTES) throw new Error(tr('本次日志证据超过大小限制，请缩小范围；未发送。'));
