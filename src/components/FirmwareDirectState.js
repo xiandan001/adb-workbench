@@ -11,6 +11,7 @@ function stateFrom(previous, response) {
     job: Object.hasOwn(response, 'job') ? response.job : previous?.job,
     globalBusy: typeof response.busy === 'boolean' ? response.busy : previous?.globalBusy,
     savedTarget: Object.hasOwn(response, 'savedTarget') ? response.savedTarget : previous?.savedTarget,
+    toolReady: typeof response.toolReady === 'boolean' ? response.toolReady : previous?.toolReady,
   };
 }
 
@@ -20,7 +21,7 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState(null);
   const [readError, setReadError] = useState(null);
-  const [registeringTarget, setRegisteringTarget] = useState(false);
+  const [setupAction, setSetupAction] = useState(null);
   const revision = useRef(0);
   const command = useRef({ active: false, cancelling: false, sequence: 0 });
   const lastState = useRef({});
@@ -76,7 +77,7 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
       const next = stateFrom(lastState.current[platform], response);
       lastState.current[platform] = next;
       setSnapshots(previous => ({ ...previous, [platform]: next }));
-      if (!response?.ok && !response?.job) setActionError({ platform, code: response?.code });
+      if (!response?.ok && !response?.job && !response?.cancelled) setActionError({ platform, code: response?.code });
     } catch {
       if (mounted.current && sequence === command.current.sequence) setActionError({ platform });
     } finally {
@@ -88,14 +89,14 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
     }
   }
 
-  async function registerTarget() {
-    if (!active || !['rk', 'mtk'].includes(platform) || !api?.firmwareDirectRegisterTarget || running ||
+  async function setup(action, caller) {
+    if (!active || !['rk', 'mtk'].includes(platform) || running || snapshot?.globalBusy ||
       command.current.active || command.current.cancelling) return;
-    setRegisteringTarget(true);
+    setSetupAction(action);
     try {
-      await request(() => api.firmwareDirectRegisterTarget(platform));
+      await request(caller);
     } finally {
-      if (mounted.current) setRegisteringTarget(false);
+      if (mounted.current) setSetupAction(null);
     }
   }
 
@@ -107,7 +108,11 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
     choose: value => request(() => api?.firmwareDirectChoose?.(platform, value)),
     enterLoader: id => request(() => api?.firmwareDirectEnterLoader?.(platform, id)),
     cancel: id => request(() => api?.firmwareDirectCancel?.(platform, id), true),
-    registerTarget: api?.firmwareDirectRegisterTarget ? registerTarget : undefined,
-    registeringTarget,
+    registerTarget: api?.firmwareDirectRegisterTarget ? () => setup('register', () => api.firmwareDirectRegisterTarget(platform)) : undefined,
+    prepareTool: api?.firmwareDirectPrepareTool ? options => setup(options?.local ? 'tool-local' : 'tool', () => options?.local
+      ? api.firmwareDirectPrepareTool(platform, { local: true }) : api.firmwareDirectPrepareTool(platform)) : undefined,
+    registeringTarget: setupAction === 'register',
+    preparingTool: setupAction === 'tool' || setupAction === 'tool-local',
+    preparingLocalTool: setupAction === 'tool-local',
   };
 }

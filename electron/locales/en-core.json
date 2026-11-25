@@ -1,4 +1,13 @@
 {
+  "刷机目标": "Flash target",
+  "更换目标": "Change target",
+  "当前 USB 设备": "Current USB device",
+  "准备刷机工具": "Prepare flash tools",
+  "固件写入成功": "Firmware written successfully",
+  "下载 RK 直刷工具": "Download RK flash tool",
+  "选择本机工具": "Select local tool",
+  "MTK 写入固件后立即显示成功。": "MTK shows success as soon as the firmware is written.",
+  "RK 可在应用内准备直刷工具。": "The RK flash tool can now be prepared in the app.",
   "登记当前 USB 目标": "Register current USB target",
   "未登记的 RK 板卡（无需 ADB，识别后手动选择）": "Unregistered RK board (no ADB; select after detection)",
   "保持同一 USB 口，按板卡要求断电上电或长按电源键进入 Loader / Maskrom。": "Keep using the same USB port. Follow the board instructions to power-cycle it or hold the power button to enter Loader / Maskrom.",

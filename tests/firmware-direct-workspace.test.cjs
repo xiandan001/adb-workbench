@@ -13,16 +13,17 @@ const profile = {
 const knownMtk = { identity: 'device-approved', location: 'usb-location', vid: '0e8d', pid: '2000', serial: 'flash-serial', stage: 'preloader', port: 'COM7', label: 'Fixture USB' };
 const receipt = { sha256: profile.firmwareSha256, chip: profile.chip, path: 'C:/fixture/flash.xml' };
 
-function fixture({ profiles, checkboxChecked = false } = {}) {
-  const handlers = new Map(), asks = [], reads = [], writes = [];
+function fixture({ profiles, checkboxChecked = false, hasTool = true, setupTool } = {}) {
+  const handlers = new Map(), asks = [], reads = [], writes = [], setupCalls = [];
   const frame = {}, otherFrame = {};
   const owner = {}, event = { senderFrame: frame };
   const api = registerFirmwareDirectWorkspace({ handle: (key, value) => handlers.set(key, value) }, {
     profiles, ownerFor: value => value.senderFrame === frame ? owner : null, getOwnerFrame: () => frame,
     isWindows: true, toolRoot: async () => 'C:/tool', canStart: () => true,
+    ...(setupTool ? { prepareTool: async (...args) => { setupCalls.push(args); return setupTool(...args); } } : {}),
     ask: async options => { asks.push(options); return { response: 1, checkboxChecked }; },
     backend: {
-      inspect: async () => ({ ok: true, tool: { version: profile.toolVersion } }),
+      inspect: async () => hasTool ? { ok: true, tool: { version: profile.toolVersion } } : { ok: false, code: 'missing' },
       write: async (plan, context) => {
         if (!await context.beforeDispatch()) return { transferCompleted: false };
         writes.push(plan); return { transferCompleted: true };
@@ -36,7 +37,7 @@ function fixture({ profiles, checkboxChecked = false } = {}) {
     },
   });
   const call = (verb, body, source = event) => handlers.get('firmware:direct:' + verb)(source, 'mtk', body);
-  return { api, call, asks, reads, writes, frame, otherFrame };
+  return { api, call, asks, reads, writes, setupCalls, frame, otherFrame };
 }
 
 test('no configured profile rejects direct arm before touching files or hardware', async () => {
@@ -48,6 +49,22 @@ test('no configured profile rejects direct arm before touching files or hardware
   assert.equal((await f.call('arm', { firmwareId, mode: profile.mode })).code, 'flash-profile-unverified');
   assert.deepEqual(f.reads, []);
   assert.deepEqual(f.writes, []);
+});
+
+test('Start on a host with no verified tool fails without using the explicit setup action', async () => {
+  const f = fixture({ profiles: [profile], hasTool: false, setupTool: async () => ({ ok: false, cancelled: true }) });
+  assert.equal((await f.call('state')).toolReady, false);
+  const firmwareId = f.api.rememberFile('mtk', receipt.path, f.frame);
+  assert.equal((await f.call('arm', { firmwareId, mode: profile.mode })).ok, true);
+  await flush();
+  assert.equal((await f.call('state')).job.phase, 'failed');
+  assert.equal((await f.call('state')).job.code, 'flash-tool-unavailable');
+  assert.deepEqual(f.setupCalls, []);
+  assert.deepEqual(f.asks, []);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(await f.call('prepare-tool', { path: 'C:/untrusted' }), { ok: false, code: 'flash-invalid-request' });
+  assert.deepEqual(await f.call('prepare-tool'), { ok: false, cancelled: true });
+  assert.equal(f.setupCalls.length, 1);
 });
 
 const mtkModes = ['download-only', 'firmware-upgrade', 'format-all-download'];
@@ -115,6 +132,18 @@ function qualifiedMtk({ mode, useSavedTarget = false, checkboxChecked = false } 
   };
 }
 
+async function assertMtkWritten(fixture) {
+  const requestsBeforeCompletion = [...fixture.requests];
+  fixture.settle();
+  await flush();
+  const status = await fixture.call('state');
+  assert.equal(status.job.phase, 'written');
+  assert.equal(status.job.percent, 100);
+  assert.equal(status.job.code, undefined);
+  assert.equal(status.busy, false);
+  assert.deepEqual(fixture.requests, requestsBeforeCompletion);
+}
+
 for (const mode of mtkModes) test('qualified MTK mode arms the reserved COM before any explicit device transition: ' + mode, async () => {
   const real = qualifiedMtk({ mode, checkboxChecked: mode === 'format-all-download' });
   const { api, call, requests, asks } = real;
@@ -133,9 +162,7 @@ for (const mode of mtkModes) test('qualified MTK mode arms the reserved COM befo
     assert.equal(requests.filter(args => args.includes('reboot')).length, 1);
     assert.equal((await call('state')).job.entryRequested, true);
   }
-  real.settle();
-  await flush();
-  assert.equal((await call('state')).job.phase, 'verified');
+  await assertMtkWritten(real);
   assert.equal(asks.length, 1);
 });
 
@@ -150,9 +177,7 @@ test('a saved MTK target can arm while offline and never offers an ADB reboot', 
   assert.equal(job.entryAvailable, false);
   assert.equal((await f.call('enter-loader', job.id)).ok, false);
   assert.deepEqual(f.requests, []);
-  f.settle();
-  await flush();
-  assert.equal((await f.call('state')).job.phase, 'verified');
+  await assertMtkWritten(f);
 });
 
 test('MTK USB registration is read-only and enables a later cold start, but COM alone cannot arm', async () => {
@@ -170,9 +195,7 @@ test('MTK USB registration is read-only and enables a later cold start, but COM 
   assert.equal((await f.call('state')).job.phase, 'armed');
   assert.equal((await f.call('state')).job.entryAvailable, false);
   assert.equal(f.requests.length, before);
-  f.settle();
-  await flush();
-  assert.equal((await f.call('state')).job.phase, 'verified');
+  await assertMtkWritten(f);
 });
 
 test('MTK cold does not arm a COM reservation while an RK download device is present', async () => {

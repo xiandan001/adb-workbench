@@ -126,7 +126,7 @@ const lowerFingerprint = text => typeof text === 'string' ? text.toLowerCase() :
 
 function registerFirmwareDirectWorkspace(ipcMain, options) {
   const {
-    ownerFor, getOwnerFrame, toolRoot, chooseToolRoot, rememberToolRoot, canStart, isWindows,
+    ownerFor, getOwnerFrame, toolRoot, toolRoots, prepareTool, canStart, isWindows,
     profiles = acceptedFlashProfiles, ask = require('./app-message-dialog.cjs').ask,
     backend, targetProvider, firmware = { preflightFirmware, prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware },
     runAdb = require('./adb-runtime.cjs').runAdb, createFlow = createFirmwareDirectFlow,
@@ -135,7 +135,29 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
   const getBackend = () => backend || (defaultBackend ||= require('./firmware-direct-backends.cjs').createDirectFlashBackends());
   const getTargets = () => targetProvider || require('./firmware-direct-targets.cjs');
   let defaultBackend;
+  let configuringTool = false;
   const selections = new Map();
+  const toolChecks = new Map();
+  async function inspectConfiguredTool(platform) {
+    const roots = toolRoots ? await toolRoots(platform) : [await toolRoot?.(platform)];
+    for (const root of roots) {
+      if (!root) continue;
+      const result = await getBackend().inspect(platform, root);
+      if (result.ok) return result;
+    }
+    return fail('flash-tool-unavailable');
+  }
+  function checkTool(platform, fresh = false) {
+    const previous = toolChecks.get(platform);
+    if (!fresh && previous && Date.now() < previous.expires) return previous.result;
+    const pending = { expires: Infinity };
+    pending.result = inspectConfiguredTool(platform).catch(() => fail('flash-tool-unavailable')).then(result => {
+      pending.expires = Date.now() + (result.ok ? 30000 : 5000);
+      return result;
+    });
+    toolChecks.set(platform, pending);
+    return pending.result;
+  }
   const bindingsFor = platform => platform === 'mtk' ? mtkBindings : rkBindings;
   const readSaved = async platform => {
     const saved = await bindingsFor(platform)?.read();
@@ -151,8 +173,8 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
   };
   const flow = createFlow({
     services: {
-      canStart: frame => canStart() && (!frame || frame === getOwnerFrame()),
-      async prepare({ platform, filePath, mode, targetHint, frame, owner, useSavedTarget, coldStart }, { signal, onPreparation }) {
+      canStart: frame => !configuringTool && canStart() && (!frame || frame === getOwnerFrame()),
+      async prepare({ platform, filePath, mode, targetHint, useSavedTarget, coldStart }, { signal, onPreparation }) {
         const onePass = typeof firmware.preflightFirmware === 'function' && typeof firmware.prepareStagedDirectFirmware === 'function';
         let structure;
         try {
@@ -193,14 +215,7 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
             }
           }
         }
-        let tool = await getBackend().inspect(platform, await toolRoot(platform));
-        if (!tool.ok && chooseToolRoot && !signal.aborted && frame === getOwnerFrame()) {
-          const root = await chooseToolRoot(platform, owner, frame, signal);
-          if (root) {
-            tool = await getBackend().inspect(platform, root);
-            if (tool.ok && !signal.aborted && frame === getOwnerFrame()) await rememberToolRoot?.(platform, root);
-          }
-        }
+        const tool = await checkTool(platform, true);
         if (!tool.ok || tool.tool.version !== profile.toolVersion) return fail('flash-tool-unavailable');
         let preparedCopy;
         if (onePass) {
@@ -331,7 +346,9 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
     const saved = bindingsFor(platform) && modes.length ? await readSaved(platform) : null;
     const product = saved && profiles.find(row => row.platform === platform && row.product === saved.product);
     const display = product ? { label: product.board, ...(saved.port ? { port: saved.port } : {}) } : null;
+    const tool = prepareTool && modes.length ? await checkTool(platform) : null;
     return { ok: true, enabled: modes.length > 0, modes, ...(modes.length ? {} : { code: 'flash-profile-unverified' }),
+      ...(tool ? { toolReady: tool.ok === true } : {}),
       ...(bindingsFor(platform) ? { savedTarget: display } : {}), ...flow.status(platform) };
   };
 
@@ -344,6 +361,31 @@ function registerFirmwareDirectWorkspace(ipcMain, options) {
     });
   }
   handle('state', platform => respond(platform));
+  handle('prepare-tool', async (platform, payload, frame, owner) => {
+    if (!prepareTool || !enabledModes(platform).length) return fail('flash-profile-unverified');
+    if (payload !== undefined && (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+        Object.keys(payload).some(key => key !== 'local') ||
+        (payload.local !== undefined && typeof payload.local !== 'boolean'))) return fail('flash-invalid-request');
+    if (configuringTool || flow.active() || !canStart() || frame !== getOwnerFrame()) return fail('flash-busy');
+    configuringTool = true;
+    const controller = new AbortController();
+    const close = () => controller.abort();
+    owner.once?.('closed', close);
+    try {
+      const result = await prepareTool(platform, {
+        owner, frame, signal: controller.signal, local: payload?.local === true,
+        findExisting: () => checkTool(platform, true),
+        inspect: root => getBackend().inspect(platform, root),
+      });
+      if (frame !== getOwnerFrame() || controller.signal.aborted) return { ok: false, cancelled: true };
+      if (!result?.ok) return result || fail('flash-tool-unavailable');
+      toolChecks.set(platform, { expires: Date.now() + 30000, result: Promise.resolve(result) });
+      return await respond(platform);
+    } finally {
+      owner.removeListener?.('closed', close);
+      configuringTool = false;
+    }
+  });
   handle('register-target', async (platform, _payload, frame) => {
     const bindings = bindingsFor(platform);
     if (!isWindows || !bindings || flow.active() || !canStart()) return fail('flash-invalid-request');

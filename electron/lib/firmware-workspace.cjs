@@ -60,6 +60,58 @@ function register(ipcMain, options = {}) {
     return localDirectory(config[platform]);
   }
 
+  const cachedRkTool = path.join(app.getPath('userData'), 'firmware-direct-tools', 'rk-2.46');
+  async function directRoots(platform) {
+    const config = await readToolConfig();
+    const bundledResources = app.isPackaged && (options.resourcesPath || process.resourcesPath);
+    const candidates = [
+      bundledResources && path.join(bundledResources, 'firmware-direct-tools', platform),
+      platform === 'rk' && cachedRkTool,
+      config[platform + 'Direct'],
+      config[platform],
+    ];
+    const local = await Promise.all(candidates.map(localDirectory));
+    return [...new Map(local.filter(Boolean).map(directory => [directory.toLowerCase(), directory])).values()];
+  }
+
+  async function prepareDirectTool(platform, { owner, frame, signal, local, findExisting, inspect }) {
+    if (configuring || installing || openingVendor || signal.aborted) return cancelled();
+    const stillOwned = () => !signal.aborted && getMainWindow() === owner &&
+      !owner.isDestroyed() && owner.webContents.mainFrame === frame;
+    const unavailable = { ok: false, code: 'flash-tool-unavailable' };
+    configuring = true;
+    try {
+      const previous = await findExisting();
+      if (!stillOwned()) return cancelled();
+      if (previous.ok) return previous;
+      if (platform === 'rk' && !local) {
+        const installRk = options.installRkDirectTool || require('./firmware-rk-tool-download.cjs').installRkDirectTool;
+        if (!await installRk(cachedRkTool, { signal })) return stillOwned() ? unavailable : cancelled();
+        if (!stillOwned()) return cancelled();
+        const installed = await inspect(cachedRkTool);
+        return installed.ok ? installed : unavailable;
+      }
+      const config = await readToolConfig();
+      const priorRoot = await localDirectory(config[platform + 'Direct']) || await toolRoot(platform);
+      if (!stillOwned()) return cancelled();
+      const picked = await dialog.showOpenDialog(owner, {
+        title: tr('选择刷机工具目录'), defaultPath: priorRoot || app.getPath('desktop'), properties: ['openDirectory'],
+      });
+      if (!stillOwned() || picked.canceled || !picked.filePaths?.[0]) return cancelled();
+      const root = await localDirectory(picked.filePaths[0]);
+      if (!root) return unavailable;
+      const selected = await inspect(root);
+      if (!stillOwned()) return cancelled();
+      if (!selected.ok) return unavailable;
+      const updated = { version: 1, ...await readToolConfig(), [platform + 'Direct']: root };
+      if (!stillOwned()) return cancelled();
+      await fs.mkdir(path.dirname(configFile), { recursive: true });
+      if (!stillOwned()) return cancelled();
+      await atomicWriteAsync(configFile, JSON.stringify(updated));
+      return selected;
+    } finally { configuring = false; }
+  }
+
   async function driverRoot(platform) {
     const config = await readToolConfig();
     const saved = await localDirectory(config[platform + 'Driver']);
@@ -78,24 +130,8 @@ function register(ipcMain, options = {}) {
     rkBindings,
     ownerFor, isWindows, getOwnerFrame: () => getMainWindow()?.webContents?.mainFrame,
     canStart: () => !configuring && !installing && !openingVendor && options.canStartDirect?.() !== false,
-    toolRoot: async platform => await localDirectory((await readToolConfig())[platform + 'Direct']) || toolRoot(platform),
-    async chooseToolRoot(platform, owner, frame, signal) {
-      if (configuring || installing || signal.aborted) return '';
-      configuring = true;
-      try {
-        const previous = await toolRoot(platform);
-        const picked = await dialog.showOpenDialog(owner, {
-          title: tr('选择刷机工具目录'), defaultPath: previous || app.getPath('desktop'), properties: ['openDirectory']
-        });
-        if (signal.aborted || owner.isDestroyed() || owner.webContents.mainFrame !== frame || picked.canceled || !picked.filePaths?.[0]) return '';
-        return localDirectory(picked.filePaths[0]);
-      } finally { configuring = false; }
-    },
-    async rememberToolRoot(platform, root) {
-      const config = { version: 1, ...await readToolConfig(), [platform + 'Direct']: root };
-      await fs.mkdir(path.dirname(configFile), { recursive: true });
-      await atomicWriteAsync(configFile, JSON.stringify(config));
-    },
+    toolRoots: directRoots,
+    prepareTool: prepareDirectTool,
     ...options.direct,
   });
   const flashBusy = () => failure(tr('设备正在刷机，请保持连接。'));

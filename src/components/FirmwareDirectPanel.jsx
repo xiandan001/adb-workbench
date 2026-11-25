@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { Download, Loader2, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Download, Loader2, TriangleAlert } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n.js';
 import { isDarkTheme } from '../shared/theme.js';
 import SelectMenu from './SelectMenu.jsx';
@@ -64,9 +64,9 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   useLocale();
   const title = useId();
   const [choice, setChoice] = useState(null);
-  const [savedTargetChoice, setSavedTargetChoice] = useState(null);
-  const [rkColdStart, setRkColdStart] = useState(false);
-  const { enabled, job, busy, running, error, unavailable, savedTarget, registeringTarget } = direct;
+  const [targetChoice, setTargetChoice] = useState(null);
+  const [targetDisclosure, setTargetDisclosure] = useState(null);
+  const { enabled, job, busy, running, error, unavailable, savedTarget, registeringTarget, toolReady, preparingTool, preparingLocalTool } = direct;
   const modes = (direct.modes || []).filter(mode => Object.hasOwn(modeLabels, mode));
   const defaultMode = defaultModes[platform];
   const preferred = choice?.platform === platform ? choice.mode : defaultMode;
@@ -74,7 +74,8 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   const fixedMode = modes.length === 1 && modes[0] === defaultMode;
   const ready = file?.ok && typeof file.firmwareId === 'string' && file.firmwareId.length > 0;
   const preparation = job?.phase === 'preparing' && job.preparation;
-  const status = Object.hasOwn(preparationLabels, preparation) ? preparationLabels[preparation]()
+  const mtkWritten = platform === 'mtk' && job?.phase === 'written' && !job.code;
+  const status = mtkWritten ? tr('固件写入成功') : Object.hasOwn(preparationLabels, preparation) ? preparationLabels[preparation]()
     : Object.hasOwn(phaseLabels, job?.phase) ? phaseLabels[job.phase]() : '';
   const percent = Number.isFinite(job?.percent) && job.percent >= 0 && job.percent <= 100 ? Math.trunc(job.percent) : undefined;
   const preparationPercent = Number.isFinite(job?.preparationPercent) && job.preparationPercent >= 0 && job.preparationPercent <= 100
@@ -90,13 +91,31 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   const modeRiskId = `${title}-mode-risk`;
   const entryButtonVisible = job?.phase === 'armed' && job.entryAvailable && typeof direct.enterLoader === 'function';
   const entryBlocked = Boolean(busy || blocked || job?.entryRequested);
-  const savedTargetKey = savedTarget?.label ? JSON.stringify([platform, savedTarget.label, savedTarget.port]) : null;
-  const useSavedTarget = Boolean(savedTargetKey && savedTargetChoice === savedTargetKey);
-  const coldStart = platform === 'rk' && rkColdStart && !useSavedTarget;
-  const target = useSavedTarget ? { useSavedTarget: true } : coldStart ? { coldStart: true } : targetHint ? { targetHint } : {};
+  const savedLabel = savedTarget?.label ? [savedTarget.label, savedTarget.port].filter(Boolean).join(' · ') : '';
+  const targetOptions = [
+    ...(savedLabel ? [{ value: 'saved', label: tr('使用已保存的 USB 目标（设备可未连接）') }] : []),
+    { value: 'connected', label: tr('当前 USB 设备') },
+    ...(platform === 'rk' ? [{ value: 'cold', label: tr('未登记的 RK 板卡（无需 ADB，识别后手动选择）') }] : []),
+  ];
+  const targetContext = JSON.stringify([platform, targetHint || null]);
+  const preferredTarget = targetChoice?.context === targetContext ? targetChoice.value : !targetHint && savedLabel ? 'saved' : 'connected';
+  const selectedTarget = targetOptions.find(option => option.value === preferredTarget) || targetOptions.find(option => option.value === 'connected');
+  const target = selectedTarget.value === 'saved' ? { useSavedTarget: true } :
+    selectedTarget.value === 'cold' ? { coldStart: true } : targetHint ? { targetHint } : {};
+  const optionsOpen = targetDisclosure === targetContext;
   const targetBlocked = Boolean(busy || blocked);
-  const canArm = Boolean(enabled && ready && mode && !running && !targetBlocked);
+  const needsTool = toolReady === false;
+  const canArm = Boolean(enabled && ready && mode && !running && !targetBlocked && !needsTool);
+  const optionsId = `${title}-target-options`;
   const mismatch = (error ? error.code : job?.code) === 'flash-platform-mismatch';
+  const registerAction = direct.registerTarget && <button type="button" disabled={targetBlocked}
+    aria-busy={registeringTarget} className={`${button} ${theme.button.secondary}`} onClick={() => {
+      if (targetBlocked) return;
+      void direct.registerTarget();
+    }}>
+    {registeringTarget && <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin" />}
+    {tr('登记当前 USB 目标')}
+  </button>;
   return <section className={`mb-4 min-w-0 space-y-3 rounded-lg border p-3 ${theme.input}`} aria-labelledby={title}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
@@ -111,7 +130,18 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
         {!fixedMode && modes.length > 0 && <SelectMenu ariaLabel={tr('刷机模式')} value={mode} isDark={dark}
           disabled={Boolean(busy || blocked)} options={modes.map(value => ({ value, label: modeLabels[value]() }))}
           onChange={value => setChoice({ platform, mode: value })} />}
-        <button type="button" disabled={!canArm} className={`${button} ${theme.button.primary}`}
+        {needsTool ? <>
+          <button type="button" disabled={targetBlocked || !direct.prepareTool} aria-busy={preparingTool && !preparingLocalTool}
+            className={`${button} ${theme.button.primary}`} onClick={() => { if (!targetBlocked) void direct.prepareTool?.(); }}>
+            {preparingTool && !preparingLocalTool && <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" />}
+            {platform === 'rk' ? tr('下载 RK 直刷工具') : tr('准备刷机工具')}
+          </button>
+          {platform === 'rk' && direct.prepareTool && <button type="button" disabled={targetBlocked} aria-busy={preparingLocalTool}
+            className={`${button} ${theme.button.secondary}`} onClick={() => { if (!targetBlocked) void direct.prepareTool({ local: true }); }}>
+            {preparingLocalTool && <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" />}
+            {tr('选择本机工具')}
+          </button>}
+        </> : <button type="button" disabled={!canArm} className={`${button} ${theme.button.primary}`}
           aria-describedby={modeRisk ? modeRiskId : undefined}
           onClick={() => {
             if (!canArm) return;
@@ -119,58 +149,51 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
           }}>
           {busy && !registeringTarget ? <Loader2 size={15} className="shrink-0 animate-spin" aria-hidden="true" /> : <Download size={15} className="shrink-0" aria-hidden="true" />}
           {tr('开始刷机')}
-        </button>
+        </button>}
       </div>}
     </div>
-    {available && !running && direct.registerTarget && <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <button type="button" disabled={targetBlocked} aria-busy={registeringTarget} className={`${button} ${theme.button.secondary}`}
-        onClick={() => {
-          if (targetBlocked) return;
-          setSavedTargetChoice(null);
-          if (platform === 'rk') setRkColdStart(false);
-          void direct.registerTarget();
-        }}>
-        {registeringTarget && <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin" />}
-        {tr('登记当前 USB 目标')}
-      </button>
-      <p className={`min-w-0 text-xs leading-5 ${theme.textMuted}`}>
+    {available && !running && <div className="space-y-2 border-t border-current/10 pt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 break-words text-xs">
+          <span className={`${theme.textMuted} me-2`}>{tr('刷机目标')}</span>
+          <span className="font-medium">{selectedTarget.value === 'saved' ? savedLabel : selectedTarget.label}</span>
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {!savedLabel && registerAction}
+          {targetOptions.length > 1 && <button type="button" disabled={targetBlocked} aria-controls={optionsId} aria-expanded={optionsOpen}
+            className={`${button} ${theme.button.secondary}`} onClick={() => setTargetDisclosure(optionsOpen ? null : targetContext)}>
+            {tr('更换目标')}
+            <ChevronDown aria-hidden="true" size={14} className={optionsOpen ? 'rotate-180' : ''} />
+          </button>}
+        </div>
+      </div>
+      {optionsOpen && <div id={optionsId} className="flex flex-wrap items-center gap-2">
+        <SelectMenu ariaLabel={tr('刷机目标')} value={selectedTarget.value} isDark={dark} compact options={targetOptions}
+          disabled={targetBlocked} onChange={value => {
+            setTargetChoice({ context: targetContext, value });
+            setTargetDisclosure(null);
+          }} />
+        {savedLabel && registerAction}
+      </div>}
+      {!savedLabel && registerAction && <p className={`text-xs leading-5 ${theme.textMuted}`}>
         {tr('先通过 USB 调试连接目标设备，再登记。之后可在设备未连接时使用已保存的目标。')}
-      </p>
+      </p>}
     </div>}
-    {available && !running && savedTargetKey && <label className="flex w-fit max-w-full items-start gap-2 text-xs leading-5">
-      <input type="checkbox" checked={useSavedTarget} disabled={targetBlocked}
-        className="mt-1 shrink-0 accent-emerald-500"
-        onChange={event => {
-          if (event.currentTarget.checked && platform === 'rk') setRkColdStart(false);
-          setSavedTargetChoice(event.currentTarget.checked ? savedTargetKey : null);
-        }} />
-      <span className="min-w-0">
-        <span className="block font-medium">{tr('使用已保存的 USB 目标（设备可未连接）')}</span>
-        <span className={`block break-words ${theme.textMuted}`}>{[savedTarget.label, savedTarget.port].filter(Boolean).join(' · ')}</span>
-      </span>
-    </label>}
-    {available && !running && platform === 'rk' && <label className="flex w-fit max-w-full items-start gap-2 text-xs leading-5">
-      <input type="checkbox" checked={coldStart} disabled={targetBlocked} className="mt-1 shrink-0 accent-emerald-500"
-        onChange={event => {
-          if (event.currentTarget.checked) setSavedTargetChoice(null);
-          setRkColdStart(event.currentTarget.checked);
-        }} />
-      <span>{tr('未登记的 RK 板卡（无需 ADB，识别后手动选择）')}</span>
-    </label>}
     {modeRisk && <p id={modeRiskId} role="status" className={`flex items-start gap-2 rounded-md px-2.5 py-2 text-xs leading-5 ${formatsStorage
       ? `bg-red-500/10 ${dark ? 'text-red-300' : 'text-red-800'}` : `bg-amber-500/10 ${accent}`}`}>
       <TriangleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
       {modeRisk}
     </p>}
-    {busy && !registeringTarget && !status && <div role="status" className={`space-y-1 text-xs ${theme.textMuted}`}>
+    {busy && !registeringTarget && !preparingTool && !status && <div role="status" className={`space-y-1 text-xs ${theme.textMuted}`}>
       <p>{phaseLabels.preparing()}</p>
       <p className={accent}>{keepConnectedBeforeReady()}</p>
     </div>}
     {status && <div className="space-y-2 border-t border-current/10 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0" role="status">
-          <p className="flex items-center gap-2 text-sm font-medium">
+          <p className={`flex items-center gap-2 text-sm font-medium ${mtkWritten ? (dark ? 'text-emerald-300' : 'text-emerald-700') : ''}`}>
             {running && <Loader2 size={15} aria-hidden="true" className="shrink-0 animate-spin text-emerald-500" />}
+            {mtkWritten && <CheckCircle2 size={15} aria-hidden="true" className="shrink-0" />}
             {status}
           </p>
           {job.targetLabel && <p className={`mt-0.5 break-words text-xs ${theme.textMuted}`}>{job.targetLabel}</p>}

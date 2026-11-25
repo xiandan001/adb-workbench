@@ -53,7 +53,54 @@ test('only the verified preselected target starts after manual arrival; no secon
   assert.deepEqual(f.writes, ['a']);
   assert.deepEqual(f.confirms, ['a']);
   assert.equal(f.status().phase, 'written');
-  assert.equal(f.status().code, 'flash-boot-unverified');
+  assert.equal(f.status().code, undefined);
+  assert.equal(f.status().percent, 100);
+});
+
+test('MTK elevated success finishes promptly without ADB and releases the staged firmware', async () => {
+  let end, bootChecks = 0, released = 0;
+  const f = fixture({ options: {
+    prepare: async () => ({ ok: true, elevatedMtk: true, profile: { product: 'fixture' } }),
+    stage: async () => ({ firmware: {}, release: async () => { released++; } }),
+    armVendor: async (_plan, _anchor, _staged, context) => {
+      assert.equal(context.beforeDispatch(), true);
+      context.onReady({ timeoutMs: 50 });
+      context.onProgress(80);
+      return new Promise(resolve => { end = resolve; });
+    },
+    verify: async () => { bootChecks++; return false; },
+  } });
+  f.configure([], a);
+  await f.arm();
+  assert.equal(f.status().phase, 'writing');
+  assert.equal(f.flow.isProtected(), true);
+  end({ transferCompleted: true, code: 'mtk-tool-reported-success' });
+  await flush();
+  assert.equal(f.status().phase, 'written');
+  assert.equal(f.status().percent, 100);
+  assert.equal(f.status().code, undefined);
+  assert.equal(bootChecks, 0);
+  assert.equal(released, 1);
+  assert.equal(f.flow.active(), false);
+  assert.equal(f.flow.isProtected(), false);
+});
+
+test('MTK progress alone cannot be mistaken for successful writing', async () => {
+  let bootChecks = 0;
+  const f = fixture({ options: {
+    prepare: async () => ({ ok: true, elevatedMtk: true, profile: { product: 'fixture' } }),
+    armVendor: async (_plan, _anchor, _staged, context) => {
+      context.onReady({ timeoutMs: 50 });
+      context.onProgress(100);
+      return { transferCompleted: false, code: 'mtk-target-mismatch' };
+    },
+    verify: async () => { bootChecks++; return false; },
+  } });
+  f.configure([], a);
+  await f.arm();
+  assert.equal(f.status().phase, 'failed');
+  assert.equal(f.status().code, 'flash-plan-changed');
+  assert.equal(bootChecks, 0);
 });
 
 test('unknown candidate never writes until explicitly chosen; only exact platform, owner, job and target match', async () => {
@@ -81,6 +128,7 @@ test('pre-existing singleton is named in confirmation; swap, expiry and failed b
   assert.deepEqual(exact.confirms, ['a']);
   assert.deepEqual(exact.writes, ['a']);
   assert.equal(exact.status('rk').phase, 'written');
+  assert.equal(exact.status('rk').code, 'flash-boot-unverified');
 
   let swap;
   const moved = fixture({ options: { validate: async () => { swap.configure([{ ...a, selector: 'reused' }, b]); return true; } } });
@@ -105,6 +153,58 @@ test('pre-existing singleton is named in confirmation; swap, expiry and failed b
   assert.deepEqual(incomplete.writes, []);
 });
 
+test('RK retries one unavailable snapshot at each write gate and launches only one write', async () => {
+  let scans = 0, attempts = 0;
+  const f = fixture({ options: {
+    scan: async () => ({ ok: ![2, 4].includes(++scans), candidates: [a] }),
+    write: async (_plan, device, _staged, context) => {
+      if (!await context.beforeDispatch()) return { transferCompleted: false, code: 'flash-plan-changed' };
+      assert.equal(device, a);
+      attempts++;
+      return { transferCompleted: true };
+    },
+  } });
+  await f.arm('rk');
+  assert.equal(scans, 5);
+  assert.equal(attempts, 1);
+  assert.equal(f.status('rk').phase, 'written');
+});
+
+test('RK does not retry a well-formed changed target at any write gate', async () => {
+  for (const changedAt of [2, 3]) {
+    let scans = 0;
+    const f = fixture({ options: {
+      scan: async () => ({ ok: true, candidates: [++scans === changedAt ? { ...a, selector: 'changed' } : a] }),
+    } });
+    await f.arm('rk');
+    assert.equal(scans, changedAt);
+    assert.deepEqual(f.writes, []);
+    assert.equal(f.status('rk').code, 'flash-plan-changed');
+  }
+});
+
+test('failed RK gate scans stay bounded, including when the owner or deadline changes', async () => {
+  for (const [platform, losesGuard, expectedScans] of [['rk', '', 3], ['rk', 'owner', 2], ['rk', 'deadline', 2], ['mtk', '', 2]]) {
+    let scans = 0, ownsFrame = true, now = 0;
+    const f = fixture({
+      settings: { now: () => now },
+      options: {
+        canStart: () => ownsFrame,
+        scan: async () => {
+          if (++scans === 1) return { ok: true, candidates: [a] };
+          if (losesGuard === 'owner') ownsFrame = false;
+          if (losesGuard === 'deadline') now = 50;
+          return { ok: false };
+        },
+      },
+    });
+    await f.arm(platform);
+    assert.equal(scans, expectedScans);
+    assert.deepEqual(f.writes, []);
+    assert.equal(f.status(platform).code, losesGuard === 'deadline' ? 'flash-wait-expired' : 'flash-plan-changed');
+  }
+});
+
 test('cancel fencing discards a late scan and prevents cancellation or concurrent arm during writing', async () => {
   let scans = 0, resume;
   const first = fixture({ options: { scan: async () => {
@@ -126,12 +226,12 @@ test('cancel fencing discards a late scan and prevents cancellation or concurren
     verify: async () => true,
   } });
   second.configure([a]);
-  await second.arm();
+  await second.arm('rk');
   assert.equal(second.flow.isProtected(), true);
-  assert.equal(second.flow.cancel('mtk', second.status().id, owner).ok, false);
-  assert.equal((await second.arm('rk')).code, 'flash-busy');
+  assert.equal(second.flow.cancel('rk', second.status('rk').id, owner).ok, false);
+  assert.equal((await second.arm('mtk')).code, 'flash-busy');
   end({ transferCompleted: true });
   await flush();
-  assert.equal(second.status().phase, 'verified');
+  assert.equal(second.status('rk').phase, 'verified');
   assert.equal(second.flow.isProtected(), false);
 });

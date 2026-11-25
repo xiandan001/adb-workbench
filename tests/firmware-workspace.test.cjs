@@ -5,9 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { register } = require('../electron/lib/firmware-workspace.cjs');
 
-async function setup(t, hostPlatform = 'win32') {
+async function setup(t, hostPlatform = 'win32', extra = {}) {
   const desktop = await fs.mkdtemp(path.join(os.tmpdir(), 'firmware-workspace-'));
   const userData = path.join(desktop, 'preferences');
+  const resources = path.join(desktop, 'resources');
   const auto = path.join(desktop, 'work', 'utils', '烧录');
   const rk = path.join(desktop, 'only-rk');
   const mtk = path.join(desktop, 'only-mtk');
@@ -22,10 +23,13 @@ async function setup(t, hostPlatform = 'win32') {
   let main = owner;
   const options = {
     hostPlatform,
+    resourcesPath: resources,
+    direct: extra.direct,
+    installRkDirectTool: extra.installRkDirectTool,
     getMainWindow: () => main,
     inspectSignedDriver: async (platform, directory) => directory === (platform === 'rk' ? rk : mtk) ? [{}] : [],
     electron: {
-      app: { getPath: key => key === 'userData' ? userData : desktop },
+      app: { isPackaged: extra.packaged === true, getPath: key => key === 'userData' ? userData : desktop },
       dialog: { showOpenDialog: async (target, settings) => {
         assert.equal(target, owner);
         calls.push(['dialog', settings]);
@@ -51,7 +55,7 @@ async function setup(t, hostPlatform = 'win32') {
   const workspace = register(binding, options);
   const event = { sender, senderFrame: frame };
   return {
-    auto, rk, mtk, event, calls,
+    auto, rk, mtk, event, calls, userData, resources,
     warmup: workspace.warmup,
     setDialog(value) { nextDialog = value; }, setOwner(value) { main = value; },
     reopen() { register(binding, options); },
@@ -71,6 +75,82 @@ test('both platforms start unconfigured even when the old desktop folder exists'
   assert.deepEqual(await f.call('chooseTools', 'rk'), { ok: false, cancelled: true });
   f.reopen();
   assert.equal((await f.call('status', 'rk')).toolRoot, '');
+});
+
+const directToolReady = root => ({ ok: true, tool: { version: 'fixture', cwd: root } });
+const directToolMissing = { ok: false, code: 'missing-fixture' };
+
+test('direct tool status reuses verified bundled and previously saved locations without a chooser', async t => {
+  const checks = [];
+  const verified = new Set();
+  const f = await setup(t, 'win32', { packaged: true,
+    direct: { backend: { async inspect(platform, root) {
+      checks.push([platform, root]);
+      return verified.has(root) ? directToolReady(root) : directToolMissing;
+    } } },
+    installRkDirectTool: async () => assert.fail('status does not download'),
+  });
+  const bundle = path.join(f.resources, 'firmware-direct-tools', 'rk');
+  await fs.mkdir(bundle, { recursive: true });
+  verified.add(bundle);
+  assert.equal((await f.call('direct:state', 'rk')).toolReady, true);
+  assert.equal((await f.call('direct:state', 'rk')).toolReady, true);
+  assert.deepEqual(checks, [['rk', bundle]]);
+  f.setDialog({ filePaths: [f.mtk] });
+  await f.call('chooseTools', 'mtk');
+  verified.add(f.mtk);
+  assert.equal((await f.call('direct:state', 'mtk')).toolReady, true);
+  assert.equal((await f.call('direct:prepare-tool', 'mtk')).toolReady, true);
+  assert.equal(f.calls.filter(([type]) => type === 'dialog').length, 1);
+});
+
+test('RK setup downloads only on the explicit request, caches verified files, and never falls back to a picker', async t => {
+  const f = await setup(t, 'win32', {
+    direct: { backend: { async inspect(platform, root) {
+      return platform === 'rk' && installed === root ? directToolReady(root) : directToolMissing;
+    } } },
+    async installRkDirectTool(destination, { signal }) {
+      downloads.push(destination);
+      assert.equal(signal.aborted, false);
+      if (downloads.length === 1) return false;
+      await fs.mkdir(destination, { recursive: true });
+      installed = destination;
+      return true;
+    },
+  });
+  let installed;
+  const downloads = [];
+  assert.equal((await f.call('direct:state', 'rk')).toolReady, false);
+  assert.deepEqual(downloads, []);
+  const spoofed = { sender: f.event.sender, senderFrame: {} };
+  assert.equal((await f.call('direct:prepare-tool', 'rk', spoofed)).ok, false);
+  assert.deepEqual(downloads, []);
+  assert.deepEqual(await f.call('direct:prepare-tool', 'rk'), { ok: false, code: 'flash-tool-unavailable' });
+  assert.equal(f.calls.some(([type]) => type === 'dialog'), false);
+  assert.equal((await f.call('direct:prepare-tool', 'rk')).toolReady, true);
+  assert.deepEqual(downloads, Array(2).fill(path.join(f.userData, 'firmware-direct-tools', 'rk-2.46')));
+  f.reopen();
+  assert.equal((await f.call('direct:state', 'rk')).toolReady, true);
+  assert.equal(f.calls.length, 0);
+});
+
+test('only explicitly selected verified local direct directories are persisted across launches', async t => {
+  const verified = new Set();
+  const f = await setup(t, 'win32', {
+    direct: { backend: { inspect: async (_platform, root) => verified.has(root) ? directToolReady(root) : directToolMissing } },
+    installRkDirectTool: async () => assert.fail('offline configuration must not download'),
+  });
+  for (const platform of ['rk', 'mtk']) {
+    f.setDialog({ filePaths: [f[platform]] });
+    const options = platform === 'rk' ? { local: true } : undefined;
+    assert.equal((await f.call('direct:prepare-tool', platform, f.event, options)).ok, false);
+    verified.add(f[platform]);
+    assert.equal((await f.call('direct:prepare-tool', platform, f.event, options)).toolReady, true);
+  }
+  f.reopen();
+  assert.equal((await f.call('direct:state', 'rk')).toolReady, true);
+  assert.equal((await f.call('direct:state', 'mtk')).toolReady, true);
+  assert.equal(f.calls.filter(([type]) => type === 'dialog').length, 4);
 });
 
 test('native selection remembers distinct RK and MTK folders across registrations', async t => {

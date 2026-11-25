@@ -1,69 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { runInNewContext } from 'node:vm';
-import { transformSync } from 'rolldown/utils';
-
-const source = ['FirmwareDirectState.js', 'FirmwareDirectPanel.jsx']
-  .map(name => readFileSync(new URL(`../src/components/${name}`, import.meta.url), 'utf8'))
-  .join('\n').replace(/^import .+;\n/gm, '').replace(/export (?:default )?(?=function |const )/g, '');
-const code = transformSync('FirmwareDirectPanel.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx' } }).code;
-const flush = () => new Promise(resolve => setImmediate(resolve));
-const theme = { input: '', textMuted: '', button: { primary: '', secondary: '' } };
-const modeOptions = ['download-only', 'firmware-upgrade', 'format-all-download'];
-const readyFile = { ok: true, firmwareId: 'private-receipt' };
-const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(nodes)];
-const text = node => typeof node === 'string' || typeof node === 'number' ? String(node)
-  : !node || typeof node !== 'object' ? '' : [node.props?.children].flat(Infinity).map(text).join(' ');
-const button = (tree, label) => nodes(tree).find(node => node.type === 'button' && text(node).trim() === label);
-const checkbox = tree => nodes(tree).find(node => node.type === 'input' && node.props.type === 'checkbox');
-
-function mount(api, options = {}) {
-  let platform = options.platform || 'mtk';
-  let active = options.active ?? true;
-  const slots = [], effects = [], timers = new Set();
-  let cursor = 0;
-  function changed(old = [], next = []) {
-    return old.length !== next.length || next.some((value, index) => !Object.is(value, old[index]));
-  }
-  const runtime = {
-    useId: () => 'direct-title', useLocale() {}, isDarkTheme: () => false,
-    Loader2: 'loading', Download: 'download', TriangleAlert: 'warning', SelectMenu: 'selection', React: { Fragment: 'fragment' }, tr: label => label,
-    jsx: (type, props, ...children) => ({ type, props: { ...props, children } }),
-    useEffect(effect, deps) {
-      const index = cursor++;
-      const previous = slots[index];
-      if (!previous || changed(previous.deps, deps)) effects.push(() => {
-        previous?.cleanup?.();
-        slots[index] = { deps, cleanup: effect() };
-      });
-    },
-    useRef: value => (slots[cursor++] ??= { current: value }),
-    useState(initial) {
-      const slot = slots[cursor++] ??= { value: initial };
-      return [slot.value, next => { slot.value = typeof next === 'function' ? next(slot.value) : next; }];
-    },
-    setTimeout(callback) { timers.add(callback); return callback; },
-    clearTimeout: callback => timers.delete(callback),
-  };
-  const model = runInNewContext(`(function(){${code};return { useFirmwareDirect, FirmwareDirectPanel };})()`, runtime);
-  const render = (file = readyFile, blocked = false) => {
-    cursor = 0;
-    const direct = model.useFirmwareDirect({ platform, active, api });
-    const tree = model.FirmwareDirectPanel({ platform, direct, file, theme, targetHint: 'usb1', blocked });
-    for (const effect of effects.splice(0)) effect();
-    return { tree, direct };
-  };
-  render();
-  return {
-    render,
-    active: value => { active = value; },
-    platform: value => { platform = value; },
-    tick() { for (const timer of Array.from(timers)) { timers.delete(timer); timer(); } },
-  };
-}
-
-const copy = value => JSON.parse(JSON.stringify(value));
+import { button, changeTarget, copy, flush, modeOptions, mount, nodes, readyFile, text } from './helpers/firmware-direct-ui-harness.mjs';
 
 test('unverified profiles offer only the vendor fallback and no start action', async () => {
   const calls = [];
@@ -82,18 +20,24 @@ test('unverified profiles offer only the vendor fallback and no start action', a
 
 test('only a click arms the selected firmware, explicit mode and optional USB hint', async () => {
   const calls = [];
+  const options = { targetHint: 'usb1' };
   const app = mount({
-    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: modeOptions, job: null }),
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: modeOptions, job: null, savedTarget: { label: 'Older registration' } }),
     firmwareDirectArm: async (platform, input) => {
       calls.push([platform, copy(input)]);
       return { ok: true, job: { id: 'job', phase: 'waiting' } };
     },
-  });
+  }, options);
   await flush();
   assert.equal(button(app.render({ ok: true }).tree, '开始刷机').props.disabled, true);
   const select = nodes(app.render().tree).find(node => node.type === 'selection');
   assert.equal(select.props.value, 'download-only');
-  assert.equal(nodes(app.render().tree).find(node => node.type === 'input' && node.props.type === 'checkbox'), undefined);
+  assert.match(text(app.render().tree), /当前 USB 设备/);
+  assert.doesNotMatch(text(app.render().tree), /Older registration/);
+  changeTarget(app, 'saved');
+  assert.match(text(app.render().tree), /Older registration/);
+  options.targetHint = 'usb2';
+  assert.match(text(app.render().tree), /当前 USB 设备/);
   assert.doesNotMatch(text(app.render().tree), /先备份|清除存储/);
   select.props.onChange('firmware-upgrade');
   const upgrade = app.render().tree;
@@ -104,8 +48,48 @@ test('only a click arms the selected firmware, explicit mode and optional USB hi
   assert.deepEqual(calls, []);
   arm.props.onClick();
   await flush();
-  assert.deepEqual(calls, [['mtk', { firmwareId: 'private-receipt', mode: 'firmware-upgrade', targetHint: 'usb1' }]]);
+  assert.deepEqual(calls, [['mtk', { firmwareId: 'private-receipt', mode: 'firmware-upgrade', targetHint: 'usb2' }]]);
   assert.match(text(app.render().tree), /请手动让目标设备进入刷机模式/);
+});
+
+for (const platform of ['rk', 'mtk']) test(`${platform} tool setup is explicit and never starts a write`, async () => {
+  let toolReady = false;
+  const calls = [];
+  const app = mount({
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: [platform === 'rk' ? 'upgrade' : 'download-only'], toolReady }),
+    firmwareDirectPrepareTool: async (...args) => {
+      calls.push(['setup', ...copy(args)]);
+      if (calls.length === 1) return { ok: false, cancelled: true };
+      toolReady = true;
+      return { ok: true, toolReady };
+    },
+    firmwareDirectArm: async () => { calls.push(['arm']); return { ok: true }; },
+  }, { platform });
+  await flush();
+  const primary = platform === 'rk' ? '下载 RK 直刷工具' : '准备刷机工具';
+  assert.equal(button(app.render().tree, '开始刷机'), undefined);
+  assert.deepEqual(calls, []);
+  button(app.render().tree, primary).props.onClick();
+  await flush();
+  assert.deepEqual(calls, [['setup', platform]]);
+  assert.equal(nodes(app.render().tree).find(node => node.props.role === 'alert'), undefined);
+  button(app.render().tree, platform === 'rk' ? '选择本机工具' : primary).props.onClick();
+  await flush();
+  assert.deepEqual(calls[1], ['setup', platform, ...(platform === 'rk' ? [{ local: true }] : [])]);
+  assert.equal(calls.length, 2);
+  button(app.render().tree, '开始刷机').props.onClick();
+  await flush();
+  assert.deepEqual(calls.at(-1), ['arm']);
+});
+
+test('hardware-confirmed MTK writes show success without claiming boot verification', async () => {
+  const state = phase => async () => ({ ok: true, enabled: true, modes: modeOptions, job: { id: 'job', phase, percent: 100 } });
+  const mtk = mount({ firmwareDirectState: state('written') });
+  const rk = mount({ firmwareDirectState: state('written') }, { platform: 'rk' });
+  await flush();
+  assert.match(text(mtk.render().tree), /固件写入成功/);
+  assert.doesNotMatch(text(mtk.render().tree), /已完成并验证/);
+  assert.match(text(rk.render().tree), /固件已写入，设备启动未验证/);
 });
 
 test('a restricted destructive mode is opt-in and stays blocked during other actions', async () => {
@@ -140,7 +124,7 @@ test('a restricted destructive mode is opt-in and stays blocked during other act
   assert.match(text(app.render().tree), /刷机工具执行模式与所选模式不一致，未确认刷写结果/);
 });
 
-test('an explicitly saved MTK target starts a cold wait without forwarding the live target hint', async () => {
+test('a saved MTK target is ready without extra setup when no explicit device is selected', async () => {
   const calls = [];
   const app = mount({
     firmwareDirectState: async () => ({
@@ -150,19 +134,32 @@ test('an explicitly saved MTK target starts a cold wait without forwarding the l
       calls.push([platform, copy(input)]);
       return { ok: true, job: { id: 'job', phase: 'authorizing' } };
     },
-  });
+  }, { targetHint: null });
   await flush();
   const { tree } = app.render();
-  assert.match(text(tree), /使用已保存的 USB 目标（设备可未连接）/);
-  assert.match(text(tree), /Recorded G520\s+·\s+COM4/);
-  const checkbox = nodes(tree).find(node => node.type === 'input' && node.props.type === 'checkbox');
-  assert.equal(checkbox.props.checked, false);
-  checkbox.props.onChange({ currentTarget: { checked: true } });
+  assert.match(text(tree), /Recorded G520\s*·\s*COM4/);
+  assert.equal(button(tree, '更换目标').props['aria-expanded'], false);
   assert.deepEqual(calls, []);
   button(app.render().tree, '开始刷机').props.onClick();
   await flush();
   assert.deepEqual(calls, [['mtk', { firmwareId: 'private-receipt', mode: 'download-only', useSavedTarget: true }]]);
-  assert.doesNotMatch(text(app.render().tree), /使用已保存的 USB 目标/);
+  assert.equal(button(app.render().tree, '更换目标'), undefined);
+});
+
+test('a failed attempt to register does not switch a device card to a previous target', async () => {
+  const calls = [];
+  const app = mount({
+    firmwareDirectState: async () => ({ ok: true, enabled: true, modes: modeOptions, savedTarget: { label: 'Old target' } }),
+    firmwareDirectRegisterTarget: async () => ({ ok: false, code: 'flash-anchor-required' }),
+    firmwareDirectArm: async (_platform, input) => { calls.push(copy(input)); return { ok: true }; },
+  }, { targetHint: 'current-board' });
+  await flush();
+  button(app.render().tree, '更换目标').props.onClick();
+  button(app.render().tree, '登记当前 USB 目标').props.onClick();
+  await flush();
+  button(app.render().tree, '开始刷机').props.onClick();
+  await flush();
+  assert.deepEqual(calls, [{ firmwareId: 'private-receipt', mode: 'download-only', targetHint: 'current-board' }]);
 });
 
 test('RK cold start sends no ADB hint and requires explicit selection of a detected board', async () => {
@@ -181,10 +178,9 @@ test('RK cold start sends no ADB hint and requires explicit selection of a detec
     },
   }, { platform: 'rk' });
   await flush();
-  const initial = app.render().tree;
-  assert.match(text(initial), /未登记的 RK 板卡（无需 ADB，识别后手动选择）/);
-  assert.equal(checkbox(initial).props.checked, false);
-  checkbox(initial).props.onChange({ currentTarget: { checked: true } });
+  assert.match(text(app.render().tree), /当前 USB 设备/);
+  changeTarget(app, 'cold');
+  assert.match(text(app.render().tree), /未登记的 RK 板卡（无需 ADB，识别后手动选择）/);
   assert.deepEqual(calls, []);
   button(app.render().tree, '开始刷机').props.onClick();
   app.render();
@@ -220,7 +216,7 @@ for (const platform of ['mtk', 'rk']) test(`registering a ${platform} target nee
       calls.push(['arm', platform, copy(input)]);
       return { ok: true, job: { id: 'job', phase: rk ? 'waiting' : 'authorizing' } };
     },
-  }, { platform });
+  }, { platform, targetHint: null });
   await flush();
   const initial = app.render({ ok: false }).tree;
   assert.deepEqual(calls, []);
@@ -240,12 +236,11 @@ for (const platform of ['mtk', 'rk']) test(`registering a ${platform} target nee
   await flush();
   const ready = app.render().tree;
   assert.match(text(ready), rk ? /Verified G520/ : /Verified G520\s*·\s*COM5/);
-  assert.equal(checkbox(ready).props.checked, false);
   assert.deepEqual(calls, [['register', platform]]);
-  const rkManual = tree => nodes(tree).filter(node => node.type === 'input' && node.props.type === 'checkbox')[1];
-  if (rk) rkManual(ready).props.onChange({ currentTarget: { checked: true } });
-  checkbox(ready).props.onChange({ currentTarget: { checked: true } });
-  if (rk) assert.equal(rkManual(app.render().tree).props.checked, false);
+  if (rk) {
+    changeTarget(app, 'cold');
+    changeTarget(app, 'saved');
+  }
   button(app.render().tree, '开始刷机').props.onClick();
   await flush();
   assert.deepEqual(calls, [['register', platform], ['arm', platform, { firmwareId: 'private-receipt', mode, useSavedTarget: true }]]);
