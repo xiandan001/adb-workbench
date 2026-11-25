@@ -2,11 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { tr } from '../shared/i18n.js';
 
 const platformKey = 'firmware-workspace-platform';
+const toolsExpandedKey = 'firmware-workspace-tools-expanded';
 const isPlatform = value => value === 'rk' || value === 'mtk';
 
 export function readFirmwarePlatform(storage = globalThis.localStorage) {
   try { return storage?.getItem(platformKey) === 'mtk' ? 'mtk' : 'rk'; }
   catch { return 'rk'; }
+}
+
+function readSupportExpanded() {
+  try {
+    const remembered = globalThis.localStorage?.getItem(toolsExpandedKey);
+    return remembered === 'true' ? true : remembered === 'false' ? false : undefined;
+  } catch { return undefined; }
 }
 
 export function resolveFirmwarePlatform(selection, entryDevice) {
@@ -39,9 +47,10 @@ const needsToolSelection = result => result?.code === 'tool-unavailable' || resu
 export function useFirmwareWorkspace({ active, entryDevice }) {
   const [selection, setSelection] = useState(() => ({ platform: readFirmwarePlatform() }));
   const platform = resolveFirmwarePlatform(selection, entryDevice);
+  const [supportExpanded, updateSupportExpanded] = useState(readSupportExpanded);
   const [states, setStates] = useState({});
   const [busy, setBusy] = useState('');
-  const [confirm, setConfirm] = useState(false);
+  const [confirm, updateConfirm] = useState(false);
   const alive = useRef(false);
   const request = useRef({});
   const recentRequest = useRef({});
@@ -144,6 +153,7 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
   async function act(kind) {
     if (operation.current) return;
     operation.current = true;
+    if (kind === 'install') updateConfirm(false);
     const type = platform;
     setBusy(kind);
     update(type, { feedbackKind: kind, error: '', notice: '' });
@@ -177,12 +187,21 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
       if (kind === 'install') await refresh(type);
     } finally {
       operation.current = false;
-      if (alive.current) { setBusy(''); if (kind === 'install') setConfirm(false); }
+      if (alive.current) setBusy('');
     }
   }
 
+  function setConfirm(value) {
+    if (!value || !operation.current) updateConfirm(value);
+  }
+
+  function setSupportExpanded(expanded) {
+    updateSupportExpanded(expanded);
+    try { globalThis.localStorage?.setItem(toolsExpandedKey, String(expanded)); } catch { /* Keep the current selection for this session. */ }
+  }
+
   return {
-    platform, changePlatform, busy, confirm, setConfirm, act,
+    platform, changePlatform, busy, confirm, setConfirm, act, supportExpanded, setSupportExpanded,
     refresh: async () => {
       if (operation.current) return;
       await refresh(platform, true);

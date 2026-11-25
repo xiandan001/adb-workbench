@@ -8,12 +8,11 @@ const source = readFileSync(new URL('../src/components/FirmwareWorkspaceState.js
   .replace(/^import .+;\n/gm, '').replaceAll('export function ', 'function ');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function mount(electronAPI, entryDevice) {
+function mount(electronAPI, entryDevice, values = new Map()) {
   let cursor = 0;
   let props = { active: true, entryDevice };
   const slots = [], effects = [];
   const timers = new Set();
-  const values = new Map();
   function changed(old = [], next = []) {
     return old.length !== next.length || next.some((value, index) => !Object.is(value, old[index]));
   }
@@ -61,6 +60,57 @@ function mount(electronAPI, entryDevice) {
 }
 
 const vendorStatus = state => ({ ok: true, state, devices: [], installer: { available: true }, tool: { available: true } });
+
+test('the tools disclosure remembers both choices across platforms, page reentry and a fresh workspace', async () => {
+  const storage = new Map();
+  const api = { firmwareStatus: async () => vendorStatus('installed') };
+  const key = 'firmware-workspace-tools-expanded';
+  const ui = mount(api, { platformHint: 'rk', requestId: 'rk-start' }, storage);
+  assert.equal(ui.view().supportExpanded, undefined);
+  assert.equal(storage.has(key), false);
+  ui.view().setSupportExpanded(true);
+  assert.equal(storage.get(key), 'true');
+  ui.view().changePlatform('mtk');
+  assert.equal(ui.view().platform, 'mtk');
+  assert.equal(ui.view().supportExpanded, true);
+  ui.active(false);
+  ui.view();
+  ui.active(true);
+  assert.equal(ui.view().supportExpanded, true);
+  ui.unmount();
+
+  const remounted = mount(api, { platformHint: 'rk', requestId: 'rk-remount' }, storage);
+  assert.equal(remounted.view().platform, 'rk');
+  assert.equal(remounted.view().supportExpanded, true);
+  remounted.view().setSupportExpanded(false);
+  assert.equal(storage.get(key), 'false');
+  remounted.view().changePlatform('mtk');
+  assert.equal(remounted.view().supportExpanded, false);
+  remounted.unmount();
+
+  const restarted = mount(api, undefined, new Map(storage));
+  assert.equal(restarted.view().supportExpanded, false);
+  await flush();
+  restarted.unmount();
+});
+
+test('invalid or blocked tool disclosure storage leaves the default and the current session usable', () => {
+  const key = 'firmware-workspace-tools-expanded';
+  const malformed = mount({}, undefined, new Map([[key, 'not-a-boolean']]));
+  assert.equal(malformed.view().supportExpanded, undefined);
+  malformed.unmount();
+
+  const blocked = mount({}, undefined, {
+    get() { throw Error('storage blocked'); },
+    set() { throw Error('storage blocked'); },
+  });
+  assert.equal(blocked.view().supportExpanded, undefined);
+  blocked.view().setSupportExpanded(true);
+  assert.equal(blocked.view().supportExpanded, true);
+  blocked.view().setSupportExpanded(false);
+  assert.equal(blocked.view().supportExpanded, false);
+  blocked.unmount();
+});
 
 test('last firmware restoration is read-only, does not block the picker and cannot overwrite a new choice', async () => {
   let sendOld;
@@ -180,19 +230,58 @@ test('uses the post-install probe without a second query and identifies an untru
 
 test('reinstallation reuses the current platform and accepts the fresh probe without a second scan', async () => {
   const calls = [];
+  let finish;
+  const installing = new Promise(resolve => { finish = resolve; });
   const ui = mount({
     firmwareStatus: async platform => { calls.push(['probe', platform]); return vendorStatus('installed'); },
     firmwareInstallDriver: async platform => {
       calls.push(['install', platform]);
-      return { ok: true, status: vendorStatus('bound') };
+      return installing;
     },
   }, { platformHint: 'mtk', requestId: 'reinstall-a' });
   await flush();
   assert.equal(firmwareDriverAction(ui.view().status), 'reinstall');
+  ui.view().setConfirm(true);
+  assert.equal(ui.view().confirm, true);
+  const operation = ui.view().act('install');
+  assert.equal(ui.view().confirm, false);
+  assert.equal(ui.view().busy, 'install');
+  ui.view().setConfirm(true);
+  assert.equal(ui.view().confirm, false);
   await ui.view().act('install');
+  ui.view().changePlatform('rk');
+  assert.equal(ui.view().platform, 'mtk');
+  finish({ ok: true, status: vendorStatus('bound') });
+  await operation;
+  assert.equal(ui.view().confirm, false);
+  assert.equal(ui.view().busy, '');
   assert.equal(ui.view().status.state, 'bound');
   assert.deepEqual(calls, [['probe', 'mtk'], ['install', 'mtk']]);
   ui.unmount();
+});
+
+test('cancelled or failed MTK reinstallation clears the pending state and leaves no stale confirmation', async () => {
+  const outcomes = [{ cancelled: true }, { ok: false, code: 'install-failed' }, Error('installer quit unexpectedly')];
+  for (const outcome of outcomes) {
+    const ui = mount({
+      firmwareStatus: async () => vendorStatus('installed'),
+      firmwareInstallDriver: async () => {
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      },
+    }, { platformHint: 'mtk', requestId: 'reinstall-outcome' });
+    await flush();
+    ui.view().setConfirm(true);
+    const operation = ui.view().act('install');
+    assert.equal(ui.view().confirm, false);
+    assert.equal(ui.view().busy, 'install');
+    await operation;
+    assert.equal(ui.view().confirm, false);
+    assert.equal(ui.view().busy, '');
+    ui.view().setConfirm(true);
+    assert.equal(ui.view().confirm, true, 'The next explicit attempt may open a fresh confirmation');
+    ui.unmount();
+  }
 });
 
 test('page reentry reuses status and only an explicit refresh forces a new driver probe', async () => {

@@ -191,6 +191,7 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
   const reinstall = driverAction === 'reinstall';
   const driverActionLabel = reinstall ? tr('重新安装驱动') : tr('安装驱动');
   const driverState = view.readError ? 'unknown' : view.status?.state;
+  const supportOpen = view.supportExpanded ?? Boolean(direct.enabled === false || direct.unavailable);
   return <div className={`firmware-workspace min-w-0 space-y-4 ${theme.text}`}>
     <div className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card}`}>
       <div role="group" aria-label={tr('选择刷机平台')} className="grid grid-cols-2 gap-2.5">
@@ -212,14 +213,15 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
           blocked={Boolean(view.busy || view.confirm || direct.globalBusy && !direct.running)} />
       </div>
     </section>
-    <details open={direct.enabled === false || direct.unavailable || undefined} className={`group min-w-0 rounded-xl border ${theme.card}`}>
-      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-xl p-4 focus-visible:outline-2 focus-visible:outline-emerald-500">
+    <details open={supportOpen} className={`group min-w-0 rounded-xl border ${theme.card}`}>
+      <summary onClick={event => { event.preventDefault(); view.setSupportExpanded(!supportOpen); }}
+        className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-xl p-4 focus-visible:outline-2 focus-visible:outline-emerald-500">
         <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <ChevronDown size={16} className="-rotate-90 shrink-0 transition-transform group-open:rotate-0" aria-hidden="true" />
           <span className="min-w-0 break-words">{tr('工具、驱动与厂商工具')}</span>
         </span>
-        {!direct.running && <span className={`text-xs ${driverState === 'missing' || driverState === 'problem' ? warningText(theme) : theme.textMuted}`}>
-          {view.checking ? tr('正在检测驱动…') : (drivers[driverState] || drivers.unknown)()}
+        {!direct.running && <span aria-live="polite" className={`text-xs ${driverState === 'missing' || driverState === 'problem' ? warningText(theme) : theme.textMuted}`}>
+          {view.busy === 'install' ? tr('正在安装驱动…') : view.checking ? tr('正在检测驱动…') : (drivers[driverState] || drivers.unknown)()}
         </span>}
       </summary>
       <div className="firmware-steps border-t border-current/10 p-4">
@@ -231,6 +233,6 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
       title={reinstall ? tr('确认重新安装 {0} 驱动', { 0: platformName }) : tr('确认安装 {0} 驱动', { 0: platformName })}
       message={tr('安装需要 Windows 管理员授权，完成后将自动复查。')}
       detail={view.status?.installer?.needsConfirmation ? tr('将打开当前目录中的未签名厂商安装器。请确认工具来源可信。') : undefined}
-      confirmLabel={driverActionLabel} loading={view.busy === 'install'} onCancel={() => view.setConfirm(false)} onConfirm={() => view.act('install')} />
+      confirmLabel={driverActionLabel} onCancel={() => view.setConfirm(false)} onConfirm={() => view.act('install')} />
   </div>;
 }

@@ -18,7 +18,7 @@ function renderWorkspace(view, direct) {
     ...icons, jsx, createElement: jsx, tr: label => label, useLocale() {}, isDarkTheme: () => false, formatBytes: String,
     useFirmwareWorkspace: () => ({ platform: 'rk', status: { state: 'installed' }, ...view }),
     useFirmwareDirect: () => direct,
-    firmwareDriverAction: () => null,
+    firmwareDriverAction: () => view.driverAction ?? null,
     FirmwareDirectPanel: 'direct-panel',
     DangerConfirmModal: 'confirm-modal',
   });
@@ -33,7 +33,7 @@ test('firmware and the direct workflow precede collapsed tools while startup res
   const direct = order.findIndex(node => node.type === 'direct-panel');
   const tools = order.findIndex(node => node.type === 'details' && /工具、驱动与厂商工具/.test(text(node)));
   assert.ok(preflight >= 0 && preflight < direct && direct < tools);
-  assert.equal(order[tools].props.open, undefined);
+  assert.equal(order[tools].props.open, false);
   assert.match(text(tree), /正在恢复上次固件…/);
   const choose = button(tree, '选择固件');
   assert.equal(choose.props.disabled, false);
@@ -51,10 +51,42 @@ test('restored firmware is ready to replace and vendor fallback is expanded if d
   assert.ok(button(tree, '打开厂商工具'));
 });
 
+test('manual tools visibility overrides the automatic fallback and the summary uses one controlled toggle', () => {
+  for (const [expanded, direct] of [[true, { enabled: true }], [false, { enabled: false, unavailable: true }]]) {
+    const calls = [];
+    const tree = renderWorkspace({ supportExpanded: expanded, setSupportExpanded: value => calls.push(value) }, direct);
+    const tools = nodes(tree).find(node => node.type === 'details' && /工具、驱动与厂商工具/.test(text(node)));
+    assert.equal(tools.props.open, expanded);
+    const summary = nodes(tools).find(node => node.type === 'summary');
+    let prevented = false;
+    summary.props.onClick({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.deepEqual(calls, [!expanded]);
+  }
+});
+
 test('the active flash can use its own entry action while other workspace operations are locked', () => {
   const own = renderWorkspace({}, { enabled: true, globalBusy: true, running: true });
   assert.equal(nodes(own).find(node => node.type === 'direct-panel').props.blocked, false);
   assert.equal(button(own, '选择固件').props.disabled, true);
   const other = renderWorkspace({}, { enabled: true, globalBusy: true, running: false });
   assert.equal(nodes(other).find(node => node.type === 'direct-panel').props.blocked, true);
+});
+
+test('driver confirmation hands off to a locked inline installation state', () => {
+  const actions = [];
+  const view = { platform: 'mtk', driverAction: 'reinstall', confirm: true, supportExpanded: true, act: action => actions.push(action) };
+  const initial = renderWorkspace(view, { enabled: true });
+  const modal = nodes(initial).find(node => node.type === 'confirm-modal');
+  assert.equal(modal.props.open, true);
+  assert.equal(modal.props.confirmLabel, '重新安装驱动');
+  assert.equal(nodes(initial).find(node => node.type === 'direct-panel').props.blocked, true);
+  modal.props.onConfirm();
+  assert.deepEqual(actions, ['install']);
+
+  const installing = renderWorkspace({ ...view, confirm: false, busy: 'install' }, { enabled: true });
+  assert.equal(nodes(installing).find(node => node.type === 'confirm-modal').props.open, false);
+  assert.equal(button(installing, '正在安装驱动…').props.disabled, true);
+  assert.equal(nodes(installing).find(node => node.type === 'direct-panel').props.blocked, true);
+  assert.equal(button(installing, '打开厂商工具').props.disabled, true);
 });
