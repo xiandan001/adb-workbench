@@ -18,11 +18,11 @@ const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const { getAppVersion } = require('./version.cjs');
 const {
   AGNES_API_URL,
-  AGNES_API_KEY,
   AGNES_MODEL,
   AI_MAX_LOG_LINES,
   AI_MAPREDUCE_THRESHOLD_BYTES,
   AI_CHUNK_LINES,
+  getInitialKeySlot,
 } = aiAnalyze.aiKeys;
 
 const MCP_SERVER_NAME = 'Device Log Analyzer MCP';
@@ -483,9 +483,9 @@ async function callMcpTool(name, args, signal) {
         port: 443,
         path: urlObj.pathname,
         method: 'POST',
+        builtinKeySlot: getInitialKeySlot(),
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${AGNES_API_KEY}`
+          'Content-Type': 'application/json'
         }
       }, (res) => {
         let body = '';

@@ -1,4 +1,3 @@
-const https = require('node:https');
 const { tr } = require('./localization.cjs');
 const { analysisMessages } = require('./analysis-language.cjs');
 
@@ -6,7 +5,7 @@ const LIMITS = Object.freeze({ timeoutMs: 90000, inputBytes: require('./ai-works
 
 function builtinConfig() {
   const keys = require('./ai-keys.cjs');
-  return { url: keys.AGNES_API_URL, model: keys.AGNES_MODEL, key: keys.AGNES_API_KEYS?.[keys.getAgnesKeyIndex()] };
+  return { url: keys.AGNES_API_URL, model: keys.AGNES_MODEL, slot: keys.getCurrentKeySlot() };
 }
 
 function failure(code) {
@@ -54,18 +53,20 @@ function prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, def
     const config = getConfig();
     const url = new URL(config?.url);
     if (url.protocol !== 'https:' || url.username || url.password || url.hash
-      || typeof config.key !== 'string' || !config.key.trim() || /[\r\n]/.test(config.key)
+      || !Number.isSafeInteger(config.slot) || config.slot < 0
       || typeof config.model !== 'string' || !config.model.trim()) return { error: failure('unavailable') };
     const payload = { model: config.model, messages: analysisMessages(systemPrompt, [], userContent), stream: false, temperature: 0.2, max_tokens: maxTokens };
     const body = deferred ? '' : JSON.stringify(payload);
     return { body, ...(deferred ? { payload } : {}), options: {
       protocol: 'https:', hostname: url.hostname, port: url.port || 443, path: `${url.pathname}${url.search}`, method: 'POST', rejectUnauthorized: true,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), Authorization: `Bearer ${config.key}` }
+      builtinKeySlot: config.slot,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     } };
   } catch { return { error: failure('unavailable') }; }
 }
 
-function createClientMethods({ request = https.request, getConfig = builtinConfig, serializeBody, deferTimeoutUntilAuthorized = false } = {}) {
+function createClientMethods({ request = (...args) => require('./ai-outbound-transport.cjs').request(...args), getConfig = builtinConfig,
+  serializeBody, deferTimeoutUntilAuthorized = false } = {}) {
   async function prepare({ systemPrompt, userContent, signal, maxTokens = 2200 } = {}) {
     if (signal?.aborted) return { error: failure('cancelled') };
     const prepared = prepareRequest({ systemPrompt, userContent, maxTokens }, getConfig, Boolean(serializeBody));

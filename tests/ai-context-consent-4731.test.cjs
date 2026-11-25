@@ -25,7 +25,7 @@ for (const decision of ['cancel', 'send']) test(`asynchronously prepared complet
     },
   });
   const batch = createBuiltinBatchClient({ request: transport.request,
-    getConfig: () => ({ url: 'https://fixture.invalid/chat', model: 'fixture', key: 'memory-only' }), deferTimeoutUntilAuthorized: true,
+    getConfig: () => ({ url: 'https://fixture.invalid/chat', model: 'fixture', slot: 0 }), deferTimeoutUntilAuthorized: true,
     serializeBody: async payload => { await tick(); return JSON.stringify(payload); } });
   const requests = Array.from({ length: 3 }, (_, index) => ({ systemPrompt: 'Inspect', userContent: JSON.stringify({ index }), maxTokens: 3000 }));
   const pending = transport.withOperation({ title: 'fixture', kind: 'summary', contentFormat: 'workspace-json' },
@@ -52,7 +52,7 @@ test('a full sixteen-request batch serializes through the real bounded worker be
     membership: async () => ({ activated: true, scope: 'vip' }), prepare: prepareBatch, request: () => { calls++; assert.fail('No approval'); } });
   t.after(() => transport.cleanup());
   const client = createBuiltinBatchClient({ request: transport.request, deferTimeoutUntilAuthorized: true,
-    getConfig: () => ({ url: 'https://fixture.invalid/chat', model: 'fixture', key: 'memory-only' }),
+    getConfig: () => ({ url: 'https://fixture.invalid/chat', model: 'fixture', slot: 0 }),
     serializeBody: (payload, options) => runWorkspaceJob('transportBody', { payload }, options) });
   const pending = transport.withOperation({ title: 'sixteen', contentFormat: 'workspace-json' }, () => client(
     Array.from({ length: 16 }, (_, index) => ({ systemPrompt: 'Inspect', userContent: JSON.stringify({ index }), maxTokens: 3000 })),

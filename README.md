@@ -100,6 +100,8 @@ npm run electron:dev
 
 ### 构建安装包
 
+内置 AI 的 Windows x64 原生模块需要 Visual Studio 2022 C++ Build Tools、Python 和与项目 Electron 版本匹配的本地构建头文件及 `node.lib`。构建时可使用已从 Git 排除的 `electron/api-keys.cjs`（参考模板），或由构建环境注入 `AGNES_API_KEYS`。安装包不包含这些输入。仅做本地源码开发时，先运行 `npm run build:builtin-ai` 即可在 `npm run electron:dev` 中使用内置 AI。
+
 ```bash
 npm run electron:build
 ```

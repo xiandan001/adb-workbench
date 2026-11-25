@@ -13,10 +13,9 @@ const logAnalyzer = require('./log-analyzer.cjs');
 const aiKeys = require('./ai-keys.cjs');
 const {
   AGNES_API_URL,
-  AGNES_API_KEYS,
   AGNES_MODEL,
-  getAgnesKeyIndex,
-  getNextApiKey,
+  getCurrentKeySlot,
+  getNextKeySlot,
 } = aiKeys;
 
 const SMART_SEARCH_CHUNK_SIZE = 1000; // 每块 1000 条日志
@@ -105,9 +104,9 @@ function register(rawIpcMain) {
           port: 443,
           path: urlObj.pathname,
           method: 'POST',
+          builtinKeySlot: getCurrentKeySlot(),
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${AGNES_API_KEYS[getAgnesKeyIndex()]}`,
             'Accept': 'application/json'
           },
           timeout: 8000 // 8 秒超时，快速失败
@@ -262,7 +261,7 @@ function register(rawIpcMain) {
         const REQUEST_TIMEOUT_MS = 15000; // 单次请求超时 15 秒
         const RETRY_DELAY_MS = 1000; // 重试间隔 1 秒
 
-        function doRequest(currentKey) {
+        function doRequest(builtinKeySlot) {
           if (myController.signal.aborted) {
             resolve(null);
             return;
@@ -273,9 +272,9 @@ function register(rawIpcMain) {
             port: 443,
             path: urlObj.pathname,
             method: 'POST',
+            builtinKeySlot,
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${currentKey}`,
               'Accept': 'application/json'
             },
             signal: myController.signal,
@@ -288,7 +287,7 @@ function register(rawIpcMain) {
                 if (retryCount < AI_MAX_RETRIES && (res.statusCode === 429 || res.statusCode >= 500)) {
                   retryCount++;
                   console.warn(`[SmartSearch] 块 ${chunk.index} 状态码 ${res.statusCode}，第 ${retryCount} 次重试…`);
-                  setTimeout(() => doRequest(getNextApiKey()), RETRY_DELAY_MS);
+                  setTimeout(() => doRequest(getNextKeySlot()), RETRY_DELAY_MS);
                   return;
                 }
                 console.error(`[SmartSearch] 块 ${chunk.index} API 错误: ${res.statusCode}`);
@@ -318,7 +317,7 @@ function register(rawIpcMain) {
                   if (retryCount < AI_MAX_RETRIES) {
                     retryCount++;
                     console.warn(`[SmartSearch] 块 ${chunk.index} 响应无 JSON，第 ${retryCount} 次重试…`);
-                    setTimeout(() => doRequest(getNextApiKey()), RETRY_DELAY_MS);
+                    setTimeout(() => doRequest(getNextKeySlot()), RETRY_DELAY_MS);
                     return;
                   }
                   resolve({ chunkIndex: chunk.index, matchedLines: [], explanation: '' });
@@ -327,7 +326,7 @@ function register(rawIpcMain) {
                 if (retryCount < AI_MAX_RETRIES) {
                   retryCount++;
                   console.warn(`[SmartSearch] 块 ${chunk.index} 解析失败: ${e.message}，第 ${retryCount} 次重试…`);
-                  setTimeout(() => doRequest(getNextApiKey()), RETRY_DELAY_MS);
+                  setTimeout(() => doRequest(getNextKeySlot()), RETRY_DELAY_MS);
                   return;
                 }
                 console.error(`[SmartSearch] 块 ${chunk.index} 解析失败（已耗尽重试）:`, e.message);
@@ -348,7 +347,7 @@ function register(rawIpcMain) {
             if (retryCount < AI_MAX_RETRIES) {
               retryCount++;
               console.warn(`[SmartSearch] 块 ${chunk.index} 错误: ${e.message}，第 ${retryCount} 次重试…`);
-              setTimeout(() => doRequest(getNextApiKey()), RETRY_DELAY_MS);
+              setTimeout(() => doRequest(getNextKeySlot()), RETRY_DELAY_MS);
               return;
             }
             console.error(`[SmartSearch] 块 ${chunk.index} 网络错误（已耗尽重试）:`, e.message);
@@ -359,7 +358,7 @@ function register(rawIpcMain) {
           req.end();
         }
 
-        doRequest(AGNES_API_KEYS[getAgnesKeyIndex()]);
+        doRequest(getCurrentKeySlot());
       });
     }
 

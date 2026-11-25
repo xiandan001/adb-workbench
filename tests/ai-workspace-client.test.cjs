@@ -5,7 +5,7 @@ const { createBuiltinClient, LIMITS } = require('../electron/lib/ai-workspace-cl
 const { withLocale } = require('../electron/lib/localization.cjs');
 
 const input = { systemPrompt: 'Return one synthetic result.', userContent: 'Synthetic fixture only.' };
-const config = { url: 'https://fixture.invalid/v1/chat/completions?route=fixture', model: 'fixture-model', key: 'fixture-not-a-real-key' };
+const config = { url: 'https://fixture.invalid/v1/chat/completions?route=fixture', model: 'fixture-model', slot: 2 };
 const responseBody = (text = '{"ok":true}', usage) => JSON.stringify({ choices: [{ message: { content: text }, finish_reason: 'stop' }], ...(usage ? { usage } : {}) });
 
 function harness({ status = 200, body = responseBody(), headers = {}, action, configOverride, synchronous = false, serializeBody } = {}) {
@@ -47,7 +47,8 @@ test('builtin client sends one isolated bounded request using the existing confi
   assert.equal(options.protocol, 'https:');
   assert.equal(options.rejectUnauthorized, true);
   assert.equal(options.path, '/v1/chat/completions?route=fixture');
-  assert.equal(options.headers.Authorization, `Bearer ${config.key}`);
+  assert.equal(options.builtinKeySlot, config.slot);
+  assert.equal(Object.hasOwn(options.headers, 'Authorization'), false);
   assert.equal(options.headers['Content-Length'], Buffer.byteLength(body));
   const payload = JSON.parse(body);
   assert.equal(payload.stream, false);
@@ -57,7 +58,6 @@ test('builtin client sends one isolated bounded request using the existing confi
   assert.match(payload.messages[0].content, /日本語/);
   assert.equal(payload.messages[1].content, input.userContent);
   assert.equal(Object.hasOwn(payload, 'tools'), false);
-  assert.equal(JSON.stringify(result).includes(config.key), false);
 });
 
 test('missing or malformed token usage is unknown rather than zero', async () => {
@@ -73,7 +73,7 @@ test('async transport serialization receives no credentials and cancelled prepar
   let seen;
   const h = harness({ serializeBody: async payload => { seen = payload; return JSON.stringify(payload); } });
   assert.equal((await h.client(input)).ok, true);
-  assert.equal(JSON.stringify(seen).includes(config.key), false);
+  assert.equal(Object.hasOwn(seen, 'builtinKeySlot'), false);
   assert.equal(h.calls[0].options.headers['Content-Length'], Buffer.byteLength(h.calls[0].body));
   let finish;
   const stopped = harness({ serializeBody: payload => new Promise(resolve => { finish = () => resolve(JSON.stringify(payload)); }) });
@@ -88,7 +88,7 @@ test('invalid input and configuration never perform a request or expose configur
     assert.equal((await h.client(args)).code, 'invalid_input');
     assert.equal(h.calls.length, 0);
   }
-  for (const configOverride of [{ url: 'http://fixture.invalid/' }, { url: 'https://user:secret@fixture.invalid/' }, { url: 'malformed-secret-url' }, { key: '' }, { key: 'secret\r\nInjected: value' }, { model: '' }]) {
+  for (const configOverride of [{ url: 'http://fixture.invalid/' }, { url: 'https://user:secret@fixture.invalid/' }, { url: 'malformed-secret-url' }, { slot: -1 }, { slot: '2' }, { slot: undefined }, { model: '' }]) {
     const h = harness({ configOverride });
     const result = await h.client(input);
     assert.equal(result.code, 'unavailable');

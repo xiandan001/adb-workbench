@@ -41,7 +41,7 @@ superpowers/specs/
 **/superpowers/specs/
 .superpowers/
 
-# Private API keys (local only, packed into release builds by electron-builder)
+# Private API keys (local build input only, never copied into the app)
 electron/api-keys.cjs
 
 # VIP license generator (local only, contains private key)

@@ -16,7 +16,7 @@ test('2000 ordinary long logcat rows above 128 KiB survive freeze and an actual 
   const evidence = createEvidenceAdapter({ runAdb: async (args, options) => {
     adbCalls.push({ args, options }); return { ok: true, stdout: args.includes('get-state') ? 'device' : raw };
   } });
-  const client = createBuiltinClient({ getConfig: () => ({ url: 'https://fixture.invalid/chat', key: 'fixture', model: 'fixture' }), request: (_options, receive) => {
+  const client = createBuiltinClient({ getConfig: () => ({ url: 'https://fixture.invalid/chat', slot: 0, model: 'fixture' }), request: (_options, receive) => {
     const req = new EventEmitter(); req.destroy = () => {};
     req.end = body => {
       sends.push(JSON.parse(body)); queueMicrotask(() => {

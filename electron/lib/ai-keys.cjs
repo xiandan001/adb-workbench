@@ -1,48 +1,31 @@
-// AI Key 加载与轮询管理（被 ai-analyze / auto-diagnose / smart-search / mcp 共享）
-// 多 API Key 轮询：从本地私有文件 electron/api-keys.cjs 读取，避免 Key 进入 Git 仓库
-// 该文件已加入 .gitignore，但会被 electron-builder 打包进应用，因此发布版本仍可正常使用
-// 注意：必须使用 .cjs 扩展名！因为 package.json 声明了 "type": "module"，
-//       .js 文件会被当作 ESM，require() 无法获取 module.exports 内容。
-// 若文件缺失，则尝试从环境变量 AGNES_API_KEYS（逗号分隔）读取
+const path = require('node:path');
+const { tr } = require('./localization.cjs');
 
-const AGNES_API_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
+// Only public defaults and numeric slot handles cross into the application code.
+// Neither packaged nor development execution reads a plaintext credential file.
+const nativeModule = 'veylo-builtin-ai.node';
+const isPackaged = /(?:^|[\\/])app\.asar(?:[\\/]|$)/.test(__filename);
+const nativePath = isPackaged
+  ? path.join(process.resourcesPath || path.resolve(__dirname, '../../..'), nativeModule)
+  : path.resolve(__dirname, '../../build/generated/builtin-ai', nativeModule);
 
-let AGNES_API_KEYS = [];
+let builtin;
 try {
-  const localKeys = require('../api-keys.cjs');
-  if (Array.isArray(localKeys?.AGNES_API_KEYS) && localKeys.AGNES_API_KEYS.length > 0) {
-    AGNES_API_KEYS = localKeys.AGNES_API_KEYS;
+  const candidate = require(nativePath);
+  if (typeof candidate.url === 'string' && typeof candidate.model === 'string' && Number.isSafeInteger(candidate.keyCount) &&
+    ['currentSlot', 'nextSlot', 'initialSlot', 'dispatch'].every(name => typeof candidate[name] === 'function')) builtin = candidate;
+} catch { /* Module failure must never restore the old plaintext loader. */ }
+
+const AGNES_API_URL = builtin?.url || 'https://apihub.agnes-ai.com/v1/chat/completions';
+const AGNES_MODEL = builtin?.model || 'agnes-3.0-flash';
+const keyCount = builtin?.keyCount || 0;
+
+function dispatchBuiltinRequest(options, callback) {
+  if (!builtin || !Number.isSafeInteger(options?.builtinKeySlot) || options.builtinKeySlot < 0 || options.builtinKeySlot >= keyCount) {
+    throw Object.assign(new Error(tr('内置 AI 暂不可用，请稍后重试。')), { code: 'AI_BUILTIN_UNAVAILABLE' });
   }
-} catch (e) {
-  console.warn('[AI] 未找到 electron/api-keys.cjs，将尝试从环境变量读取 API Keys');
+  return builtin.dispatch(options.builtinKeySlot, options, callback);
 }
-if (AGNES_API_KEYS.length === 0 && process.env.AGNES_API_KEYS) {
-  AGNES_API_KEYS = process.env.AGNES_API_KEYS.split(',').map(k => k.trim()).filter(Boolean);
-}
-if (AGNES_API_KEYS.length === 0) {
-  console.error('[AI] 未配置 Agnes API Keys，AI 日志分析功能将不可用。请创建 electron/api-keys.js 或设置 AGNES_API_KEYS 环境变量。');
-}
-
-// 轮询索引：随机起点，避免所有实例首次都打到同一个 Key
-let agnesKeyIndex = AGNES_API_KEYS.length > 0 ? Math.floor(Math.random() * AGNES_API_KEYS.length) : 0;
-
-// 加载时快照：MCP 的 ai_analyze 非流式接口使用此 Key（与原 main.cjs 行为保持一致）
-const AGNES_API_KEY = AGNES_API_KEYS.length > 0 ? AGNES_API_KEYS[agnesKeyIndex] : '';
-
-// 获取当前 Key（不递增）
-function getCurrentApiKey() {
-  if (AGNES_API_KEYS.length === 0) return '';
-  return AGNES_API_KEYS[agnesKeyIndex];
-}
-
-// 获取下一个 API Key（轮询）
-function getNextApiKey() {
-  if (AGNES_API_KEYS.length === 0) return '';
-  agnesKeyIndex = (agnesKeyIndex + 1) % AGNES_API_KEYS.length;
-  return AGNES_API_KEYS[agnesKeyIndex];
-}
-
-const AGNES_MODEL = 'agnes-3.0-flash';
 
 // 模型上下文窗口上限（tokens），用于前端展示上下文使用率
 const AI_MODEL_MAX_CONTEXT_TOKENS = require('./ai-model-request-limits.cjs').contextTokens;
@@ -67,9 +50,8 @@ const AI_COMPRESSED_MSG_MAX_BYTES = 2 * 1024;     // 超过 2KB 的历史消息�
 
 module.exports = {
   AGNES_API_URL,
-  AGNES_API_KEYS,
-  AGNES_API_KEY,
   AGNES_MODEL,
+  keyCount,
   AI_MAX_LOG_LINES,
   AI_MAX_CONTEXT_MESSAGES,
   AI_MAX_CONTEXT_BYTES,
@@ -80,7 +62,8 @@ module.exports = {
   AI_CONTEXT_COMPRESS_THRESHOLD,
   AI_COMPRESSED_MSG_MAX_BYTES,
   AI_MODEL_MAX_CONTEXT_TOKENS,
-  getAgnesKeyIndex: () => agnesKeyIndex,
-  getCurrentApiKey,
-  getNextApiKey,
+  getCurrentKeySlot: () => builtin?.currentSlot() ?? -1,
+  getNextKeySlot: () => builtin?.nextSlot() ?? -1,
+  getInitialKeySlot: () => builtin?.initialSlot() ?? -1,
+  dispatchBuiltinRequest,
 };

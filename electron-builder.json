@@ -9,8 +9,16 @@
   "files": [
     "dist/**/*",
     "electron/**/*",
+    "!electron/api-keys.cjs",
+    "!electron/api-keys.template.cjs",
+    "!native/builtin-ai/**/*",
+    "!**/credentials.generated.h",
+    "!**/.env",
+    "!**/.env.*",
+    "!**/*.{obj,pdb,rsp}",
     "icon.png"
   ],
+  "afterPack": "./scripts/build-builtin-ai.cjs",
   "extraFiles": [
     {
       "from": "hdc",
@@ -27,6 +35,7 @@
   ],
   "extraResources": [
     { "from": "build/generated/installer-ui/VeyloInstallWait.exe", "to": "installer-wait.exe" },
+    { "from": "build/generated/builtin-ai/veylo-builtin-ai.node", "to": "veylo-builtin-ai.node" },
     { "from": "build/firmware-drivers", "to": "firmware-drivers", "filter": ["**/*.inf", "**/*.cat", "**/*.sys"] }
   ],
   "win": {

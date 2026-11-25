@@ -22,7 +22,7 @@ const responses = {
 // Load the actual production register/factory. Only environment/configuration,
 // devices, storage, processor scheduling and the final network socket are faked.
 function fixture({ method = 'plan', holdResponse = false } = {}) {
-  const calls = [], handlers = new Map(), config = { url: 'https://workspace.fixture/v1/chat', model: 'fixture', key: 'never-preview-fixture-key' };
+  const calls = [], handlers = new Map(), config = { url: 'https://workspace.fixture/v1/chat', model: 'fixture', slot: 0 };
   const owner = Object.assign(new EventEmitter(), { id: 7, mainFrame: {}, isDestroyed: () => false, send() {} });
   const window = { webContents: owner, isDestroyed: () => false }, membership = async () => ({ activated: true, scope: 'vip' });
   const transport = createOutboundTransport({ getOwner: () => owner, trustedOwner: () => owner, getEndpoint: () => config.url,
@@ -86,7 +86,7 @@ for (const method of ['plan', 'analyze', 'generateTask']) {
     assert.equal(f.calls.length, 0);
     await assert.rejects(() => f.transport.gate.decide(f.owner, { previewId: preview.id, decision: 'send' }), { code: 'AI_SEND_CONSENT' });
     const full = await f.approve(preview), text = JSON.stringify(full);
-    assert.ok(!text.includes('PRIVATE-QUESTION')); assert.ok(!text.includes('PRIVATE-EVIDENCE')); assert.ok(!text.includes('never-preview-fixture-key'));
+    assert.ok(!text.includes('PRIVATE-QUESTION')); assert.ok(!text.includes('PRIVATE-EVIDENCE')); assert.ok(!text.includes('builtinKeySlot'));
     const response = await result; assert.equal(response.ok, true, response.error); assert.equal(f.calls.length, 1);
     assert.deepEqual(JSON.parse(f.calls[0].body).messages, full.selectedRequest.messages);
     assert.equal(createHash('sha256').update(f.calls[0].body).digest('hex'), full.selectedRequest.digest);

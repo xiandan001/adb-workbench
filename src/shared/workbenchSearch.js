@@ -1,13 +1,17 @@
 import { tr } from './i18n.js';
+import { settingsCategories, settingsCategoryForSection } from './settingsNavigation.js';
 
 export function searchDestinations() {
+  const categories = Object.fromEntries(settingsCategories().map(({ id, label }) => [id, label]));
   const settings = [
     ['settings-commands', tr('快捷命令')], ['settings-cast', tr('投屏')],
     ['settings-paths', tr('保存路径')], ['settings-appearance', tr('外观')],
-    ['settings-data', tr('数据迁移')], ['settings-update', tr('更新')],
-    ['settings-danger', tr('高危操作')],
-  ].map(([id, title]) => ({ id: `setting:${id}`, title, group: tr('偏好设置'),
-    description: `${tr('偏好设置')} → ${title}`, destination: { kind: 'settings', id } }));
+    ['settings-data', tr('数据迁移')], ['settings-support', tr('支持与诊断'), [tr('问题反馈'), tr('应用日志')]],
+    ['settings-danger', tr('高危操作')], ['settings-legal', tr('法律'), [tr('第三方许可')]],
+    ['settings-update', tr('版本与更新'), [tr('检查更新'), tr('更新日志'), tr('当前版本')]],
+  ].map(([id, title, keywords]) => ({ id: `setting:${id}`, title, keywords, group: tr('偏好设置'),
+    description: [...new Set([tr('偏好设置'), categories[settingsCategoryForSection(id)], title])].join(' → '),
+    destination: { kind: 'settings', id } }));
   const paths = [
     ['screenshotPath', tr('截图保存位置'), tr('截图路径')],
     ['screenRecordPath', tr('录屏保存位置'), tr('录屏路径')],

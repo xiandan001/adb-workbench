@@ -1,0 +1,36 @@
+.preferences-frame {
+  width: 100%;
+  max-width: 70rem;
+  min-width: 0;
+  margin-inline: auto;
+  container: preferences / inline-size;
+}
+
+.preferences-category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .375rem;
+}
+
+.preferences-software-layout {
+  display: grid;
+  min-width: 0;
+  gap: 1rem;
+}
+
+.preferences-software-directory { display: none; }
+.preferences-category-detail { display: none; }
+
+@container preferences (min-width: 42rem) {
+  .preferences-category-detail { display: block; }
+  .preferences-theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@container preferences (min-width: 46rem) {
+  .preferences-software-layout {
+    grid-template-columns: 11.75rem minmax(0, 1fr);
+    align-items: start;
+  }
+  .preferences-software-directory { display: block; }
+  .preferences-software-select { display: none; }
+}

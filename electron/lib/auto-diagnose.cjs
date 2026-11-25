@@ -20,10 +20,9 @@ const vip = require('./vip.cjs');
 const { canUseMembershipFeature } = require('./membership-entitlements.cjs');
 const {
   AGNES_API_URL,
-  AGNES_API_KEYS,
   AGNES_MODEL,
-  getAgnesKeyIndex,
-  getNextApiKey,
+  getCurrentKeySlot,
+  getNextKeySlot,
 } = aiAnalyze.aiKeys;
 
 // 日志诊断规则库：内置规则基础版可用，自定义规则与导入导出由会员版解锁。
@@ -638,7 +637,7 @@ function register(rawIpcMain) {
       const AI_MAX_RETRIES = 0;
       let retryCount = 0;
 
-      function doRequest(currentKey) {
+      function doRequest(builtinKeySlot) {
         const controller = aiAnalyze.createNewAiAbortController();
 
         const options = {
@@ -646,9 +645,9 @@ function register(rawIpcMain) {
           port: 443,
           path: urlObj.pathname,
           method: 'POST',
+          builtinKeySlot,
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentKey}`,
             'Accept': 'text/event-stream'
           },
           signal: controller.signal
@@ -663,9 +662,8 @@ function register(rawIpcMain) {
               if (!aiAnalyze.hasActiveAiRequest()) return;
               if (retryCount < AI_MAX_RETRIES && (res.statusCode === 429 || res.statusCode >= 500)) {
                 retryCount++;
-                const nextKey = getNextApiKey();
                 console.log(`[AI-AutoDiagnose] API Key 出错(${res.statusCode})，第 ${retryCount} 次重试`);
-                doRequest(nextKey);
+                doRequest(getNextKeySlot());
                 return;
               }
               if (!sender.isDestroyed()) {
@@ -740,9 +738,8 @@ function register(rawIpcMain) {
             if (e.name === 'AbortError' || !aiAnalyze.hasActiveAiRequest()) return;
             if (retryCount < AI_MAX_RETRIES && !fullResponse) {
               retryCount++;
-              const nextKey = getNextApiKey();
               console.log(`[AI-AutoDiagnose] 流式网络错误，第 ${retryCount} 次重试`);
-              doRequest(nextKey);
+              doRequest(getNextKeySlot());
               return;
             }
             if (!sender.isDestroyed()) {
@@ -766,9 +763,8 @@ function register(rawIpcMain) {
           }
           if (retryCount < AI_MAX_RETRIES && !fullResponse) {
             retryCount++;
-            const nextKey = getNextApiKey();
             console.log(`[AI-AutoDiagnose] 连接错误(${e.message})，第 ${retryCount} 次重试`);
-            doRequest(nextKey);
+            doRequest(getNextKeySlot());
             return;
           }
           if (!sender.isDestroyed()) {
@@ -781,7 +777,7 @@ function register(rawIpcMain) {
         req.end();
       }
 
-      doRequest(AGNES_API_KEYS[getAgnesKeyIndex()]);
+      doRequest(getCurrentKeySlot());
       return { ok: true, autoDiagnose: true, issueCount: issues.length };
     } catch (error) {
       console.error('Auto-diagnose analyze error:', error);

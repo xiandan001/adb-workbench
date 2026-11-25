@@ -16,8 +16,8 @@ const ctx = require('./app-context.cjs');
 
 const {
   AGNES_API_URL,
-  AGNES_API_KEYS,
   AGNES_MODEL,
+  keyCount,
   AI_MAX_LOG_LINES,
   AI_MAX_CONTEXT_MESSAGES,
   AI_MAX_CONTEXT_BYTES,
@@ -28,8 +28,8 @@ const {
   AI_CONTEXT_COMPRESS_THRESHOLD,
   AI_COMPRESSED_MSG_MAX_BYTES,
   AI_MODEL_MAX_CONTEXT_TOKENS,
-  getAgnesKeyIndex,
-  getNextApiKey,
+  getCurrentKeySlot,
+  getNextKeySlot,
 } = aiKeys;
 
 // AI 上下文状态（模块级，CommonJS 模块缓存保证单例）
@@ -375,7 +375,7 @@ function register(rawIpcMain) {
       const AI_MAX_RETRIES = 0; // Retrying or changing an authorized payload requires a new explicit preview.
       let retryCount = 0;
 
-      function doRequest(currentKey) {
+      function doRequest(builtinKeySlot) {
         aiAbortController = new AbortController();
 
         const options = {
@@ -383,9 +383,9 @@ function register(rawIpcMain) {
           port: 443,
           path: urlObj.pathname,
           method: 'POST',
+          builtinKeySlot,
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentKey}`,
             'Accept': 'text/event-stream'
           },
           signal: aiAbortController.signal
@@ -402,9 +402,8 @@ function register(rawIpcMain) {
               // 500/429/502/503 等服务端错误且还有重试次数：切换 Key 重试
               if (retryCount < AI_MAX_RETRIES && (res.statusCode === 429 || res.statusCode >= 500)) {
                 retryCount++;
-                const nextKey = getNextApiKey();
-                console.log(`[AI] API Key 出错(${res.statusCode})，第 ${retryCount} 次重试，切换 Key: ${nextKey.substring(0, 10)}...`);
-                doRequest(nextKey);
+                console.log(`[AI] API Key 出错(${res.statusCode})，第 ${retryCount} 次重试`);
+                doRequest(getNextKeySlot());
                 return;
               }
 
@@ -457,7 +456,7 @@ function register(rawIpcMain) {
                   temperature: 0.3,
                   ...(thinkingMode ? { chat_template_kwargs: { enable_thinking: true } } : {})
                 });
-                doRequest(currentKey);
+                doRequest(builtinKeySlot);
                 return;
               }
 
@@ -569,9 +568,8 @@ function register(rawIpcMain) {
             // 流式传输中的网络错误，如果还没输出内容且有重试次数
             if (retryCount < AI_MAX_RETRIES && !fullResponse) {
               retryCount++;
-              const nextKey = getNextApiKey();
-              console.log(`[AI] 流式网络错误，第 ${retryCount} 次重试，切换 Key: ${nextKey.substring(0, 10)}...`);
-              doRequest(nextKey);
+              console.log(`[AI] 流式网络错误，第 ${retryCount} 次重试`);
+              doRequest(getNextKeySlot());
               return;
             }
             if (!sender.isDestroyed()) {
@@ -598,9 +596,8 @@ function register(rawIpcMain) {
           // 连接错误，如果还没输出内容且有重试次数
           if (retryCount < AI_MAX_RETRIES && !fullResponse) {
             retryCount++;
-            const nextKey = getNextApiKey();
-            console.log(`[AI] 连接错误(${e.message})，第 ${retryCount} 次重试，切换 Key: ${nextKey.substring(0, 10)}...`);
-            doRequest(nextKey);
+            console.log(`[AI] 连接错误(${e.message})，第 ${retryCount} 次重试`);
+            doRequest(getNextKeySlot());
             return;
           }
           if (!sender.isDestroyed()) {
@@ -614,7 +611,7 @@ function register(rawIpcMain) {
       }
 
       // 首次请求使用当前 Key
-      doRequest(AGNES_API_KEYS[getAgnesKeyIndex()]);
+      doRequest(getCurrentKeySlot());
 
       return { ok: true, totalLines: lines.length, truncated, analyzedLines: truncated ? AI_MAX_LOG_LINES : lines.length };
     } catch (error) {
@@ -757,7 +754,7 @@ function clearAiConversation() {
 function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, temperature = 0.2, signal, maxTokens }) {
   if (signal?.aborted) return Promise.resolve({ ok: false, code: 'AI_SEND_CANCELLED', cancelled: true, error: tr('AI 发送已取消。') });
   return new Promise((resolve) => {
-    if (!AGNES_API_KEYS || AGNES_API_KEYS.length === 0) {
+    if (keyCount === 0) {
       resolve({ ok: false, error: tr("AI Key 未配置") });
       return;
     }
@@ -781,7 +778,7 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
       resolve(result);
     };
 
-    const doRequest = (apiKey) => {
+    const doRequest = (builtinKeySlot) => {
       let req = null;
       let timer;
 
@@ -790,10 +787,10 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
         port: 443,
         path: urlObj.pathname,
         method: 'POST',
+        builtinKeySlot,
         signal,
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Content-Type': 'application/json'
         }
       }, (res) => {
         let body = '';
@@ -804,7 +801,7 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
           if (res.statusCode !== 200) {
             if (retryCount < maxRetries && (res.statusCode === 429 || res.statusCode >= 500)) {
               retryCount += 1;
-              doRequest(getNextApiKey());
+              doRequest(getNextKeySlot());
               return;
             }
             finish({ ok: false, error: tr("API返回 {0}: {1}", { 0: res.statusCode, 1: body.slice(0, 300) }) });
@@ -829,7 +826,7 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
         if (settled) return;
         if (retryCount < maxRetries) {
           retryCount += 1;
-          doRequest(getNextApiKey());
+          doRequest(getNextKeySlot());
           return;
         }
         finish({ ok: false, code: error.code, cancelled: error.name === 'AbortError' || error.code === 'AI_SEND_CANCELLED', error: error.message });
@@ -847,7 +844,7 @@ function generateAiSummary({ systemPrompt, userContent, timeoutMs = 60000, tempe
       req.end();
     };
 
-    doRequest(AGNES_API_KEYS[getAgnesKeyIndex()]);
+    doRequest(getCurrentKeySlot());
   });
 }
 

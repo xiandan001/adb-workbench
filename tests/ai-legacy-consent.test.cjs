@@ -11,13 +11,16 @@ const { prepareBatch } = require('../electron/lib/ai-outbound-policy.cjs');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function until(predicate) { for (let index = 0; index < 200; index++) { if (predicate()) return; await tick(); } assert.fail('Legacy fixture did not settle'); }
 function fixture({ map = false, status = 200, report } = {}) {
-  const events = [], calls = [], handlers = new Map();
+  const events = [], calls = [], slots = [], handlers = new Map();
   const owner = Object.assign(new EventEmitter(), { mainFrame: {}, isDestroyed: () => false, send: (channel, payload) => events.push({ channel, payload }) });
   const entries = Array.from({ length: 1203 }, (_, index) => ({ id: `row-${index}`, raw: `log ${index} password=raw-private`, message: `log ${index} password=raw-private`, ts: 1, level: 'E', tag: 'Fixture' }));
   const transport = createOutboundTransport({ getOwner: () => owner,
     trustedOwner: event => event.sender === owner && event.senderFrame === owner.mainFrame ? owner : null,
     getEndpoint: () => 'https://builtin.fixture/v1/chat', membership: async () => ({ activated: true, scope: 'vip' }), prepare: async bodies => prepareBatch(bodies),
     request: (options, callback) => {
+      assert.ok(Number.isInteger(options.builtinKeySlot));
+      assert.ok(Object.keys(options.headers).every(key => key.toLowerCase() !== 'authorization'));
+      slots.push(options.builtinKeySlot);
       const req = new EventEmitter(); req.setTimeout = () => req;
       req.destroy = error => queueMicrotask(() => req.emit('error', error));
       req.end = body => {
@@ -38,11 +41,12 @@ function fixture({ map = false, status = 200, report } = {}) {
       };
       return req;
     } });
-  const keys = { AGNES_API_URL: 'https://builtin.fixture/v1/chat', AGNES_API_KEY: 'fixture-key', AGNES_API_KEYS: ['fixture-key'], AGNES_MODEL: 'fixture-model',
+  const keys = { AGNES_API_URL: 'https://builtin.fixture/v1/chat', keyCount: 2, AGNES_MODEL: 'fixture-model',
     AI_MAX_LOG_LINES: 100000, AI_MAX_CONTEXT_MESSAGES: 10, AI_MAX_CONTEXT_BYTES: 2 * 1024 * 1024, AI_BYTES_PER_TOKEN: 3,
     AI_CHUNK_LINES: 2, AI_MAPREDUCE_THRESHOLD_BYTES: map ? 1 : 1024 * 1024, AI_MAPREDUCE_MAX_CHUNKS: 4,
     AI_CONTEXT_COMPRESS_THRESHOLD: 2 * 1024 * 1024, AI_COMPRESSED_MSG_MAX_BYTES: 8192, AI_MODEL_MAX_CONTEXT_TOKENS: 524288,
-    getAgnesKeyIndex: () => 0, getNextApiKey: () => { assert.fail('Automatic retry must not run'); } };
+    getCurrentKeySlot: () => 1, getInitialKeySlot: () => 0,
+    getNextKeySlot: () => assert.fail('Automatic retry must not run') };
   const modules = new Map();
   function load(name, expose = '') {
     if (modules.has(name)) return modules.get(name);
@@ -86,7 +90,7 @@ function fixture({ map = false, status = 200, report } = {}) {
     if (decision === 'send') for (let index = 0; index < value.requestCount; index++) transport.gate.get(owner, { previewId: value.id, index });
     return transport.gate.decide(owner, { previewId: value.id, decision });
   }
-  return { api, load, entries, transport, owner, calls, handlers, event, events, pending, decide };
+  return { api, load, entries, transport, owner, calls, slots, handlers, event, events, pending, decide };
 }
 
 test('actual legacy streamed analysis cannot send before consent and emits request-bound events', async t => {
@@ -96,6 +100,7 @@ test('actual legacy streamed analysis cannot send before consent and emits reque
   assert.equal(result.ok, true); const preview = await f.pending(); assert.equal(f.calls.length, 0);
   await f.decide(preview); await until(() => f.events.some(event => event.channel === 'ai:streamEnd'));
   assert.equal(f.calls.length, 1); assert.ok(!JSON.stringify(f.calls).includes('raw-private'));
+  assert.deepEqual(f.slots, [1]);
   assert.ok(!JSON.stringify(f.calls).includes('question-private'));
   assert.ok(f.events.find(event => event.channel === 'ai:streamChunk').payload.requestId);
 });
@@ -112,6 +117,7 @@ test('actual legacy Map-Reduce keeps chunks but derived summary waits for its ow
   await f.decide(reduce); await started;
   await until(() => f.events.some(event => event.channel === 'ai:streamEnd'));
   assert.equal(f.calls.length, 4);
+  assert.deepEqual(f.slots, [1, 1, 1, 1]);
 });
 
 test('actual smart search separately previews keywords, then a fixed bounded concurrent chunk batch', async t => {
@@ -123,6 +129,7 @@ test('actual smart search separately previews keywords, then a fixed bounded con
   const chunks = f.transport.gate.list(f.owner).pending[0]; assert.equal(chunks.requestCount, 3); assert.equal(f.calls.length, 1);
   await f.decide(chunks); assert.equal((await result).ok, true);
   assert.equal(f.calls.length, 4); assert.ok(!JSON.stringify(f.calls).includes('raw-private'));
+  assert.deepEqual(f.slots, [1, 1, 1, 1]);
 });
 
 test('actual diagnostic and generic job summary cancellation perform no model call and preserve callers result flow', async t => {
@@ -134,6 +141,19 @@ test('actual diagnostic and generic job summary cancellation perform no model ca
   const summary = f.api.generateAiSummary({ systemPrompt: 'fixture report summary', userContent: original.report });
   await f.decide(await f.pending(), 'cancel');
   assert.equal((await summary).cancelled, true); assert.equal(original.report, 'synthetic completed evidence'); assert.equal(f.calls.length, 0);
+});
+
+test('actual diagnostic authorizes the current built-in slot only after consent', async t => {
+  const f = fixture(); t.after(() => f.transport.cleanup());
+  f.load('auto-diagnose.cjs').register({ handle: (name, fn) => f.handlers.set(name, fn) });
+  await f.handlers.get('auto-diagnose:analyze')(f.event, { issues: [{ label: 'Crash', severity: 'fatal', context: 'password=raw-private' }] });
+  const preview = await f.pending();
+  assert.deepEqual(f.slots, []);
+  await f.decide(preview);
+  await until(() => f.events.some(event => event.channel === 'ai:streamEnd'));
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.slots, [1]);
+  assert.doesNotMatch(JSON.stringify(f.calls), /raw-private/);
 });
 
 test('actual legacy Markdown picker and retry require a fresh confirmed report preview without rewriting evidence', async t => {
@@ -168,6 +188,7 @@ test('actual legacy Markdown picker and retry require a fresh confirmed report p
   const completed = await pending;
   assert.equal(completed.ok, true);
   assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.slots, [1]);
   assert.deepEqual(f.calls[0].messages, preview.messages);
   assert.equal(fs.readFileSync(filename, 'utf8'), evidence);
   assert.ok(fs.existsSync(completed.summaryPath));
@@ -180,4 +201,5 @@ test('actual MCP AI tool is independently gated and cannot authorize itself or r
   const preview = await f.pending(); assert.equal(f.calls.length, 0);
   await f.decide(preview); const result = await response;
   assert.ok(result); assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.slots, [0]);
 });

@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } fro
 import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles, HardDriveDownload } from 'lucide-react';
 import './index.css';
 import './styles/workbenchLayout.css';
+import './styles/preferences.css';
 import brandIcon from '../assets/brand/icon-128.png';
 import themes from './data/themes';
 import { getChangelog } from './data/changelogs';
@@ -32,6 +33,8 @@ import AppMessageDialogHost from './components/AppMessageDialogHost';
 import SelectMenu from './components/SelectMenu';
 import ScreenshotResult from './components/ScreenshotResult';
 import DataMigrationSettings from './components/DataMigrationSettings';
+import SettingsCategoryTabs from './components/SettingsCategoryTabs';
+import SettingsSoftwareDirectory from './components/SettingsSoftwareDirectory';
 import StartupPreferences from './components/StartupPreferences';
 import LanguagePreferences from './components/LanguagePreferences';
 import InitialLanguageDialog from './components/InitialLanguageDialog';
@@ -46,6 +49,7 @@ import { observeUpdaterState, updaterInstallLabel } from './shared/updaterState.
 import { readMigratedPreference } from './shared/dataMigrationStorage';
 import { isCommandShortcutMatch, normalizeCommandSettings } from './data/globalCommands';
 import { searchDestinations } from './shared/workbenchSearch';
+import { settingsCategoryForSection } from './shared/settingsNavigation.js';
 import { clearConfirmSuppressionMemory, isConfirmSuppressed, rememberConfirmSuppressed } from './shared/confirmMemory';
 import { isDarkTheme, resolveThemeKey } from './shared/theme';
 import useThemeScope from './shared/useThemeScope.js';
@@ -62,6 +66,7 @@ const SshWorkspace = lazy(() => import('./components/ssh/SshWorkspace'));
 const AiToolsWorkspace = lazy(() => import('./components/ai-tools/AiToolsWorkspace'));
 const AiWorkspace = lazy(() => import('./components/AiWorkspace'));
 const FirmwareWorkspace = lazy(() => import('./components/FirmwareWorkspace'));
+const SettingsLegal = lazy(() => import('./components/SettingsLegal'));
 
 async function requestAiTools(command, args = {}) {
   const response = await window.electronAPI.aiToolsRequest({ command, args });
@@ -138,6 +143,7 @@ function App() {
     setActiveTab('firmware');
   };
   const [activeSettingsSection, setActiveSettingsSection] = useState('settings-commands');
+  const [activeSettingsCategory, setActiveSettingsCategory] = useState('software');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [wifiIp, setWifiIp] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
@@ -720,7 +726,14 @@ function App() {
     if (destination) {
       const requestId = crypto.randomUUID();
       if (destination.kind === 'diagnostics') setDiagnosticOpen(true);
-      else if (destination.kind === 'settings') { setSearchDestination({ ...destination, requestId }); setActiveTab('settings'); }
+      else if (destination.kind === 'settings') {
+        const category = settingsCategoryForSection(destination.id);
+        if (!category) return;
+        setActiveSettingsCategory(category);
+        if (category === 'software') setActiveSettingsSection(destination.id);
+        setSearchDestination({ ...destination, requestId });
+        setActiveTab('settings');
+      }
       else if (destination.kind === 'ai-tool') { setSearchDestination({ ...destination, requestId }); setActiveTab('ai-tools'); }
       else if (destination.kind === 'artifact') { setIncomingArtifactRequest({ id: destination.id, requestId }); setActiveTab('artifacts'); }
       else if (destination.kind === 'history' || destination.kind === 'casebook') {
@@ -1580,23 +1593,28 @@ function App() {
   const eligibleDevices = isVipOrLoading ? deviceCards : [activeDevice || deviceCards[0]].filter(Boolean);
   const visibleDevices = filterDeviceCards(eligibleDevices, { query: deviceQuery, names: deviceNames, pinnedIds: pinnedDeviceIds });
   const lockedCount = deviceCards.length - eligibleDevices.length;
-  const settingsSectionClass = `rounded-xl border shadow-sm p-4 lg:p-6 scroll-mt-20 ${isDarkTheme(t) ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`;
+  const settingsSectionClass = `min-w-0 rounded-2xl border p-4 lg:p-6 scroll-mt-24 ${t.card}`;
   const settingsNavShellClass = isDarkTheme(t)
-    ? 'bg-[#202124] border-[#3E4145]/80'
-    : 'bg-slate-50 border-slate-200/80';
-  const settingsNavPanelClass = isDarkTheme(t)
-    ? 'bg-[#2D2F33] border-[#3E4145] shadow-[0_18px_36px_rgba(0,0,0,0.36)]'
-    : 'bg-white border-slate-200 shadow-[0_18px_36px_rgba(15,23,42,0.14)]';
+    ? 'bg-[#181818]'
+    : 'bg-slate-50';
   const settingsNavItemClass = isDarkTheme(t)
-    ? 'border-[#4A4D52] text-[#BDC1C6] hover:bg-[#3E4145] hover:text-[#E8EAED]'
-    : 'border-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800';
+    ? 'text-[#BDC1C6] hover:bg-white/5 hover:text-[#E8EAED]'
+    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800';
   const settingsNavActiveItemClass = isDarkTheme(t)
-    ? 'border-emerald-500/45 bg-emerald-500/15 text-emerald-300 shadow-sm'
-    : 'border-emerald-500/35 bg-emerald-50 text-emerald-700 shadow-sm';
-  const scrollToSettingsSection = (sectionId) => {
+    ? 'bg-emerald-500/12 text-emerald-300'
+    : 'bg-emerald-50 text-emerald-800';
+  const openSettingsSection = (sectionId) => {
+    if (sectionId === activeSettingsSection) return;
     setActiveSettingsSection(sectionId);
-    document.getElementById(sectionId)?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
+    if (mainRef.current) mainRef.current.scrollTop = 0;
   };
+  const openSettingsCategory = (category) => {
+    if (category === activeSettingsCategory) return;
+    setSearchDestination(previous => previous?.kind === 'settings' ? null : previous);
+    setActiveSettingsCategory(category);
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  };
+  const currentChangelog = activeTab === 'settings' && activeSettingsCategory === 'version' && appVersion ? getChangelog(appVersion) : null;
   const settingsSections = useMemo(() => {
     void locale;
     return [
@@ -1605,61 +1623,24 @@ function App() {
     { id: 'settings-paths', label: tr("保存路径"), icon: Folder },
     { id: 'settings-appearance', label: tr("外观"), icon: Palette },
     { id: 'settings-data', label: tr("数据迁移"), icon: DownloadCloud },
-    { id: 'settings-update', label: tr("更新"), icon: Package },
+    { id: 'settings-support', label: tr('支持与诊断'), icon: MessageSquare },
     { id: 'settings-danger', label: tr("高危操作"), icon: RotateCcw }
     ];
   }, [locale]);
 
   useEffect(() => {
-    if (activeTab !== 'settings' || searchDestination?.kind !== 'settings') return;
+    if (activeTab !== 'settings' || searchDestination?.kind !== 'settings'
+      || settingsCategoryForSection(searchDestination.id) !== activeSettingsCategory
+      || (activeSettingsCategory === 'software' && activeSettingsSection !== searchDestination.id)) return;
     const frame = requestAnimationFrame(() => {
-      const target = document.getElementById(searchDestination.field || searchDestination.id);
-      target?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
-      if (searchDestination.field) target?.focus({ preventScroll: true });
-      setActiveSettingsSection(searchDestination.id);
+      const field = searchDestination.field ? document.getElementById(searchDestination.field) : null;
+      const target = field || document.getElementById(searchDestination.id);
+      target?.scrollIntoView({ behavior: preferredScrollBehavior(), block: field ? 'center' : 'start' });
+      field?.focus({ preventScroll: true });
       setSearchDestination(previous => previous?.requestId === searchDestination.requestId ? null : previous);
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeTab, searchDestination]);
-
-  useEffect(() => {
-    if (activeTab !== 'settings') return undefined;
-
-    const scrollContainer = document.querySelector('main');
-    const sectionElements = settingsSections
-      .map((item) => document.getElementById(item.id))
-      .filter(Boolean);
-
-    if (!scrollContainer || sectionElements.length === 0) return undefined;
-
-    let frameId = null;
-    const updateActiveSection = () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(() => {
-        const navShell = scrollContainer.querySelector('[data-settings-nav="true"]');
-        const targetY = (navShell?.getBoundingClientRect().bottom ?? scrollContainer.getBoundingClientRect().top) + 16;
-        let currentSectionId = sectionElements[0].id;
-
-        sectionElements.forEach((sectionElement) => {
-          if (sectionElement.getBoundingClientRect().top <= targetY) {
-            currentSectionId = sectionElement.id;
-          }
-        });
-
-        setActiveSettingsSection((prev) => (prev === currentSectionId ? prev : currentSectionId));
-      });
-    };
-
-    updateActiveSection();
-    scrollContainer.addEventListener('scroll', updateActiveSection, { passive: true });
-    window.addEventListener('resize', updateActiveSection);
-
-    return () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      scrollContainer.removeEventListener('scroll', updateActiveSection);
-      window.removeEventListener('resize', updateActiveSection);
-    };
-  }, [activeTab, settingsSections]);
+  }, [activeTab, activeSettingsCategory, activeSettingsSection, searchDestination]);
 
   return (
     <div className={`workbench-shell flex h-screen select-none ${isDarkTheme(t) ? 'bg-[#202124] text-[#E8EAED]' : 'bg-slate-50 text-slate-900'}`}>
@@ -2020,7 +2001,7 @@ function App() {
           <div className="workbench-header-title" style={{ flex: '1 1 18rem', minWidth: 'min(100%, 18rem)' }}>
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'firmware' ? tr('固件刷机') : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : tr("全局设置")}
+              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'firmware' ? tr('固件刷机') : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : activeTab === 'settings' ? tr('偏好设置') : tr("全局设置")}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr('通过串口或网络连接设备，收发调试数据。')}</p>}
@@ -2519,31 +2500,18 @@ function App() {
           )}
 
           {activeTab === 'settings' && (
-            <div className="space-y-4">
-              <div data-settings-nav="true" className={`sticky -top-4 z-[8] -mx-4 -mt-4 px-4 pt-2 pb-2 border-b lg:-top-6 lg:-mx-6 lg:-mt-6 lg:px-6 lg:pt-3 xl:-top-8 xl:-mx-8 xl:-mt-8 xl:px-8 xl:pt-3 ${settingsNavShellClass}`}>
-                <div className={`rounded-xl border p-1.5 ${settingsNavPanelClass}`}>
-                  <div className="flex gap-2 overflow-x-auto pb-0.5">
-                    {settingsSections.map((item) => {
-                      const Icon = item.icon;
-                      const isActive = activeSettingsSection === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          aria-current={isActive ? 'true' : undefined}
-                          onClick={() => scrollToSettingsSection(item.id)}
-                          className={`min-w-[128px] shrink-0 xl:min-w-0 xl:flex-1 px-3 py-2 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 transition-all ${isActive ? settingsNavActiveItemClass : settingsNavItemClass}`}
-                        >
-                          <Icon size={15} className="shrink-0" />
-                          <span className="whitespace-nowrap">{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+            <div className="preferences-frame">
+              <div className={`sticky -top-4 z-[8] -mt-4 pt-4 pb-4 lg:-top-6 lg:-mt-6 lg:pt-6 xl:-top-8 xl:-mt-8 xl:pt-8 ${settingsNavShellClass}`}>
+                <SettingsCategoryTabs active={activeSettingsCategory} onChange={openSettingsCategory} theme={t} isDark={isDark} />
               </div>
 
-              <section id="settings-commands" className={settingsSectionClass}>
+              <div role="tabpanel" id="settings-panel-software" aria-labelledby="settings-tab-software"
+                hidden={activeSettingsCategory !== 'software'}>
+              <div className="preferences-software-layout">
+              <SettingsSoftwareDirectory sections={settingsSections} active={activeSettingsSection} select={openSettingsSection}
+                theme={t} normalClass={settingsNavItemClass} selectedClass={settingsNavActiveItemClass} />
+              <div className="min-w-0">
+              <section id="settings-commands" hidden={activeSettingsSection !== 'settings-commands'} className="min-w-0 scroll-mt-24">
               <GlobalCommandSettings
                 settings={globalCommandSettings}
                 theme={theme}
@@ -2551,7 +2519,7 @@ function App() {
               />
               </section>
 
-              <section id="settings-cast" className={settingsSectionClass}>
+              <section id="settings-cast" hidden={activeSettingsSection !== 'settings-cast'} className={settingsSectionClass}>
               <h3 className={`text-lg font-semibold mb-4 ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("Scrcpy 投屏设置")}</h3>
               <p className={`text-sm mb-6 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("这些设置将在启动新的投屏会话时应用。")}</p>
 
@@ -2610,7 +2578,7 @@ function App() {
               </div>
               </section>
 
-              <section id="settings-paths" className={settingsSectionClass}>
+              <section id="settings-paths" hidden={activeSettingsSection !== 'settings-paths'} className={settingsSectionClass}>
                 <div className="mb-5">
                   <h3 className={`text-lg font-semibold ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("保存路径")}</h3>
                   <p className={`text-sm mt-1 ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("集中管理截图、录屏、巡检、性能、任务和质量产物目录。")}</p>
@@ -2909,7 +2877,7 @@ function App() {
                 </div>
               </section>
 
-              <section id="settings-appearance" className={settingsSectionClass}>
+              <section id="settings-appearance" hidden={activeSettingsSection !== 'settings-appearance'} className={settingsSectionClass}>
                 <LanguagePreferences theme={t} isDark={isDark} />
                 <StartupPreferences theme={t} isDark={isDark} />
                 {/* Theme Selection */}
@@ -2945,17 +2913,19 @@ function App() {
                       className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${t.button.primary.split(' ')[0]} ${t.button.primary.split(' ')[1] || ''} text-white`}
                     >{tr("+ 自定义主题")}</button>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                  <div className="preferences-theme-grid grid grid-cols-2 gap-3">
                     {Object.entries(allThemes).filter(([key]) => !key.startsWith('custom_') || customThemes.some(t => t.key === key)).map(([key, themeOption]) => {
                       const isCustom = themeOption.isCustom;
                       return (
                         <div key={key} className="relative">
                           <button
                             data-theme-preserve
+                            type="button"
+                            aria-pressed={effectiveThemeKey === key}
                             onClick={() => setCurrentTheme(key)}
-                            className={`w-full p-3 rounded-xl border-2 transition-all ${
+                            className={`w-full rounded-xl border-2 p-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                               effectiveThemeKey === key
-                                ? 'border-emerald-500 shadow-lg scale-105'
+                                ? 'border-emerald-500'
                                 : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
                             } ${themeOption.preview}`}
                           >
@@ -2966,7 +2936,7 @@ function App() {
                               <div className={`w-4 h-4 rounded-full ${themeOption.button.outline.split(' ')[0]}`} />
                             </div>
                             {effectiveThemeKey === key && (
-                              <div className="absolute -top-2 -right-2 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center">
+                              <div className="absolute top-2 right-2 flex size-5 items-center justify-center rounded-full bg-emerald-500">
                                 <span className="text-white text-xs">✓</span>
                               </div>
                             )}
@@ -2996,163 +2966,17 @@ function App() {
                 </div>
               </section>
 
-              <section id="settings-data" className={settingsSectionClass}>
+              <section id="settings-data" hidden={activeSettingsSection !== 'settings-data'} className={settingsSectionClass}>
                 <DataMigrationSettings theme={t} showToast={showToast} />
               </section>
 
-              <section id="settings-update" className={settingsSectionClass}>
+              <section id="settings-support" hidden={activeSettingsSection !== 'settings-support'} className={settingsSectionClass}>
+                <h3 className={`mb-3 text-lg font-semibold ${t.text}`}>{tr('支持与诊断')}</h3>
                 <FeedbackSection theme={t} onOpen={() => setFeedbackOpen(true)} />
                 <ApplicationLogSection theme={t} />
-                {/* 关于与更新 */}
-                <div className="py-3">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Package size={16} className={isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'} />
-                    <span className={`font-medium ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr("关于与更新")}</span>
-                  </div>
-
-                  <div className="space-y-3">
-                    {/* 版本号显示 */}
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg ${isDarkTheme(t) ? 'bg-[#3E4145]/50' : 'bg-slate-50'}`}>
-                      <span className={`text-sm ${isDarkTheme(t) ? 'text-[#9AA0A6]' : 'text-[#80868B]'}`}>{tr("当前版本")}</span>
-                      <span className={`text-sm font-mono font-semibold ${isDarkTheme(t) ? 'text-cyan-400' : 'text-cyan-600'}`}>v{appVersion || '2.0.0'}</span>
-                    </div>
-
-                    {/* 自动更新开关 */}
-                    <div className={`flex items-center justify-between py-2 ${isDarkTheme(t) ? 'border-[#3E4145]' : 'border-slate-100'} border-b`}>
-                      <div>
-                        <span className={`font-medium text-sm ${isDarkTheme(t) ? 'text-[#E8EAED]' : 'text-slate-700'}`}>{tr('自动检查更新')}</span>
-                        <p className={`text-xs mt-0.5 ${isDarkTheme(t) ? 'text-[#80868B]' : 'text-[#9AA0A6]'}`}>{tr('启动 3 秒后检查，之后每 2 小时自动检测新版本')}</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={autoUpdateEnabled}
-                          aria-label={tr('自动检查更新')}
-                          onChange={(e) => setAutoUpdateEnabled(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-cyan-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
-                      </label>
-                    </div>
-
-                    {/* 更新状态与操作按钮 */}
-                    <div className="space-y-2">
-                      {/* 错误提示 */}
-                      {updaterState.error && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'}`}>
-                          <AlertCircle size={14} />
-                          <span className="flex-1">{tr(updaterState.error)}</span>
-                        </div>
-                      )}
-
-                      {/* 检查中 */}
-                      {updaterState.checking && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
-                          <Loader2 size={14} className="animate-spin" />
-                          <span>{tr("正在检查更新…")}</span>
-                        </div>
-                      )}
-
-                      {/* 已是最新版本 */}
-                      {updaterState.notAvailable && !updaterState.checking && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-slate-500/10 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                          <CheckCircle2 size={14} />
-                          <span>{tr("当前已是最新版本")}</span>
-                        </div>
-                      )}
-
-                      {/* 发现新版本 */}
-                      {updaterState.available && !updaterState.downloaded && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
-                          <DownloadCloud size={14} />
-                          <span className="font-semibold">{tr("发现新版本 v")}{updaterState.info?.version || tr("未知")}</span>
-                        </div>
-                      )}
-
-                      {/* 下载进度 */}
-                      {updaterState.downloading && updaterState.progress && (
-                        <div className={`px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-700'}`}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="flex items-center gap-1.5">
-                              <Loader2 size={12} className="animate-spin" />{tr("正在下载…")}</span>
-                            <span className="font-mono">{updaterState.progress.percent.toFixed(1)}%</span>
-                          </div>
-                          <div className={`h-1.5 rounded-full overflow-hidden ${isDarkTheme(t) ? 'bg-[#3E4145]' : 'bg-slate-200'}`}>
-                            <div
-                              className="h-full bg-cyan-500 transition-all"
-                              style={{ width: `${updaterState.progress.percent}%` }}
-                            />
-                          </div>
-                          <div className="flex justify-between mt-1 opacity-70 text-[10px]">
-                            <span>{(updaterState.progress.transferred / 1024 / 1024).toFixed(2)} MB</span>
-                            <span>{(updaterState.progress.total / 1024 / 1024).toFixed(2)} MB</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 下载完成 */}
-                      {updaterState.downloaded && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${isDarkTheme(t) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-700'}`}>
-                          <CheckCircle2 size={14} />
-                          <span className="flex-1">{tr("更新已下载完成，点击\"立即安装\"重启应用")}</span>
-                        </div>
-                      )}
-
-                      {/* 操作按钮组 */}
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {/* 检查更新按钮 */}
-                        <button
-                          onClick={handleManualUpdateCheck}
-                          disabled={updateActionBusy}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                            isDarkTheme(t)
-                              ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145] active:scale-95 shadow-sm'
-                              : 'border-slate-300 text-slate-700 hover:bg-slate-100 active:scale-95 shadow-sm'
-                          }`}
-                          title={tr("手动检查是否有新版本")}
-                        >
-                          <RefreshCw size={14} className={updaterState.checking ? 'animate-spin' : ''} />
-                          <span>{tr("检查更新")}</span>
-                        </button>
-
-                        {/* 下载按钮（发现新版本且未下载时显示） */}
-                        {updaterState.available && !updaterState.downloading && !updaterState.downloaded && (
-                          <button
-                            disabled={updateActionBusy}
-                            onClick={() => window.electronAPI?.downloadUpdate?.()}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
-                              isDarkTheme(t)
-                                ? 'bg-cyan-500 hover:bg-cyan-600 text-white'
-                                : 'bg-cyan-600 hover:bg-cyan-700 text-white'
-                            }`}
-                          >
-                            <Download size={14} />
-                            <span>{tr("下载更新")}</span>
-                          </button>
-                        )}
-
-                        {/* 立即安装按钮（下载完成后显示） */}
-                        {updaterState.downloaded && (
-                          <button
-                            disabled={updateActionBusy}
-                            onClick={handleInstallUpdate}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm ${
-                              isDarkTheme(t)
-                                ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                            }`}
-                          >
-                            <DownloadCloud size={14} />
-                            <span>{updateInstalling ? updaterInstallLabel(updaterState.installPhase) : tr("立即安装并重启")}</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </section>
 
-              <section id="settings-danger" className={settingsSectionClass}>
+              <section id="settings-danger" hidden={activeSettingsSection !== 'settings-danger'} className={settingsSectionClass}>
                 {/* 重置所有设置（放在最后） */}
                 <div className="py-2">
                   <div className="flex items-center justify-between">
@@ -3211,6 +3035,147 @@ function App() {
                   </div>
                 </div>
               </section>
+
+              </div>
+              </div>
+              </div>
+
+              <div role="tabpanel" id="settings-panel-legal" aria-labelledby="settings-tab-legal"
+                hidden={activeSettingsCategory !== 'legal'}>
+                <section id="settings-legal" className="space-y-4 scroll-mt-24">
+                  {activeSettingsCategory === 'legal' && <Suspense fallback={<p role="status" className={`p-4 text-sm ${t.textMuted}`}>{tr('加载中…')}</p>}>
+                    <SettingsLegal theme={t} />
+                  </Suspense>}
+                </section>
+              </div>
+
+              <div role="tabpanel" id="settings-panel-version" aria-labelledby="settings-tab-version"
+                hidden={activeSettingsCategory !== 'version'}>
+                <section id="settings-update" className="mx-auto w-full max-w-4xl space-y-4">
+                  <div className={`flex flex-wrap items-center justify-between gap-5 rounded-2xl border p-5 sm:p-6 ${t.card}`}>
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className={`grid size-12 shrink-0 place-items-center rounded-xl ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                        <Package size={23} aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <h2 className={`text-xs font-semibold ${t.textMuted}`}>{tr('版本与更新')}</h2>
+                        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                          <span className={`font-mono text-2xl font-semibold leading-none tracking-tight ${t.text}`}>{appVersion ? `v${appVersion}` : tr('未知')}</span>
+                          <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${isDark ? 'bg-white/7 text-[#BDC1C6]' : 'bg-slate-100 text-slate-600'}`}>{tr('当前版本')}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {currentChangelog && <button type="button" className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors ${t.button.secondary}`}
+                        onClick={() => { setChangelogContent({ version: appVersion, ...currentChangelog }); setShowChangelog(true); }}>
+                        <History size={15} aria-hidden="true" />{tr('查看更新日志')}
+                      </button>}
+                      <button type="button"
+                        onClick={handleManualUpdateCheck}
+                        disabled={updateActionBusy}
+                        className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${updaterState.available || updaterState.downloaded ? t.button.secondary : t.button.primary}`}
+                        title={tr('手动检查是否有新版本')}
+                      >
+                        <RefreshCw size={15} aria-hidden="true" className={updaterState.checking ? 'animate-spin' : ''} />
+                        {tr('检查更新')}
+                      </button>
+                      {updaterState.available && !updaterState.downloading && !updaterState.downloaded && (
+                        <button type="button"
+                          disabled={updateActionBusy}
+                          onClick={() => window.electronAPI?.downloadUpdate?.()}
+                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${t.button.primary}`}
+                        >
+                          <Download size={15} aria-hidden="true" />
+                          {tr('下载更新')}
+                        </button>
+                      )}
+                      {updaterState.downloaded && (
+                        <button type="button"
+                          disabled={updateActionBusy}
+                          onClick={handleInstallUpdate}
+                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${t.button.primary}`}
+                        >
+                          <DownloadCloud size={15} aria-hidden="true" />
+                          {updateInstalling ? updaterInstallLabel(updaterState.installPhase) : tr('立即安装并重启')}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={`rounded-2xl border p-5 sm:px-6 ${t.card}`}>
+                    <label className="flex cursor-pointer items-center justify-between gap-4">
+                      <span className="min-w-0">
+                        <span className={`block text-sm font-semibold ${t.text}`}>{tr('自动检查更新')}</span>
+                        <span className={`mt-1 block text-xs leading-relaxed ${t.textMuted}`}>{tr('启动 3 秒后检查，之后每 2 小时自动检测新版本')}</span>
+                      </span>
+                      <span className="relative inline-flex shrink-0 items-center">
+                        <input
+                          type="checkbox"
+                          checked={autoUpdateEnabled}
+                          aria-label={tr('自动检查更新')}
+                          onChange={e => setAutoUpdateEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <span aria-hidden="true" className={`relative h-6 w-11 rounded-full transition-colors after:absolute after:top-0.5 after:left-0.5 after:size-5 after:rounded-full after:bg-white after:shadow-sm after:transition-transform after:content-[''] peer-checked:bg-emerald-600 peer-checked:after:translate-x-full peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 peer-focus-visible:ring-offset-2 ${isDark ? 'bg-[#4A4D52] peer-focus-visible:ring-offset-[#202124]' : 'bg-slate-300 peer-focus-visible:ring-offset-white'}`} />
+                      </span>
+                    </label>
+
+                    {(updaterState.error || updaterState.checking || updaterState.notAvailable || updaterState.available || updaterState.downloading || updaterState.downloaded) && (
+                      <div className={`mt-4 space-y-2 border-t pt-4 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+                        {updaterState.error && (
+                          <div role="alert" className={`flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs ${isDark ? 'bg-red-500/10 text-red-300' : 'bg-red-50 text-red-600'}`}>
+                            <AlertCircle size={15} aria-hidden="true" className="shrink-0" />
+                            <span className="min-w-0 break-words">{tr(updaterState.error)}</span>
+                          </div>
+                        )}
+                        {updaterState.checking && (
+                          <div role="status" className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs ${isDark ? 'bg-white/5 text-[#BDC1C6]' : 'bg-slate-50 text-slate-600'}`}>
+                            <Loader2 size={15} aria-hidden="true" className="animate-spin" />
+                            {tr('正在检查更新…')}
+                          </div>
+                        )}
+                        {updaterState.notAvailable && !updaterState.checking && (
+                          <div role="status" className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs ${isDark ? 'bg-white/5 text-[#BDC1C6]' : 'bg-slate-50 text-slate-600'}`}>
+                            <CheckCircle2 size={15} aria-hidden="true" />
+                            {tr('当前已是最新版本')}
+                          </div>
+                        )}
+                        {updaterState.available && !updaterState.downloaded && (
+                          <div role="status" className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-medium ${isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                            <DownloadCloud size={15} aria-hidden="true" />
+                            <span>{tr('发现新版本 v')}{updaterState.info?.version || tr('未知')}</span>
+                          </div>
+                        )}
+                        {updaterState.downloading && updaterState.progress && (
+                          <div className={`space-y-2 rounded-lg px-3 py-2.5 text-xs ${isDark ? 'bg-white/5 text-[#BDC1C6]' : 'bg-slate-50 text-slate-600'}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5">
+                                <Loader2 size={14} aria-hidden="true" className="animate-spin" />
+                                {tr('正在下载…')}
+                              </span>
+                              <span className="font-mono">{updaterState.progress.percent.toFixed(1)}%</span>
+                            </div>
+                            <div role="progressbar" aria-label={tr('正在下载…')} aria-valuenow={updaterState.progress.percent}
+                              className={`h-1.5 overflow-hidden rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-200'}`}>
+                              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${updaterState.progress.percent}%` }} />
+                            </div>
+                            <div className="flex flex-wrap justify-between gap-2 text-[10px]">
+                              <span>{(updaterState.progress.transferred / 1024 / 1024).toFixed(2)} MB</span>
+                              <span>{(updaterState.progress.total / 1024 / 1024).toFixed(2)} MB</span>
+                            </div>
+                          </div>
+                        )}
+                        {updaterState.downloaded && (
+                          <div role="status" className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs ${isDark ? 'bg-emerald-500/10 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                            <CheckCircle2 size={15} aria-hidden="true" />
+                            <span>{tr('更新已下载完成，点击"立即安装"重启应用')}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
 
                 {/* Custom Theme Editor Modal */}
                 {showThemeEditor && (

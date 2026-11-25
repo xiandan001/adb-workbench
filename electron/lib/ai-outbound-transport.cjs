@@ -193,7 +193,7 @@ let singleton;
 function runtime() {
   if (!singleton) {
     const ctx = require('./app-context.cjs');
-    singleton = createOutboundTransport({ request: require('node:https').request, getOwner: () => ctx.getMainWindow()?.webContents,
+    singleton = createOutboundTransport({ request: require('./ai-keys.cjs').dispatchBuiltinRequest, getOwner: () => ctx.getMainWindow()?.webContents,
       trustedOwner: event => [ctx.getMainWindow(), ctx.getLogAnalyzerWindow()].find(window => window && !window.isDestroyed()
         && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame)?.webContents,
       getEndpoint: () => require('./ai-keys.cjs').AGNES_API_URL, membership: () => require('./vip.cjs').getStatusAsync(),
