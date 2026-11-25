@@ -1,6 +1,6 @@
 import catalog from '../../electron/lib/rs232-protocol-catalog.json' with { type: 'json' };
 import tcl from '../../electron/lib/rs232-protocol-tcl.json' with { type: 'json' };
-import { defaultProtocolPreferences, normalizeProtocolPreferences } from './rs232ProtocolPreferences.js';
+import { defaultProtocolPreferences, normalizeProtocolParameterOverrides, normalizeProtocolPreferences } from './rs232ProtocolPreferences.js';
 import { tr } from './i18n.js';
 import { completeTclFrame, tclCrcToken, tclLengthToken } from './tclFactoryProtocol.js';
 
@@ -29,8 +29,15 @@ function describe(command) {
   if (typeof id !== 'string' || !builtins.has(id) && !customId.test(id)) fail('RS232_COMMAND_INVALID');
   if (typeof template !== 'string' || !template.trim() || template.length > 8192) fail('RS232_TEMPLATE_INVALID');
   const base = builtins.get(id);
+  let overrides = [];
+  const configured = descriptors.parameterOverrides;
+  if (configured) {
+    if (!configured.enumerable || !Object.hasOwn(configured, 'value')) fail('RS232_PARAMETER_INVALID');
+    try { overrides = normalizeProtocolParameterOverrides(configured.value, id, template); }
+    catch { fail('RS232_PARAMETER_INVALID'); }
+  }
   return { base, template, isTcl: base?.protocol === 'tcl' || !base && /^AA(?:\s|$)/iu.test(template.trim()),
-    reviewed: descriptors.reviewed?.value === true };
+    reviewed: descriptors.reviewed?.value === true, overrides };
 }
 function tokensFor(template, isTcl) {
   const tokens = template.trim().split(/\s+/u);
@@ -47,7 +54,7 @@ export function listProtocolCommands(preferences = defaultProtocolPreferences())
   const materialize = (base, override) => {
     const command = { ...(base ? structuredClone(base) : {}), ...override };
     command.builtin = Boolean(base); command.modified = Boolean(override);
-    command.needsReview = !base || base.needsReview || command.template !== base.template;
+    command.needsReview = !base || base.needsReview || command.template !== base.template || Boolean(command.parameterOverrides?.length);
     command.referenceOnly = base?.referenceOnly === true; command.reviewed = override?.reviewed === true;
     if (!base && /^AA(?:\s|$)/iu.test(command.template.trim())) command.protocol = 'tcl';
     if (!base || command.name !== base.name) delete command.labels;
@@ -58,11 +65,24 @@ export function listProtocolCommands(preferences = defaultProtocolPreferences())
     ...current.overrides.filter(entry => !builtins.has(entry.id)).map(entry => materialize(null, entry))];
 }
 
-export function getProtocolParameters(command) {
-  const { base, template, isTcl } = describe(command); const tokens = tokensFor(template, isTcl);
-  if (base && template === base.template) return structuredClone(base.parameters);
+function protocolParameters({ base, template, isTcl, overrides }, tokens) {
   const keys = [...new Set(tokens.map(token => token.match(placeholder)?.[1]).filter(Boolean))];
-  return keys.map(key => isTcl && base?.parameters.find(parameter => parameter.key === key) || { key, label: key, type: 'byte', min: 0, max: 255 });
+  const source = base && template === base.template ? base.parameters
+    : keys.map(key => isTcl && base?.parameters.find(parameter => parameter.key === key) || { key, label: key, type: 'byte', min: 0, max: 255 });
+  const index = new Map(overrides.map(item => [item.key, item]));
+  return structuredClone(source.map(parameter => {
+    const change = index.get(parameter.key);
+    if (!change) return parameter;
+    const { label, labels, options, ...definition } = parameter;
+    return { ...definition, label: change.label, ...(label === change.label && labels ? { labels } : {}),
+      ...(change.options.length ? { min: 0, max: 255, options: change.options.map(option =>
+        options?.find(sourceOption => sourceOption.label === option.label && sourceOption.value === option.value) || option) } : {}) };
+  }));
+}
+
+export function getProtocolParameters(command) {
+  const description = describe(command);
+  return protocolParameters(description, tokensFor(description.template, description.isTcl));
 }
 
 function parameterBytes(parameter, value) {
@@ -92,10 +112,11 @@ function parameterBytes(parameter, value) {
 }
 
 export function buildProtocolCommand(command, values = {}) {
-  const { base, template, reviewed, isTcl } = describe(command);
+  const description = describe(command);
+  const { base, template, reviewed, isTcl, overrides } = description;
   if (base?.referenceOnly) fail('RS232_REFERENCE_ONLY');
-  if ((!base || base.needsReview || template !== base.template) && !reviewed) fail('RS232_REVIEW_REQUIRED');
-  const tokens = tokensFor(template, isTcl), parameters = getProtocolParameters(command), expectedKeys = new Set(parameters.map(parameter => parameter.key));
+  if ((!base || base.needsReview || template !== base.template || overrides.length) && !reviewed) fail('RS232_REVIEW_REQUIRED');
+  const tokens = tokensFor(template, isTcl), parameters = protocolParameters(description, tokens), expectedKeys = new Set(parameters.map(parameter => parameter.key));
   if (!plain(values) || Reflect.ownKeys(values).some(key => !expectedKeys.has(key)) || parameters.some(parameter => !Object.hasOwn(values, parameter.key))) fail('RS232_PARAMETER_INVALID');
   const expanded = new Map();
   for (const parameter of parameters) {

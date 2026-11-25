@@ -1,6 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fillProtocolDraft } from '../src/shared/rs232ProtocolDraft.js';
+import {
+  createProtocolCommandDraft, fillProtocolDraft, prepareProtocolCommandDraft, protocolCommandDraftChanged,
+  protocolParameterEditorModel, updateProtocolParameterDraft,
+} from '../src/shared/rs232ProtocolDraft.js';
+import { listProtocolCommands } from '../src/shared/rs232Protocol.js';
+
+test('byte options start from the catalog, reset prior review when edited, and serialize only real overrides', () => {
+  const { id, name, category, template } = listProtocolCommands().find(command => command.id === 'tcl-032');
+  const initial = createProtocolCommandDraft({ id, name, category, template, note: '', reviewed: true });
+  const [base] = protocolParameterEditorModel(initial).parameters;
+  assert.deepEqual(base.options.map(option => option.hex), ['01', '02', '03']);
+  assert.ok(!Object.hasOwn(prepareProtocolCommandDraft(initial), 'parameterOverrides'));
+  const edited = updateProtocolParameterDraft(initial, base, { ...base, options: [{ label: 'Manual option', hex: '0a' }] });
+  assert.equal(edited.reviewed, false);
+  assert.ok(protocolCommandDraftChanged(initial, edited));
+  const expected = [{ key: 'XX', label: base.label, options: [{ label: 'Manual option', value: 10 }] }];
+  assert.deepEqual(prepareProtocolCommandDraft(edited).parameterOverrides, expected);
+  const removed = { ...edited, template: 'AA 06 31 01 CRC1 CRC2' };
+  assert.ok(!Object.hasOwn(prepareProtocolCommandDraft(removed), 'parameterOverrides'));
+});
+
+test('draft validation reports duplicate or incomplete option rows before saving', () => {
+  const initial = createProtocolCommandDraft({
+    id: 'custom-00112233-4455-6677-8899-aabbccddeeff', name: 'Mode', category: 'Custom',
+    template: 'AA LL 31 {MODE} CRC1 CRC2', note: '', reviewed: false,
+  });
+  const [base] = protocolParameterEditorModel(initial).parameters;
+  const update = options => updateProtocolParameterDraft(initial, base, { ...base, options });
+  assert.throws(() => prepareProtocolCommandDraft(update([{ label: 'Mode A', hex: 'A' }])), /两位 HEX/);
+  assert.throws(() => prepareProtocolCommandDraft(update([{ label: 'Mode A', hex: '0A' }, { label: 'Mode B', hex: '0a' }])), /不能重复/);
+});
 
 test('protocol selection fills an exact HEX draft only after send preferences are accepted', async () => {
   const calls = [], frame = { hex: 'FE 08 58 42 48 43 4D 44 01 F0 CF' };

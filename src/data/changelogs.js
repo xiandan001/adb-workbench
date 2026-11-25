@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.1': {
+    title: 'v5.0.1',
+    date: '2026-11-25',
+    items: [
+      { type: 'feature', get text() { return tr('RS232 命令支持为单字节参数添加、编辑和删除下拉选项，可自定义名称及 HEX 值。'); } },
+      { type: 'improve', get text() { return tr('RS232 协议搜索支持一键清空，并优化长帧 HEX 数据输入布局。'); } },
+    ],
+  },
   '5.0.0': {
     title: 'v5.0.0',
     date: '2026-11-25',

@@ -1,5 +1,9 @@
 const { tr } = require('./localization.cjs');
-const tclIds = new Set(require('./rs232-protocol-tcl.json').commands.map(command => command.id));
+const catalog = require('./rs232-protocol-catalog.json');
+const tcl = require('./rs232-protocol-tcl.json');
+const tclIds = new Set(tcl.commands.map(command => command.id));
+const builtinCommands = new Map([...catalog.commands, ...tcl.commands].map(command => [command.id, command]));
+const commandFields = ['id', 'name', 'category', 'template', 'note', 'reviewed'];
 
 const RS232_PROTOCOL_PREFS_KEY = 'adb-workbench.rs232-protocol.v1';
 const RS232_PROTOCOL_PREFS_LIMIT = 512 * 1024;
@@ -32,16 +36,42 @@ function text(value, limit, required = false, multiline = false) {
   }
   return value;
 }
+function normalizeProtocolParameterOverrides(value, id, template) {
+  const entries = items(value, 32);
+  if (entries.length === 0) return [];
+  const placeholders = new Set(template.trim().split(/\s+/u).map(token => token.match(/^\{([A-Za-z][A-Za-z0-9_]{0,31})\}$/)?.[1]).filter(Boolean));
+  const base = builtinCommands.get(id);
+  const inherited = base && (isTclProtocolId(id) || base.template === template) ? base.parameters : [];
+  const nonBytes = new Set(inherited.filter(parameter => parameter.type !== 'byte').map(parameter => parameter.key));
+  const keys = new Set();
+  return entries.map(item => {
+    const { key, label, options } = fields(item, ['key', 'label', 'options']);
+    if (!placeholders.has(key) || keys.has(key) || nonBytes.has(key)) invalid();
+    keys.add(key);
+    const values = new Set(), names = new Set();
+    return { key, label: text(label, 80, true).trim(), options: items(options, 64).map(row => {
+      const { label: raw, value: byte } = fields(row, ['label', 'value']);
+      const name = text(raw, 80, true).trim(), canonical = name.toLowerCase();
+      if (!Number.isInteger(byte) || byte < 0 || byte > 255 || values.has(byte) || names.has(canonical)) invalid();
+      values.add(byte); names.add(canonical);
+      return { label: name, value: byte };
+    }) };
+  });
+}
 const defaultProtocolPreferences = () => ({ version: 1, overrides: [], removed: [] });
 function normalizeProtocolPreferences(value) {
   const root = fields(value, ['version', 'overrides', 'removed']); if (root.version !== 1) invalid();
   const seen = new Set();
   const overrides = items(root.overrides, 256).map(item => {
-    const entry = fields(item, ['id', 'name', 'category', 'template', 'note', 'reviewed']);
+    const hasOverrides = Object.hasOwn(item || {}, 'parameterOverrides');
+    const entry = fields(item, hasOverrides ? [...commandFields, 'parameterOverrides'] : commandFields);
     if ((!builtin(entry.id) && !custom(entry.id)) || seen.has(entry.id) || typeof entry.reviewed !== 'boolean') invalid();
     seen.add(entry.id);
+    const template = text(entry.template, 8192, true, true);
+    const parameters = hasOverrides ? normalizeProtocolParameterOverrides(entry.parameterOverrides, entry.id, template) : [];
     return { id: entry.id, name: text(entry.name, 80, true), category: text(entry.category, 40, true),
-      template: text(entry.template, 8192, true, true), note: text(entry.note, 2000, false, true), reviewed: entry.reviewed };
+      template, note: text(entry.note, 2000, false, true), reviewed: entry.reviewed,
+      ...(parameters.length ? { parameterOverrides: parameters } : {}) };
   });
   const removed = items(root.removed, 115 + tclIds.size); if (new Set(removed).size !== removed.length || removed.some(id => !builtin(id))) invalid();
   const next = { version: 1, overrides, removed };

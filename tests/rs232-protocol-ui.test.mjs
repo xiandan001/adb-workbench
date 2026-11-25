@@ -30,6 +30,7 @@ function environment({ manualFrames = false } = {}) {
   const runtime = { console, URL, TextEncoder, Uint8Array, crypto: { randomUUID }, document, Fragment: 'fragment', Suspense: 'Suspense', SelectMenu: 'SelectMenu', lazy: () => ({ lazy: true }),
     jsx: (type, props, ...children) => ({ type, props: { ...props, children } }), tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), getLocale: () => locale, useLocale: () => locale,
     trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex, completeManualTclHex, previewManualTclHex,
+    isDarkTheme: value => value?.isDark === true,
     ...Object.fromEntries(Object.entries(protocol).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
     ...Object.fromEntries(Object.entries(draftHelpers).filter(([, value]) => typeof value === 'function')),
     ...Object.fromEntries(Object.entries(protocolMemory).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
@@ -46,9 +47,9 @@ function environment({ manualFrames = false } = {}) {
     useCallback(callback, deps) { const owner = active, index = owner.cursor++, slot = owner.slots[index]; if (slot && same(slot.deps, deps)) return slot.value; owner.slots[index] = { deps, value: callback }; return callback; },
     useEffect: hookEffect('effects'), useLayoutEffect: hookEffect('layouts'),
   };
-  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Calculator', 'Code2', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
+  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Calculator', 'Code2', 'List', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
   const context = vm.createContext(runtime), components = {};
-  for (const name of ['Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'TclFrameDialog', 'SerialSendPanel', 'SerialSchemeControls']) {
+  for (const name of ['Rs232ProtocolParametersEditor', 'Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'TclFrameDialog', 'SerialSendPanel', 'SerialSchemeControls']) {
     const source = fs.readFileSync(new URL('../src/components/' + name + '.jsx', import.meta.url), 'utf8').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
     components[name] = vm.runInContext('(function(){' + transformSync(name + '.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx', pragmaFrag: 'Fragment' } }).code + ';return ' + name + ';})()', context); runtime[name] = components[name];
   }
@@ -97,6 +98,29 @@ test('actual panel previews fixed/parameter frames and never invokes a serial se
   for (const id of ['lango-045', 'lango-report-1']) { command(h, id).props.onClick(); await h.drain(); assert.equal(find(h, '填入发送区').props.disabled, true); }
   await command(h, 'lango-107').props.onClick(); await h.drain(); assert.match(text(region(h, '协议命令详情')), /模拟外设输入/); assert.equal(used.length, 1);
 });
+
+test('clear search returns focus and restores only the current category list, retaining the selected command', async t => {
+  const e = environment(); t.after(e.dispose);
+  const h = e.mount('Rs232ProtocolPanel', { theme, onClose() {}, onUse: () => assert.fail('Search must not use a frame') });
+  const search = () => nodes(h.tree()).find(node => node.type === 'input' && node.props['aria-label'] === '搜索协议功能');
+  const picker = () => nodes(h.tree()).find(node => node.type === 'SelectMenu' && node.props.ariaLabel === '协议分类');
+  await h.drain();
+  assert.equal(find(h, '清空搜索'), undefined);
+  picker().props.onChange('TCL 厂测协议'); await h.drain();
+  search().props.onChange({ target: { value: 'GAMMA文件抄写' } }); await h.drain();
+  await command(h, 'tcl-044').props.onClick(); await h.drain();
+  assert.equal(command(h, 'tcl-032'), undefined);
+  const writes = e.writes.length;
+  find(h, '清空搜索').props.onClick(); await h.drain();
+  assert.equal(search().props.value, '');
+  assert.equal(find(h, '清空搜索'), undefined);
+  assert.equal(picker().props.value, 'TCL 厂测协议');
+  assert.ok(command(h, 'tcl-032'));
+  assert.equal(command(h, 'lango-005'), undefined);
+  assert.match(text(region(h, '协议命令详情')), /GAMMA文件抄写/);
+  assert.equal(e.focus.at(-1), 'input');
+  assert.equal(e.writes.length, writes);
+});
 test('the single TCL category exposes read-only ACK references and warns on hazardous commands', async t => {
   const e = environment(); t.after(e.dispose); let fills = 0;
   const h = e.mount('Rs232ProtocolPanel', { theme, onClose() {}, onUse: async () => { fills++; return true; } }); await h.drain();
@@ -136,6 +160,9 @@ test('TCL HEX input reports exact whole-byte bounds, previews without persisting
   const writes = e.writes.length;
   await edit('A A' + ' AB'.repeat(255));
   assert.equal(input().props['aria-invalid'], true);
+  assert.equal(find(h, '填入发送区').props.disabled, true);
+  await edit('AB'.repeat(255));
+  assert.match(text(region(h, '协议命令详情')), /已输入 255 字节 · 允许 256–65527 字节/);
   assert.equal(find(h, '填入发送区').props.disabled, true);
   await edit('AB'.repeat(65528));
   assert.match(text(region(h, '协议命令详情')), /已输入 65528 字节 · 允许 256–65527 字节/);

@@ -28,7 +28,7 @@ function renderParameter(parameter, { locale, values, hexCounts, busy, field, th
     const maxLength = Number.isSafeInteger(parameter.maxBytes) && parameter.maxBytes > 0 ? Math.min(262108, parameter.maxBytes * 4) : 1024;
     const invalid = Boolean(text.trim() && (count === null || count < parameter.minBytes || count > parameter.maxBytes));
     const hintId = `${inputId}-${parameter.key}-hex-hint`;
-    return <label key={parameter.key} className="block min-w-0 space-y-1 text-xs sm:col-span-2">
+    return <label key={parameter.key} className="grid min-w-0 gap-2 text-xs sm:col-span-2">
       <span>{label}</span>
       <textarea disabled={busy} value={text} rows={3} maxLength={maxLength} spellCheck={false} autoCapitalize="off"
         aria-label={label} aria-describedby={hintId} aria-invalid={invalid}
@@ -40,7 +40,7 @@ function renderParameter(parameter, { locale, values, hexCounts, busy, field, th
       </span>
     </label>;
   }
-  return <label key={parameter.key} className="block min-w-0 space-y-1 text-xs">
+  return <label key={parameter.key} className="grid min-w-0 gap-2 text-xs">
     <span>{label}</span>
     {parameter.options?.length
       ? <SelectMenu disabled={busy} ariaLabel={label} value={String(value)} onChange={next => changeValues(parameter.key, next)} isDark={isDark}
@@ -54,6 +54,7 @@ function renderParameter(parameter, { locale, values, hexCounts, busy, field, th
 export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memoryScope = { workspace: 'rs232', schemeId: '' } }) {
   const locale = useLocale(), dialog = useRef(null), lock = useRef(false), alive = useRef(true), returnFocus = useRef(true);
   const parameterInputId = useId();
+  const searchInput = useRef(null);
   const dirtyRef = useRef(false), editorSavingRef = useRef(false), wasEditing = useRef(false);
   const focusNonce = useRef(0), pendingFocus = useRef(0);
   const [boot] = useState(() => { try { return { preferences: readProtocolPreferences(), error: '' }; } catch (failure) { return { preferences: defaultProtocolPreferences(), error: failure.message }; } });
@@ -140,7 +141,7 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
     } finally { lock.current = false; if (alive.current) setConfirming(false); }
   };
   const select = async command => { if (selectedId === command.id && !editor || !await mayLeaveEditor() || !alive.current) return; const next = restoreProtocolValues(memory.value, memoryScope, command); setSelectedId(command.id); setValues(next); remember(command, next); clearEditor(); setError(''); };
-  const edit = async command => { if (!await mayLeaveEditor() || !alive.current) return; dirty(false); setEditor({ id: command.id, name: command.name, category: command.category, template: command.template, note: command.note || '', reviewed: command.reviewed === true }); };
+  const edit = async command => { if (!await mayLeaveEditor() || !alive.current) return; dirty(false); setEditor({ id: command.id, name: command.name, category: command.category, template: command.template, note: command.note || '', reviewed: command.reviewed === true, parameterOverrides: command.parameterOverrides }); };
   const add = async () => { if (!await mayLeaveEditor() || !alive.current) return; dirty(false); setEditor({ id: 'custom-' + crypto.randomUUID(), name: '', category: category || tr('自定义命令'), template: '', note: '', reviewed: false }); };
   const save = draft => { if (lock.current || !alive.current) throw Error(tr('请先完成当前操作。')); const saved = commit(upsertProtocolCommand(preferences, draft)); memory.update(current => rememberProtocolSelection(forgetProtocolParameters(current, memoryScope, draft.id), memoryScope, { selectedId: draft.id, category, command: draft, values: {} })); setSelectedId(draft.id); setValues({}); clearEditor(); return saved; };
   const remove = async () => {
@@ -169,7 +170,17 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
       {(persistenceError || error || memory.error) && <div role="alert" className="mb-3 break-words rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-500">{persistenceError || error || memory.error}</div>}
       <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.2fr)]">
         <section className="min-w-0 space-y-3" aria-label={tr('协议功能列表')}>
-          <div className={`flex items-center gap-2 ${field}`}><Search size={15} className="shrink-0 opacity-60" /><input aria-label={tr('搜索协议功能')} disabled={busy} value={query} onChange={event => setQuery(event.target.value)} placeholder={tr('搜索功能名称或指令码')} className="w-full min-w-0 bg-transparent text-xs outline-none" /></div>
+          <div className={`relative flex items-center gap-2 focus-within:ring-2 focus-within:ring-emerald-500 ${field}`}>
+            <Search size={15} aria-hidden="true" className="shrink-0 opacity-60" />
+            <input ref={searchInput} aria-label={tr('搜索协议功能')} disabled={busy} value={query}
+              onChange={event => setQuery(event.target.value)} placeholder={tr('搜索功能名称或指令码')}
+              className="w-full min-w-0 bg-transparent pr-7 text-xs outline-none" />
+            {query && <button type="button" aria-label={tr('清空搜索')} title={tr('清空搜索')} disabled={busy}
+              onClick={() => { if (!lock.current && !editorSavingRef.current) { setQuery(''); searchInput.current?.focus({ preventScroll: true }); } }}
+              className={`absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center rounded-md hover:bg-slate-400/15 focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-40 ${theme.textMuted}`}>
+              <X size={15} aria-hidden="true" />
+            </button>}
+          </div>
           <div className="flex items-center gap-2"><SelectMenu ariaLabel={tr('协议分类')} disabled={busy} value={category} onChange={changeCategory} isDark={isDark} className="min-w-0 flex-1" options={[{ value: '', label: tr('全部分类') }, ...categories.map(value => ({ value, label: categoryLabel(value) }))]} /><button type="button" disabled={busy} onClick={add} className={button}><Plus size={14} />{tr('添加命令')}</button></div>
           <p className={`text-xs ${theme.textMuted}`}>{tr('匹配 {0} 条 · 点击查看参数与报文', { 0: filtered.length.toLocaleString(locale) })}</p>
           <div className="max-h-[min(28rem,50vh)] space-y-1 overflow-y-auto rounded-xl border border-slate-400/20 p-1">
@@ -186,7 +197,9 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
             <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className={`text-xs ${theme.textMuted}`}>{categoryLabel(selected.category)}</p><h3 data-protocol-command-title tabIndex={-1} className="mt-1 break-words text-lg font-semibold">{getProtocolDisplayName(selected, locale)}</h3></div><div className="flex flex-wrap gap-1"><button type="button" disabled={busy} onClick={() => edit(selected)} className={button}><Pencil size={13} />{tr('编辑')}</button><button type="button" disabled={busy} onClick={remove} className={button}><Trash2 size={13} />{tr('删除')}</button>{selected.builtin && selected.modified && <button type="button" disabled={busy} onClick={() => restore(selected.id)} className={button}><RotateCcw size={13} />{tr('恢复内置原样')}</button>}</div></div>
             {selected.modified && selected.reviewed && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('人工确认仅代表模板已核对，未验证当前设备或固件。')}</p>}
             {selected.simulatedInput && <p className="rounded-lg border border-amber-500/30 px-3 py-2 text-xs text-amber-500">{tr('模拟外设输入')}</p>}
-            {(selected.referenceOnly || selected.needsReview && !selected.reviewed) && <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{selected.referenceOnly ? tr('这是设备上报示例，仅供查看，不可作为主机控制命令填入。') : tr('此条控制码在源表中存在疑点，请先编辑并核对；不会猜测修正值。')}</p>}
+            {(selected.referenceOnly || selected.needsReview && !selected.reviewed) && <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{selected.referenceOnly ? tr('这是设备上报示例，仅供查看，不可作为主机控制命令填入。')
+              : !selected.builtin || selected.parameterOverrides?.length ? tr('此指令待核对，请编辑并明确确认后使用。')
+                : tr('此条控制码在源表中存在疑点，请先编辑并核对；不会猜测修正值。')}</p>}
             {selected.hazardous === true && !selected.referenceOnly && <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500">
               <AlertTriangle size={15} aria-hidden="true" className="mt-0.5 shrink-0" />{tr('此命令可能更改设备状态或数据。请核对目标和参数后，再手动发送。')}
             </p>}

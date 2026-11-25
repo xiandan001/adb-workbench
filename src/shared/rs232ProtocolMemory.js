@@ -70,7 +70,7 @@ export function restoreProtocolValues(value, scope, command) {
   const saved = getRs232MemoryScope(value, scope);
   const remembered = saved.parameters.find(item => item.commandId === command?.id && item.template === command.template);
   let values = {};
-  if (remembered && safeIds.has(command.id) && command.template === builtins.get(command.id)?.template) {
+  if (remembered && safeIds.has(command.id) && !command.parameterOverrides?.length && command.template === builtins.get(command.id)?.template) {
     try { buildProtocolCommand(command, remembered.values); values = { ...remembered.values }; } catch { /* A template/range change cannot restore stale values. */ }
   }
   return values;
