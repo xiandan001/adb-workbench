@@ -11,6 +11,7 @@ import { encodeMessage } from '../src/shared/serialSettings.js';
 import { formatHex } from '../src/shared/serialFormat.js';
 import { trapAppMessageFocus } from '../src/shared/appMessageDialog.js';
 import * as protocolMemory from '../src/shared/rs232ProtocolMemory.js';
+import { completeManualTclHex, previewManualTclHex } from '../src/shared/tclFactoryProtocol.js';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 const theme = { card: '', text: '', textMuted: '', input: '', button: { primary: '', secondary: '' } };
@@ -28,7 +29,7 @@ function environment({ manualFrames = false } = {}) {
   const hookEffect = kind => (callback, deps) => { const owner = active, index = owner.cursor++, slot = owner.slots[index] || (owner.slots[index] = {}); if (deps && same(slot.deps, deps)) return; slot.deps = deps; owner[kind].push(() => { slot.cleanup?.(); slot.cleanup = callback(); }); };
   const runtime = { console, URL, TextEncoder, Uint8Array, crypto: { randomUUID }, document, Fragment: 'fragment', Suspense: 'Suspense', SelectMenu: 'SelectMenu', lazy: () => ({ lazy: true }),
     jsx: (type, props, ...children) => ({ type, props: { ...props, children } }), tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), getLocale: () => locale, useLocale: () => locale,
-    trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex,
+    trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex, completeManualTclHex, previewManualTclHex,
     ...Object.fromEntries(Object.entries(protocol).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
     ...Object.fromEntries(Object.entries(draftHelpers).filter(([, value]) => typeof value === 'function')),
     ...Object.fromEntries(Object.entries(protocolMemory).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
@@ -45,9 +46,9 @@ function environment({ manualFrames = false } = {}) {
     useCallback(callback, deps) { const owner = active, index = owner.cursor++, slot = owner.slots[index]; if (slot && same(slot.deps, deps)) return slot.value; owner.slots[index] = { deps, value: callback }; return callback; },
     useEffect: hookEffect('effects'), useLayoutEffect: hookEffect('layouts'),
   };
-  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Code2', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
+  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Calculator', 'Code2', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
   const context = vm.createContext(runtime), components = {};
-  for (const name of ['Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'SerialSendPanel', 'SerialSchemeControls']) {
+  for (const name of ['Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'TclFrameDialog', 'SerialSendPanel', 'SerialSchemeControls']) {
     const source = fs.readFileSync(new URL('../src/components/' + name + '.jsx', import.meta.url), 'utf8').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
     components[name] = vm.runInContext('(function(){' + transformSync(name + '.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx', pragmaFrag: 'Fragment' } }).code + ';return ' + name + ';})()', context); runtime[name] = components[name];
   }
@@ -250,6 +251,97 @@ test('the only protocol entry sits at the start of the send action row and openi
   assert.equal(nodes(h.tree()).filter(node => node.type === 'button' && text(node).trim() === 'RS232 协议面板').length, 1);
   const row = nodes(h.tree()).find(node => node.props?.['data-serial-send-actions']); assert.ok(row); assert.equal(nodes(row).filter(node => node.type === 'button')[0], entry); assert.equal(nodes(row).filter(node => node.type === 'button').at(-1), send);
   entry.props.onClick(); await h.drain(); assert.equal(sends, 0); assert.ok(nodes(h.tree()).find(node => node.type?.lazy));
+});
+
+test('manual TCL HEX CRC uses one effective message for preview, explicit send, and favorites without changing the input', async t => {
+  const e = environment(), sends = [], edits = [], changes = []; t.after(e.dispose);
+  const original = 'aa 06 10 01';
+  const completed = 'AA 06 10 01 A7 EF';
+  const preferences = { sendMode: 'hex', lineEnding: 'none', favorites: [] };
+  const h = e.mount('SerialSendPanel', {
+    theme, preferences, draft: '', connected: true, sending: false, busy: false, history: [], commandsOpen: true, onCommandsOpen() {},
+    onDraft: draft => { edits.push(draft); h.setProps({ draft }); },
+    onPreferences: value => { changes.push(structuredClone(value)); return true; },
+    onSend: message => sends.push(structuredClone(message)),
+  });
+  const area = () => nodes(h.tree()).find(node => node.type === 'textarea');
+  const crc = () => nodes(h.tree()).find(node => node.type === 'input' && node.props.type === 'checkbox');
+  const bytes = () => nodes(region(h, '实际发送字节预览')).find(node => node.type === 'code');
+  await h.drain();
+  area().props.onChange({ target: { value: original } }); await h.drain();
+  assert.deepEqual(edits, [original]);
+  assert.deepEqual(sends, []);
+  assert.equal(crc().props.checked, true);
+  assert.equal(area().props.value, original);
+  assert.match(text(h.tree()), /已自动补齐 TCL CRC：A7 EF/);
+  assert.match(text(h.tree()), /待发送 6 B/);
+  assert.equal(text(bytes()).trim(), completed);
+  const name = nodes(h.tree()).find(node => node.props['aria-label'] === '常用命令名称');
+  name.props.onChange({ target: { value: 'TCL test example' } }); await h.drain();
+  await find(h, '保存常用命令').props.onClick();
+  assert.equal(changes[0].favorites[0].content, completed);
+  assert.deepEqual(sends, []);
+  area().props.onKeyDown({ ctrlKey: true, key: 'Enter', preventDefault() {} });
+  assert.equal(sends[0].content, completed);
+  assert.deepEqual(edits, [original]);
+
+  crc().props.onChange({ currentTarget: { checked: false } }); await h.drain();
+  assert.equal(text(bytes()).trim(), original.toUpperCase());
+  area().props.onKeyDown({ ctrlKey: true, key: 'Enter', preventDefault() {} });
+  assert.equal(sends[1].content, original);
+  assert.doesNotMatch(text(h.tree()), /已自动补齐 TCL CRC/);
+  crc().props.onChange({ currentTarget: { checked: true } }); await h.drain();
+  find(h, '整理 HEX').props.onClick(); await h.drain();
+  assert.deepEqual(edits, [original, completed]);
+  assert.equal(sends.length, 2);
+  assert.doesNotMatch(text(h.tree()), /已自动补齐 TCL CRC/);
+  h.setProps({ draft: 'fe 08 58 42 48 43 4d 44 02 08 cf' }); await h.drain();
+  area().props.onKeyDown({ ctrlKey: true, key: 'Enter', preventDefault() {} });
+  assert.equal(sends[2].content, 'fe 08 58 42 48 43 4d 44 02 08 cf');
+  h.setProps({ draft: original, memoryScope: { workspace: 'terminal', schemeId: '' } }); await h.drain();
+  assert.equal(crc(), undefined);
+  assert.equal(text(bytes()).trim(), original.toUpperCase());
+});
+
+test('the dedicated TCL generator previews complete HEX and fills explicit CRC bytes without sending', async t => {
+  const e = environment(), sends = [], edits = [], changes = []; t.after(e.dispose);
+  const original = 'AA 06 10 01';
+  const preferences = { sendMode: 'hex', lineEnding: 'none', favorites: [] };
+  const h = e.mount('SerialSendPanel', { theme, preferences, draft: original, connected: true, busy: false,
+    history: [], commandsOpen: false, onCommandsOpen() {}, onSend: message => sends.push(message),
+    onDraft: draft => { edits.push(draft); h.setProps({ draft }); }, onPreferences: value => { changes.push(value); return true; } });
+  const child = () => nodes(h.tree()).find(node => node.type?.name === 'TclFrameDialog');
+  await h.drain();
+  const launch = find(h, 'TCL 报文生成器');
+  assert.ok(nodes(h.tree()).find(node => node.props['data-serial-send-actions'] && nodes(node).includes(launch)));
+  launch.props.onClick(); await h.drain();
+  const first = e.mount('TclFrameDialog', child().props); await first.drain();
+  assert.equal(first.tree().props.onKeyDown, trapAppMessageFocus);
+  assert.match(text(first.tree()), /完整报文.*AA 06 10 01 A7 EF.*CRC1 \/ CRC2/s);
+  let prevented = false;
+  first.tree().props.onCancel({ preventDefault() { prevented = true; } }); first.dispose(); await h.drain();
+  assert.equal(prevented, true);
+  assert.equal(child(), undefined);
+  assert.deepEqual(edits, []);
+
+  find(h, 'TCL 报文生成器').props.onClick(); await h.drain();
+  const modal = e.mount('TclFrameDialog', child().props); await modal.drain();
+  const input = () => nodes(modal.tree()).find(node => node.type === 'textarea');
+  const edit = async value => { input().props.onChange({ target: { value } }); await modal.drain(); };
+  await edit('AA 08 10 01');
+  assert.equal(find(modal, '填入发送区').props.disabled, true);
+  await edit('AA 06 10 01 A7 EF');
+  assert.match(text(modal.tree()), /已输入 CRC，保留原字节/);
+  const incorrectCrc = 'AA 06 10 01 00 00';
+  await edit(incorrectCrc);
+  assert.match(text(modal.tree()), /已输入的 CRC 校验不匹配，原字节未改动/);
+  assert.deepEqual([sends.length, changes.length, edits.length], [0, 0, 0]);
+  await find(modal, '填入发送区').props.onClick(); modal.dispose(); await h.drain();
+  assert.deepEqual(edits, [incorrectCrc]);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].sendMode, 'hex');
+  assert.deepEqual(sends, []);
+  assert.equal(child(), undefined);
 });
 
 test('new category persistence follows command save/reload while cancelling a dirty category leaves no independent data', async t => {

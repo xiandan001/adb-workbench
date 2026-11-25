@@ -1,3 +1,9 @@
+import catalog from '../../electron/lib/rs232-protocol-tcl.json' with { type: 'json' };
+
+const knownShortOpcodes = new Set(catalog.commands.filter(command => !command.needsReview && !command.template.startsWith('AA FE '))
+  .map(command => parseInt(command.template.split(' ')[2], 16)));
+const hexByte = byte => byte.toString(16).padStart(2, '0').toUpperCase();
+
 export function tclLengthToken(tokens, index) {
   if (tokens[index] === 'LL' && index === 1) return true;
   if (tokens[1]?.toUpperCase() !== 'FE') return false;
@@ -36,4 +42,46 @@ export function completeTclFrame(tokens, bytes) {
     bytes[bytes.length - 1] = checksum & 0xff;
   }
   return (bytes.at(-2) << 8 | bytes.at(-1)) === checksum;
+}
+
+function readManualShortFrame(content) {
+  if (typeof content !== 'string' || content.length > 2048 || !/^\s*AA/i.test(content)) return null;
+  let text = content.trim();
+  const suffix = /\s+CRC1\s+CRC2$/i.exec(text);
+  if (suffix) text = text.slice(0, suffix.index);
+  const tokens = text.split(/\s+/u);
+  if (tokens.some(token => token.length % 2 || !/^[0-9a-f]+$/i.test(token))) return null;
+  const packed = tokens.join('');
+  if (packed.length < 6 || packed.length > 0xfd * 2) return null;
+  const bytes = Array.from({ length: packed.length / 2 }, (_, index) => parseInt(packed.slice(index * 2, index * 2 + 2), 16));
+  if (bytes[0] !== 0xaa || bytes[1] < 5 || bytes[1] >= 0xfe) return null;
+  return { bytes, explicit: Boolean(suffix) };
+}
+
+function manualResult(bytes) {
+  const parts = bytes.map(hexByte);
+  return { hex: parts.join(' '), crc: parts.slice(-2).join(' ') };
+}
+
+function finishManualBody(bytes) {
+  bytes.push(0, 0);
+  return completeTclFrame(['CRC1', 'CRC2'], bytes) ? manualResult(bytes) : null;
+}
+
+// Infer only one recognized short TCL request with both checksum bytes absent.
+// Explicit CRC placeholders also permit a documented/custom short opcode.
+export function completeManualTclHex(content) {
+  const frame = readManualShortFrame(content);
+  if (!frame || frame.bytes[1] !== frame.bytes.length + 2 || !frame.explicit && !knownShortOpcodes.has(frame.bytes[2])) return null;
+  return finishManualBody(frame.bytes);
+}
+
+// The dedicated TCL editor is explicit, so a well-formed custom opcode is allowed.
+export function previewManualTclHex(content) {
+  const frame = readManualShortFrame(content);
+  if (!frame) return null;
+  const { bytes, explicit } = frame;
+  if (bytes[1] === bytes.length + 2) return finishManualBody(bytes);
+  if (explicit || bytes[1] !== bytes.length) return null;
+  return { ...manualResult(bytes), crcProvided: true, crcValid: completeTclFrame([], bytes) };
 }

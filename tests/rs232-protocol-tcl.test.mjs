@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { buildProtocolCommand, getProtocolParameters, getProtocolCategoryLabel, listProtocolCommands } from '../src/shared/rs232Protocol.js';
 import { normalizeProtocolPreferences, defaultProtocolPreferences } from '../src/shared/rs232ProtocolPreferences.js';
 import { defaultRs232Memory, rememberProtocolSelection, restoreProtocolSelection } from '../src/shared/rs232ProtocolMemory.js';
+import { completeManualTclHex, previewManualTclHex } from '../src/shared/tclFactoryProtocol.js';
 
 const require = createRequire(import.meta.url);
 const main = require('../electron/lib/rs232-protocol-preferences.cjs');
@@ -76,6 +77,31 @@ test('manually reviewed long data is bounded, counts bytes big-endian and resist
   assert.throws(() => buildProtocolCommand(reviewed, { [key]: 'A B '.repeat(256) }), { code: 'RS232_PARAMETER_INVALID' });
   assert.throws(() => buildProtocolCommand(reviewed, { [key]: '00'.repeat(65528) }), { code: 'RS232_PARAMETER_INVALID' });
   assert.throws(() => buildProtocolCommand(reviewed, { [key]: '' }), { code: 'RS232_PARAMETER_INVALID' });
+});
+
+test('manual HEX fills two missing CRC bytes for recognized TCL, leaving raw or already complete packets untouched', () => {
+  const frame = { hex: 'AA 06 10 01 A7 EF', crc: 'A7 EF' };
+  for (const input of ['AA 06 10 01', '  aa061001 ', 'AA 06 10 01 CRC1 CRC2', 'AA 06 10 01 crc1\ncrc2']) {
+    assert.deepEqual(completeManualTclHex(input), frame);
+  }
+  for (const input of ['AA 06 10', 'AA 06 10 01 A7', 'AA 06 10 01 A7 EF', 'AA 06 10 01 00 00',
+    'AA 06 FF 01', 'A A 06 10 01', 'AA FE 01 08 E9 02', 'AB 05 0A', 'FE 08 58 42 48 43 4D 44 02 08 CF',
+    'AA 06 10 01 A7 EF AA 06 10 00', 'AA 06 10 01 CRC1', 'AA 06 10 01 CRC2 CRC1']) {
+    assert.equal(completeManualTclHex(input), null, input);
+  }
+  assert.ok(completeManualTclHex('AA 06 FF 01 CRC1 CRC2')?.hex.startsWith('AA 06 FF 01 '));
+  assert.notEqual(completeManualTclHex('AA 06 10 00').crc, frame.crc);
+});
+
+test('the dedicated Tcl editor preserves any CRC that was already entered and reports its validity', () => {
+  const example = { hex: 'AA 06 10 01 A7 EF', crc: 'A7 EF' };
+  assert.deepEqual(previewManualTclHex('aa 06 10 01'), example);
+  assert.deepEqual(previewManualTclHex('aa 06 10 01 a7 ef'), { ...example, crcProvided: true, crcValid: true });
+  assert.deepEqual(previewManualTclHex('aa 06 10 01 00 00'), { hex: 'AA 06 10 01 00 00', crc: '00 00', crcProvided: true, crcValid: false });
+  assert.deepEqual(previewManualTclHex('AA 06 FF 01'), completeManualTclHex('AA 06 FF 01 CRC1 CRC2'));
+  for (const malformed of ['AA 06 10 01 A7 EF CRC1 CRC2', 'AA FE 01 08 E9 02', 'AB 05 0A', 'AA 06 10']) {
+    assert.equal(previewManualTclHex(malformed), null, malformed);
+  }
 });
 
 test('Tcl edits, removals and selection round-trip without remembering Tcl parameters', () => {

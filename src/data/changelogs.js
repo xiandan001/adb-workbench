@@ -8,6 +8,7 @@ const CHANGELOGS = {
     date: '2026-11-25',
     items: [
       { type: 'feature', get text() { return tr('新增 TCL 厂测协议：支持生成 HEX 和查看设备应答示例。'); } },
+      { type: 'feature', get text() { return tr('手动输入 TCL 短帧时可自动补齐 CRC。'); } },
     ],
   },
   '4.9.6': {
