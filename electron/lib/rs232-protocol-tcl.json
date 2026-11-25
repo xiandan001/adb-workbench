@@ -1,0 +1,1695 @@
+{
+  "category": {
+    "name": "TCL 厂测协议",
+    "labels": {
+      "zh-CN": "TCL 厂测协议",
+      "en-US": "TCL factory test protocol",
+      "zh-TW": "TCL 廠測協議",
+      "ja-JP": "TCL 工場試験プロトコル",
+      "ko-KR": "TCL 공장 테스트 프로토콜"
+    }
+  },
+  "commands": [
+    {
+      "id": "tcl-001",
+      "name": "进入工厂串口模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "进入工厂串口模式",
+        "en-US": "Enter factory serial mode",
+        "zh-TW": "進入工廠串口模式",
+        "ja-JP": "工場シリアルモードに入る",
+        "ko-KR": "공장 시리얼 모드 진입"
+      },
+      "template": "AA 06 10 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 10 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-002",
+      "name": "退出工厂串口模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "退出工厂串口模式",
+        "en-US": "Exit factory serial mode",
+        "zh-TW": "退出工廠串口模式",
+        "ja-JP": "工場シリアルモードを終了",
+        "ko-KR": "공장 시리얼 모드 종료"
+      },
+      "template": "AA 06 10 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 10 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-003",
+      "name": "工厂菜单显示",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "工厂菜单显示",
+        "en-US": "Show factory menu",
+        "zh-TW": "顯示工廠菜單",
+        "ja-JP": "工場メニューを表示",
+        "ko-KR": "공장 메뉴 표시"
+      },
+      "template": "AA 06 11 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 11 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-004",
+      "name": "工厂菜单隐藏",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "工厂菜单隐藏",
+        "en-US": "Hide factory menu",
+        "zh-TW": "隱藏工廠菜單",
+        "ja-JP": "工場メニューを非表示",
+        "ko-KR": "공장 메뉴 숨기기"
+      },
+      "template": "AA 06 11 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 11 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-005",
+      "name": "老化开",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "老化开",
+        "en-US": "Enable burn-in",
+        "zh-TW": "開啟老化模式",
+        "ja-JP": "エージングを開始",
+        "ko-KR": "에이징 시작"
+      },
+      "template": "AA 06 13 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 13 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-006",
+      "name": "老化关",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "老化关",
+        "en-US": "Disable burn-in",
+        "zh-TW": "關閉老化模式",
+        "ja-JP": "エージングを停止",
+        "ko-KR": "에이징 중지"
+      },
+      "template": "AA 06 13 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 13 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-007",
+      "name": "读取累计老化时间",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "读取累计老化时间",
+        "en-US": "Read total burn-in time",
+        "zh-TW": "讀取累計老化時間",
+        "ja-JP": "累積エージング時間を読み取る",
+        "ko-KR": "누적 에이징 시간 읽기"
+      },
+      "template": "AA 06 7A 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "D1 为分钟（0–60），D2 为小时（0–99）。原表示例 D1=D2=00，CRC 为 AE 43。",
+      "sourceControl": "AA 06 7A 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 7B D1 D2 CRC1 CRC2"
+    },
+    {
+      "id": "tcl-008",
+      "name": "打开检屏模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "打开检屏模式",
+        "en-US": "Enter panel test mode",
+        "zh-TW": "開啟檢屏模式",
+        "ja-JP": "パネル試験モードを開始",
+        "ko-KR": "패널 검사 모드 시작"
+      },
+      "template": "AA 06 29 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 29 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-009",
+      "name": "关闭检屏模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "关闭检屏模式",
+        "en-US": "Exit panel test mode",
+        "zh-TW": "關閉檢屏模式",
+        "ja-JP": "パネル試験モードを終了",
+        "ko-KR": "패널 검사 모드 종료"
+      },
+      "template": "AA 06 29 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 29 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-010",
+      "name": "切换检屏图像",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "切换检屏图像",
+        "en-US": "Select panel test pattern",
+        "zh-TW": "切換檢屏圖像",
+        "ja-JP": "パネル試験パターンを切り替える",
+        "ko-KR": "패널 검사 패턴 전환"
+      },
+      "template": "AA 06 2A {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "检屏图像",
+          "labels": {
+            "zh-CN": "检屏图像",
+            "en-US": "Panel test pattern",
+            "zh-TW": "檢屏圖像",
+            "ja-JP": "パネル試験パターン",
+            "ko-KR": "패널 검사 패턴"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 8,
+          "options": [
+            {
+              "value": 0,
+              "label": "15宫格",
+              "labels": {
+                "zh-CN": "15宫格",
+                "en-US": "15-cell grid",
+                "zh-TW": "15宮格",
+                "ja-JP": "15 分割グリッド",
+                "ko-KR": "15칸 격자"
+              }
+            },
+            {
+              "value": 1,
+              "label": "100%灰度",
+              "labels": {
+                "zh-CN": "100%灰度",
+                "en-US": "100% gray",
+                "zh-TW": "100%灰階",
+                "ja-JP": "100% グレー",
+                "ko-KR": "100% 회색"
+              }
+            },
+            {
+              "value": 2,
+              "label": "20%灰度",
+              "labels": {
+                "zh-CN": "20%灰度",
+                "en-US": "20% gray",
+                "zh-TW": "20%灰階",
+                "ja-JP": "20% グレー",
+                "ko-KR": "20% 회색"
+              }
+            },
+            {
+              "value": 3,
+              "label": "黑场",
+              "labels": {
+                "zh-CN": "黑场",
+                "en-US": "Black screen",
+                "zh-TW": "黑場",
+                "ja-JP": "黒画面",
+                "ko-KR": "검정 화면"
+              }
+            },
+            {
+              "value": 4,
+              "label": "红场",
+              "labels": {
+                "zh-CN": "红场",
+                "en-US": "Red screen",
+                "zh-TW": "紅場",
+                "ja-JP": "赤画面",
+                "ko-KR": "빨강 화면"
+              }
+            },
+            {
+              "value": 5,
+              "label": "绿场",
+              "labels": {
+                "zh-CN": "绿场",
+                "en-US": "Green screen",
+                "zh-TW": "綠場",
+                "ja-JP": "緑画面",
+                "ko-KR": "초록 화면"
+              }
+            },
+            {
+              "value": 6,
+              "label": "蓝场",
+              "labels": {
+                "zh-CN": "蓝场",
+                "en-US": "Blue screen",
+                "zh-TW": "藍場",
+                "ja-JP": "青画面",
+                "ko-KR": "파랑 화면"
+              }
+            },
+            {
+              "value": 7,
+              "label": "灰阶",
+              "labels": {
+                "zh-CN": "灰阶",
+                "en-US": "Grayscale ramp",
+                "zh-TW": "灰階",
+                "ja-JP": "グレースケール階調",
+                "ko-KR": "회색 계조"
+              }
+            },
+            {
+              "value": 8,
+              "label": "调色板",
+              "labels": {
+                "zh-CN": "调色板",
+                "en-US": "Color palette",
+                "zh-TW": "調色盤",
+                "ja-JP": "カラーパレット",
+                "ko-KR": "색상 팔레트"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 2A XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-011",
+      "name": "打开按键模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "打开按键模式",
+        "en-US": "Enable key test mode",
+        "zh-TW": "開啟按鍵模式",
+        "ja-JP": "キー試験モードを開始",
+        "ko-KR": "키 검사 모드 시작"
+      },
+      "template": "AA 06 14 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "实际按键功能暂停。原表提示按住红场，松手恢复。",
+      "sourceControl": "AA 06 14 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-012",
+      "name": "按键值查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "按键值查询",
+        "en-US": "Read key test value",
+        "zh-TW": "查詢按鍵值",
+        "ja-JP": "キー試験値を読み取る",
+        "ko-KR": "키 검사 값 조회"
+      },
+      "template": "AA 06 76 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "查询单按键。00 为 Standby，长按 2 秒退出老化；06 为全部测试完成，其他值为异常按键值。",
+      "sourceControl": "AA 06 76 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 06 77 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-013",
+      "name": "关闭按键模式",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "关闭按键模式",
+        "en-US": "Disable key test mode",
+        "zh-TW": "關閉按鍵模式",
+        "ja-JP": "キー試験モードを終了",
+        "ko-KR": "키 검사 모드 종료"
+      },
+      "template": "AA 06 14 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 14 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-014",
+      "name": "HDMI／TYPE-C／DP信源选择",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "HDMI／TYPE-C／DP信源选择",
+        "en-US": "Select HDMI / Type-C / DP input",
+        "zh-TW": "選擇 HDMI／TYPE-C／DP 訊號源",
+        "ja-JP": "HDMI／Type-C／DP 入力を選択",
+        "ko-KR": "HDMI / Type-C / DP 입력 선택"
+      },
+      "template": "AA 06 25 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "信源",
+          "labels": {
+            "zh-CN": "信源",
+            "en-US": "Input",
+            "zh-TW": "訊號源",
+            "ja-JP": "入力ソース",
+            "ko-KR": "입력 소스"
+          },
+          "type": "byte",
+          "min": 1,
+          "max": 6,
+          "options": [
+            {
+              "value": 1,
+              "label": "HDMI1",
+              "labels": {
+                "zh-CN": "HDMI1",
+                "en-US": "HDMI1",
+                "zh-TW": "HDMI1",
+                "ja-JP": "HDMI1",
+                "ko-KR": "HDMI1"
+              }
+            },
+            {
+              "value": 2,
+              "label": "HDMI2",
+              "labels": {
+                "zh-CN": "HDMI2",
+                "en-US": "HDMI2",
+                "zh-TW": "HDMI2",
+                "ja-JP": "HDMI2",
+                "ko-KR": "HDMI2"
+              }
+            },
+            {
+              "value": 3,
+              "label": "OPS",
+              "labels": {
+                "zh-CN": "OPS",
+                "en-US": "OPS",
+                "zh-TW": "OPS",
+                "ja-JP": "OPS",
+                "ko-KR": "OPS"
+              }
+            },
+            {
+              "value": 4,
+              "label": "F-TYPE-C",
+              "labels": {
+                "zh-CN": "F-TYPE-C",
+                "en-US": "F-TYPE-C",
+                "zh-TW": "F-TYPE-C",
+                "ja-JP": "F-TYPE-C",
+                "ko-KR": "F-TYPE-C"
+              }
+            },
+            {
+              "value": 5,
+              "label": "TYPE-C",
+              "labels": {
+                "zh-CN": "TYPE-C",
+                "en-US": "TYPE-C",
+                "zh-TW": "TYPE-C",
+                "ja-JP": "TYPE-C",
+                "ko-KR": "TYPE-C"
+              }
+            },
+            {
+              "value": 6,
+              "label": "DP",
+              "labels": {
+                "zh-CN": "DP",
+                "en-US": "DP",
+                "zh-TW": "DP",
+                "ja-JP": "DP",
+                "ko-KR": "DP"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 25 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-015",
+      "name": "读取软件版本",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "读取软件版本",
+        "en-US": "Read software version",
+        "zh-TW": "讀取軟體版本",
+        "ja-JP": "ソフトウェアバージョンを読み取る",
+        "ko-KR": "소프트웨어 버전 읽기"
+      },
+      "template": "AA 06 57 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "版本类型",
+          "labels": {
+            "zh-CN": "版本类型",
+            "en-US": "Version type",
+            "zh-TW": "版本類型",
+            "ja-JP": "バージョン種別",
+            "ko-KR": "버전 유형"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 4,
+          "options": [
+            {
+              "value": 0,
+              "label": "主软件",
+              "labels": {
+                "zh-CN": "主软件",
+                "en-US": "Main software",
+                "zh-TW": "主軟體",
+                "ja-JP": "メインソフトウェア",
+                "ko-KR": "메인 소프트웨어"
+              }
+            },
+            {
+              "value": 1,
+              "label": "触摸",
+              "labels": {
+                "zh-CN": "触摸",
+                "en-US": "Touch",
+                "zh-TW": "觸控",
+                "ja-JP": "タッチ",
+                "ko-KR": "터치"
+              }
+            },
+            {
+              "value": 2,
+              "label": "板控",
+              "labels": {
+                "zh-CN": "板控",
+                "en-US": "Board controller",
+                "zh-TW": "板控",
+                "ja-JP": "基板コントローラー",
+                "ko-KR": "보드 컨트롤러"
+              }
+            },
+            {
+              "value": 4,
+              "label": "LD",
+              "labels": {
+                "zh-CN": "LD",
+                "en-US": "LD",
+                "zh-TW": "LD",
+                "ja-JP": "LD",
+                "ko-KR": "LD"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 57 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 17 58 D0…D17 CRC1 CRC2"
+    },
+    {
+      "id": "tcl-016",
+      "name": "S/N条形码抄写",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "S/N条形码抄写",
+        "en-US": "Write S/N barcode",
+        "zh-TW": "寫入 S/N 條碼",
+        "ja-JP": "S/N バーコードを書き込む",
+        "ko-KR": "S/N 바코드 쓰기"
+      },
+      "template": "AA LL 71 {SN} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "SN",
+          "label": "序列号",
+          "labels": {
+            "zh-CN": "序列号",
+            "en-US": "Serial number",
+            "zh-TW": "序號",
+            "ja-JP": "シリアル番号",
+            "ko-KR": "일련번호"
+          },
+          "type": "ascii",
+          "minBytes": 1,
+          "maxBytes": 248
+        }
+      ],
+      "note": "写入 ASCII 序列号条形码，最多 248 字节。此操作会改写设备序列号数据。",
+      "sourceControl": "AA LL 71 SN CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-017",
+      "name": "SN查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "SN查询",
+        "en-US": "Read serial number",
+        "zh-TW": "查詢序號",
+        "ja-JP": "シリアル番号を読み取る",
+        "ko-KR": "일련번호 조회"
+      },
+      "template": "AA 06 BE 03 CRC1 CRC2",
+      "parameters": [],
+      "note": "返回长度和序列号数据按原表保留；XX 为长度字段。",
+      "sourceControl": "AA 06 BE 03 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB XX BF 03 D1…Dn CRC1 CRC2"
+    },
+    {
+      "id": "tcl-018",
+      "name": "光感开关",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "光感开关",
+        "en-US": "Toggle ambient light sensor",
+        "zh-TW": "環境光感測器開關",
+        "ja-JP": "環境光センサーを切り替える",
+        "ko-KR": "조도 센서 켜기/끄기"
+      },
+      "template": "AA 07 9F 0A {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "开关",
+          "labels": {
+            "zh-CN": "开关",
+            "en-US": "Switch",
+            "zh-TW": "開關",
+            "ja-JP": "切り替え",
+            "ko-KR": "켜기/끄기"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 1,
+          "options": [
+            {
+              "value": 0,
+              "label": "关",
+              "labels": {
+                "zh-CN": "关",
+                "en-US": "Off",
+                "zh-TW": "關",
+                "ja-JP": "オフ",
+                "ko-KR": "끄기"
+              }
+            },
+            {
+              "value": 1,
+              "label": "开",
+              "labels": {
+                "zh-CN": "开",
+                "en-US": "On",
+                "zh-TW": "開",
+                "ja-JP": "オン",
+                "ko-KR": "켜기"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 07 9F 0A XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-019",
+      "name": "光感工作状态查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "光感工作状态查询",
+        "en-US": "Read light sensor activity",
+        "zh-TW": "查詢光感工作狀態",
+        "ja-JP": "環境光センサーの動作状態を読み取る",
+        "ko-KR": "조도 센서 동작 상태 조회"
+      },
+      "template": "AA 07 9A 09 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "XX=00 表示不工作；XX=01 表示工作。",
+      "sourceControl": "AA 07 9A 09 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 08 9B 09 00 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-020",
+      "name": "环境光感参数查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "环境光感参数查询",
+        "en-US": "Read ambient light sensor value",
+        "zh-TW": "查詢環境光感參數",
+        "ja-JP": "環境光の測定値を読み取る",
+        "ko-KR": "주변 조도 값 조회"
+      },
+      "template": "AA 06 97 23 CRC1 CRC2",
+      "parameters": [],
+      "note": "返回参数 XX 范围 0–255。",
+      "sourceControl": "AA 06 97 23 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 98 23 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-021",
+      "name": "人体感应",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "人体感应",
+        "en-US": "Read presence sensor",
+        "zh-TW": "查詢人體感應",
+        "ja-JP": "人感センサーを読み取る",
+        "ko-KR": "인체 감지 조회"
+      },
+      "template": "AA 07 97 44 00 10 4A",
+      "parameters": [],
+      "note": "XX=00 无人；XX=01 有人。固定发送帧和 CRC 按原表保留。",
+      "sourceControl": "AA 07 97 44 00 10 4A",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 98 44 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-022",
+      "name": "出厂复位",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "出厂复位",
+        "en-US": "Factory reset",
+        "zh-TW": "恢復原廠設定",
+        "ja-JP": "工場出荷状態にリセット",
+        "ko-KR": "공장 초기화"
+      },
+      "template": "AA 06 19 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "出厂复位，原表标注约 5 秒。会清除设备设置或数据。",
+      "sourceControl": "AA 06 19 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-023",
+      "name": "待机",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "待机",
+        "en-US": "Enter standby",
+        "zh-TW": "進入待機",
+        "ja-JP": "スタンバイに切り替える",
+        "ko-KR": "대기 모드 진입"
+      },
+      "template": "AA 07 9F 18 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 07 9F 18 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-024",
+      "name": "Wi‑Fi打开",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "Wi‑Fi打开",
+        "en-US": "Enable Wi-Fi",
+        "zh-TW": "開啟 Wi-Fi",
+        "ja-JP": "Wi-Fi を有効にする",
+        "ko-KR": "Wi-Fi 켜기"
+      },
+      "template": "AA 06 DA 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 DA 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-025",
+      "name": "Wi‑Fi关闭",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "Wi‑Fi关闭",
+        "en-US": "Disable Wi-Fi",
+        "zh-TW": "關閉 Wi-Fi",
+        "ja-JP": "Wi-Fi を無効にする",
+        "ko-KR": "Wi-Fi 끄기"
+      },
+      "template": "AA 06 DA 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 DA 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-026",
+      "name": "TCL IPTV信号强度查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "TCL IPTV信号强度查询",
+        "en-US": "Read TCL IPTV signal strength",
+        "zh-TW": "查詢 TCL IPTV 訊號強度",
+        "ja-JP": "TCL IPTV の信号強度を読み取る",
+        "ko-KR": "TCL IPTV 신호 강도 조회"
+      },
+      "template": "AA 06 97 02 CRC1 CRC2",
+      "parameters": [],
+      "note": "信号强度范围 00–05；原表示例 XX=05，CRC 为 61 E5。指定的 Wi‑Fi 名称不属于发送参数。",
+      "sourceControl": "AA 06 97 02 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 98 02 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-027",
+      "name": "蓝牙打开",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "蓝牙打开",
+        "en-US": "Enable Bluetooth",
+        "zh-TW": "開啟藍牙",
+        "ja-JP": "Bluetooth を有効にする",
+        "ko-KR": "블루투스 켜기"
+      },
+      "template": "AA 07 9F 04 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 07 9F 04 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-028",
+      "name": "蓝牙关闭",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "蓝牙关闭",
+        "en-US": "Disable Bluetooth",
+        "zh-TW": "關閉藍牙",
+        "ja-JP": "Bluetooth を無効にする",
+        "ko-KR": "블루투스 끄기"
+      },
+      "template": "AA 07 9F 04 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 07 9F 04 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-029",
+      "name": "蓝牙功能状态查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "蓝牙功能状态查询",
+        "en-US": "Read Bluetooth status",
+        "zh-TW": "查詢藍牙功能狀態",
+        "ja-JP": "Bluetooth の状態を読み取る",
+        "ko-KR": "블루투스 상태 조회"
+      },
+      "template": "AA 06 97 12 CRC1 CRC2",
+      "parameters": [],
+      "note": "",
+      "sourceControl": "AA 06 97 12 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 98 12 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-030",
+      "name": "NFC查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "NFC查询",
+        "en-US": "Read NFC status",
+        "zh-TW": "查詢 NFC 狀態",
+        "ja-JP": "NFC の状態を読み取る",
+        "ko-KR": "NFC 상태 조회"
+      },
+      "template": "AA 07 97 43 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "原表 ACK2 以 AA 开头，照录，未将它改成 AB。",
+      "sourceControl": "AA 07 97 43 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AA 07 98 43 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-031",
+      "name": "白平衡初始化",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "白平衡初始化",
+        "en-US": "Initialize white balance",
+        "zh-TW": "初始化白平衡",
+        "ja-JP": "ホワイトバランスを初期化",
+        "ko-KR": "화이트밸런스 초기화"
+      },
+      "template": "AA 06 16 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "恢复当前信源的白平衡出厂参数，并关闭光感、对比度和局部调光。",
+      "sourceControl": "AA 06 16 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-032",
+      "name": "色温状态切换",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "色温状态切换",
+        "en-US": "Switch color temperature",
+        "zh-TW": "切換色溫",
+        "ja-JP": "色温度を切り替える",
+        "ko-KR": "색온도 전환"
+      },
+      "template": "AA 06 31 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "色温",
+          "labels": {
+            "zh-CN": "色温",
+            "en-US": "Color temperature",
+            "zh-TW": "色溫",
+            "ja-JP": "色温度",
+            "ko-KR": "색온도"
+          },
+          "type": "byte",
+          "min": 1,
+          "max": 3,
+          "options": [
+            {
+              "value": 1,
+              "label": "标准",
+              "labels": {
+                "zh-CN": "标准",
+                "en-US": "Normal",
+                "zh-TW": "標準",
+                "ja-JP": "標準",
+                "ko-KR": "표준"
+              }
+            },
+            {
+              "value": 2,
+              "label": "冷",
+              "labels": {
+                "zh-CN": "冷",
+                "en-US": "Cool",
+                "zh-TW": "冷",
+                "ja-JP": "寒色",
+                "ko-KR": "차가움"
+              }
+            },
+            {
+              "value": 3,
+              "label": "暖",
+              "labels": {
+                "zh-CN": "暖",
+                "en-US": "Warm",
+                "zh-TW": "暖",
+                "ja-JP": "暖色",
+                "ko-KR": "따뜻함"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 31 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-033",
+      "name": "亮度切换",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "亮度切换",
+        "en-US": "Set brightness",
+        "zh-TW": "切換亮度",
+        "ja-JP": "明るさを設定",
+        "ko-KR": "밝기 설정"
+      },
+      "template": "AA 06 32 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "亮度",
+          "labels": {
+            "zh-CN": "亮度",
+            "en-US": "Brightness",
+            "zh-TW": "亮度",
+            "ja-JP": "明るさ",
+            "ko-KR": "밝기"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 100
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 32 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-034",
+      "name": "对比度",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "对比度",
+        "en-US": "Set contrast",
+        "zh-TW": "設定對比度",
+        "ja-JP": "コントラストを設定",
+        "ko-KR": "명암 설정"
+      },
+      "template": "AA 06 33 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "对比度",
+          "labels": {
+            "zh-CN": "对比度",
+            "en-US": "Contrast",
+            "zh-TW": "對比度",
+            "ja-JP": "コントラスト",
+            "ko-KR": "명암"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 100
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 33 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-035",
+      "name": "背光",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "背光",
+        "en-US": "Set backlight",
+        "zh-TW": "設定背光",
+        "ja-JP": "バックライトを設定",
+        "ko-KR": "백라이트 설정"
+      },
+      "template": "AA 06 36 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "背光",
+          "labels": {
+            "zh-CN": "背光",
+            "en-US": "Backlight",
+            "zh-TW": "背光",
+            "ja-JP": "バックライト",
+            "ko-KR": "백라이트"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 100
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 36 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-036",
+      "name": "内置图案开关",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "内置图案开关",
+        "en-US": "Toggle built-in pattern",
+        "zh-TW": "內建圖案開關",
+        "ja-JP": "内蔵パターンを切り替える",
+        "ko-KR": "내장 패턴 켜기/끄기"
+      },
+      "template": "AA 06 27 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "开关",
+          "labels": {
+            "zh-CN": "开关",
+            "en-US": "Switch",
+            "zh-TW": "開關",
+            "ja-JP": "切り替え",
+            "ko-KR": "켜기/끄기"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 1,
+          "options": [
+            {
+              "value": 0,
+              "label": "关",
+              "labels": {
+                "zh-CN": "关",
+                "en-US": "Off",
+                "zh-TW": "關",
+                "ja-JP": "オフ",
+                "ko-KR": "끄기"
+              }
+            },
+            {
+              "value": 1,
+              "label": "开",
+              "labels": {
+                "zh-CN": "开",
+                "en-US": "On",
+                "zh-TW": "開",
+                "ja-JP": "オン",
+                "ko-KR": "켜기"
+              }
+            }
+          ]
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 06 27 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-037",
+      "name": "内置图案RGB",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "内置图案RGB",
+        "en-US": "Set built-in pattern RGB",
+        "zh-TW": "設定內建圖案 RGB",
+        "ja-JP": "内蔵パターンの RGB を設定",
+        "ko-KR": "내장 패턴 RGB 설정"
+      },
+      "template": "AA 08 28 {R} {G} {B} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "R",
+          "label": "红色",
+          "labels": {
+            "zh-CN": "红色",
+            "en-US": "Red",
+            "zh-TW": "紅色",
+            "ja-JP": "赤",
+            "ko-KR": "빨강"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "G",
+          "label": "绿色",
+          "labels": {
+            "zh-CN": "绿色",
+            "en-US": "Green",
+            "zh-TW": "綠色",
+            "ja-JP": "緑",
+            "ko-KR": "초록"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "B",
+          "label": "蓝色",
+          "labels": {
+            "zh-CN": "蓝色",
+            "en-US": "Blue",
+            "zh-TW": "藍色",
+            "ja-JP": "青",
+            "ko-KR": "파랑"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "",
+      "sourceControl": "AA 08 28 R G B CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-038",
+      "name": "保存白平衡Gain/Offset至NVM",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "保存白平衡Gain/Offset至NVM",
+        "en-US": "Save white balance gain / offset to NVM",
+        "zh-TW": "將白平衡 Gain／Offset 儲存到 NVM",
+        "ja-JP": "ホワイトバランスのゲイン／オフセットを NVM に保存",
+        "ko-KR": "화이트밸런스 게인 / 오프셋을 NVM에 저장"
+      },
+      "template": "AA 0B 4D {INPUT} {TEMP} {TYPE} {R} {G} {B} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "INPUT",
+          "label": "信源",
+          "labels": {
+            "zh-CN": "信源",
+            "en-US": "Input",
+            "zh-TW": "訊號源",
+            "ja-JP": "入力ソース",
+            "ko-KR": "입력 소스"
+          },
+          "type": "byte",
+          "min": 1,
+          "max": 6,
+          "options": [
+            {
+              "value": 1,
+              "label": "AV",
+              "labels": {
+                "zh-CN": "AV",
+                "en-US": "AV",
+                "zh-TW": "AV",
+                "ja-JP": "AV",
+                "ko-KR": "AV"
+              }
+            },
+            {
+              "value": 2,
+              "label": "CMP",
+              "labels": {
+                "zh-CN": "CMP",
+                "en-US": "CMP",
+                "zh-TW": "CMP",
+                "ja-JP": "CMP",
+                "ko-KR": "CMP"
+              }
+            },
+            {
+              "value": 3,
+              "label": "VGA",
+              "labels": {
+                "zh-CN": "VGA",
+                "en-US": "VGA",
+                "zh-TW": "VGA",
+                "ja-JP": "VGA",
+                "ko-KR": "VGA"
+              }
+            },
+            {
+              "value": 4,
+              "label": "HDMI",
+              "labels": {
+                "zh-CN": "HDMI",
+                "en-US": "HDMI",
+                "zh-TW": "HDMI",
+                "ja-JP": "HDMI",
+                "ko-KR": "HDMI"
+              }
+            },
+            {
+              "value": 5,
+              "label": "MEDIA",
+              "labels": {
+                "zh-CN": "MEDIA",
+                "en-US": "MEDIA",
+                "zh-TW": "MEDIA",
+                "ja-JP": "MEDIA",
+                "ko-KR": "MEDIA"
+              }
+            },
+            {
+              "value": 6,
+              "label": "SCART-RGB",
+              "labels": {
+                "zh-CN": "SCART-RGB",
+                "en-US": "SCART-RGB",
+                "zh-TW": "SCART-RGB",
+                "ja-JP": "SCART-RGB",
+                "ko-KR": "SCART-RGB"
+              }
+            }
+          ]
+        },
+        {
+          "key": "TEMP",
+          "label": "色温",
+          "labels": {
+            "zh-CN": "色温",
+            "en-US": "Color temperature",
+            "zh-TW": "色溫",
+            "ja-JP": "色温度",
+            "ko-KR": "색온도"
+          },
+          "type": "byte",
+          "min": 1,
+          "max": 5,
+          "options": [
+            {
+              "value": 1,
+              "label": "标准",
+              "labels": {
+                "zh-CN": "标准",
+                "en-US": "Normal",
+                "zh-TW": "標準",
+                "ja-JP": "標準",
+                "ko-KR": "표준"
+              }
+            },
+            {
+              "value": 2,
+              "label": "冷",
+              "labels": {
+                "zh-CN": "冷",
+                "en-US": "Cool",
+                "zh-TW": "冷",
+                "ja-JP": "寒色",
+                "ko-KR": "차가움"
+              }
+            },
+            {
+              "value": 3,
+              "label": "暖",
+              "labels": {
+                "zh-CN": "暖",
+                "en-US": "Warm",
+                "zh-TW": "暖",
+                "ja-JP": "暖色",
+                "ko-KR": "따뜻함"
+              }
+            },
+            {
+              "value": 4,
+              "label": "5000K",
+              "labels": {
+                "zh-CN": "5000K",
+                "en-US": "5000K",
+                "zh-TW": "5000K",
+                "ja-JP": "5000K",
+                "ko-KR": "5000K"
+              }
+            },
+            {
+              "value": 5,
+              "label": "SRGB",
+              "labels": {
+                "zh-CN": "SRGB",
+                "en-US": "SRGB",
+                "zh-TW": "SRGB",
+                "ja-JP": "SRGB",
+                "ko-KR": "SRGB"
+              }
+            }
+          ]
+        },
+        {
+          "key": "TYPE",
+          "label": "参数类型",
+          "labels": {
+            "zh-CN": "参数类型",
+            "en-US": "Parameter type",
+            "zh-TW": "參數類型",
+            "ja-JP": "パラメータ種別",
+            "ko-KR": "매개변수 유형"
+          },
+          "type": "byte",
+          "min": 1,
+          "max": 2,
+          "options": [
+            {
+              "value": 1,
+              "label": "增益",
+              "labels": {
+                "zh-CN": "增益",
+                "en-US": "Gain",
+                "zh-TW": "增益",
+                "ja-JP": "ゲイン",
+                "ko-KR": "게인"
+              }
+            },
+            {
+              "value": 2,
+              "label": "偏移",
+              "labels": {
+                "zh-CN": "偏移",
+                "en-US": "Offset",
+                "zh-TW": "偏移",
+                "ja-JP": "オフセット",
+                "ko-KR": "오프셋"
+              }
+            }
+          ]
+        },
+        {
+          "key": "R",
+          "label": "红色",
+          "labels": {
+            "zh-CN": "红色",
+            "en-US": "Red",
+            "zh-TW": "紅色",
+            "ja-JP": "赤",
+            "ko-KR": "빨강"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "G",
+          "label": "绿色",
+          "labels": {
+            "zh-CN": "绿色",
+            "en-US": "Green",
+            "zh-TW": "綠色",
+            "ja-JP": "緑",
+            "ko-KR": "초록"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "B",
+          "label": "蓝色",
+          "labels": {
+            "zh-CN": "蓝色",
+            "en-US": "Blue",
+            "zh-TW": "藍色",
+            "ja-JP": "青",
+            "ko-KR": "파랑"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "写入 NVM。R/G/B 范围 0–255；Offset 未调整时固定为 128（0x80）。",
+      "sourceControl": "AA 0B 4D INPUT TEMP TYPE R G B CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-039",
+      "name": "红色增益",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "红色增益",
+        "en-US": "Set red gain",
+        "zh-TW": "設定紅色增益",
+        "ja-JP": "赤ゲインを設定",
+        "ko-KR": "빨강 게인 설정"
+      },
+      "template": "AA 06 40 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "红色",
+          "labels": {
+            "zh-CN": "红色",
+            "en-US": "Red",
+            "zh-TW": "紅色",
+            "ja-JP": "赤",
+            "ko-KR": "빨강"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "范围 0–255；在 HDMI 信源且色温为 Normal 时设置绝对值，其他情况为相对值。",
+      "sourceControl": "AA 06 40 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-040",
+      "name": "绿色增益",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "绿色增益",
+        "en-US": "Set green gain",
+        "zh-TW": "設定綠色增益",
+        "ja-JP": "緑ゲインを設定",
+        "ko-KR": "초록 게인 설정"
+      },
+      "template": "AA 06 41 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "绿色",
+          "labels": {
+            "zh-CN": "绿色",
+            "en-US": "Green",
+            "zh-TW": "綠色",
+            "ja-JP": "緑",
+            "ko-KR": "초록"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "范围 0–255；在 HDMI 信源且色温为 Normal 时设置绝对值，其他情况为相对值。",
+      "sourceControl": "AA 06 41 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-041",
+      "name": "蓝色增益",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "蓝色增益",
+        "en-US": "Set blue gain",
+        "zh-TW": "設定藍色增益",
+        "ja-JP": "青ゲインを設定",
+        "ko-KR": "파랑 게인 설정"
+      },
+      "template": "AA 06 42 {XX} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "XX",
+          "label": "蓝色",
+          "labels": {
+            "zh-CN": "蓝色",
+            "en-US": "Blue",
+            "zh-TW": "藍色",
+            "ja-JP": "青",
+            "ko-KR": "파랑"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "范围 0–255；在 HDMI 信源且色温为 Normal 时设置绝对值，其他情况为相对值。",
+      "sourceControl": "AA 06 42 XX CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E"
+    },
+    {
+      "id": "tcl-042",
+      "name": "设置PID（屏参）",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "设置PID（屏参）",
+        "en-US": "Set panel PID",
+        "zh-TW": "設定 PID（螢幕參數）",
+        "ja-JP": "パネル PID を設定",
+        "ko-KR": "패널 PID 설정"
+      },
+      "template": "AA 07 70 {HI} {LO} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "HI",
+          "label": "高字节",
+          "labels": {
+            "zh-CN": "高字节",
+            "en-US": "High byte",
+            "zh-TW": "高位元組",
+            "ja-JP": "上位バイト",
+            "ko-KR": "상위 바이트"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "LO",
+          "label": "低字节",
+          "labels": {
+            "zh-CN": "低字节",
+            "en-US": "Low byte",
+            "zh-TW": "低位元組",
+            "ja-JP": "下位バイト",
+            "ko-KR": "하위 바이트"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "屏参 PID，高字节在前、低字节在后。会改写屏幕参数。",
+      "sourceControl": "AA 07 70 HI LO CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-043",
+      "name": "读取PID",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "读取PID",
+        "en-US": "Read panel PID",
+        "zh-TW": "讀取 PID",
+        "ja-JP": "パネル PID を読み取る",
+        "ko-KR": "패널 PID 읽기"
+      },
+      "template": "AA 06 84 00 CRC1 CRC2",
+      "parameters": [],
+      "note": "返回屏幕 PID 的两个字节 XX1、XX2。",
+      "sourceControl": "AA 06 84 00 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 85 XX1 XX2 CRC1 CRC2"
+    },
+    {
+      "id": "tcl-044",
+      "name": "GAMMA文件抄写",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "GAMMA文件抄写",
+        "en-US": "Write GAMMA file",
+        "zh-TW": "寫入 GAMMA 檔案",
+        "ja-JP": "GAMMA ファイルを書き込む",
+        "ko-KR": "GAMMA 파일 쓰기"
+      },
+      "template": "AA FE LH LL E9 02 {DATA} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "DATA",
+          "label": "文件 HEX 数据",
+          "labels": {
+            "zh-CN": "文件 HEX 数据",
+            "en-US": "File contents in HEX",
+            "zh-TW": "檔案 HEX 資料",
+            "ja-JP": "ファイルの HEX データ",
+            "ko-KR": "파일 HEX 데이터"
+          },
+          "type": "hex",
+          "minBytes": 256,
+          "maxBytes": 65527
+        }
+      ],
+      "note": "原表对 255/256 字节分界和长帧长度覆盖范围的说明不一致，且 CRC 示例的输入长度参数为 8 位。请核对设备的长帧长度和校验规则；人工标记不代表已通过真机验证。",
+      "sourceControl": "AA FE LH LL E9 02 DATA CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "needsReview": true,
+      "hazardous": true
+    },
+    {
+      "id": "tcl-045",
+      "name": "GAMMA文件校验值抄写",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "GAMMA文件校验值抄写",
+        "en-US": "Write GAMMA file checksum",
+        "zh-TW": "寫入 GAMMA 檔案校驗值",
+        "ja-JP": "GAMMA ファイルのチェックサムを書き込む",
+        "ko-KR": "GAMMA 파일 체크섬 쓰기"
+      },
+      "template": "AA 08 99 06 {HI} {LO} CRC1 CRC2",
+      "parameters": [
+        {
+          "key": "HI",
+          "label": "高字节",
+          "labels": {
+            "zh-CN": "高字节",
+            "en-US": "High byte",
+            "zh-TW": "高位元組",
+            "ja-JP": "上位バイト",
+            "ko-KR": "상위 바이트"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        },
+        {
+          "key": "LO",
+          "label": "低字节",
+          "labels": {
+            "zh-CN": "低字节",
+            "en-US": "Low byte",
+            "zh-TW": "低位元組",
+            "ja-JP": "下位バイト",
+            "ko-KR": "하위 바이트"
+          },
+          "type": "byte",
+          "min": 0,
+          "max": 255
+        }
+      ],
+      "note": "高字节在前，传入文件压缩前的 CRC16；该值与发送报文自身的 CRC 不同。",
+      "sourceControl": "AA 08 99 06 HI LO CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    },
+    {
+      "id": "tcl-046",
+      "name": "GAMMA调试状态查询",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "GAMMA调试状态查询",
+        "en-US": "Read GAMMA calibration status",
+        "zh-TW": "查詢 GAMMA 調校狀態",
+        "ja-JP": "GAMMA 調整の状態を読み取る",
+        "ko-KR": "GAMMA 조정 상태 조회"
+      },
+      "template": "AA LL EA 02 CRC1 CRC2",
+      "parameters": [],
+      "note": "XX=00 Fail，XX=01 Success。",
+      "sourceControl": "AA LL EA 02 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB 07 EB 02 XX CRC1 CRC2"
+    },
+    {
+      "id": "tcl-047",
+      "name": "GAMMA调试数据读取",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "GAMMA调试数据读取",
+        "en-US": "Read GAMMA calibration data",
+        "zh-TW": "讀取 GAMMA 調校資料",
+        "ja-JP": "GAMMA 調整データを読み取る",
+        "ko-KR": "GAMMA 조정 데이터 읽기"
+      },
+      "template": "AA LL EC 02 CRC1 CRC2",
+      "parameters": [],
+      "note": "ACK2 为扩展长帧，长度字段高字节在前，低字节在后。",
+      "sourceControl": "AA LL EC 02 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "ack2": "AB FE XX XX ED 02 D1…Dn CRC1 CRC2"
+    },
+    {
+      "id": "tcl-048",
+      "name": "GAMMA调试初始化",
+      "category": "TCL 厂测协议",
+      "labels": {
+        "zh-CN": "GAMMA调试初始化",
+        "en-US": "Initialize GAMMA calibration",
+        "zh-TW": "初始化 GAMMA 調校",
+        "ja-JP": "GAMMA 調整を初期化",
+        "ko-KR": "GAMMA 조정 초기화"
+      },
+      "template": "AA 07 9F 09 01 CRC1 CRC2",
+      "parameters": [],
+      "note": "初始 GAMMA 立即生效但不保存；标准色温的 RGB 设为 128，冷／暖色温设为 0，均立即生效并保存。",
+      "sourceControl": "AA 07 9F 09 01 CRC1 CRC2",
+      "ack1": "AB 05 0A DF 4E",
+      "hazardous": true
+    }
+  ]
+}

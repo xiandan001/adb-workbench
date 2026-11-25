@@ -96,6 +96,69 @@ test('actual panel previews fixed/parameter frames and never invokes a serial se
   for (const id of ['lango-045', 'lango-report-1']) { command(h, id).props.onClick(); await h.drain(); assert.equal(find(h, '填入发送区').props.disabled, true); }
   await command(h, 'lango-107').props.onClick(); await h.drain(); assert.match(text(region(h, '协议命令详情')), /模拟外设输入/); assert.equal(used.length, 1);
 });
+test('the single TCL category exposes read-only ACK references and warns on hazardous commands', async t => {
+  const e = environment(); t.after(e.dispose); let fills = 0;
+  const h = e.mount('Rs232ProtocolPanel', { theme, onClose() {}, onUse: async () => { fills++; return true; } }); await h.drain();
+  const catalog = protocol.listProtocolCommands();
+  const reference = catalog.find(item => item.id === 'tcl-021');
+  e.setLocale('en-US'); await h.drain();
+  const categories = nodes(h.tree()).find(node => node.type === 'SelectMenu' && node.props.ariaLabel === '协议分类');
+  assert.deepEqual(structuredClone(categories.props.options.filter(item => item.value === reference.category)), [
+    { value: reference.category, label: 'TCL factory test protocol' },
+  ]);
+  categories.props.onChange(reference.category); await h.drain();
+  const choose = async id => { await nodes(h.tree()).find(node => node.type === 'button' && node.props.key === id).props.onClick(); await h.drain(); };
+  await choose('tcl-021');
+  const detail = text(region(h, '协议命令详情'));
+  assert.ok(detail.includes(reference.ack1) && detail.includes(reference.ack2));
+  assert.match(detail, /设备应答参考.*ACK1.*ACK2/s);
+  assert.match(detail, /接收确认与执行完成是两种不同的应答/s);
+  assert.match(detail, /执行完成参考\s+AB 05 0B CF 6F/s);
+  assert.match(detail, /TCL 帧包含 CRC/);
+  assert.doesNotMatch(detail, /115200 \/ 8N1|无 CRC/);
+  await choose('tcl-022');
+  assert.match(text(region(h, '协议命令详情')), /可能更改设备状态或数据/);
+  assert.equal(fills, 0);
+});
+
+test('TCL HEX input reports exact whole-byte bounds, previews without persisting, and only fills explicitly', async t => {
+  const e = environment(), used = []; t.after(e.dispose);
+  const base = protocol.listProtocolCommands().find(item => item.id === 'tcl-044');
+  const { id, name, category, template, note } = base;
+  persistence.saveProtocolPreferences(persistence.upsertProtocolCommand(persistence.defaultProtocolPreferences(),
+    { id, name, category, template, note, reviewed: true }), e.storage);
+  const h = e.mount('Rs232ProtocolPanel', { theme, onClose() {}, onUse: async frame => { used.push(frame); return true; } }); await h.drain();
+  await nodes(h.tree()).find(node => node.type === 'button' && node.props.key === id).props.onClick(); await h.drain();
+  const input = () => nodes(region(h, '协议命令详情')).find(node => node.type === 'textarea');
+  const edit = async value => { input().props.onChange({ target: { value } }); await h.drain(); };
+  assert.equal(input().props.maxLength, 262108);
+  const writes = e.writes.length;
+  await edit('A A' + ' AB'.repeat(255));
+  assert.equal(input().props['aria-invalid'], true);
+  assert.equal(find(h, '填入发送区').props.disabled, true);
+  await edit('AB'.repeat(65528));
+  assert.match(text(region(h, '协议命令详情')), /已输入 65528 字节 · 允许 256–65527 字节/);
+  assert.equal(find(h, '填入发送区').props.disabled, true);
+  await edit('AB'.repeat(256));
+  assert.match(text(region(h, '协议命令详情')), /已输入 256 字节/);
+  assert.equal(find(h, '填入发送区').props.disabled, false);
+  assert.equal(e.writes.length, writes);
+  assert.equal(used.length, 0);
+  await find(h, '填入发送区').props.onClick();
+  assert.equal(used.length, 1);
+  assert.deepEqual([...used[0].bytes.slice(0, 2)], [0xaa, 0xfe]);
+});
+
+test('editor distinguishes TCL length and CRC guidance from Lango templates', async t => {
+  const e = environment(); t.after(e.dispose);
+  const initial = { id: 'custom-' + randomUUID(), name: 'Test', category: 'Custom', template: '', note: '', reviewed: false };
+  const h = e.mount('Rs232ProtocolCommandEditor', { initial, theme, onSave() {}, onCancel() {} }); await h.drain();
+  assert.match(text(h.tree()), /不会修正写死的长度或追加校验/);
+  nodes(h.tree()).find(node => node.type === 'textarea').props.onChange({ target: { value: 'aa LL 19 01 CRC1 CRC2' } });
+  await h.drain();
+  assert.match(text(h.tree()), /TCL 模板以 AA 开头.*FE LH LL.*CRC1 CRC2/);
+});
+
 test('actual dirty editor cannot disappear on close, escape or command switch without a custom confirmation', async t => {
   const e = environment(); t.after(e.dispose); let closes = 0; const h = e.mount('Rs232ProtocolPanel', { theme, onClose: () => closes++, onUse: async () => true }); await h.drain(); find(h, '添加命令').props.onClick(); await h.drain();
   const child = e.mount('Rs232ProtocolCommandEditor', editorNode(h).props); await child.drain(); nodes(child.tree()).find(node => node.type === 'input').props.onChange({ target: { value: 'Unsaved user command' } }); await child.drain();

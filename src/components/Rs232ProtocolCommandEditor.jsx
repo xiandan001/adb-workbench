@@ -4,7 +4,7 @@ import { tr, useLocale } from '../shared/i18n.js';
 import { protocolCommandDraftChanged } from '../shared/rs232ProtocolDraft.js';
 import SelectMenu from './SelectMenu.jsx';
 
-export default function Rs232ProtocolCommandEditor({ initial, theme, isDark, categoryOptions = [], onSave, onCancel, onDirtyChange, onSavingChange }) {
+export default function Rs232ProtocolCommandEditor({ initial, protocol, theme, isDark, categoryOptions = [], onSave, onCancel, onDirtyChange, onSavingChange }) {
   useLocale();
   const [draft, setDraft] = useState(initial), [error, setError] = useState(''), [saving, setSaving] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false), [categoryName, setCategoryName] = useState(''), [draftCategories, setDraftCategories] = useState([]);
@@ -12,6 +12,7 @@ export default function Rs232ProtocolCommandEditor({ initial, theme, isDark, cat
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const field = `w-full min-w-0 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${theme.input}`;
   const categories = [...new Set([...categoryOptions.map(item => item.value), ...draftCategories, draft.category].filter(Boolean))].map(value => categoryOptions.find(item => item.value === value) || { value, label: value });
+  const tcl = protocol === 'tcl' || /^AA(?:\s|$)/i.test(draft.template.trimStart()) || /^TCL\b/i.test(draft.category.trim());
   const change = (key, value) => {
     if (lock.current) return;
     const next = { ...draft, [key]: value, ...(key === 'template' && value !== draft.template ? { reviewed: false } : {}) };
@@ -38,7 +39,9 @@ export default function Rs232ProtocolCommandEditor({ initial, theme, isDark, cat
       {addingCategory && <div className="space-y-2 rounded-lg border border-slate-400/20 p-2"><div className="flex flex-wrap gap-2"><input autoFocus aria-label={tr('新分类名称')} disabled={saving} value={categoryName} maxLength={40} onChange={event => { if (lock.current) return; const value = event.target.value; setCategoryName(value); setError(''); onDirtyChange?.(protocolCommandDraftChanged(initial, draft) || Boolean(value)); }} onKeyDown={event => { if (event.key === 'Enter' && !event.isComposing && !event.nativeEvent?.isComposing && event.keyCode !== 229) { event.preventDefault(); addCategory(); } }} className={`${field} flex-1 basis-40`} /><button type="button" disabled={saving} onClick={addCategory} className={`rounded-lg px-3 py-2 ${theme.button.secondary}`}>{tr('确认分类')}</button><button type="button" disabled={saving} aria-label={tr('取消新增分类')} onClick={cancelCategory} className={`rounded-lg p-2 ${theme.button.secondary}`}><X size={14} /></button></div><p className={`leading-5 ${theme.textMuted}`}>{tr('新分类会随这条命令一起保存；取消编辑不会新增分类。')}</p></div>}
     </div>
     <label className="block space-y-1 text-xs"><span>{tr('HEX 帧模板')}</span><textarea disabled={saving} value={draft.template} maxLength={8192} rows={4} spellCheck={false} onChange={event => change('template', event.target.value)} className={`${field} max-h-48 resize-y font-mono text-xs`} /></label>
-    <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('固定字节使用两位 HEX，字节参数使用 {XX} 等占位符。只有明确写出的 LL 会按数据长度计算；不会修正写死的长度或追加校验。')}</p>
+    <p className={`text-xs leading-5 ${theme.textMuted}`}>{tcl
+      ? tr('TCL 模板以 AA 开头。LL 自动计算短帧长度；长帧用 FE LH LL。CRC1 CRC2 自动生成校验。')
+      : tr('固定字节使用两位 HEX，字节参数使用 {XX} 等占位符。只有明确写出的 LL 会按数据长度计算；不会修正写死的长度或追加校验。')}</p>
     <label className="block space-y-1 text-xs"><span>{tr('命令备注')}</span><textarea disabled={saving} value={draft.note} maxLength={2000} rows={2} onChange={event => change('note', event.target.value)} className={`${field} max-h-40 resize-y`} /></label>
     <label className="flex items-start gap-2 text-xs leading-5"><input type="checkbox" disabled={saving} checked={draft.reviewed} onChange={event => change('reviewed', event.target.checked)} className="mt-1 accent-emerald-500" /><span>{tr('我已核对模板。此标记只代表人工确认，不代表设备已验证。')}</span></label>
     {error && <p role="alert" className="break-words text-xs text-red-500">{error}</p>}

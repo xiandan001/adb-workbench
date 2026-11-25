@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowDownToLine, Code2, Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { getLocale, tr, useLocale } from '../shared/i18n.js';
 import { trapAppMessageFocus, confirmAppMessage } from '../shared/appMessageDialog.js';
@@ -9,8 +9,51 @@ import Rs232ProtocolCommandEditor from './Rs232ProtocolCommandEditor.jsx';
 import useRs232ProtocolMemory from '../shared/useRs232ProtocolMemory.js';
 import { clearRs232ScopeMemory, forgetProtocolParameters, rememberProtocolSelection, restoreProtocolSelection, restoreProtocolValues } from '../shared/rs232ProtocolMemory.js';
 
+const tclCompletionResponse = 'AB 05 0B CF 6F';
+
+function countHexBytes(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return 0;
+  const tokens = text.split(/\s+/u);
+  return tokens.every(token => token.length % 2 === 0 && /^[0-9a-f]+$/i.test(token))
+    ? tokens.reduce((total, token) => total + token.length / 2, 0) : null;
+}
+
+function renderParameter(parameter, { locale, values, hexCounts, busy, field, theme, isDark, changeValues, inputId }) {
+  const label = parameter.labels?.[locale] || parameter.label || parameter.key;
+  const value = values[parameter.key] ?? '';
+  if (parameter.type === 'hex') {
+    const text = typeof value === 'string' ? value : '';
+    const count = hexCounts.get(parameter.key);
+    const maxLength = Number.isSafeInteger(parameter.maxBytes) && parameter.maxBytes > 0 ? Math.min(262108, parameter.maxBytes * 4) : 1024;
+    const invalid = Boolean(text.trim() && (count === null || count < parameter.minBytes || count > parameter.maxBytes));
+    const hintId = `${inputId}-${parameter.key}-hex-hint`;
+    return <label key={parameter.key} className="block min-w-0 space-y-1 text-xs sm:col-span-2">
+      <span>{label}</span>
+      <textarea disabled={busy} value={text} rows={3} maxLength={maxLength} spellCheck={false} autoCapitalize="off"
+        aria-label={label} aria-describedby={hintId} aria-invalid={invalid}
+        onChange={event => { if (event.target.value.length <= maxLength) changeValues(parameter.key, event.target.value, false); }}
+        placeholder={tr('输入 HEX 数据')} className={`${field} w-full resize-y font-mono`} />
+      <span id={hintId} className={`block break-words ${invalid ? 'text-amber-500' : theme.textMuted}`}>
+        {count === null ? tr('HEX 内容必须是成对的十六进制字符，字节之间可用空白分隔')
+          : tr('已输入 {0} 字节 · 允许 {1}–{2} 字节', { 0: count, 1: parameter.minBytes, 2: parameter.maxBytes })}
+      </span>
+    </label>;
+  }
+  return <label key={parameter.key} className="block min-w-0 space-y-1 text-xs">
+    <span>{label}</span>
+    {parameter.options?.length
+      ? <SelectMenu disabled={busy} ariaLabel={label} value={String(value)} onChange={next => changeValues(parameter.key, next)} isDark={isDark}
+        className="w-full" options={[{ value: '', label: tr('请选择参数') }, ...parameter.options.map(option => ({ value: String(option.value), label: option.labels?.[locale] || option.label }))]} />
+      : <input disabled={busy} value={value} onChange={event => changeValues(parameter.key, event.target.value)} className={`${field} w-full`}
+        inputMode={parameter.type === 'byte' ? 'numeric' : 'text'} maxLength={parameter.type === 'ascii' ? (parameter.maxBytes || 247) : 247}
+        placeholder={parameter.type === 'byte' ? tr('十进制 {0}–{1}，或 0x 前缀 HEX', { 0: parameter.min, 1: parameter.max }) : tr('输入 ASCII 数据')} />}
+  </label>;
+}
+
 export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memoryScope = { workspace: 'rs232', schemeId: '' } }) {
   const locale = useLocale(), dialog = useRef(null), lock = useRef(false), alive = useRef(true), returnFocus = useRef(true);
+  const parameterInputId = useId();
   const dirtyRef = useRef(false), editorSavingRef = useRef(false), wasEditing = useRef(false);
   const focusNonce = useRef(0), pendingFocus = useRef(0);
   const [boot] = useState(() => { try { return { preferences: readProtocolPreferences(), error: '' }; } catch (failure) { return { preferences: defaultProtocolPreferences(), error: failure.message }; } });
@@ -24,18 +67,23 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
   const commands = useMemo(() => listProtocolCommands(preferences), [preferences]);
   const originals = useMemo(() => new Map(listProtocolCommands(defaultProtocolPreferences()).map(command => [command.id, command])), []);
   const selected = commands.find(command => command.id === selectedId) || null;
+  const tcl = selected?.protocol === 'tcl';
+  const acknowledgements = tcl ? Object.entries({ ACK1: selected.ack1, ACK2: selected.ack2 }).filter(([, value]) => value) : [];
   const parameterState = useMemo(() => {
     void locale;
     try { return { items: selected && !selected.referenceOnly ? getProtocolParameters(selected) : [], error: '' }; }
     catch (failure) { return { items: [], error: failure.message }; }
   }, [selected, locale]);
   const parameters = parameterState.items;
+  const hexCounts = useMemo(() => new Map(parameters.filter(parameter => parameter.type === 'hex')
+    .map(parameter => [parameter.key, countHexBytes(values[parameter.key])])), [parameters, values]);
   const preview = useMemo(() => {
     void locale;
     if (!selected) return { frame: null, error: '' };
     if (parameterState.error) return { frame: null, error: parameterState.error };
+    if ([...hexCounts.values()].includes(null)) return { frame: null, error: '' };
     try { return { frame: buildProtocolCommand(selected, values), error: '' }; } catch (failure) { return { frame: null, error: failure.message }; }
-  }, [selected, values, parameterState.error, locale]);
+  }, [selected, values, hexCounts, parameterState.error, locale]);
   const categories = [...new Set(commands.map(command => command.category))];
   const categoryLabel = value => getProtocolCategoryLabel(value, locale);
   const filtered = commands.filter(command => (!category || command.category === category) &&
@@ -77,7 +125,11 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
     catch (failure) { setPersistenceError(failure.message); throw failure; }
   };
   const remember = (command, nextValues = values, nextCategory = category) => memory.update(current => rememberProtocolSelection(current, memoryScope, { selectedId: command?.id || '', category: nextCategory, command, values: nextValues }));
-  const changeValues = (key, value) => { const next = { ...values, [key]: value }; setValues(next); remember(selected, next); };
+  const changeValues = (key, value, rememberValue = true) => {
+    const next = { ...values, [key]: value };
+    setValues(next);
+    if (rememberValue) remember(selected, next);
+  };
   const changeCategory = value => { setCategory(value); remember(selected, values, value); };
   const resetMemory = async () => {
     if (lock.current || editorSavingRef.current) return;
@@ -130,15 +182,41 @@ export default function Rs232ProtocolPanel({ theme, isDark, onClose, onUse, memo
           {preferences.removed.length > 0 && <div><button type="button" disabled={busy} onClick={() => setShowRemoved(value => !value)} aria-expanded={showRemoved} className={`text-xs underline ${theme.textMuted}`}>{tr('已删除的内置命令（{0}）', { 0: preferences.removed.length })}</button>{showRemoved && <div className="mt-2 flex max-h-32 flex-wrap gap-2 overflow-auto">{preferences.removed.map(id => <button key={id} type="button" disabled={busy} onClick={() => restore(id)} className={button}><RotateCcw size={12} />{getProtocolDisplayName(originals.get(id), locale) || id}</button>)}</div>}</div>}
         </section>
         <div className={`min-w-0 rounded-xl border border-slate-400/20 p-4 ${isDark ? 'bg-[#202124]/50' : 'bg-slate-50/60'}`}>
-          {editor ? <Rs232ProtocolCommandEditor key={editor.id} initial={editor} theme={theme} isDark={isDark} categoryOptions={categories.map(value => ({ value, label: categoryLabel(value) }))} onSave={save} onCancel={cancelEditor} onDirtyChange={dirty} onSavingChange={saving} /> : selected ? <section className="min-w-0 space-y-4" aria-label={tr('协议命令详情')}>
+          {editor ? <Rs232ProtocolCommandEditor key={editor.id} initial={editor} protocol={originals.get(editor.id)?.protocol} theme={theme} isDark={isDark} categoryOptions={categories.map(value => ({ value, label: categoryLabel(value) }))} onSave={save} onCancel={cancelEditor} onDirtyChange={dirty} onSavingChange={saving} /> : selected ? <section className="min-w-0 space-y-4" aria-label={tr('协议命令详情')}>
             <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className={`text-xs ${theme.textMuted}`}>{categoryLabel(selected.category)}</p><h3 data-protocol-command-title tabIndex={-1} className="mt-1 break-words text-lg font-semibold">{getProtocolDisplayName(selected, locale)}</h3></div><div className="flex flex-wrap gap-1"><button type="button" disabled={busy} onClick={() => edit(selected)} className={button}><Pencil size={13} />{tr('编辑')}</button><button type="button" disabled={busy} onClick={remove} className={button}><Trash2 size={13} />{tr('删除')}</button>{selected.builtin && selected.modified && <button type="button" disabled={busy} onClick={() => restore(selected.id)} className={button}><RotateCcw size={13} />{tr('恢复内置原样')}</button>}</div></div>
             {selected.modified && selected.reviewed && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('人工确认仅代表模板已核对，未验证当前设备或固件。')}</p>}
             {selected.simulatedInput && <p className="rounded-lg border border-amber-500/30 px-3 py-2 text-xs text-amber-500">{tr('模拟外设输入')}</p>}
             {(selected.referenceOnly || selected.needsReview && !selected.reviewed) && <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{selected.referenceOnly ? tr('这是设备上报示例，仅供查看，不可作为主机控制命令填入。') : tr('此条控制码在源表中存在疑点，请先编辑并核对；不会猜测修正值。')}</p>}
-            {parameters.length > 0 && <div className="grid min-w-0 gap-3 sm:grid-cols-2">{parameters.map(parameter => <label key={parameter.key} className="block min-w-0 space-y-1 text-xs"><span>{parameter.labels?.[locale] || parameter.label || parameter.key}</span>{parameter.options?.length ? <SelectMenu disabled={busy} ariaLabel={parameter.labels?.[locale] || parameter.label || parameter.key} value={values[parameter.key] === undefined ? '' : String(values[parameter.key])} onChange={value => changeValues(parameter.key, value)} isDark={isDark} className="w-full" options={[{ value: '', label: tr('请选择参数') }, ...parameter.options.map(option => ({ value: String(option.value), label: option.labels?.[locale] || option.label }))]} /> : <input disabled={busy} value={values[parameter.key] ?? ''} onChange={event => changeValues(parameter.key, event.target.value)} className={`${field} w-full`} inputMode={parameter.type === 'byte' ? 'numeric' : 'text'} maxLength={247} placeholder={parameter.type === 'byte' ? tr('十进制 {0}–{1}，或 0x 前缀 HEX', { 0: parameter.min, 1: parameter.max }) : tr('输入 ASCII 数据')} />}</label>)}</div>}
+            {selected.hazardous === true && !selected.referenceOnly && <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-500">
+              <AlertTriangle size={15} aria-hidden="true" className="mt-0.5 shrink-0" />{tr('此命令可能更改设备状态或数据。请核对目标和参数后，再手动发送。')}
+            </p>}
+            {parameters.length > 0 && <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              {parameters.map(parameter => renderParameter(parameter, { locale, values, hexCounts, busy, field, theme, isDark, changeValues, inputId: parameterInputId }))}
+            </div>}
             <div className="rounded-xl border border-slate-400/20 p-3"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{tr('生成的发送数据')}</span>{preview.frame && <span className={theme.textMuted}>{tr('{0} 字节', { 0: preview.frame.bytes.byteLength })}</span>}</div><pre className={`mt-2 whitespace-pre-wrap break-all font-mono text-xs leading-6 ${preview.frame ? 'text-emerald-500' : theme.textMuted}`}>{preview.frame?.hex || tr('填写有效参数后显示完整 HEX。')}</pre>{preview.error && <p role="status" className="mt-2 break-words text-xs text-amber-500">{preview.error}</p>}</div>
             {selected.note && <details className={`text-xs leading-5 ${theme.textMuted}`}><summary className="cursor-pointer">{tr('源文档备注（中文）')}</summary><p className="mt-2 whitespace-pre-wrap break-words">{selected.note}</p></details>}
-            <details className={`text-xs leading-5 ${theme.textMuted}`}><summary className="cursor-pointer">{tr('原始报文与适用范围')}</summary><p className="mt-2">{tr('参考 115200 / 8N1，无 CRC。实际端口、使能状态及固件支持需核对；不会自动修改连接。')}</p><p className="mt-2 break-all font-mono">{selected.sourceControl || selected.template}</p>{selected.sourceResponse && <p className="mt-1 break-all font-mono">{selected.sourceResponse}</p>}</details>
+            <details className={`text-xs leading-5 ${theme.textMuted}`}>
+              <summary className="cursor-pointer">{tr('原始报文与适用范围')}</summary>
+              <p className="mt-2">{tcl ? tr('TCL 帧包含 CRC 校验。请按设备文档核对串口设置和固件支持；应用不会自动修改连接。')
+                : tr('参考 115200 / 8N1，无 CRC。实际端口、使能状态及固件支持需核对；不会自动修改连接。')}</p>
+              <p className="mt-2 whitespace-pre-wrap break-all font-mono">{selected.sourceControl || selected.template}</p>
+              {!tcl && selected.sourceResponse && <p className="mt-1 break-all font-mono">{selected.sourceResponse}</p>}
+            </details>
+            {tcl && <details className={`rounded-lg border border-slate-400/20 px-3 py-2 text-xs leading-5 ${theme.textMuted}`}>
+              <summary className="cursor-pointer font-medium">{tr('设备应答参考')}</summary>
+              <p className="mt-2">{tr('以下为文档中的应答示例，不会发送，也不代表设备已执行。')}</p>
+              <p>{tr('接收确认与执行完成是两种不同的应答。')}</p>
+              <dl className="mt-2 grid min-w-0 gap-2">
+                {acknowledgements.map(([label, response]) => <div key={label} className="min-w-0">
+                  <dt className="font-semibold">{label}</dt>
+                  <dd className="whitespace-pre-wrap break-all font-mono">{response}</dd>
+                </div>)}
+                <div className="min-w-0">
+                  <dt className="font-semibold">{tr('执行完成参考')}</dt>
+                  <dd className="break-all font-mono">{tclCompletionResponse}</dd>
+                </div>
+              </dl>
+            </details>}
           </section> : <p className={`py-12 text-center text-sm ${theme.textMuted}`}>{tr('从左侧选择一个功能，或添加自己的命令。')}</p>}
         </div>
       </div>

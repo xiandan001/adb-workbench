@@ -19,7 +19,7 @@ test('power, query, volume, channel and whiteboard golden frames contain only or
     const result = buildProtocolCommand(entries[index - 1], values); assert.equal(result.hex, expected); assert.ok(result.bytes instanceof Uint8Array);
     assert.equal(result.bytes.length, expected.split(' ').length); assert.equal(result.bytes.at(-1), 0xcf); assert.equal(result.hex.includes('\n'), false);
   }
-  for (const command of entries.filter(entry => !entry.needsReview && !entry.referenceOnly && !entry.template.includes('{') && !entry.template.includes(' LL '))) assert.equal(buildProtocolCommand(command).hex, command.sourceControl);
+  for (const command of entries.filter(entry => entry.protocol !== 'tcl' && !entry.needsReview && !entry.referenceOnly && !entry.template.includes('{') && !entry.template.includes(' LL '))) assert.equal(buildProtocolCommand(command).hex, command.sourceControl);
 });
 test('documented integer ranges, enums and unknown/missing fields fail closed rather than guessing defaults', async () => {
   const { listProtocolCommands, getProtocolParameters, buildProtocolCommand } = await api(), entries = listProtocolCommands(), volume = entries[41], channel = entries[36];

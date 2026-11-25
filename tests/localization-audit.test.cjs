@@ -234,3 +234,12 @@ test('startup markup and built-in JSON cannot introduce uncatalogued copy', () =
   assert.equal(auditHtml({ file: 'index.html', source: '<p>キャンセル</p>', catalog }).length, 1);
   assert.equal(auditHtml({ file: 'index.html', source: '<p>취소</p>', catalog }).length, 1);
 });
+
+test('the TCL protocol catalog audits embedded labels without requiring duplicate locale entries', () => {
+  const file = 'electron/lib/rs232-protocol-tcl.json', catalog = new Set();
+  const source = { label: '新标签', labels: { 'zh-CN': '新标签', 'en-US': 'New label', 'zh-TW': '新標籤', 'ja-JP': '新しいラベル', 'ko-KR': '새 레이블' } };
+  assert.equal(auditJson({ file, source: JSON.stringify(source), catalog }).length, 0);
+  assert.equal(auditJson({ file: 'spec.json', source: JSON.stringify(source), catalog }).length, 1);
+  delete source.labels['ko-KR'];
+  assert.equal(auditJson({ file, source: JSON.stringify(source), catalog }).length, 1);
+});

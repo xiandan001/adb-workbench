@@ -181,12 +181,21 @@ function runtimeFiles(root) {
 }
 function auditJson({ file, source, catalog }) {
   const diagnostics = [], fields = new Set(['label', 'hint', 'title', 'description', 'message', 'placeholder', 'emptyText']);
+  const tclCatalog = file === 'electron/lib/rs232-protocol-tcl.json';
   let value;
   try { value = JSON.parse(source); }
   catch { return [{ file, line: 1, kind: 'json', message: 'Runtime JSON is invalid' }]; }
-  function walk(node, field) {
-    if (typeof node === 'string' && fields.has(field) && !technical(node) && !catalog.has(node)) diagnostics.push({ file, line: source.slice(0, source.indexOf(JSON.stringify(node))).split('\n').length, kind: 'missing-translation', source: node, message: 'Built-in display data needs complete target-language translations' });
-    else if (node && typeof node === 'object') for (const [key, child] of Object.entries(node)) walk(child, key);
+  function walk(node, field, parent) {
+    if (typeof node === 'string' && tclCatalog && ['label', 'name'].includes(field)) {
+      const labels = parent?.labels;
+      if (labels?.['zh-CN'] !== node || Object.keys(labels || {}).length !== DISPLAY_LOCALES.size ||
+        !Array.from(DISPLAY_LOCALES).every(locale => typeof labels[locale] === 'string' && labels[locale].trim() &&
+          placeholders(labels[locale]) === placeholders(node)) || EAST_ASIAN.test(labels['en-US'])) {
+        diagnostics.push({ file, line: source.slice(0, source.indexOf(JSON.stringify(node))).split('\n').length,
+          kind: 'missing-translation', source: node, message: 'TCL display names require their own five locale labels' });
+      }
+    } else if (typeof node === 'string' && fields.has(field) && !technical(node) && !catalog.has(node)) diagnostics.push({ file, line: source.slice(0, source.indexOf(JSON.stringify(node))).split('\n').length, kind: 'missing-translation', source: node, message: 'Built-in display data needs complete target-language translations' });
+    else if (node && typeof node === 'object') for (const [key, child] of Object.entries(node)) walk(child, key, node);
   }
   walk(value, ''); return diagnostics;
 }

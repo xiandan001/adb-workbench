@@ -1,9 +1,10 @@
 const { tr } = require('./localization.cjs');
 const { types } = require('node:util');
+const { isTclProtocolId } = require('./rs232-protocol-preferences.cjs');
 const RS232_MEMORY_KEY = 'adb-workbench.rs232-memory.v1';
 const RS232_MEMORY_BYTES = 32768;
 const safeIds = new Set([14,37,39,42,46,48,50,52,54,56,58,62,63,84,111].map(value => `lango-${String(value).padStart(3,'0')}`));
-const commandId = value => typeof value === 'string' && (/^lango-\d{3}$/.test(value) && Number(value.slice(6)) >= 1 && Number(value.slice(6)) <= 111 || /^lango-report-[1-4]$/.test(value) || /^custom-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value));
+const commandId = value => typeof value === 'string' && (isTclProtocolId(value) || /^lango-\d{3}$/.test(value) && Number(value.slice(6)) >= 1 && Number(value.slice(6)) <= 111 || /^lango-report-[1-4]$/.test(value) || /^custom-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value));
 const fail = () => { throw Error(tr('协议操作记忆无效，原数据已保留。')); };
 const text = (value, maximum) => typeof value === 'string' && value.length <= maximum && !Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 function fields(value, keys) {
