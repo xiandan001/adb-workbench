@@ -78,8 +78,18 @@ function parseMtkFlashLine(line) {
   const [part, total] = progress.slice(3).map(Number);
   return {
     phase, percentage: Number(progress[1]),
+    ...(description.startsWith('image data ') ? { wholeImage: true } : {}),
     ...(part > 0 && total >= part ? { part, total } : {}),
   };
+}
+
+function mtkProgress(event) {
+  if (event?.phase === 'formatting') return [null, { stage: 'formatting', stagePercent: event.percentage }];
+  if (event?.phase !== 'writing') return null;
+  const details = { stage: 'writing' };
+  if (!event.wholeImage) details.partPercent = event.percentage;
+  if (event.part !== undefined) Object.assign(details, { part: event.part, total: event.total });
+  return [event.wholeImage || event.total === 1 ? event.percentage : null, details];
 }
 
 function parseMtkTraceLine(line, pid) {
@@ -104,7 +114,7 @@ function parseMtkTraceLine(line, pid) {
   const end = /^CmdExecutor::execute\(\): CMD:(ERASE-FLASH|FLASH-ALL|FLASH-UPDATE|WRITE-PARTITIONS) command execute (successed\.|failed\b.*)$/.exec(body);
   if (end) return { phase: 'device-command', command: end[1], outcome: end[2] === 'successed.' ? 'success' : 'failure' };
   if (body === 'ConsoleMode::ConsoleModeEntry::run(): All command exec done!') return { phase: 'tool-completed' };
-  const message = /^(?:ConsoleMode::ConsoleModeRunner::cbDownloadProgress|ConsoleMode::ConsoleModeEntry::run)\(\): (.*)$/.exec(body);
+  const message = /^(?:ConsoleMode::ConsoleModeRunner::cb(?:Download|Format)Progress|ConsoleMode::ConsoleModeEntry::run)\(\): (.*)$/.exec(body);
   return message ? parseMtkFlashLine(message[1]) : null;
 }
 
@@ -127,4 +137,4 @@ function finishMtkFlash({ exitCode, signal, evidence } = {}) {
   return { ok: true, status: 'tool-completed' };
 }
 
-module.exports = { MTK_VERSION, buildMtkFlashArgs, parseMtkFlashLine, parseMtkTraceLine, updateMtkEvidence, finishMtkFlash };
+module.exports = { MTK_VERSION, buildMtkFlashArgs, mtkProgress, parseMtkFlashLine, parseMtkTraceLine, updateMtkEvidence, finishMtkFlash };

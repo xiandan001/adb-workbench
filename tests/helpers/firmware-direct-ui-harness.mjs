@@ -33,7 +33,8 @@ function mount(api, options = {}) {
   const runtime = {
     useId: () => 'direct-title', useLocale() {}, isDarkTheme: () => false,
     Loader2: 'loading', Download: 'download', TriangleAlert: 'warning', CheckCircle2: 'done', ChevronDown: 'chevron',
-    SelectMenu: 'selection', React: { Fragment: 'fragment' }, tr: label => label,
+    SelectMenu: 'selection', React: { Fragment: 'fragment' },
+    tr: (label, values) => values ? label.replace(/\{(\d+)\}/g, (_, key) => values[key]) : label,
     jsx: (type, props, ...children) => ({ type, props: { ...props, children } }),
     useEffect(effect, deps) {
       const index = cursor++;

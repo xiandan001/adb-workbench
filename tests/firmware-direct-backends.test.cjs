@@ -8,6 +8,7 @@ const { mtk: knownMtk } = require('../electron/lib/firmware-tools-vendor.json');
 
 const root = path.resolve('approved tools');
 const rkDir = path.join(root, 'RK', 'Windows_Upgrade_Tool_v2.46');
+const rkRunDir = path.join(root, 'private-writer');
 const mtkDir = path.join(root, 'MTK', 'SP_Flash_Tool_V6');
 const rkTarget = { locationId: '1a2', vid: '2207', pid: '350e', mode: 'maskrom' };
 const mtkTarget = { port: 'COM4', stage: 'preloader', verified: true };
@@ -33,8 +34,9 @@ function rkImageFixture() {
   return image;
 }
 
-function backend(events = [], { elevatedMtk, image = rkImageFixture() } = {}) {
+function backend(events = [], { elevatedMtk, image = rkImageFixture(), writerValid = true } = {}) {
   const calls = [];
+  const writerStages = [];
   const loaderFiles = new Map();
   let blocked = false;
   const instance = createDirectFlashBackends({
@@ -61,6 +63,15 @@ function backend(events = [], { elevatedMtk, image = rkImageFixture() } = {}) {
       async unlink(file) { loaderFiles.delete(file); },
     },
     elevatedMtk, waitForRk: async () => {},
+    stageRkTool: async original => {
+      writerStages.push('stage');
+      assert.equal(original.cwd, rkDir);
+      return {
+        tool: { ...original, cwd: rkRunDir, executable: path.join(rkRunDir, 'upgrade_tool.exe') },
+        async validate() { writerStages.push('validate'); return writerValid; },
+        async release() { writerStages.push('release'); },
+      };
+    },
     revalidateRkFirmware: async firmware => firmware === verifiedRkFirmware,
     async verifyRk(directory) {
       return directory !== rkDir ? { ok: false, code: 'rk-tool-unavailable' }
@@ -84,7 +95,7 @@ function backend(events = [], { elevatedMtk, image = rkImageFixture() } = {}) {
       calls.push({ executable, args, spawnOptions });
       queueMicrotask(() => {
         child.emit('spawn');
-        for (const [kind, data, signal] of typeof events === 'function' ? events(args, loaderFiles) : events) {
+        for (const [kind, data, signal] of typeof events === 'function' ? events(args, loaderFiles, child) : events) {
           if (kind === 'stdout' || kind === 'stderr') child[kind].emit('data', Buffer.from(data));
           else if (kind === 'error') child.emit(kind, new Error(data));
           else child.emit('close', data, signal);
@@ -93,7 +104,7 @@ function backend(events = [], { elevatedMtk, image = rkImageFixture() } = {}) {
       return child;
     },
   });
-  return { instance, calls, loaderFiles, disableTrust() { blocked = true; } };
+  return { instance, calls, loaderFiles, writerStages, disableTrust() { blocked = true; } };
 }
 
 async function rkWrite(events, { onProgress } = {}) {
@@ -172,15 +183,53 @@ test('RK accepts framed progress and success only after the actual LocationID ma
   assert.deepEqual(progress, [35, 100]);
   assert.deepEqual(calls[0].args, ['-s', '1a2', 'uf', rkFirmware.path, '-noreset']);
   assert.equal(calls[0].spawnOptions.shell, false);
+  assert.equal(calls[0].spawnOptions.cwd, rkRunDir);
+  assert.equal(calls[0].executable, path.join(rkRunDir, 'upgrade_tool.exe'));
   for (const [log, code] of [
     ['Current Device Location ID:BBBB\rUpgrade firmware ok.', 'rk-target-mismatch'],
     ['Upgrade firmware ok.', 'rk-write-unconfirmed'],
     ['Current Device Location ID:01A2\rDownload Image... (100%)', 'rk-write-unconfirmed'],
     ['Current Device Location ID:01A2\rUpgrade firmware ok.\rCheck Chip Fail', 'rk-write-failed'],
     ['Current Device Location ID:01A2\rUpgrade firmware ok.\r' + 'x'.repeat(2050), 'rk-write-unconfirmed'],
+    ['Current Device Location ID:01A2\rDownload Image... (20%)Upgrade firmware ok.', 'rk-write-unconfirmed'],
   ]) {
     assert.deepEqual((await rkWrite([['stdout', log], ['close', 0]])).result, { transferCompleted: false, code });
   }
+});
+
+test('RK delivers complete adjacent progress frames before returning from a still-running process', async () => {
+  const progress = [];
+  let spawnChild;
+  const started = new Promise(resolve => { spawnChild = resolve; });
+  const { instance } = backend((_args, _files, child) => {
+    spawnChild(child);
+    return [['stdout', 'Current Device Location ID:01A2\r']];
+  });
+  const { tool } = await instance.inspect('rk', root);
+  let closed = false;
+  const running = instance.write({
+    platform: 'rk', tool, target: rkTarget, firmware: rkFirmware,
+  }, { onProgress: (value, detail) => progress.push([value, detail]) }).then(result => { closed = true; return result; });
+  const child = await started;
+  child.stdout.emit('data', Buffer.from('\x1b[2K\x08Download Image... (1'));
+  assert.deepEqual(progress, []);
+  child.stdout.emit('data', Buffer.from('2%)Download Image... ('));
+  assert.deepEqual(progress, [[12, { stage: 'writing' }]]);
+  child.stdout.emit('data', Buffer.from('13%)' + 'Download Image... (14%)'.repeat(140) + 'Download Image... (15%)'));
+  assert.deepEqual(progress.map(([value]) => value), [12, 13, 14, 15]);
+  assert.equal(closed, false);
+  child.stdout.emit('data', Buffer.from('\rUpgrade firmware ok.\r'));
+  child.emit('close', 0);
+  assert.deepEqual(await running, { transferCompleted: true, code: 'rk-tool-reported-success' });
+});
+
+test('RK never spawns if the private writer copy fails trust validation', async () => {
+  const { instance, calls, writerStages } = backend([], { writerValid: false });
+  const { tool } = await instance.inspect('rk', root);
+  const outcome = await instance.write({ platform: 'rk', tool, target: rkTarget, firmware: rkFirmware });
+  assert.deepEqual(outcome, { transferCompleted: false, code: 'flash-tool-unavailable' });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(writerStages, ['stage', 'validate', 'release']);
 });
 
 test('MTK reports write percentage only, requires a clean exit and rejects a conflicting COM identity', async () => {
@@ -230,10 +279,10 @@ test('RK no-echo completion needs fresh chip and storage evidence, exact file, r
   assert.deepEqual(prepared, { ok: true, target: { ...guardedTarget, preWriteChipVerified: true } });
   assert.deepEqual(calls.map(call => call.args), [['-s', '1a2', 'rci'], ['-s', '1a2', 'rfi']]);
   const request = { platform: 'rk', tool, target: prepared.target, firmware: verifiedRkFirmware };
-  const callbacks = { beforeDispatch: async () => true, onProgress: value => progress.push(value) };
+  const callbacks = { beforeDispatch: async () => true, onProgress: (value, details) => progress.push([value, details]) };
   const outcome = await instance.write(request, callbacks);
   assert.deepEqual(outcome, { transferCompleted: true, code: 'rk-tool-reported-success' });
-  assert.deepEqual(progress, [30]);
+  assert.deepEqual(progress, [[null, { stage: 'connecting' }], [30, { stage: 'writing' }], [null, { stage: 'finalizing' }]]);
   assert.deepEqual(await instance.write(request, callbacks), { transferCompleted: false, code: 'flash-plan-changed' });
   assert.equal(calls.length, 3);
 });

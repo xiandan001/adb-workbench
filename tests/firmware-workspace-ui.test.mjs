@@ -62,6 +62,28 @@ function mount(electronAPI, entryDevice) {
 
 const vendorStatus = state => ({ ok: true, state, devices: [], installer: { available: true }, tool: { available: true } });
 
+test('last firmware restoration is read-only, does not block the picker and cannot overwrite a new choice', async () => {
+  let sendOld;
+  const restoring = new Promise(resolve => { sendOld = resolve; });
+  const calls = [];
+  const ui = mount({
+    firmwareStatus: async () => vendorStatus('installed'),
+    firmwareRestoreFile: platform => { calls.push(['restore', platform]); return restoring; },
+    firmwareChooseFile: async platform => { calls.push(['choose', platform]); return { ok: true, fileName: 'new.img' }; },
+  });
+  await flush();
+  assert.equal(ui.view().restoringFile, true);
+  assert.equal(ui.view().busy, '');
+  assert.deepEqual(calls, [['restore', 'rk']]);
+  await ui.view().act('file');
+  assert.equal(ui.view().file.fileName, 'new.img');
+  sendOld({ ok: true, fileName: 'old.img' });
+  await flush();
+  assert.equal(ui.view().restoringFile, false);
+  assert.equal(ui.view().file.fileName, 'new.img');
+  assert.deepEqual(calls, [['restore', 'rk'], ['choose', 'rk']]);
+});
+
 test('driver action preserves installation and offers reinstallation for known installed packages only', () => {
   const status = state => ({ state, installer: { canChoose: true } });
   for (const state of ['installed', 'bound']) assert.equal(firmwareDriverAction(status(state)), 'reinstall');

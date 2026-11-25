@@ -9,6 +9,7 @@ import { tr } from '../src/shared/i18n.js';
 const require = createRequire(import.meta.url), { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default;
 const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'), ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
 const declarations = new Map(), effects = [], sidebar = new Map();
+let discoveryNoticeGate;
 traverse(ast, {
   VariableDeclarator({ node, parent }) {
     if (['setActiveTab', 'fetchDevices', 'previousDevicePageRef', 'refreshConnectionHistory'].includes(node.id.name)) declarations.set(node.id.name, parent);
@@ -24,6 +25,21 @@ traverse(ast, {
     if (callback.type === 'ArrowFunctionExpression' && call?.type === 'CallExpression' && call.callee.name === 'setActiveTab'
       && ['devices', 'settings', 'serial'].includes(call.arguments[0]?.value)) sidebar.set(call.arguments[0].value, source.slice(callback.start, callback.end));
   },
+  JSXExpressionContainer({ node }) {
+    const expression = node.expression;
+    if (expression.type === 'LogicalExpression' && expression.right.type === 'JSXElement' &&
+        source.slice(expression.right.start, expression.right.end).includes('{tr(error)}')) {
+      discoveryNoticeGate = source.slice(expression.left.start, expression.left.end);
+    }
+  },
+});
+
+test('only the device discovery notice is suppressed in the independent firmware workspace', () => {
+  assert.ok(discoveryNoticeGate, 'Evaluate the actual discovery banner render gate');
+  const available = (activeTab, error) => Boolean(runInNewContext(discoveryNoticeGate, { activeTab, error }));
+  for (const page of ['firmware', 'serial', 'ssh']) assert.equal(available(page, 'ADB unavailable'), false, page);
+  for (const page of ['devices', 'settings', 'tasks']) assert.equal(available(page, 'ADB unavailable'), true, page);
+  assert.equal(available('devices', ''), false);
 });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function fixture({ page = 'devices', initialRows = [], discover = async () => initialRows } = {}) {

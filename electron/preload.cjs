@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   firmwareStatus: (platform, refresh) => ipcRenderer.invoke('firmware:status', platform, refresh === true),
   firmwareChooseTools: platform => ipcRenderer.invoke('firmware:chooseTools', platform),
   firmwareChooseFile: platform => ipcRenderer.invoke('firmware:chooseFile', platform),
+  firmwareRestoreFile: platform => ipcRenderer.invoke('firmware:restoreFile', platform),
   firmwareInstallDriver: platform => ipcRenderer.invoke('firmware:installDriver', platform),
   firmwareOpenTool: platform => ipcRenderer.invoke('firmware:openTool', platform),
   firmwareDirectState: platform => ipcRenderer.invoke('firmware:direct:state', platform),

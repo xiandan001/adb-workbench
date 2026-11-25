@@ -2050,7 +2050,7 @@ function App() {
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
           {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
           {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
-          {error && !['serial', 'ssh'].includes(activeTab) && (
+          {error && !['serial', 'ssh', 'firmware'].includes(activeTab) && (
             <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {tr(error)}
             </div>

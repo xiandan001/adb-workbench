@@ -32,6 +32,23 @@ const preparationLabels = {
   'checking-environment': () => tr('正在检查工具、USB 和磁盘空间…'),
   'staging-firmware': () => tr('正在准备固件文件…'),
 };
+const writeStageLabels = {
+  connecting: () => tr('正在连接刷机设备…'),
+  formatting: () => tr('正在格式化设备存储…'),
+  finalizing: () => tr('正在完成写入…'),
+};
+const validPercent = value => Number.isFinite(value) && value >= 0 && value <= 100 ? Math.trunc(value) : undefined;
+
+function writeDetail(job) {
+  const partPercent = validPercent(job.partPercent);
+  if (Number.isInteger(job.part) && Number.isInteger(job.total) && job.part > 0 && job.part <= job.total) {
+    return partPercent === undefined ? tr('当前分区 {0}/{1}', { 0: job.part, 1: job.total })
+      : tr('当前分区 {0}/{1} · {2}%', { 0: job.part, 1: job.total, 2: partPercent });
+  }
+  if (partPercent !== undefined) return tr('当前分区 {0}%', { 0: partPercent });
+  const stagePercent = validPercent(job.stagePercent);
+  return stagePercent === undefined ? '' : tr('当前阶段 {0}%', { 0: stagePercent });
+}
 const keepConnectedBeforeReady = () => tr('工具就绪前请保持 USB 连接和供电，不要重启或断电。');
 const errors = {
   'flash-profile-unverified': () => tr('此平台尚未开放直刷，请使用厂商工具。'),
@@ -74,12 +91,17 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
   const fixedMode = modes.length === 1 && modes[0] === defaultMode;
   const ready = file?.ok && typeof file.firmwareId === 'string' && file.firmwareId.length > 0;
   const preparation = job?.phase === 'preparing' && job.preparation;
+  const writing = job?.phase === 'writing';
+  const verifying = job?.phase === 'verifying';
   const mtkWritten = platform === 'mtk' && job?.phase === 'written' && !job.code;
-  const status = mtkWritten ? tr('固件写入成功') : Object.hasOwn(preparationLabels, preparation) ? preparationLabels[preparation]()
-    : Object.hasOwn(phaseLabels, job?.phase) ? phaseLabels[job.phase]() : '';
-  const percent = Number.isFinite(job?.percent) && job.percent >= 0 && job.percent <= 100 ? Math.trunc(job.percent) : undefined;
-  const preparationPercent = Number.isFinite(job?.preparationPercent) && job.preparationPercent >= 0 && job.preparationPercent <= 100
-    ? Math.trunc(job.preparationPercent) : undefined;
+  const writeStage = writing && Object.hasOwn(writeStageLabels, job.progressStage) ? writeStageLabels[job.progressStage]() : '';
+  const status = mtkWritten ? tr('固件写入成功') : writeStage || (Object.hasOwn(preparationLabels, preparation) ? preparationLabels[preparation]()
+    : Object.hasOwn(phaseLabels, job?.phase) ? phaseLabels[job.phase]() : '');
+  const percent = verifying ? 100 : validPercent(job?.percent);
+  const preparationPercent = validPercent(job?.preparationPercent);
+  const writeStatus = platform === 'mtk' && writing ? writeDetail(job) : '';
+  const stepPercent = writeStatus ? validPercent(job.partPercent) ?? validPercent(job.stagePercent) : undefined;
+  const meterPercent = percent ?? stepPercent;
   const dark = isDarkTheme(theme);
   const accent = dark ? 'text-amber-300' : 'text-amber-700';
   const button = 'inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50';
@@ -116,7 +138,7 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
     {registeringTarget && <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin" />}
     {tr('登记当前 USB 目标')}
   </button>;
-  return <section className={`mb-4 min-w-0 space-y-3 rounded-lg border p-3 ${theme.input}`} aria-labelledby={title}>
+  return <section className={`min-w-0 space-y-3 self-start rounded-lg border p-3 ${theme.input}`} aria-labelledby={title}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
         <h4 id={title} className="text-sm font-semibold">{tr('应用内直刷')}</h4>
@@ -239,10 +261,17 @@ export default function FirmwareDirectPanel({ direct, platform, theme, file, tar
           </button>
         </li>)}
       </ul>}
-      {job.phase === 'writing' && <>
-        <progress className="h-2 w-full accent-emerald-500" max={100} value={percent} aria-label={tr('刷机进度')} />
-        {percent !== undefined && <p className={`text-right text-xs ${theme.textMuted}`}>{percent}%</p>}
-        <p className={`text-xs ${accent}`}>{tr('写入期间请保持 USB 连接和供电。')}</p>
+      {(writing || verifying) && <>
+        <div className="firmware-write-meter" data-indeterminate={meterPercent === undefined || undefined}>
+          <progress max={100} value={meterPercent} aria-label={percent === undefined && stepPercent !== undefined ? writeStatus : tr('刷机进度')} />
+        </div>
+        <div className={`flex flex-wrap items-start justify-between gap-2 text-xs ${theme.textMuted}`}>
+          <span>{writeStatus}</span>
+          {percent !== undefined && <span className="ms-auto font-medium tabular-nums">{percent}%</span>}
+          {writing && meterPercent === undefined && <span>{tr('工具未报告准确总进度，正在写入…')}</span>}
+        </div>
+        <p className={`text-xs ${accent}`}>{writing ? tr('写入期间请保持 USB 连接和供电。')
+          : tr('保持目标设备接在原 USB 口，不要换线或更换设备。')}</p>
       </>}
       {job.code && job.code !== 'flash-platform-mismatch' && (job.phase !== 'cancelled' || job.code === 'flash-wait-expired') &&
         <p className={`text-xs ${job.phase === 'failed' ? accent : theme.textMuted}`}>{errorText(job.code)}</p>}

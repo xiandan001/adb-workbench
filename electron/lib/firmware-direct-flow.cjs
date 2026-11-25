@@ -4,6 +4,25 @@ const livePhases = new Set(['preparing', 'confirming', 'waiting', 'choice-requir
 const protectedPhases = new Set(['checking', 'authorizing', 'armed', 'writing', 'verifying']);
 const choicePhases = new Set(['waiting', 'choice-required']);
 const failure = code => ({ ok: false, code });
+const writeStages = ['connecting', 'formatting', 'writing', 'finalizing'];
+const percentValue = value => Number.isFinite(value) && value >= 0 && value <= 100;
+
+function writeProgress(job, value, detail) {
+  if (percentValue(value) && value >= (job.percent ?? 0)) job.percent = value;
+  const stage = writeStages.indexOf(detail?.stage);
+  if (stage < 0 || stage < writeStages.indexOf(job.progressStage)) return;
+  if (job.progressStage !== detail.stage) {
+    job.progressStage = detail.stage;
+    job.stagePercent = job.part = job.total = job.partPercent = undefined;
+  }
+  if (percentValue(detail.stagePercent) && detail.stagePercent >= (job.stagePercent ?? 0)) job.stagePercent = detail.stagePercent;
+  if (detail.stage !== 'writing' || !percentValue(detail.partPercent)) return;
+  const { part, total, partPercent } = detail;
+  if (Number.isInteger(part) && Number.isInteger(total) && part >= 1 && total >= part && total <= 4096) {
+    if (job.total === total && (part < job.part || part === job.part && partPercent < job.partPercent)) return;
+    Object.assign(job, { part, total, partPercent });
+  } else if (job.part === undefined) job.partPercent = partPercent;
+}
 
 function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, scanMs = 450, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let current;
@@ -20,8 +39,9 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     } : {};
     const preparing = phase === 'preparing' ? { preparation, preparationPercent } : {};
     const cold = current.plan?.coldStart ? { coldStart: true } : {};
+    const { progressStage, stagePercent, part, total, partPercent } = current;
     return { busy: active(), job: { id, platform, phase, percent, code, deadline, targetLabel, candidates: candidates.map(publicTarget),
-      ...entry, ...preparing, ...cold } };
+      ...entry, ...preparing, ...cold, ...(progressStage ? { progressStage, stagePercent, part, total, partPercent } : {}) } };
   };
   const expired = job => job.deadline !== undefined && now() >= job.deadline;
 
@@ -191,8 +211,8 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
           return canCheckWriteTarget(job) && latest?.candidates.some(stillApproved);
         },
         onWriteStart: () => { if (alive(job) && job.phase === 'checking') job.phase = 'writing'; },
-        onProgress: value => {
-          if (job.phase === 'writing' && Number.isFinite(value) && value >= (job.percent ?? 0) && value <= 100) job.percent = value;
+        onProgress: (value, details) => {
+          if (alive(job) && job.phase === 'writing') writeProgress(job, value, details);
         },
       });
       await conclude(job, exact, result);
@@ -216,12 +236,11 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
           if (Number.isInteger(info?.timeoutMs) && info.timeoutMs > 0) job.deadline = now() + Math.min(info.timeoutMs, waitMs);
         }
       },
-      onProgress: value => {
+      onProgress: (value, details) => {
         if (!alive(job) || !['armed', 'writing'].includes(job.phase)) return;
-        if (value === null) { job.phase = 'writing'; return; }
-        if (Number.isFinite(value) && value >= (job.percent ?? 0) && value <= 100) {
-          job.phase = 'writing'; job.percent = value;
-        }
+        if (value !== null && !percentValue(value)) return;
+        job.phase = 'writing';
+        writeProgress(job, value, details);
       },
     });
     await conclude(job, job.anchor, result);

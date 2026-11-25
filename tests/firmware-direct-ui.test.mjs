@@ -402,3 +402,37 @@ test('writing has progress, no cancel action, and no reads while the workspace i
   await flush();
   assert.equal(reads, 2);
 });
+
+test('MTK reports local progress honestly and keeps a full write bar while verifying', async () => {
+  let job = { id: 'job', phase: 'writing', progressStage: 'formatting', stagePercent: 62.7 };
+  const app = mount({ firmwareDirectState: async () => ({ ok: true, enabled: true, modes: modeOptions, job }) });
+  const progress = tree => nodes(tree).find(node => node.type === 'progress').props.value;
+  await flush();
+  const formatting = app.render().tree;
+  assert.equal(progress(formatting), 62);
+  assert.match(text(formatting), /正在格式化设备存储/);
+  assert.match(text(formatting), /当前阶段 62%/);
+
+  job = { ...job, progressStage: 'writing', part: 2, total: 7, partPercent: 48 };
+  app.tick();
+  await flush();
+  const partition = nodes(app.render().tree).find(node => node.type === 'progress');
+  assert.equal(partition.props.value, 48);
+  assert.equal(partition.props['aria-label'], '当前分区 2/7 · 48%');
+
+  job = { ...job, progressStage: 'writing', part: 2, total: 7, partPercent: 48, percent: 35 };
+  app.tick();
+  await flush();
+  const writing = app.render().tree;
+  assert.equal(progress(writing), 35);
+  assert.match(text(writing), /当前分区 2\/7 · 48%/);
+  assert.doesNotMatch(text(writing), /未报告准确总进度|当前阶段 62%/);
+
+  job = { ...job, phase: 'verifying' };
+  app.tick();
+  await flush();
+  const verifying = app.render().tree;
+  assert.equal(progress(verifying), 100);
+  assert.match(text(verifying), /正在验证刷机结果/);
+  assert.doesNotMatch(text(verifying), /当前分区|固件写入成功/);
+});

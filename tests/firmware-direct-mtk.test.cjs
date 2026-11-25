@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  MTK_VERSION, buildMtkFlashArgs, parseMtkFlashLine, parseMtkTraceLine, updateMtkEvidence, finishMtkFlash,
+  MTK_VERSION, buildMtkFlashArgs, mtkProgress, parseMtkFlashLine, parseMtkTraceLine, updateMtkEvidence, finishMtkFlash,
 } = require('../electron/lib/firmware-direct-mtk.cjs');
 
 const request = Object.freeze({
@@ -67,6 +67,11 @@ test('MTK reports preparation, connection and writes separately and never forwar
   assert.deepEqual(parseMtkFlashLine('50% of flash has been formatted(about 3s).'), { phase: 'formatting', percentage: 50 });
   assert.deepEqual(parseMtkFlashLine('27% of [system_a] data has been sent (about 4s)'), { phase: 'writing', percentage: 27 });
   assert.deepEqual(parseMtkFlashLine('31% of [super [23/24]] data has been sent (about 1.97G)'), { phase: 'writing', percentage: 31, part: 23, total: 24 });
+  assert.deepEqual(mtkProgress(parseMtkFlashLine('31% of [super [23/24]] data has been sent (about 1.97G)')),
+    [null, { stage: 'writing', part: 23, total: 24, partPercent: 31 }]);
+  assert.deepEqual(mtkProgress(parseMtkFlashLine('100% of [super [1/1]] data has been sent')), [100, { stage: 'writing', part: 1, total: 1, partPercent: 100 }]);
+  assert.deepEqual(mtkProgress(parseMtkFlashLine('8% of [system_a] data has been sent')), [null, { stage: 'writing', partPercent: 8 }]);
+  assert.deepEqual(mtkProgress(parseMtkFlashLine('98% of image data has been sent')), [98, { stage: 'writing' }]);
   for (const line of ['1000% of image data has been sent', 'about to process All command exec done!', 'file D:/private.auth', 'x'.repeat(2049)]) {
     assert.equal(parseMtkFlashLine(line), null);
   }
@@ -88,6 +93,8 @@ test('V6 trace parses exact current PID, COM scanner scope, host echo and writte
   assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): current command name: CMD:ERASE-FLASH,	command XML:', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'ERASE-FLASH', outcome: 'request' });
   assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:FLASH-UPDATE command execute failed, return error code: -3', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'FLASH-UPDATE', outcome: 'failure' });
   assert.deepEqual(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:FLASH-ALL command execute successed.', 'CmdExecutor'), 2100), { phase: 'device-command', command: 'FLASH-ALL', outcome: 'success' });
+  assert.deepEqual(parseMtkTraceLine(line('ConsoleMode::ConsoleModeRunner::cbFormatProgress(): 100% of flash has been formatted(about 3s).', 'ConsoleModeRunner'), 2100),
+    { phase: 'formatting', percentage: 100 });
   assert.deepEqual(parseMtkTraceLine(line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry'), 2100), { phase: 'tool-completed' });
   assert.equal(parseMtkTraceLine(line('CmdExecutor::execute(): CMD:GET-SYS-PROPERTY@DA.DUI command execute failed, return error code: -3', 'CmdExecutor'), 2100), null);
 });

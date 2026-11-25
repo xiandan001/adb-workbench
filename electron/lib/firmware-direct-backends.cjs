@@ -7,10 +7,10 @@ const { inspectVendorFiles } = require('./firmware-tools.cjs');
 const { mtk: mtkVendorFiles } = require('./firmware-tools-vendor.json');
 const {
   RK3576_CHIP, inspectRkTool, rkListArgs, parseRkDeviceList, buildRkFlashArgs, rkReadArgs, rkBootArgs,
-  parseRkReadInfo, readRkFirmware, parseRkProgressLine, classifyRkResult,
+  parseRkReadInfo, readRkFirmware, stageRkWriter, rkProgressFraming, parseRkProgressLine, classifyRkResult,
 } = require('./firmware-direct-rk.cjs');
 const { revalidateDirectFirmware } = require('./firmware-direct-receipt.cjs');
-const { MTK_VERSION, buildMtkFlashArgs, parseMtkFlashLine, updateMtkEvidence, finishMtkFlash } = require('./firmware-direct-mtk.cjs');
+const { MTK_VERSION, buildMtkFlashArgs, mtkProgress, parseMtkFlashLine, updateMtkEvidence, finishMtkFlash } = require('./firmware-direct-mtk.cjs');
 
 const mtkExecutable = 'SPFlashToolV6.exe';
 const mtkFiles = Object.freeze({
@@ -50,28 +50,46 @@ function toolEnvironment() {
   return env;
 }
 
-function createLineReader(onLine, budget) {
+function createLineReader(onLine, budget, framing) {
   const decoder = new StringDecoder('utf8');
   let tail = '';
+  let emittedFrames = false;
   let skipLine = false;
   let exceeded = false;
   let remaining = budget;
+  function finishLine() {
+    if (tail && !skipLine) {
+      if (!emittedFrames) onLine(tail);
+      // Only progress frames can create virtual separators. Do not turn
+      // adjacent text into a separate trusted target or completion marker.
+      else if (!framing.isPadding(tail)) exceeded = true;
+    }
+    tail = '';
+    emittedFrames = false;
+    skipLine = false;
+  }
   function add(text) {
     const parts = text.split(/[\r\n]/);
     const last = parts.length - 1;
     for (let index = 0; index <= last; index++) {
       const part = parts[index];
-      if (!skipLine && tail.length + part.length > maxLineLength) {
-        exceeded = true;
-        skipLine = true;
-        tail = '';
+      if (!skipLine) {
+        tail += part;
+        if (framing) {
+          let frame;
+          while ((frame = framing.take(tail)) !== null) {
+            onLine(frame.line);
+            tail = tail.slice(frame.length);
+            emittedFrames = true;
+          }
+        }
+        if (tail.length > maxLineLength) {
+          exceeded = true;
+          skipLine = true;
+          tail = '';
+        }
       }
-      if (!skipLine) tail += part;
-      if (index < last) {
-        if (tail) onLine(tail);
-        tail = '';
-        skipLine = false;
-      }
+      if (index < last) finishLine();
     }
   }
   return {
@@ -89,13 +107,13 @@ function createLineReader(onLine, budget) {
     },
     finish() {
       add(decoder.end());
-      if (tail && !skipLine) onLine(tail);
+      finishLine();
       return exceeded;
     },
   };
 }
 
-function runVendor(spawnProcess, tool, args, { onLine, outputBytes, timeout }) {
+function runVendor(spawnProcess, tool, args, { onLine, outputBytes, timeout, framing }) {
   return new Promise(resolve => {
     let child;
     try {
@@ -106,8 +124,8 @@ function runVendor(spawnProcess, tool, args, { onLine, outputBytes, timeout }) {
       resolve({ startFailed: true });
       return;
     }
-    const stdout = createLineReader(onLine, outputBytes);
-    const stderr = createLineReader(onLine, outputBytes);
+    const stdout = createLineReader(onLine, outputBytes, framing);
+    const stderr = createLineReader(onLine, outputBytes, framing);
     let started = false;
     let processError = false;
     let timedOut = false;
@@ -137,8 +155,8 @@ function runVendor(spawnProcess, tool, args, { onLine, outputBytes, timeout }) {
   });
 }
 
-function reportProgress(onProgress, percent) {
-  try { onProgress?.(percent); } catch { /* A UI observer cannot interrupt a flash. */ }
+function reportProgress(onProgress, percent, details) {
+  try { onProgress?.(percent, details); } catch { /* A UI observer cannot interrupt a flash. */ }
 }
 
 async function inspectMtk(directory, io, verifyFiles) {
@@ -210,7 +228,13 @@ async function bootRkRam(spawnProcess, tool, target, loader) {
 async function writeRk(spawnProcess, tool, args, onProgress, guarded) {
   const evidence = { successMarker: false, failureMarker: false, sawTarget: false, mismatchedTarget: false, chip: false, downloaded: false };
   const location = args[1];
-  const result = await runVendor(spawnProcess, tool, args, { outputBytes: maxWriteOutputBytes, onLine(line) {
+  let phase, lastPercent = -1;
+  function publishStage(stage) {
+    if (phase === stage || phase === 'finalizing' || phase === 'writing' && stage === 'connecting') return;
+    phase = stage;
+    reportProgress(onProgress, null, { stage });
+  }
+  const result = await runVendor(spawnProcess, tool, args, { framing: rkProgressFraming, outputBytes: maxWriteOutputBytes, onLine(line) {
     const event = parseRkProgressLine(line);
     if (event?.type === 'success') evidence.successMarker = true;
     if (event?.type === 'failure') evidence.failureMarker = true;
@@ -220,8 +244,16 @@ async function writeRk(spawnProcess, tool, args, onProgress, guarded) {
     }
     if (event?.type === 'stage' && event.stage === 'check-chip-success') evidence.chip = true;
     if (event?.type === 'stage' && event.stage === 'download-firmware-success' && evidence.chip) evidence.downloaded = true;
-    if (event?.type === 'progress' && !evidence.mismatchedTarget && (evidence.sawTarget || (guarded && evidence.chip))) {
-      reportProgress(onProgress, event.percent);
+    if (!event || evidence.mismatchedTarget || evidence.failureMarker) return;
+    if (event.type === 'stage' && (guarded || evidence.sawTarget)) {
+      if (event.stage === 'download-firmware-start') publishStage('writing');
+      else if (event.stage === 'download-firmware-success') publishStage('finalizing');
+      else publishStage('connecting');
+    }
+    if (event.type === 'progress' && phase !== 'finalizing' && (evidence.sawTarget || (guarded && evidence.chip)) && event.percent > lastPercent) {
+      lastPercent = event.percent;
+      phase = 'writing';
+      reportProgress(onProgress, event.percent, { stage: phase });
     }
   } });
   if (result.startFailed) return failure('rk-tool-start-failed');
@@ -239,7 +271,9 @@ async function writeMtk(spawnProcess, tool, args, onProgress) {
   const result = await runVendor(spawnProcess, tool, args, { outputBytes: maxWriteOutputBytes, onLine(line) {
     const event = parseMtkFlashLine(line);
     if (event?.phase === 'tool-target' && !ports.has(event.port)) mismatchedTarget = true;
-    if (event?.phase === 'writing' && !mismatchedTarget) reportProgress(onProgress, event.percentage);
+    if (!mismatchedTarget && (event?.phase === 'writing' || event?.phase === 'formatting' && args[1] === 'format-download')) {
+      reportProgress(onProgress, ...mtkProgress(event));
+    }
     evidence = updateMtkEvidence(evidence, event);
   } });
   if (result.startFailed) return failure('mtk-tool-start-failed');
@@ -253,6 +287,7 @@ async function writeMtk(spawnProcess, tool, args, onProgress) {
 function createDirectFlashBackends({
   spawnProcess = spawn, io = fs, host = process.platform, arch = process.arch,
   verifyRk = inspectRkTool, verifyMtkFiles = inspectVendorFiles,
+  stageRkTool = stageRkWriter,
   revalidateRkFirmware = revalidateDirectFirmware, waitForRk = () => delay(350),
   elevatedMtk = (...args) => require('./firmware-direct-elevated.cjs').writeElevatedMtk(...args),
 } = {}) {
@@ -360,6 +395,17 @@ function createDirectFlashBackends({
     const guarded = Boolean(prepared && sameTool(fresh, prepared.tool) && prepared.path === firmware.path &&
       prepared.sha256 === firmware.sha256 && await revalidateRkFirmware(firmware) && typeof beforeDispatch === 'function');
     if (platform === 'rk' && (prepared || target?.preWriteChipVerified === true) && !guarded) return failure('flash-plan-changed');
+    if (platform === 'rk') {
+      let writer;
+      try { writer = await stageRkTool(fresh, { io }); }
+      catch { return failure('flash-tool-unavailable'); }
+      try {
+        if (!await writer.validate()) return failure('flash-tool-unavailable');
+        const confirmed = typeof beforeDispatch === 'function' && await beforeDispatch() === true;
+        if (beforeDispatch && !confirmed) return failure('flash-plan-changed');
+        return await writeRk(spawnProcess, writer.tool, args, onProgress, guarded && confirmed);
+      } finally { await writer.release().catch(() => {}); }
+    }
     const beforeConfirmed = typeof beforeDispatch === 'function' && await beforeDispatch() === true;
     if (beforeDispatch && !beforeConfirmed) return failure('flash-plan-changed');
     if (platform === 'mtk' && options.elevated === true) {
@@ -367,7 +413,7 @@ function createDirectFlashBackends({
       return elevatedMtk({ tool: fresh, args, target, mode: options.mode, permitFormatAll: options.permitFormatAll === true },
         { onReady, onProgress });
     }
-    return platform === 'rk' ? writeRk(spawnProcess, fresh, args, onProgress, guarded && beforeConfirmed) : writeMtk(spawnProcess, fresh, args, onProgress);
+    return writeMtk(spawnProcess, fresh, args, onProgress);
   }
 
   return { inspect, listRk, prepareRk, write };

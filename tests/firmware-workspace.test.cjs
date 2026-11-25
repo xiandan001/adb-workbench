@@ -49,7 +49,10 @@ async function setup(t, hostPlatform = 'win32', extra = {}) {
       },
       open: async (platform, dir) => { calls.push(['open', platform, dir]); return { ok: true }; }
     },
-    preflight: async (platform, file) => { calls.push(['preflight', platform, file]); return { ok: true, fileName: path.basename(file) }; },
+    preflight: async (platform, file) => {
+      calls.push(['preflight', platform, file]);
+      return extra.preflight ? extra.preflight(platform, file) : { ok: true, fileName: path.basename(file) };
+    },
   };
   const binding = { handle: (key, callback) => handlers.set(key, callback) };
   const workspace = register(binding, options);
@@ -79,6 +82,58 @@ test('both platforms start unconfigured even when the old desktop folder exists'
 
 const directToolReady = root => ({ ok: true, tool: { version: 'fixture', cwd: root } });
 const directToolMissing = { ok: false, code: 'missing-fixture' };
+
+test('reopening remembers each platform file but issues a new receipt only after rechecking it', async t => {
+  const f = await setup(t, 'win32', { preflight: async (_platform, file) => ({
+    ok: Boolean(await fs.stat(file).catch(() => null)), fileName: path.basename(file),
+  }) });
+  const selected = {};
+  for (const [platform, fileName] of [['rk', 'update.img'], ['mtk', 'flash.xml']]) {
+    assert.equal((await f.call('restoreFile', platform)).empty, true);
+    const file = path.join(f[platform], fileName);
+    await fs.writeFile(file, 'fixture');
+    f.setDialog({ filePaths: [file] });
+    selected[platform] = await f.call('chooseFile', platform);
+    assert.ok(selected[platform].firmwareId);
+  }
+  f.reopen();
+  for (const platform of ['rk', 'mtk']) {
+    const prior = await f.call('restoreFile', platform);
+    assert.equal(prior.filePath, selected[platform].filePath);
+    assert.ok(prior.firmwareId && prior.firmwareId !== selected[platform].firmwareId);
+  }
+  assert.equal(f.calls.filter(([type]) => type === 'dialog').length, 2);
+  await fs.unlink(selected.rk.filePath);
+  f.reopen();
+  const missing = await f.call('restoreFile', 'rk');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.firmwareId, undefined);
+  assert.equal((await f.call('restoreFile', 'mtk')).ok, true);
+});
+
+test('an explicit new choice wins over slow restore and an invalid choice is never remembered', async t => {
+  let hold, pending;
+  const f = await setup(t, 'win32', { async preflight(_platform, file) {
+    if (hold && file.endsWith('first.img')) { pending(); await hold; }
+    return { ok: !file.endsWith('invalid.img'), fileName: path.basename(file) };
+  } });
+  for (const name of ['first.img', 'invalid.img']) {
+    f.setDialog({ filePaths: [path.join(f.rk, name)] });
+    assert.equal(Boolean((await f.call('chooseFile', 'rk')).firmwareId), name === 'first.img');
+  }
+  f.reopen();
+  let unblock;
+  hold = new Promise(resolve => { unblock = resolve; });
+  const started = new Promise(resolve => { pending = resolve; });
+  const restoring = f.call('restoreFile', 'rk');
+  await started;
+  f.setDialog({ filePaths: [path.join(f.rk, 'new.img')] });
+  assert.equal((await f.call('chooseFile', 'rk')).fileName, 'new.img');
+  unblock();
+  assert.equal((await restoring).cancelled, true);
+  f.reopen();
+  assert.equal((await f.call('restoreFile', 'rk')).fileName, 'new.img');
+});
 
 test('direct tool status reuses verified bundled and previously saved locations without a chooser', async t => {
   const checks = [];

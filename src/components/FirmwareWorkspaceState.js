@@ -44,6 +44,7 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
   const [confirm, setConfirm] = useState(false);
   const alive = useRef(false);
   const request = useRef({});
+  const recentRequest = useRef({});
   const operation = useRef(false);
   const update = useCallback((type, data) => {
     if (alive.current) setStates(prior => ({ ...prior, [type]: { ...prior[type], ...data } }));
@@ -66,7 +67,7 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
 
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; request.current = {}; };
+    return () => { alive.current = false; request.current = {}; recentRequest.current = {}; };
   }, []);
 
   const requested = states[platform]?.requested === true;
@@ -77,6 +78,24 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
     }, 0);
     return () => clearTimeout(initial);
   }, [active, platform, requested, busy, refresh]);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!active || busy || !api?.firmwareRestoreFile || recentRequest.current[platform]) return undefined;
+    const timer = setTimeout(async () => {
+      if (recentRequest.current[platform] || operation.current) return;
+      const ticket = Symbol();
+      recentRequest.current[platform] = ticket;
+      const stillCurrent = () => alive.current && recentRequest.current[platform] === ticket;
+      update(platform, { restoringFile: true });
+      try {
+        const result = await api.firmwareRestoreFile(platform);
+        if (stillCurrent() && result?.fileName) update(platform, { file: result });
+      } catch { /* A recent path is optional; the file picker remains available. */ }
+      finally { if (stillCurrent()) update(platform, { restoringFile: false }); }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [active, busy, platform, update]);
 
   function invalidateOtherStatus(type) {
     const other = type === 'rk' ? 'mtk' : 'rk';
@@ -131,8 +150,11 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
     const api = window.electronAPI;
     try {
       if (kind === 'file') {
+        recentRequest.current[type] = Symbol();
+        update(type, { restoringFile: false });
         const result = await api?.firmwareChooseFile?.(type);
         if (result?.fileName || result?.code) update(type, { file: result });
+        else if (result?.cancelled && !states[type]?.file) delete recentRequest.current[type];
         else if (!result?.cancelled) update(type, { error: result?.error || tr('固件文件不可访问，请重新选择。') });
       } else if (kind === 'install') {
         const result = await api?.firmwareInstallDriver?.(type);

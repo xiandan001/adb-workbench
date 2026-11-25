@@ -9,6 +9,7 @@ const {
   parseRkDeviceList,
   buildRkFlashArgs,
   parseRkReadInfo,
+  enableRkStreamingConfig,
   parseRkProgressLine,
   classifyRkResult,
 } = require('../electron/lib/firmware-direct-rk.cjs');
@@ -52,6 +53,8 @@ test('full image launch plan has no default target and permits only documented a
 
 test('known progress, target and failure messages never constitute image completion', () => {
   assert.deepEqual(parseRkProgressLine('\rDownload Image... (58%)'), { type: 'progress', percent: 58 });
+  assert.deepEqual(parseRkProgressLine('\x1b[3G\x08Download Image... (59%)\x08'), { type: 'progress', percent: 59 });
+  assert.equal(parseRkProgressLine('Download Image... (59.7%)'), null);
   assert.deepEqual(parseRkProgressLine('Current Device Location ID:01A2'), { type: 'target', locationId: '1a2' });
   assert.deepEqual(parseRkProgressLine('Check Chip Success'), { type: 'stage', stage: 'check-chip-success' });
   assert.deepEqual(parseRkProgressLine('Download Firmware Success'), { type: 'stage', stage: 'download-firmware-success' });
@@ -65,6 +68,15 @@ test('known progress, target and failure messages never constitute image complet
   assert.deepEqual(classifyRkResult({ exitCode: 0, successMarker: true, failureMarker: true }), { ok: false, code: 'rk-write-failed' });
   assert.deepEqual(classifyRkResult({ exitCode: null, signal: 'SIGTERM' }), { ok: false, code: 'rk-write-interrupted' });
   assert.deepEqual(classifyRkResult({ exitCode: 0, successMarker: true }), { ok: true, code: 'rk-tool-reported-success' });
+});
+
+test('unbuffered RK config changes only the exact commented vendor setting', () => {
+  const original = Buffer.from('#log_off=\r\n#stdout_buffer_off=\r\n#log_dir=\r\n');
+  assert.equal(enableRkStreamingConfig(original).toString(), '#log_off=\r\nstdout_buffer_off=true\r\n#log_dir=\r\n');
+  assert.equal(original.toString(), '#log_off=\r\n#stdout_buffer_off=\r\n#log_dir=\r\n');
+  for (const input of ['stdout_buffer_off=1', 'x#stdout_buffer_off=', '#stdout_buffer_off=false', '#stdout_buffer_off=\n#stdout_buffer_off=']) {
+    assert.throws(() => enableRkStreamingConfig(Buffer.from(input)), { code: 'rk-tool-untrusted' });
+  }
 });
 
 test('RK3576 verified reads require full hex chip response and consistent raw capacity', () => {

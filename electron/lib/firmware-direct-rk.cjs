@@ -1,10 +1,15 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { tmpdir } = require('node:os');
+const { createHash } = require('node:crypto');
 
 // ArmSoM's archive of Rockchip Windows upgrade_tool 2.46.
 const files = Object.freeze({
   'upgrade_tool.exe': '789c509dde39206d27b2f8915a5a169ff5eafb5b21fdb2108d0709bdda9ebde0',
   'config.ini': 'de40a55a95df909810245a0bc0e2d1919758205c5c6fe7a5788194aaff715472',
+});
+const streamingFiles = Object.freeze({
+  ...files, 'config.ini': 'ff1e6f1976d173a8f0456054d37cfec575ca416f36272ad943954b84d41e1258',
 });
 const executableName = 'upgrade_tool.exe';
 const RK3576_CHIP = '0x33353736';
@@ -19,12 +24,20 @@ const statusMarker = /^Upgrade firmware ok\.?$/i;
 const targetMarker = /^Current Device Location ID:([0-9a-f]{1,8})$/i;
 const failureMarker = /^(?:Error\s*:|No found (?:specific|any) rockusb device\b|Creating device object failed!|(?:Download Boot|Wait For Maskrom|Test Device|Check Chip|Get FlashInfo|Prepare IDB|Download IDB|Download Firmware|Upgrade firmware) Fail(?:ed)?[.!]?$|operation canceled[.!]?$)/i;
 const progressMarker = /^Download Image\.\.\.\s*\((\d{1,3})%\)$/i;
+const progressPrefix = /^(?:[ \t\x08]|\x1b\[[0-?]{0,24}[ -/]{0,8}[@-~]){0,32}(Download Image\.\.\.[ \t]{0,16}\((?:100|[1-9]?\d)%\))/i;
 const stageMarker = /^(Download Boot|Wait For Maskrom|Test Device|Check Chip|Get FlashInfo|Prepare IDB|Download IDB|Download Firmware) (Start|Success)$/i;
 
 const fail = code => ({ ok: false, code });
 const invalid = code => Object.assign(new Error(code), { code });
 const stripAnsi = line => line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').trim();
 const normalizeLocation = value => value.toLowerCase().replace(/^0+(?=[0-9a-f])/, '');
+const rkProgressFraming = Object.freeze({
+  take(text) {
+    const frame = progressPrefix.exec(text);
+    return frame ? { length: frame[0].length, line: frame[1] } : null;
+  },
+  isPadding: text => !stripAnsi(text.replace(/\x08/g, '')),
+});
 
 function localPath(value) {
   if (typeof value !== 'string' || value.length > 1024 || badPath.test(value) || /^[\\/]{2}/.test(value)) return false;
@@ -44,6 +57,65 @@ async function inspectRkTool(directory, io = fs) {
     return { ok: true, executable: result.path, cwd: canonical, version: '2.46', sha256: files[executableName] };
   } catch (error) {
     return fail(['ENOENT', 'ENOTDIR'].includes(error.code) ? 'rk-tool-unavailable' : 'rk-tool-untrusted');
+  }
+}
+
+const comparablePath = value => process.platform === 'win32' ? value.toLowerCase() : value;
+const digest = data => createHash('sha256').update(data).digest('hex');
+
+function enableRkStreamingConfig(source) {
+  const marker = Buffer.from('#stdout_buffer_off=');
+  const index = source.indexOf(marker);
+  const end = index + marker.length;
+  if (index < 0 || (index > 0 && source[index - 1] !== 0x0a) ||
+    ![undefined, 0x0a, 0x0d].includes(source[end]) || source.indexOf(marker, end) !== -1) throw invalid('rk-tool-untrusted');
+  return Buffer.concat([source.subarray(0, index), Buffer.from('stdout_buffer_off=true'), source.subarray(end)]);
+}
+
+async function readPinnedRkFile(io, file, expected, maxBytes) {
+  if (comparablePath(await io.realpath(file)) !== comparablePath(file)) throw invalid('rk-tool-untrusted');
+  const handle = await io.open(file, 'r');
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) throw invalid('rk-tool-untrusted');
+    const data = await readExact(handle, stat.size, 0);
+    if (digest(data) !== expected) throw invalid('rk-tool-untrusted');
+    return data;
+  } finally { await handle.close(); }
+}
+
+async function stageRkWriter(tool, { io = fs, stagingBase = tmpdir() } = {}) {
+  if (!localPath(tool?.cwd) || tool.executable !== path.join(tool.cwd, executableName) ||
+    tool.sha256 !== files[executableName] || tool.version !== '2.46') throw invalid('rk-tool-untrusted');
+  const [executable, config, base] = await Promise.all([
+    readPinnedRkFile(io, tool.executable, files[executableName], 8 * 1024 * 1024),
+    readPinnedRkFile(io, path.join(tool.cwd, 'config.ini'), files['config.ini'], 64 * 1024),
+    io.realpath(stagingBase),
+  ]);
+  if (!localPath(base)) throw invalid('rk-tool-untrusted');
+  const directory = await io.mkdtemp(path.join(base, 'veylo-rk-writer-'));
+  if (comparablePath(path.dirname(directory)) !== comparablePath(base) ||
+    !/^veylo-rk-writer-[a-z0-9]+$/i.test(path.basename(directory))) throw invalid('rk-tool-untrusted');
+  const stillOwned = async () => comparablePath(await io.realpath(directory)) === comparablePath(directory);
+  const release = async () => {
+    if (await stillOwned().catch(() => false)) await io.rm(directory, { recursive: true, force: true });
+  };
+  const writer = path.join(directory, executableName);
+  const validate = async () => {
+    const { inspectVendorFiles } = require('./firmware-tools.cjs');
+    return await stillOwned().catch(() => false) &&
+      (await inspectVendorFiles(directory, executableName, streamingFiles, io)).path === writer;
+  };
+  try {
+    const enabled = enableRkStreamingConfig(config);
+    if (digest(enabled) !== streamingFiles['config.ini']) throw invalid('rk-tool-untrusted');
+    await io.writeFile(writer, executable, { flag: 'wx', mode: 0o700 });
+    await io.writeFile(path.join(directory, 'config.ini'), enabled, { flag: 'wx', mode: 0o600 });
+    if (!await validate()) throw invalid('rk-tool-untrusted');
+    return { tool: { ...tool, executable: writer, cwd: directory }, validate, release };
+  } catch (cause) {
+    await release().catch(() => {});
+    throw cause;
   }
 }
 
@@ -169,7 +241,9 @@ function parseRkProgressLine(line) {
   if (failureMarker.test(text)) return { type: 'failure' };
   const target = targetMarker.exec(text);
   if (target) return { type: 'target', locationId: normalizeLocation(target[1]) };
-  const progress = progressMarker.exec(text);
+  // Some console redraws add adjacent backspaces. Do not interpret arbitrary
+  // cursor edits or numeric fragments as completed progress lines.
+  const progress = progressMarker.exec(text.replace(/^\x08{1,16}|\x08{1,16}$/g, '').trim());
   if (progress && Number(progress[1]) <= 100) return { type: 'progress', percent: Number(progress[1]) };
   const stage = stageMarker.exec(text);
   return stage ? { type: 'stage', stage: (stage[1] + ' ' + stage[2]).toLowerCase().replaceAll(' ', '-') } : null;
@@ -184,5 +258,6 @@ function classifyRkResult({ exitCode, successMarker, failureMarker, signal } = {
 
 module.exports = {
   RK3576_CHIP, inspectRkTool, rkListArgs, parseRkDeviceList, buildRkFlashArgs, rkReadArgs,
-  rkBootArgs, parseRkReadInfo, readRkFirmware, parseRkProgressLine, classifyRkResult,
+  rkBootArgs, parseRkReadInfo, readRkFirmware, enableRkStreamingConfig, stageRkWriter, rkProgressFraming,
+  parseRkProgressLine, classifyRkResult,
 };

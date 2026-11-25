@@ -3,7 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { StringDecoder } = require('node:string_decoder');
-const { MTK_VERSION, buildMtkFlashArgs, parseMtkTraceLine } = require('./firmware-direct-mtk.cjs');
+const { MTK_VERSION, buildMtkFlashArgs, mtkProgress, parseMtkTraceLine } = require('./firmware-direct-mtk.cjs');
 
 const dumpName = /^SP_FT_V6_Dump_\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2}$/;
 const traceFile = 'QT_FLASH_TOOL_V6.log';
@@ -15,6 +15,7 @@ const writeCommand = Object.freeze({
   'format-all-download': 'FLASH-ALL',
 });
 const formatMode = 'format-all-download';
+const progressStageOrder = Object.freeze({ connecting: 1, formatting: 2, writing: 3, finalizing: 4 });
 const failure = code => ({ transferCompleted: false, code });
 const notify = (callback, ...args) => { try { callback?.(...args); } catch { /* UI cannot stop the flasher. */ } };
 
@@ -193,7 +194,19 @@ function createTraceTail(io, root, previous) {
 function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgress } = {}) {
   let scan, modeConfirmed = false, ready = false, actual = false, written = false, completed = false, reason;
   let fullErase = false, formatted = false;
-  let lastUpdate = 0, lastPart = 0;
+  let lastUpdate = 0, lastProgress;
+  function publishProgress(percent, details) {
+    if (!actual || reason || (lastProgress && progressStageOrder[details.stage] < progressStageOrder[lastProgress.stage])) return;
+    const timestamp = Date.now();
+    const current = details.partPercent ?? details.stagePercent ?? percent;
+    if (lastProgress?.stage === details.stage && lastProgress.part === details.part) {
+      const previous = lastProgress.partPercent ?? lastProgress.stagePercent ?? lastProgress.percent;
+      if (current === null || previous !== null && (current <= previous || current < 100 && timestamp - lastUpdate < 250)) return;
+    }
+    lastProgress = { ...details, percent };
+    lastUpdate = timestamp;
+    notify(onProgress, percent, details);
+  }
   function deviceCommand(event) {
     if (completed || (written && event.command === 'ERASE-FLASH')) {
       reason = 'mtk-mode-mismatch';
@@ -204,14 +217,20 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
       else if (event.outcome === 'request') {
         fullErase = false;
         formatted = false;
+        publishProgress(null, { stage: 'formatting' });
       } else if (event.outcome === 'failure') reason ||= 'mtk-write-failed';
       else formatted = actual && fullErase && !reason;
       return;
     }
     if (event.command !== writeCommand[mode]) reason = 'mtk-mode-mismatch';
     else if (event.outcome === 'failure') reason ||= 'mtk-write-failed';
-    else if (event.outcome === 'request') written = false;
-    else if (event.outcome === 'success') written = actual && !reason && (mode !== formatMode || formatted);
+    else if (event.outcome === 'request') {
+      written = false;
+      publishProgress(null, { stage: 'writing' });
+    } else if (event.outcome === 'success') {
+      written = actual && !reason && (mode !== formatMode || formatted);
+      if (written) publishProgress(null, { stage: 'finalizing' });
+    }
   }
 
   function consume(events, running) {
@@ -235,7 +254,7 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
           else if (ready && !actual && !reason) {
             actual = true;
             // Once the target appears, stop asking for another power cycle even before write progress.
-            notify(onProgress, null, { stage: 'connecting' });
+            publishProgress(null, { stage: 'connecting' });
           }
           break;
         case 'erase-scope': fullErase = event.full; break;
@@ -243,15 +262,10 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
         case 'tool-error': reason ||= 'mtk-write-failed'; break;
         case 'formatting':
           if (mode !== formatMode) reason = 'mtk-mode-mismatch';
-          else if (actual && !reason) notify(onProgress, null, { stage: 'formatting' });
+          else publishProgress(...mtkProgress(event));
           break;
         case 'writing':
-          if (actual && !reason && (event.part !== lastPart || Date.now() - lastUpdate >= 250)) {
-            lastPart = event.part;
-            lastUpdate = Date.now();
-            notify(onProgress, event.total === 1 ? Math.min(event.percentage, 99) : null,
-              { part: event.part, total: event.total, partPercent: event.percentage });
-          }
+          publishProgress(...mtkProgress(event));
           break;
         case 'tool-completed': completed = written; break;
       }

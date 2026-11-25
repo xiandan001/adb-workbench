@@ -83,8 +83,38 @@ test('elevated Download Only announces only current exact COM readiness, not ano
     },
   });
   assert.deepEqual(readiness, [{ port: 'COM3', timeoutMs: 120000 }]);
-  assert.deepEqual(progress, [[null, { stage: 'connecting' }], [null, { part: 23, total: 24, partPercent: 31 }]]);
+  assert.deepEqual(progress, [
+    [null, { stage: 'connecting' }],
+    [null, { stage: 'writing', part: 23, total: 24, partPercent: 31 }],
+    [null, { stage: 'finalizing' }],
+  ]);
   assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
+});
+
+test('elevated formatting percent and numbered partition percent never become total percent', async t => {
+  const f = await setup(t);
+  const progress = [];
+  const result = await writeElevatedMtk(forMode('format-all-download', true), {
+    onProgress: (value, details) => progress.push([value, details]),
+  }, {
+    ...f,
+    async launch(_tool, _args, onPid) {
+      onPid(pid);
+      const format = line('ConsoleMode::ConsoleModeRunner::cbFormatProgress(): 100% of flash has been formatted(about 3s).', 'ConsoleModeRunner');
+      const write = line('ConsoleMode::ConsoleModeRunner::cbDownloadProgress(): 34% of [super [23/24]] data has been sent (about 2G)', 'ConsoleModeRunner');
+      await f.add(scan('COM3', 'format-download') + echo('COM3') + erase().replace(commandResult('ERASE-FLASH'), format + commandResult('ERASE-FLASH')) +
+        write + commandResult('FLASH-ALL') + terminal);
+      return { exitCode: 0 };
+    },
+  });
+  assert.equal(result.transferCompleted, true);
+  assert.deepEqual(progress, [
+    [null, { stage: 'connecting' }],
+    [null, { stage: 'formatting' }],
+    [null, { stage: 'formatting', stagePercent: 100 }],
+    [null, { stage: 'writing', part: 23, total: 24, partPercent: 34 }],
+    [null, { stage: 'finalizing' }],
+  ]);
 });
 
 test('elevated Download Only rejects stale markers, generic scans, wrong target and a full erase', async t => {

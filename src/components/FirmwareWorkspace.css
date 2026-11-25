@@ -13,7 +13,42 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .firmware-vendor-step {
-    grid-column: 1 / -1;
-  }
+}
+
+.firmware-write-meter {
+  position: relative;
+  overflow: hidden;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.firmware-write-meter progress {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 100%;
+}
+
+.firmware-write-meter progress::-webkit-progress-bar { background: transparent; }
+.firmware-write-meter progress::-webkit-progress-value { background: #10b981; border-radius: 999px; }
+.firmware-write-meter[data-indeterminate] progress { opacity: 0; }
+.firmware-write-meter[data-indeterminate]::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  border-radius: 999px;
+  background: #10b981;
+  animation: firmware-meter-sweep 1.65s ease-in-out infinite;
+}
+
+@keyframes firmware-meter-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(315%); }
+}
+
+html[data-reduced-motion="true"] .firmware-write-meter[data-indeterminate]::after { transform: translateX(106%); }
+@media (prefers-reduced-motion: reduce) {
+  .firmware-write-meter[data-indeterminate]::after { transform: translateX(106%); }
 }

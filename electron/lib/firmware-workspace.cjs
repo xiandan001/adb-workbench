@@ -13,6 +13,27 @@ const PLATFORMS = Object.freeze({
 const cancelled = () => ({ ok: false, cancelled: true });
 const failure = error => ({ ok: false, error });
 
+function recentFirmwareFiles(directory) {
+  const filename = platform => path.join(directory, `firmware-recent-file.${platform}.v1.json`);
+  const usable = (platform, file) => typeof file === 'string' && file.length <= 1024 && !file.includes('\0') &&
+    path.isAbsolute(file) && !/^[\\/]{2}/.test(file) && PLATFORMS[platform].includes(path.extname(file).slice(1).toLowerCase());
+  return {
+    async read(platform) {
+      try {
+        const meta = await fs.lstat(filename(platform));
+        if (!meta.isFile() || meta.size > 8192) return '';
+        const value = JSON.parse(await fs.readFile(filename(platform), 'utf8'));
+        return value?.version === 1 && usable(platform, value.filePath) ? value.filePath : '';
+      } catch { return ''; }
+    },
+    async remember(platform, filePath) {
+      if (!usable(platform, filePath)) return;
+      await fs.mkdir(directory, { recursive: true });
+      await atomicWriteAsync(filename(platform), JSON.stringify({ version: 1, filePath }));
+    },
+  };
+}
+
 async function localDirectory(value) {
   if (typeof value !== 'string' || value.length > 1024 || !path.isAbsolute(value) || /^[\\/]{2}/.test(value)) return '';
   try {
@@ -29,6 +50,9 @@ function register(ipcMain, options = {}) {
   const preflight = options.preflight || require('./firmware-preflight.cjs').preflightFirmware;
   const isWindows = (options.hostPlatform || process.platform) === 'win32';
   const configFile = path.join(app.getPath('userData'), 'firmware-tools.v1.json');
+  const recentFiles = recentFirmwareFiles(app.getPath('userData'));
+  const fileRevision = new Map();
+  const choosingFiles = new Set();
   const mtkBindings = createMtkBindingStore(path.join(app.getPath('userData'), 'firmware-direct-mtk-binding.v1.json'));
   const rkBindings = createRkBindingStore(path.join(app.getPath('userData'), 'firmware-direct-rk-binding.v1.json'));
   let configuring = false;
@@ -178,15 +202,32 @@ function register(ipcMain, options = {}) {
   });
   handle('chooseFile', async (platform, owner, event) => {
     if (direct.isActive()) return flashBusy();
-    const selected = await dialog.showOpenDialog(owner, {
-      title: tr('选择待预检的固件'),
-      properties: ['openFile'],
-      filters: [{ name: tr('固件文件'), extensions: PLATFORMS[platform] }]
-    });
-    if (selected.canceled || !selected.filePaths?.[0] || ownerFor(event) !== owner) return cancelled();
-    const filePath = selected.filePaths[0];
+    if (choosingFiles.has(platform)) return cancelled();
+    choosingFiles.add(platform);
+    fileRevision.set(platform, Symbol());
+    try {
+      const selected = await dialog.showOpenDialog(owner, {
+        title: tr('选择待预检的固件'),
+        properties: ['openFile'],
+        filters: [{ name: tr('固件文件'), extensions: PLATFORMS[platform] }]
+      });
+      if (selected.canceled || !selected.filePaths?.[0] || ownerFor(event) !== owner) return cancelled();
+      const filePath = selected.filePaths[0];
+      const checked = await preflight(platform, filePath);
+      if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
+      if (checked.ok) await recentFiles.remember(platform, filePath).catch(() => {});
+      if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
+      return { ...checked, filePath, ...(checked.ok ? { firmwareId: direct.rememberFile(platform, filePath, event.senderFrame) } : {}) };
+    } finally { choosingFiles.delete(platform); }
+  });
+  handle('restoreFile', async (platform, owner, event) => {
+    if (direct.isActive() || choosingFiles.has(platform)) return cancelled();
+    const revision = Symbol();
+    fileRevision.set(platform, revision);
+    const filePath = await recentFiles.read(platform);
+    if (!filePath) return { ok: false, empty: true };
     const checked = await preflight(platform, filePath);
-    if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
+    if (fileRevision.get(platform) !== revision || ownerFor(event) !== owner || direct.isActive()) return cancelled();
     return { ...checked, filePath, ...(checked.ok ? { firmwareId: direct.rememberFile(platform, filePath, event.senderFrame) } : {}) };
   });
   handle('installDriver', async (platform, owner, event) => {

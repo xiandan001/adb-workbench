@@ -103,6 +103,41 @@ test('MTK progress alone cannot be mistaken for successful writing', async () =>
   assert.equal(bootChecks, 0);
 });
 
+test('vendor partition, stage and overall progress stay separate throughout a write', async () => {
+  let report, end;
+  const f = fixture({ options: {
+    prepare: async () => ({ ok: true, elevatedMtk: true, profile: { product: 'fixture' } }),
+    armVendor: async (_plan, _anchor, _staged, context) => {
+      context.onReady({ timeoutMs: 50 });
+      report = context.onProgress;
+      return new Promise(resolve => { end = resolve; });
+    },
+  } });
+  f.configure([], a);
+  await f.arm();
+  report(null, { stage: 'formatting', stagePercent: 68 });
+  assert.equal(f.status().phase, 'writing');
+  assert.equal(f.status().percent, null);
+  assert.equal(f.status().stagePercent, 68);
+  report(null, { stage: 'writing', part: 23, total: 24, partPercent: 30 });
+  assert.equal(f.status().stagePercent, undefined);
+  assert.equal(f.status().part, 23);
+  assert.equal(f.status().total, 24);
+  assert.equal(f.status().partPercent, 30);
+  assert.equal(f.status().percent, null);
+  report(71, { stage: 'writing' });
+  report(5, { stage: 'writing', part: 23, total: 24, partPercent: 4 });
+  assert.equal(f.status().percent, 71);
+  assert.equal(f.status().partPercent, 30);
+  report(null, { stage: 'finalizing' });
+  assert.equal(f.status().partPercent, undefined);
+  assert.equal(f.status().percent, 71);
+  end({ transferCompleted: true });
+  await flush();
+  assert.equal(f.status().percent, 100);
+  assert.equal(f.status().phase, 'written');
+});
+
 test('unknown candidate never writes until explicitly chosen; only exact platform, owner, job and target match', async () => {
   const f = fixture();
   await f.arm();

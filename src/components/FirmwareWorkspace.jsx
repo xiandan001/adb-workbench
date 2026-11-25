@@ -36,12 +36,9 @@ function Action({ icon, processing, className, children, ...props }) {
   </button>;
 }
 
-function Step({ id, title, theme, children, className = '' }) {
-  return <section className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card} ${className}`} aria-labelledby={`firmware-step-${id}`}>
-    <header className="mb-4 flex min-w-0 items-center gap-3">
-      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-500/10 text-sm font-semibold ${accentText(theme)}`} aria-hidden="true">{id}</span>
-      <h3 id={`firmware-step-${id}`} className="min-w-0 break-words text-sm font-semibold">{title}</h3>
-    </header>
+function SupportPanel({ title, theme, children }) {
+  return <section className={`min-w-0 rounded-lg border p-3 ${theme.input}`}>
+    <h4 className="mb-3 break-words text-sm font-semibold">{title}</h4>
     {children}
   </section>;
 }
@@ -57,13 +54,13 @@ function driverPackageText(driverPackage) {
   return [driverPackage?.name || driverPackage?.inf, driverPackage?.provider, driverPackage?.version].filter(Boolean).join(' · ');
 }
 
-function DriverStep({ view, theme, driverAction, driverActionLabel }) {
+function DriverPanel({ view, theme, driverAction, driverActionLabel, flashing }) {
   const { busy, status, checking, readError } = view;
   const deviceRows = Array.isArray(status?.devices) ? status.devices : [];
   const info = driverPackageText(status?.driverPackage);
   const state = readError ? 'unknown' : status?.state;
   const muted = theme.textMuted;
-  return <Step id={1} title={tr('工具与驱动')} theme={theme}>
+  return <SupportPanel title={tr('工具与驱动')} theme={theme}>
     <div className="space-y-3">
       <div role="status" aria-live="polite" className={`rounded-lg border p-3 ${theme.input}`}>
         <div className="flex min-w-0 items-start gap-2.5">
@@ -87,7 +84,7 @@ function DriverStep({ view, theme, driverAction, driverActionLabel }) {
       <Feedback view={view} actions={['install']} theme={theme} />
       <div className="border-t border-current/10 pt-3">
         <p className="text-xs font-medium">{tr('刷机 USB 设备')}</p>
-        {(status || !checking) && <p className={`mt-1 text-xs ${muted}`}>{deviceRows.length ? tr('刷机 USB 设备独立识别。') : tr('未检测到刷机 USB 设备。')}</p>}
+        {(deviceRows.length > 0 || !flashing && (status || !checking)) && <p className={`mt-1 text-xs ${muted}`}>{deviceRows.length ? tr('刷机 USB 设备独立识别。') : tr('未检测到刷机 USB 设备。')}</p>}
         {deviceRows.length > 0 && <ul className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
           {deviceRows.map((device, index) => <li key={device.hardwareId ? `${device.hardwareId}:${index}` : index}
             className={`flex min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 ${theme.input}`}>
@@ -102,56 +99,64 @@ function DriverStep({ view, theme, driverAction, driverActionLabel }) {
         </ul>}
       </div>
     </div>
-  </Step>;
+  </SupportPanel>;
 }
 
-function PreflightStep({ view, theme }) {
-  const { file, platform, busy } = view;
+function PreflightPanel({ view, theme }) {
+  const { file, platform, busy, restoringFile } = view;
   const dependencies = Array.isArray(file?.files) ? file.files : [];
   const unavailable = dependencies.filter(item => item.status !== 'present');
   const muted = theme.textMuted;
-  return <Step id={2} title={tr('固件预检')} theme={theme}>
-    <div className="space-y-3">
-      <p className={`text-xs leading-5 ${muted}`}>{platform === 'rk' ? tr('选择 RK 完整固件（update.img）。') : tr('选择 MTK 下载清单（flash.xml），保留配套文件原有目录。')}</p>
-      <div className="flex flex-wrap gap-2">
-        <Action icon={FileSearch} processing={busy === 'file'} className={theme.button.secondary}
-          disabled={Boolean(busy || view.confirm)} onClick={() => view.act('file')}>{busy === 'file' ? tr('正在预检固件…') : tr('选择固件')}</Action>
-        {file?.filePath && <Action icon={Copy} className={theme.button.secondary} disabled={Boolean(busy)} onClick={() => view.act('copy')}>{tr('复制固件路径')}</Action>}
-      </div>
-      <Feedback view={view} actions={['file', 'copy']} theme={theme} />
-      {file && <div role="status" className={`min-w-0 rounded-lg border p-3 ${theme.input}`}>
-        <p className="break-all text-sm font-medium">{file.fileName}</p>
-        <p className={`mt-0.5 break-words text-xs ${muted}`}>{[Number.isFinite(file.sizeBytes) ? formatBytes(file.sizeBytes) : '', file.chip, file.project].filter(Boolean).join(' · ')}</p>
-        <p className={`mt-2 text-xs font-medium ${file.ok ? accentText(theme) : warningText(theme)}`}>
-          {file.ok ? tr('固件结构检查通过') : tr('固件需要检查')}
-        </p>
-        {!file.ok && <p className={`mt-1 text-xs leading-5 ${muted}`}>{file.error || (preflightErrors[file.code] || preflightErrors['file-unavailable'])()}</p>}
-        {dependencies.length > 0 && <details key={file.filePath || file.fileName} open={unavailable.length > 0 || undefined} className="mt-2 border-t border-current/10 pt-2">
-          <summary className="cursor-pointer text-xs font-medium">{tr('依赖文件')} · {dependencies.length - unavailable.length}/{dependencies.length}</summary>
-          <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
-            {[...unavailable, ...dependencies.filter(item => item.status === 'present')].map((item, index) => (
-              <li key={`${item.name}:${index}`} className="flex items-start gap-2 text-xs">
-                {item.status === 'present' ? <CheckCircle2 size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-500" /> : <FileSearch size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-amber-500" />}
-                <span className="min-w-0 flex-1 break-all">{item.name}</span>
-                {item.status !== 'present' && <span className={`shrink-0 ${warningText(theme)}`}>{tr('不可用')}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>}
-      </div>}
-      <p className={`rounded-lg bg-amber-500/8 px-3 py-2 text-xs leading-5 ${muted}`}>{tr('此检查只核对本地文件。请在厂商工具中确认型号、板卡及固件匹配。')}</p>
+  return <section className={`min-w-0 space-y-3 self-start rounded-lg border p-3 ${theme.input}`} aria-labelledby="firmware-preflight-title">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <h4 id="firmware-preflight-title" className="pt-1 text-sm font-semibold">{tr('固件预检')}</h4>
+      <Action icon={FileSearch} processing={busy === 'file'} className={file ? theme.button.secondary : theme.button.primary}
+        disabled={Boolean(busy || view.confirm)} onClick={() => view.act('file')}>
+        {busy === 'file' ? tr('正在预检固件…') : file ? tr('更换固件') : tr('选择固件')}
+      </Action>
     </div>
-  </Step>;
+    {!file?.ok && <p className={`text-xs leading-5 ${muted}`}>{platform === 'rk' ? tr('选择 RK 完整固件（update.img）。') : tr('选择 MTK 下载清单（flash.xml），保留配套文件原有目录。')}</p>}
+    {restoringFile && !file && <p role="status" className={`flex items-center gap-2 text-xs ${muted}`}>
+      <Loader2 size={14} aria-hidden="true" className="shrink-0 animate-spin" />{tr('正在恢复上次固件…')}
+    </p>}
+    <Feedback view={view} actions={['file', 'copy']} theme={theme} />
+    {file && <div role="status" className={`min-w-0 rounded-lg border p-3 ${theme.input}`}>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="break-words text-sm font-medium">{file.fileName}</p>
+          <p className={`mt-0.5 break-words text-xs ${muted}`}>{[Number.isFinite(file.sizeBytes) ? formatBytes(file.sizeBytes) : '', file.chip, file.project].filter(Boolean).join(' · ')}</p>
+        </div>
+        {file.filePath && <button type="button" className={`grid size-8 shrink-0 place-items-center rounded-md disabled:opacity-50 ${theme.button.secondary}`}
+          aria-label={tr('复制固件路径')} title={tr('复制固件路径')} disabled={Boolean(busy)} onClick={() => view.act('copy')}>
+          <Copy size={14} aria-hidden="true" />
+        </button>}
+      </div>
+      <p className={`mt-2 text-xs font-medium ${file.ok ? accentText(theme) : warningText(theme)}`}>
+        {file.ok ? tr('固件结构检查通过') : tr('固件需要检查')}
+      </p>
+      {!file.ok && <p className={`mt-1 text-xs leading-5 ${muted}`}>{file.error || (preflightErrors[file.code] || preflightErrors['file-unavailable'])()}</p>}
+      {dependencies.length > 0 && <details key={file.filePath || file.fileName} open={unavailable.length > 0 || undefined} className="mt-2 border-t border-current/10 pt-2">
+        <summary className="cursor-pointer text-xs font-medium">{tr('依赖文件')} · {dependencies.length - unavailable.length}/{dependencies.length}</summary>
+        <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+          {[...unavailable, ...dependencies.filter(item => item.status === 'present')].map((item, index) => (
+            <li key={`${item.name}:${index}`} className="flex items-start gap-2 text-xs">
+              {item.status === 'present' ? <CheckCircle2 size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-500" /> : <FileSearch size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-amber-500" />}
+              <span className="min-w-0 flex-1 break-all">{item.name}</span>
+              {item.status !== 'present' && <span className={`shrink-0 ${warningText(theme)}`}>{tr('不可用')}</span>}
+            </li>
+          ))}
+        </ul>
+      </details>}
+    </div>}
+  </section>;
 }
 
-function VendorStep({ view, theme, direct, targetHint, blocked }) {
+function VendorPanel({ view, theme, direct }) {
   const { status, busy, platform } = view;
   const toolName = status?.tool?.name || (platform === 'rk' ? 'RKDevTool' : 'SP Flash Tool V6');
-  return <Step id={3} title={tr('刷机操作')} theme={theme} className="firmware-vendor-step">
-    <FirmwareDirectPanel direct={direct} platform={platform} theme={theme} file={view.file} targetHint={targetHint} blocked={blocked} />
+  return <SupportPanel title={toolName} theme={theme}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
-        <p className="break-words text-sm font-medium">{toolName}</p>
         <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('在厂商工具中确认目标与固件后开始写入。')}</p>
         {platform === 'mtk' && <p className={`text-xs leading-5 ${theme.textMuted}`}>
           {tr('使用 USB ADB 时，在 V6 核对固件和下载模式后，先点 Download 等待设备，再对目标设备执行 Loader 重启；识别到设备后可能立即写入。')}
@@ -171,7 +176,7 @@ function VendorStep({ view, theme, direct, targetHint, blocked }) {
       </div>
     </div>
     <div className="mt-2 empty:hidden"><Feedback view={view} actions={['vendor']} theme={theme} /></div>
-  </Step>;
+  </SupportPanel>;
 }
 
 export default function FirmwareWorkspace({ theme, active = true, entryDevice }) {
@@ -185,6 +190,7 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
   const driverAction = firmwareDriverAction(view.status, view.readError);
   const reinstall = driverAction === 'reinstall';
   const driverActionLabel = reinstall ? tr('重新安装驱动') : tr('安装驱动');
+  const driverState = view.readError ? 'unknown' : view.status?.state;
   return <div className={`firmware-workspace min-w-0 space-y-4 ${theme.text}`}>
     <div className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card}`}>
       <div role="group" aria-label={tr('选择刷机平台')} className="grid grid-cols-2 gap-2.5">
@@ -197,13 +203,30 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
       </div>
       {entryDevice?.name && <p className={`mt-3 break-words text-xs ${theme.textMuted}`}>{tr('来自设备卡片：{0}', { 0: entryDevice.name })}</p>}
     </div>
-    <div className="firmware-steps">
-      <DriverStep view={stepView} theme={theme} driverAction={driverAction} driverActionLabel={driverActionLabel} />
-      <PreflightStep view={stepView} theme={theme} />
-      <VendorStep view={stepView} theme={theme} direct={direct}
-        targetHint={entryDevice?.platformHint && entryDevice.platformHint !== view.platform ? undefined : entryDevice?.targetHint}
-        blocked={Boolean(view.busy || view.confirm || direct.globalBusy)} />
-    </div>
+    <section className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card}`} aria-labelledby="firmware-workflow-title">
+      <h3 id="firmware-workflow-title" className="mb-3 text-sm font-semibold">{tr('刷机操作')}</h3>
+      <div className="firmware-steps">
+        <PreflightPanel view={stepView} theme={theme} />
+        <FirmwareDirectPanel direct={direct} platform={view.platform} theme={theme} file={view.file}
+          targetHint={entryDevice?.platformHint && entryDevice.platformHint !== view.platform ? undefined : entryDevice?.targetHint}
+          blocked={Boolean(view.busy || view.confirm || direct.globalBusy && !direct.running)} />
+      </div>
+    </section>
+    <details open={direct.enabled === false || direct.unavailable || undefined} className={`group min-w-0 rounded-xl border ${theme.card}`}>
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-xl p-4 focus-visible:outline-2 focus-visible:outline-emerald-500">
+        <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <ChevronDown size={16} className="-rotate-90 shrink-0 transition-transform group-open:rotate-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{tr('工具、驱动与厂商工具')}</span>
+        </span>
+        {!direct.running && <span className={`text-xs ${driverState === 'missing' || driverState === 'problem' ? warningText(theme) : theme.textMuted}`}>
+          {view.checking ? tr('正在检测驱动…') : (drivers[driverState] || drivers.unknown)()}
+        </span>}
+      </summary>
+      <div className="firmware-steps border-t border-current/10 p-4">
+        <DriverPanel view={stepView} theme={theme} driverAction={driverAction} driverActionLabel={driverActionLabel} flashing={direct.running} />
+        <VendorPanel view={stepView} theme={theme} direct={direct} />
+      </div>
+    </details>
     <DangerConfirmModal open={view.confirm} theme={theme} tone="warning"
       title={reinstall ? tr('确认重新安装 {0} 驱动', { 0: platformName }) : tr('确认安装 {0} 驱动', { 0: platformName })}
       message={tr('安装需要 Windows 管理员授权，完成后将自动复查。')}
