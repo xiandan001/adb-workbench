@@ -25,7 +25,7 @@ namespace skin {
 #include "installer-strings.generated.h"
 
 constexpr int kWidth = 760, kHeight = 500, kLeft = 250;
-constexpr UINT_PTR kTimer = 475, kSubclass = 475, kNativeSubclass = 476;
+constexpr UINT_PTR kTimer = 475, kSubclass = 475, kNativeSubclass = 476, kLanguageSubclass = 477;
 constexpr UINT kConcealNativeMessage = WM_APP + 476;
 constexpr UINT kInstallStageMessage = WM_APP + 477;
 constexpr UINT kPreparationFailureMessage = WM_APP + 478;
@@ -33,6 +33,8 @@ constexpr COLORREF kBackground = RGB(0, 0, 0), kLeftBackground = RGB(0, 0, 0);
 constexpr COLORREF kText = RGB(244, 244, 244), kMuted = RGB(164, 164, 164);
 constexpr COLORREF kAccent = RGB(29, 213, 162), kBorder = RGB(37, 37, 37);
 constexpr COLORREF kEditBackground = RGB(12, 12, 12);
+constexpr COLORREF kLanguageSurface = RGB(20, 20, 20), kLanguageBorder = RGB(55, 55, 55);
+constexpr COLORREF kLanguageHighlight = RGB(17, 53, 43);
 enum ControlId { Primary = 300, Secondary, Browse, Cancel, Path, Shortcut, Details, Copy, Keep, Exit, Language };
 enum class Mode { Welcome, Install, Finish };
 struct NativeWindow {
@@ -72,6 +74,9 @@ static veylo::installer::UpdateArguments updateArguments;
 static veylo::installer::InstallGuard installGuard;
 static std::atomic<bool> readyConfirmed{false};
 constexpr int kLanguageIds[] = {2052, 1028, 1033, 1041, 1042};
+constexpr const wchar_t* kLanguageNames[] = {L"简体中文", L"繁體中文", L"English", L"日本語", L"한국어"};
+constexpr int kLanguageCount = _countof(kLanguageNames), kLanguageRowHeight = 26;
+static_assert(kLanguageCount == _countof(kLanguageIds));
 int Px(float value);
 bool ProtectNativeWindow(HWND window);
 void ReadDetails();
@@ -306,7 +311,7 @@ void Layout() {
   SetButton(s.browse, L"browse"); SetButton(s.copy, L"copy");
   SetWindowTextW(s.keep, ActionText(L"continue", L"unContinue")); SetWindowTextW(s.exit, ActionText(L"exit", L"unExit"));
   SetWindowTextW(s.shortcut, T(L"shortcut")); SetWindowTextW(s.parent, ActionText(L"title", L"unTitle"));
-  Place(s.language, 578, 7, 150, 200, welcome && !s.uninstall);
+  Place(s.language, 578, 11, 150, 200, welcome && !s.uninstall);
   Place(s.primary, 282, 354, 446, 46, !s.failed && (welcome || finish));
   Place(s.secondary, 282, 410, welcome ? 310 : 446, 34, !s.failed && !s.uninstall && (welcome || finish));
   Place(s.path, 284, 240, 342, 32, welcome && s.custom && !s.uninstall);
@@ -486,6 +491,92 @@ void DrawButton(const DRAWITEMSTRUCT& item) {
     focus.SetDashStyle(Gdiplus::DashStyleDot);
     graphics.DrawRectangle(&focus, 3.0f, 3.0f, width - 6, height - 6);
   }
+}
+
+bool LanguageHighContrast() {
+  HIGHCONTRASTW contrast{sizeof(contrast)};
+  return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+    (contrast.dwFlags & HCF_HIGHCONTRASTON);
+}
+
+void DrawLanguageLabel(HDC dc, RECT area, int selection, COLORREF text) {
+  if (selection < 0 || selection >= kLanguageCount) return;
+  const int saved = SaveDC(dc);
+  SelectObject(dc, s.font);
+  SetTextColor(dc, text);
+  SetBkMode(dc, TRANSPARENT);
+  ::DrawTextW(dc, kLanguageNames[selection], -1, &area, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+  RestoreDC(dc, saved);
+}
+
+void DrawLanguageItem(const DRAWITEMSTRUCT& item) {
+  const bool selected = (item.itemState & ODS_SELECTED) != 0;
+  const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+  const bool contrast = LanguageHighContrast();
+  const COLORREF background = contrast ? GetSysColor(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW)
+    : selected ? kLanguageHighlight : kLanguageSurface;
+  const COLORREF text = contrast ? GetSysColor(disabled ? COLOR_GRAYTEXT : selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT)
+    : disabled ? kMuted : selected ? kAccent : kText;
+  RECT area = item.rcItem;
+  HBRUSH brush = CreateSolidBrush(background);
+  FillRect(item.hDC, &area, brush);
+  DeleteObject(brush);
+  area.left += Px(9);
+  area.right -= Px(7);
+  DrawLanguageLabel(item.hDC, area, static_cast<int>(item.itemID), text);
+  if (contrast && (item.itemState & ODS_FOCUS)) DrawFocusRect(item.hDC, &item.rcItem);
+}
+
+void DrawLanguageFace(HWND window, HDC dc) {
+  RECT area{};
+  GetClientRect(window, &area);
+  const float width = static_cast<float>(area.right) / s.scale;
+  const float height = static_cast<float>(area.bottom) / s.scale;
+  if (width <= 10 || height <= 10) return;
+  const bool enabled = IsWindowEnabled(window) != FALSE;
+  const bool expanded = SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0) != FALSE;
+  const bool focused = enabled && (GetFocus() == window || expanded);
+  {
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.ScaleTransform(s.scale, s.scale);
+    graphics.Clear(Color(kBackground));
+    Gdiplus::GraphicsPath frame;
+    constexpr float diameter = 12.f;
+    frame.AddArc(0.5f, 0.5f, diameter, diameter, 180, 90);
+    frame.AddArc(width - diameter - 0.5f, 0.5f, diameter, diameter, 270, 90);
+    frame.AddArc(width - diameter - 0.5f, height - diameter - 0.5f, diameter, diameter, 0, 90);
+    frame.AddArc(0.5f, height - diameter - 0.5f, diameter, diameter, 90, 90);
+    frame.CloseFigure();
+    Gdiplus::SolidBrush fill(Color(kLanguageSurface));
+    Gdiplus::Pen border(Color(focused ? kAccent : kLanguageBorder), 1.0f);
+    graphics.FillPath(&fill, &frame);
+    graphics.DrawPath(&border, &frame);
+    const float x = width - 15.f, y = height / 2.0f, turn = expanded ? -1.0f : 1.0f;
+    Gdiplus::Pen arrow(Color(focused ? kAccent : kMuted), 1.25f);
+    const Gdiplus::PointF points[] = {{x - 4.f, y - 2.f * turn}, {x, y + 2.f * turn}, {x + 4.f, y - 2.f * turn}};
+    graphics.DrawLines(&arrow, points, _countof(points));
+  }
+  area.left += Px(10);
+  area.right -= Px(27);
+  DrawLanguageLabel(dc, area, static_cast<int>(SendMessageW(window, CB_GETCURSEL, 0, 0)), enabled ? kText : kMuted);
+}
+
+LRESULT CALLBACK LanguageProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
+  if (message == WM_NCDESTROY) RemoveWindowSubclass(window, LanguageProc, kLanguageSubclass);
+  if ((message == WM_PAINT || message == WM_PRINTCLIENT || message == WM_ERASEBKGND) && !LanguageHighContrast()) {
+    if (message == WM_PAINT) {
+      PAINTSTRUCT paint{};
+      const HDC dc = BeginPaint(window, &paint);
+      DrawLanguageFace(window, dc);
+      EndPaint(window, &paint);
+    } else if (message == WM_PRINTCLIENT) DrawLanguageFace(window, reinterpret_cast<HDC>(wParam));
+    return message == WM_ERASEBKGND ? 1 : 0;
+  }
+  const auto result = DefSubclassProc(window, message, wParam, lParam);
+  if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_ENABLE ||
+      message == CB_SETCURSEL || message == CB_SHOWDROPDOWN) InvalidateRect(window, nullptr, FALSE);
+  return result;
 }
 
 bool Validate() {
@@ -714,14 +805,29 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_PRINTCLIENT: PaintTo(window, reinterpret_cast<HDC>(wParam)); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_COMMAND:
-      if (LOWORD(wParam) == Language && HIWORD(wParam) == CBN_SELCHANGE && !s.uninstall) {
-        const auto selected = SendMessageW(s.language, CB_GETCURSEL, 0, 0);
-        if (selected >= 0 && selected < 5) { s.locale = static_cast<int>(selected); s.error.clear(); Layout(); }
+      if (LOWORD(wParam) == Language && !s.uninstall) {
+        if (HIWORD(wParam) == CBN_SELCHANGE) {
+          const auto selected = SendMessageW(s.language, CB_GETCURSEL, 0, 0);
+          if (selected >= 0 && selected < kLanguageCount) { s.locale = static_cast<int>(selected); s.error.clear(); Layout(); }
+        }
+        InvalidateRect(s.language, nullptr, FALSE);
       }
       else if (LOWORD(wParam) == Path && HIWORD(wParam) == EN_CHANGE) { s.error.clear(); Repaint(); }
       else if (HIWORD(wParam) == BN_CLICKED) Command(LOWORD(wParam));
       return 0;
-    case WM_DRAWITEM: DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam)); return TRUE;
+    case WM_MEASUREITEM: {
+      auto* item = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+      if (item->CtlType != ODT_COMBOBOX || item->CtlID != Language) break;
+      item->itemHeight = Px(kLanguageRowHeight);
+      return TRUE;
+    }
+    case WM_DRAWITEM: {
+      const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+      if (item.CtlType == ODT_COMBOBOX && item.CtlID == Language) DrawLanguageItem(item);
+      else if (item.CtlType == ODT_BUTTON) DrawButton(item);
+      else break;
+      return TRUE;
+    }
     case WM_TIMER: if (wParam == kTimer) Tick(); return 0;
     case WM_CTLCOLORBTN: {
       HDC dc = reinterpret_cast<HDC>(wParam);
@@ -733,6 +839,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
       HDC dc = reinterpret_cast<HDC>(wParam);
+      if (message == WM_CTLCOLORLISTBOX && LanguageHighContrast()) {
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+        return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+      }
       SetTextColor(dc, kText);
       const bool edit = message == WM_CTLCOLORLISTBOX || reinterpret_cast<HWND>(lParam) == s.language ||
         reinterpret_cast<HWND>(lParam) == s.path || reinterpret_cast<HWND>(lParam) == s.detailEdit;
@@ -788,10 +899,13 @@ bool Initialize(HWND parent, const std::wstring& image, const std::wstring& lang
   s.shortcut = CreateWindowExW(0, L"BUTTON", T(L"shortcut"), WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 0, 0, s.window, reinterpret_cast<HMENU>(Shortcut), s.instance, nullptr);
   SendMessageW(s.shortcut, BM_SETCHECK, BST_CHECKED, 0);
   s.detailEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL | ES_READONLY | ES_MULTILINE | ES_AUTOVSCROLL, 0, 0, 0, 0, s.window, nullptr, s.instance, nullptr);
-  s.language = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, 0, 0, s.window, reinterpret_cast<HMENU>(Language), s.instance, nullptr);
-  for (const wchar_t* languageName : {L"简体中文", L"繁體中文", L"English", L"日本語", L"한국어"})
+  s.language = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL |
+    CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, 0, 0, 0, 0, s.window, reinterpret_cast<HMENU>(Language), s.instance, nullptr);
+  SendMessageW(s.language, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1), Px(kLanguageRowHeight));
+  for (const wchar_t* languageName : kLanguageNames)
     SendMessageW(s.language, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(languageName));
   SendMessageW(s.language, CB_SETCURSEL, s.locale, 0);
+  SetWindowSubclass(s.language, LanguageProc, kLanguageSubclass, 0);
   for (HWND control : {s.path, s.shortcut, s.detailEdit, s.language}) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(s.font), FALSE);
   s.nativeCancel = GetDlgItem(parent, IDCANCEL);
   if (!SetWindowSubclass(parent, ParentProc, kSubclass, 0)) { Cleanup(); return false; }

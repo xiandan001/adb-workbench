@@ -5,7 +5,8 @@ const { writeFileSync, readdirSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware } = require('../electron/lib/firmware-direct-receipt.cjs');
+const { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware,
+  prepareMtkQuickReview, stageMtkQuickReview } = require('../electron/lib/firmware-direct-receipt.cjs');
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'direct-firmware-receipt-'));
@@ -37,6 +38,49 @@ test('whole MTK package carries stable digest and detects changed dependency wit
   await fs.writeFile(f.image, 'replaced');
   assert.equal(await revalidateDirectFirmware(receipt), false);
   assert.notEqual((await prepareDirectFirmware('mtk', f.manifest)).sha256, receipt.sha256);
+});
+
+test('MTK quick review and same-volume staging never stream a partition and keep both aliases read-only', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const f = await fixture(t);
+  const base = path.dirname(f.image);
+  const opened = fs.open;
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await opened(...args);
+    handle.createReadStream = () => assert.fail('No bulk payload stream in the quick path');
+    return handle;
+  });
+  const receipt = await prepareMtkQuickReview(f.manifest);
+  assert.equal(receipt.sha256, undefined);
+  assert.equal(receipt.chip, 'MT8189');
+  assert.equal(receipt.files.length, 5);
+  const staged = await stageMtkQuickReview(receipt, { stagingBase: base });
+  t.after(staged.release);
+  assert.equal(staged.isActive(), true);
+  assert.equal(staged.firmware.path.endsWith(path.join('download_agent', 'flash.xml')), true);
+  assert.equal(staged.protectedFiles.length, 5);
+  const alias = staged.protectedFiles.find(file => path.basename(file) === 'boot.img');
+  assert.ok(alias && path.dirname(alias) !== base);
+  assert.equal((await fs.stat(f.image, { bigint: true })).ino, (await fs.stat(alias, { bigint: true })).ino);
+  assert.equal(await fs.readFile(alias, 'utf8'), 'original');
+  await assert.rejects(fs.open(f.image, 'r+'));
+  await assert.rejects(fs.open(alias, 'r+'));
+  await assert.rejects(fs.rename(alias, alias + '.renamed'));
+  assert.equal(await revalidateDirectFirmware(staged.firmware), true);
+  await staged.release();
+  await assert.rejects(fs.stat(alias), { code: 'ENOENT' });
+  await fs.writeFile(f.image, 'now writable');
+});
+
+test('MTK quick preparation rejects a same-sized changed dependency before staging', { skip: process.platform !== 'win32' }, async t => {
+  const f = await fixture(t);
+  const base = path.dirname(f.image);
+  const receipt = await prepareMtkQuickReview(f.manifest);
+  await fs.writeFile(f.image, 'modified');
+  await assert.rejects(stageMtkQuickReview(receipt, { stagingBase: base }), { code: 'firmware-changed' });
+  assert.equal((await fs.readdir(base)).some(name => name.startsWith('veylo-flash-')), false);
+  await fs.writeFile(f.image, 'now unlocked');
 });
 
 test('MTK receipt binds the implicit sibling XSD and never lists it twice when declared', async t => {

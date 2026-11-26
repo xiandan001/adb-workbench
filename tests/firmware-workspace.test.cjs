@@ -262,6 +262,31 @@ test('firmware picker runs only read-only preflight on a native file and handles
   assert.deepEqual(f.calls.at(-2)[1].filters[0].extensions, ['xml']);
 });
 
+test('a cancelled picker keeps the receipt but a newly selected invalid file revokes it', async t => {
+  const sha256 = 'a'.repeat(64);
+  let contentReads = 0;
+  const f = await setup(t, 'win32', {
+    preflight: async (_platform, file) => ({
+      ok: !file.endsWith('invalid.xml'), fileName: path.basename(file),
+    }),
+    direct: {
+      profiles: [{ platform: 'mtk', mode: 'download-only', chip: 'MT8189', firmwareSha256: sha256 }],
+      firmware: { prepareDirectFirmware: async () => { contentReads++; return { chip: 'MT8189', sha256 }; } },
+    },
+  });
+  f.setDialog({ filePaths: [path.join(f.mtk, 'valid.xml')] });
+  const { firmwareId } = await f.call('chooseFile', 'mtk');
+  assert.ok(firmwareId);
+  f.setDialog({ canceled: true });
+  assert.deepEqual(await f.call('chooseFile', 'mtk'), { ok: false, cancelled: true });
+  const validate = () => f.call('direct:validate-file', 'mtk', f.event, { firmwareId });
+  assert.deepEqual(await validate(), { ok: true, modes: ['download-only'] });
+  f.setDialog({ filePaths: [path.join(f.mtk, 'invalid.xml')] });
+  assert.equal((await f.call('chooseFile', 'mtk')).ok, false);
+  assert.equal((await validate()).cancelled, true);
+  assert.equal(contentReads, 1);
+});
+
 test('only the main frame can use firmware controls, and a main window replaced during a picker is rejected', async t => {
   const f = await setup(t);
   assert.equal((await f.call('installDriver', 'mtk', { ...f.event, senderFrame: {} })).ok, false);

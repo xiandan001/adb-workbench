@@ -55,8 +55,11 @@ function mount(api, options = {}) {
   const model = runInNewContext(`(function(){${code};return { useFirmwareDirect, FirmwareDirectPanel };})()`, runtime);
   const render = (file = readyFile, blocked = false) => {
     cursor = 0;
-    const direct = model.useFirmwareDirect({ platform, active, api });
-    const tree = model.FirmwareDirectPanel({ platform, direct, file, theme, targetHint: Object.hasOwn(options, 'targetHint') ? options.targetHint : 'usb1', blocked });
+    const direct = model.useFirmwareDirect({ platform, active, api, firmwareId: file?.firmwareId });
+    const tree = model.FirmwareDirectPanel({ platform, direct, file, theme, targetHint: Object.hasOwn(options, 'targetHint') ? options.targetHint : 'usb1',
+      blocked, onCopyFirmwarePath: options.onCopyFirmwarePath, onOpenVendor: options.onOpenVendor,
+      onCopyFirmwareFingerprint: options.onCopyFirmwareFingerprint, handoffFeedback: options.handoffFeedback, handoffDisabled: options.handoffDisabled,
+      onReviewFirmware: options.onReviewFirmware, reviewPending: options.reviewPending, reviewFeedback: options.reviewFeedback });
     for (const effect of effects.splice(0)) effect();
     return { tree, direct };
   };

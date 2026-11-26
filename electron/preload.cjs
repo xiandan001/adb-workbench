@@ -154,6 +154,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   firmwareInstallDriver: platform => ipcRenderer.invoke('firmware:installDriver', platform),
   firmwareOpenTool: platform => ipcRenderer.invoke('firmware:openTool', platform),
   firmwareDirectState: platform => ipcRenderer.invoke('firmware:direct:state', platform),
+  firmwareDirectValidateFile: (platform, request) => ipcRenderer.invoke('firmware:direct:validate-file', platform, request),
+  firmwareDirectReviewFile: (platform, request) => ipcRenderer.invoke('firmware:direct:review-file', platform, request),
   firmwareDirectPrepareTool: (platform, options) => ipcRenderer.invoke('firmware:direct:prepare-tool', platform, options),
   firmwareDirectArm: (platform, request) => ipcRenderer.invoke('firmware:direct:arm', platform, request),
   firmwareDirectChoose: (platform, request) => ipcRenderer.invoke('firmware:direct:choose', platform, request),

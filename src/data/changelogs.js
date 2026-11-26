@@ -3,6 +3,17 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.2': {
+    title: 'v5.0.2',
+    date: '2026-11-26',
+    items: [
+      { type: 'feature', get text() { return tr('MTK 支持单设备上电自动刷机，无需预先识别端口或登记设备。'); } },
+      { type: 'improve', get text() { return tr('MTK 选择 XML 后可快速完成预检，应用内确认一次即可准备刷机。'); } },
+      { type: 'feature', get text() { return tr('RK 未登记设备可在上电识别后，直接在应用内选择并刷机。'); } },
+      { type: 'improve', get text() { return tr('更换 RK 或 MTK 固件后会重新检查，不沿用上一次的核对结果。'); } },
+      { type: 'improve', get text() { return tr('优化安装器的语言选择界面。'); } },
+    ],
+  },
   '5.0.1': {
     title: 'v5.0.1',
     date: '2026-11-25',

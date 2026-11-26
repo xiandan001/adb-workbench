@@ -18,6 +18,14 @@ const args = buildMtkFlashArgs({
   firmware: { verified: true, manifestPath: 'D:/isolated stage/download_agent/flash.xml' },
 });
 const request = { tool, target, args };
+const protectedFiles = [
+  'D:\\私有目录 & verified\\veylo-flash-sel123\\download_agent\\flash.xml',
+  'D:\\私有目录 & verified\\veylo-flash-sel123\\payload\\system.img',
+];
+const protectedRequest = { ...request, args: buildMtkFlashArgs({
+  executableVersion: MTK_VERSION, target, mode: 'download-only',
+  firmware: { verified: true, manifestPath: protectedFiles[0] },
+}), protectedFiles };
 const line = (text, source = 'Connection', id = pid) =>
   '11/24/2026 16:42:07.187 SPFlashToolV6[' + id + '][3232][D]: ' + text + '(' + source + '.cpp,72)\r\n';
 const modeLine = value => line('ConsoleMode::CommandSetting::createCmdSettingFromArgs(): current input command name: ' + value, 'CommandSetting');
@@ -27,7 +35,9 @@ const scan = (port, vendorMode = 'download') => [
   line('Connection::scan_com_port(): com port clue: COM://' + port + '.'),
 ].join('');
 const echo = port => line('ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://usb#fixture@MediaTek PreLoader USB VCOM (Android) (' + port + ')@fixture', 'ConsoleModeCallBack');
-const nativeEcho = usb => line('ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://\\\\?\\usb#vid_0e8d&pid_2000#' + usb + '#{a5dcbf10-6530-11d2-901f-00c04fb951ed}@MediaTek PreLoader USB VCOM (Android) (COM3)@' + usb, 'ConsoleModeCallBack');
+const nativeEcho = (usb, port = 'COM3', pid = '2000') => line(
+  'ConsoleModeCallBack::cb_com_port_status(): com port friendly name: COM://\\\\?\\usb#vid_0e8d&pid_' + pid + '#' + usb +
+  '#{a5dcbf10-6530-11d2-901f-00c04fb951ed}@MediaTek PreLoader USB VCOM (Android) (' + port + ')@' + usb, 'ConsoleModeCallBack');
 const commandResult = (name, successful = true) => line('CmdExecutor::execute(): CMD:' + name + (successful ? ' command execute successed.' : ' command execute failed, return error code: -3'), 'CmdExecutor');
 const terminal = line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry');
 const erase = (partition = 'ALL', successful = true) => [
@@ -46,6 +56,14 @@ const done = [
   line('CmdExecutor::execute(): CMD:WRITE-PARTITIONS command execute successed.', 'CmdExecutor'),
   line('ConsoleMode::ConsoleModeEntry::run(): All command exec done!', 'ConsoleModeEntry'),
 ].join('');
+
+function automatic(mode = 'download-only', permitFormatAll = false) {
+  const target = { stage: 'preloader-auto', verified: true };
+  return { tool, target, mode, permitFormatAll, args: buildMtkFlashArgs({
+    executableVersion: MTK_VERSION, target, mode, permitFormatAll, permitAutoPort: true,
+    firmware: { verified: true, manifestPath: 'D:/isolated stage/download_agent/flash.xml' },
+  }) };
+}
 
 async function setup(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mtk-elevated-fixture-'));
@@ -89,6 +107,78 @@ test('elevated Download Only announces only current exact COM readiness, not ano
     [null, { stage: 'finalizing' }],
   ]);
   assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
+});
+
+test('elevated native auto scan can arm with no endpoint and reports progress only after one actual Preloader', async t => {
+  const f = await setup(t);
+  const ready = [], progress = [];
+  let announce;
+  const armed = new Promise(resolve => { announce = resolve; });
+  const result = await writeElevatedMtk(automatic(), {
+    onReady(event) { ready.push(event); announce(); },
+    onProgress(...value) { progress.push(value); },
+  }, {
+    ...f,
+    async launch(_tool, argv, onPid) {
+      assert.deepEqual(argv, ['-c', 'download', '-f', 'D:\\isolated stage\\download_agent\\flash.xml', '-t', 'auto', '-r']);
+      onPid(pid);
+      await f.add(scan('').replaceAll('[' + pid + ']', '[2900]'));
+      await delay(14);
+      assert.deepEqual(ready, []);
+      await f.add(scan('') + line('ConsoleMode::ConsoleModeRunner::cbDownloadProgress(): 11% of image data has been sent', 'ConsoleModeRunner'));
+      await Promise.race([armed, delay(1000).then(() => { throw new Error('vendor scan did not announce readiness'); })]);
+      assert.deepEqual(progress, []);
+      await f.add(nativeEcho('8&aabb&0&1', 'COM12') + nativeEcho('8&aabb&0&1', 'COM12') + done);
+      return { exitCode: 0 };
+    },
+  });
+  assert.deepEqual(ready, [{ timeoutMs: 120000 }]);
+  assert.deepEqual(progress, [
+    [null, { stage: 'connecting' }],
+    [null, { stage: 'writing', part: 23, total: 24, partPercent: 31 }],
+    [null, { stage: 'finalizing' }],
+  ]);
+  assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
+});
+
+test('native auto scan rejects incorrect mode and clue, no device, missing PnP identity, and contradictory endpoints', async t => {
+  const a = nativeEcho('8&aabb&0&1');
+  for (const [trace, code] of [
+    [scan('', 'format-download') + a + done, 'mtk-mode-mismatch'],
+    [scan('', null) + a + done, 'mtk-write-unverified'],
+    [scan('COM3') + a + done, 'mtk-write-unverified'],
+    [scan('garbage') + a + done, 'mtk-write-unverified'],
+    [scan('') + line('Connection::scan_com_port(): scan device com port failed, error code: -1, error msg: .'), 'mtk-wait-expired'],
+    [scan('') + done, 'mtk-write-unverified'],
+    [scan('') + echo('COM3') + done, 'mtk-write-unverified'],
+    [scan('') + nativeEcho('8&aabb&0&1', 'COM3', '0003') + done, 'mtk-write-unverified'],
+    [scan('') + a + nativeEcho('8&ccdd&0&1') + done, 'mtk-write-unverified'],
+    [scan('') + a + nativeEcho('8&aabb&0&1', 'COM5') + done, 'mtk-write-unverified'],
+    [scan('') + a + done + nativeEcho('8&ccdd&0&1', 'COM5'), 'mtk-write-unverified'],
+  ]) {
+    const f = await setup(t);
+    const result = await writeElevatedMtk(automatic(), {}, {
+      ...f,
+      async launch(_tool, _argv, onPid) { onPid(pid); await f.add(trace); return { exitCode: 0 }; },
+    });
+    assert.deepEqual(result, { transferCompleted: false, code });
+  }
+});
+
+test('native format auto scan requires both literal erase authorization and current PID erase/write evidence', async t => {
+  const f = await setup(t);
+  const approved = automatic('format-all-download', true);
+  const validWrite = async (_tool, _args, onPid) => {
+    onPid(pid);
+    await f.add(scan('', 'format-download') + nativeEcho('8&aabb&0&1') + erase() + commandResult('FLASH-ALL') + terminal);
+    return { exitCode: 0 };
+  };
+  assert.deepEqual(await writeElevatedMtk({ ...approved, permitFormatAll: 1 }, {}, { ...f, launch: validWrite }),
+    { transferCompleted: false, code: 'mtk-tool-start-failed' });
+  assert.deepEqual(await writeElevatedMtk({ ...approved, args: [...approved.args, '-p', 'COM5'] }, {}, { ...f, launch: validWrite }),
+    { transferCompleted: false, code: 'mtk-tool-start-failed' });
+  assert.deepEqual(await writeElevatedMtk(approved, {}, { ...f, launch: validWrite }),
+    { transferCompleted: true, code: 'mtk-tool-reported-success' });
 });
 
 test('elevated formatting percent and numbered partition percent never become total percent', async t => {
@@ -274,4 +364,61 @@ test('Windows launcher passes a literal argv to one native consent request and r
   });
   assert.equal(spawns, 1);
   assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
+});
+
+test('Windows launcher obtains all protected file handles before elevated dispatch and holds them to vendor exit', async t => {
+  const f = await setup(t);
+  let spawns = 0;
+  const result = await writeElevatedMtk(protectedRequest, {}, {
+    ...f, spawnProcess(_executable, options, config) {
+      spawns++;
+      assert.deepEqual(config.stdio, ['pipe', 'pipe', 'ignore']);
+      const command = Buffer.from(options.at(-1), 'base64').toString('utf16le');
+      const open = command.indexOf('[IO.File]::Open($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)');
+      const launch = command.indexOf('Start-Process');
+      const wait = command.indexOf('$vendor.WaitForExit()');
+      const dispose = command.indexOf('finally { foreach ($handle in $locks) { $handle.Dispose() } }');
+      assert.match(command, /\[Console\]::In.ReadToEnd\(\)/);
+      assert.ok(open > 0 && launch > open && wait > launch && dispose > wait);
+      assert.equal(command.includes(protectedFiles[1]), false);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stdin = new EventEmitter();
+      child.stdin.end = (payload, encoding) => {
+        assert.equal(encoding, 'ascii');
+        assert.deepEqual(JSON.parse(Buffer.from(payload, 'base64').toString('utf8')), { files: protectedFiles });
+        queueMicrotask(async () => {
+          child.stdout.emit('data', Buffer.from('VEYLO_MTK_PID:' + pid + '\r\n'));
+          await f.add(scan('COM3') + echo('COM3') + done);
+          child.stdout.emit('data', Buffer.from('VEYLO_MTK_EXIT:0\r\n'));
+          child.emit('close', 0);
+        });
+      };
+      return child;
+    },
+  });
+  assert.equal(spawns, 1);
+  assert.deepEqual(result, { transferCompleted: true, code: 'mtk-tool-reported-success' });
+});
+
+test('Windows launcher never spawns for a malformed or incomplete private lease', async t => {
+  const f = await setup(t);
+  let spawns = 0;
+  const fixture = { ...f, spawnProcess: () => { spawns++; throw new Error('must not spawn'); } };
+  for (const value of [
+    null, [], protectedFiles[0], [protectedFiles[1]], [protectedFiles[0], protectedFiles[0].toUpperCase()],
+    [protectedFiles[0], '\\\\winhost\\share\\veylo-flash-sel123\\other.img'],
+    [protectedFiles[0], protectedFiles[1].replace('sel123', 'sel124')],
+    [protectedFiles[0], protectedFiles[1].replace('payload', '..')],
+    [protectedFiles[0], protectedFiles[1].replace('payload', 'COM1')],
+    [protectedFiles[0], protectedFiles[1] + ':stream'],
+    [protectedFiles[0], protectedFiles[1] + '\r\n'],
+    Array.from({ length: 513 }, (_, index) => protectedFiles[1] + index),
+  ]) {
+    assert.deepEqual(await writeElevatedMtk({ ...protectedRequest, protectedFiles: value }, {}, fixture),
+      { transferCompleted: false, code: 'mtk-tool-start-failed' });
+  }
+  assert.deepEqual(await writeElevatedMtk({ ...request, protectedFiles }, {}, fixture),
+    { transferCompleted: false, code: 'mtk-tool-start-failed' });
+  assert.equal(spawns, 0);
 });

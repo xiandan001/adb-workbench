@@ -33,7 +33,7 @@ function fixture({ options = {}, settings = {} } = {}) {
   });
   return {
     flow, writes, confirms, configure(data = [], source = undefined, ok = true) { candidates = data; anchor = source; available = ok; },
-    async arm(platform = 'mtk', targetHint = '') { const result = await flow.arm({ platform, targetHint }, owner); await flush(); return result; },
+    async arm(platform = 'mtk', targetHint = '', extra = {}) { const result = await flow.arm({ platform, targetHint, ...extra }, owner); await flush(); return result; },
     async tick(ms = 5) { currentTime += ms; timer?.(); await flush(); },
     status: (platform = 'mtk') => flow.status(platform).job,
   };
@@ -83,6 +83,78 @@ test('MTK elevated success finishes promptly without ADB and releases the staged
   assert.equal(released, 1);
   assert.equal(f.flow.active(), false);
   assert.equal(f.flow.isProtected(), false);
+});
+
+test('unregistered MTK shows wait before discovery, then protects the exact confirmed vendor session', async () => {
+  let vendor, end;
+  const f = fixture({ options: {
+    prepare: async () => ({ ok: true, coldStart: true, profile: { product: 'fixture' } }),
+    armVendor: () => assert.fail('An unregistered job must not arm a vendor without a target'),
+    async write(_plan, chosen, _staged, context) {
+      assert.equal(chosen, a);
+      assert.equal(await context.beforeDispatch(), true);
+      vendor = context;
+      return new Promise(resolve => { end = resolve; });
+    },
+  } });
+  const armed = await f.arm('mtk', '', { coldStart: true, firmwareId: 'current-file-ticket' });
+  assert.equal(armed.job.phase, 'preparing');
+  assert.equal(armed.job.coldStart, true);
+  assert.equal(armed.job.firmwareId, 'current-file-ticket');
+  assert.equal(f.status().phase, 'waiting');
+  assert.equal(f.flow.isProtected(), false);
+  assert.deepEqual(f.confirms, []);
+  assert.equal(vendor, undefined);
+  f.configure([a]);
+  await f.tick();
+  const choices = f.status();
+  assert.equal(choices.phase, 'choice-required');
+  assert.equal(vendor, undefined);
+  await f.flow.choose('mtk', choices.id, a.id, owner);
+  await flush();
+  assert.deepEqual(f.confirms, ['a']);
+  assert.equal(f.status().phase, 'checking');
+  assert.equal(f.flow.isProtected(), true);
+  vendor.onReady({ timeoutMs: 50 });
+  assert.equal(f.status().phase, 'armed');
+  assert.notEqual(f.status().entryAvailable, true);
+  assert.equal((await f.flow.enterLoader('mtk', choices.id, owner)).ok, false);
+  assert.equal(f.flow.cancel('mtk', choices.id, owner).ok, false);
+  vendor.onProgress(null, { stage: 'connecting' });
+  vendor.onProgress(25, { stage: 'writing' });
+  assert.equal(f.status().phase, 'writing');
+  assert.equal(f.status().percent, 25);
+  end({ transferCompleted: true });
+  await flush();
+  assert.equal(f.status().phase, 'written');
+  assert.equal(f.status().firmwareId, 'current-file-ticket');
+  assert.equal(vendor.signal.aborted, true);
+});
+
+test('unregistered MTK can cancel while waiting and a changed target never dispatches after confirmation', async () => {
+  const stopped = fixture({ options: { prepare: async () => ({ ok: true, coldStart: true, profile: { product: 'fixture' } }) } });
+  await stopped.arm('mtk', '', { coldStart: true });
+  assert.equal(stopped.flow.cancel('mtk', stopped.status().id, owner).ok, true);
+  stopped.configure([a]);
+  await stopped.tick();
+  assert.deepEqual(stopped.writes, []);
+
+  let confirm;
+  const changed = fixture({ options: {
+    prepare: async () => ({ ok: true, coldStart: true, profile: { product: 'fixture' } }),
+    confirm: async () => new Promise(resolve => { confirm = resolve; }),
+    write: () => assert.fail('A replacement target must not start the vendor'),
+  } });
+  await changed.arm('mtk', '', { coldStart: true });
+  changed.configure([a]);
+  await changed.tick();
+  await changed.flow.choose('mtk', changed.status().id, a.id, owner);
+  await flush();
+  changed.configure([b]);
+  confirm(true);
+  await flush();
+  assert.equal(changed.status().phase, 'failed');
+  assert.equal(changed.status().code, 'flash-plan-changed');
 });
 
 test('MTK progress alone cannot be mistaken for successful writing', async () => {

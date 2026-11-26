@@ -103,6 +103,11 @@ async function prepareDirectFirmware(platform, filePath, { signal, onProgress = 
   return receipt;
 }
 
+async function prepareMtkQuickReview(filePath, { signal } = {}) {
+  const { preflight, file, before } = await snapshotFirmware('mtk', filePath, signal);
+  return { path: file, chip: preflight.chip, project: preflight.project, files: before };
+}
+
 async function revalidateDirectFirmware(receipt) {
   if (!Array.isArray(receipt?.files) || !receipt.files.length) return false;
   try {
@@ -233,4 +238,63 @@ async function prepareStagedDirectFirmware(platform, filename, { signal, onProgr
   }
 }
 
-module.exports = { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware };
+async function stageMtkQuickReview(receipt, {
+  signal, stagingBase = tmpdir(), openLease = require('./firmware-mtk-file-lease.cjs').openMtkFileLease,
+} = {}) {
+  abort(signal);
+  const root = packageRoot('mtk', receipt.path);
+  const lease = await openLease(receipt.files.map(member => member.path), { signal });
+  let staging;
+  try {
+    const ready = () => {
+      abort(signal);
+      if (!lease.isActive()) throw error('firmware-staging-unavailable');
+    };
+    ready();
+    if (!await revalidateDirectFirmware(receipt)) throw error('firmware-changed');
+    staging = await createStaging(stagingBase);
+    const device = String((await fs.stat(staging.stage, { bigint: true })).dev);
+    if (receipt.files.some(member => !member.identity.startsWith(device + ':'))) {
+      await staging.release();
+      staging = null;
+      // Different volumes cannot share a hard link. Keep the source read-only for the verified copy.
+      const copy = await prepareStagedDirectFirmware('mtk', receipt.path, { signal, stagingBase });
+      try { ready(); }
+      catch (cause) { await copy.release().catch(() => {}); throw cause; }
+      await lease.release();
+      return copy;
+    }
+    const files = [];
+    for (const original of receipt.files) {
+      ready();
+      const destination = safeMember(staging.stage, path.relative(root, original.path));
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.link(original.path, destination);
+      const linked = await fileSnapshot(destination);
+      // Link creation updates ctime on NTFS. Data was locked before this operation.
+      const created = linked.identity.slice(0, linked.identity.lastIndexOf(':'));
+      const expected = original.identity.slice(0, original.identity.lastIndexOf(':'));
+      if (created !== expected) throw error('firmware-changed');
+      files.push({ path: destination, identity: linked.identity });
+    }
+    await lease.add(files.map(member => member.path));
+    const filename = safeMember(staging.stage, path.relative(root, receipt.path));
+    const firmware = { path: filename, chip: receipt.chip, project: receipt.project, files };
+    if (!await revalidateDirectFirmware(firmware)) throw error('firmware-changed');
+    ready();
+    return {
+      firmware, protectedFiles: files.map(member => member.path), isActive: lease.isActive,
+      async release() {
+        try { await lease.release(); }
+        finally { await staging.release(); }
+      },
+    };
+  } catch (cause) {
+    await lease.release().catch(() => {});
+    await staging?.release().catch(() => {});
+    throw stagingError(cause, signal);
+  }
+}
+
+module.exports = { prepareDirectFirmware, revalidateDirectFirmware, stageDirectFirmware, prepareStagedDirectFirmware,
+  prepareMtkQuickReview, stageMtkQuickReview };

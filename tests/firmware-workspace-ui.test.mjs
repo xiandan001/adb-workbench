@@ -12,6 +12,7 @@ function mount(electronAPI, entryDevice, values = new Map()) {
   let cursor = 0;
   let props = { active: true, entryDevice };
   const slots = [], effects = [];
+  const copied = [];
   const timers = new Set();
   function changed(old = [], next = []) {
     return old.length !== next.length || next.some((value, index) => !Object.is(value, old[index]));
@@ -20,7 +21,7 @@ function mount(electronAPI, entryDevice, values = new Map()) {
     tr: value => value,
     window: { electronAPI },
     localStorage: { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) },
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: { clipboard: { writeText: async value => { copied.push(value); } } },
     setTimeout: callback => timers.add(callback) && callback,
     clearTimeout: callback => timers.delete(callback),
     useCallback(fn, deps) {
@@ -52,7 +53,7 @@ function mount(electronAPI, entryDevice, values = new Map()) {
   };
   view();
   return {
-    view, model,
+    view, model, copied,
     entry: next => { props = { ...props, entryDevice: next }; },
     active: next => { props = { ...props, active: next }; },
     unmount: () => slots.forEach(slot => slot?.cleanup?.()),
@@ -132,6 +133,222 @@ test('last firmware restoration is read-only, does not block the picker and cann
   assert.equal(ui.view().restoringFile, false);
   assert.equal(ui.view().file.fileName, 'new.img');
   assert.deepEqual(calls, [['restore', 'rk'], ['choose', 'rk']]);
+});
+
+test('reselection launches a fresh check even at the same path; cancellation and late results cannot change the current file', async () => {
+  const checks = [];
+  const file = firmwareId => ({ ok: true, fileName: 'update.img', filePath: 'C:/firmware/update.img', firmwareId });
+  let selected = file('first');
+  const ui = mount({
+    firmwareRestoreFile: async () => file('restored'),
+    firmwareChooseFile: async () => selected,
+    firmwareDirectValidateFile: (platform, { firmwareId }) => new Promise(resolve => checks.push({ platform, firmwareId, resolve })),
+    firmwareDirectArm: async () => assert.fail('Choosing a file must not arm a firmware job'),
+  });
+  await flush();
+  assert.equal(ui.view().file.firmwareId, 'restored');
+  assert.equal(ui.view().file.verification, undefined);
+  assert.equal(checks.length, 0);
+
+  await ui.view().act('file');
+  assert.equal(ui.view().busy, '', 'A content check does not lock the native picker');
+  assert.equal(ui.view().file.firmwareId, 'first');
+  assert.equal(ui.view().file.verification.phase, 'checking');
+  assert.equal(checks[0].platform, 'rk');
+
+  selected = { cancelled: true };
+  await ui.view().act('file');
+  assert.equal(ui.view().file.firmwareId, 'first');
+  assert.equal(ui.view().file.verification.phase, 'checking');
+  assert.equal(checks.length, 1);
+
+  selected = file('second');
+  await ui.view().act('file');
+  assert.equal(ui.view().file.firmwareId, 'second');
+  assert.equal(ui.view().file.filePath, file('first').filePath);
+  assert.deepEqual(checks.map(check => check.firmwareId), ['first', 'second']);
+  checks[1].resolve({ ok: true, modes: ['upgrade'] });
+  await flush();
+  assert.equal(ui.view().file.verification.phase, 'passed');
+  assert.deepEqual(ui.view().file.verification.modes, ['upgrade']);
+  checks[0].resolve({ ok: false, code: 'flash-firmware-content-unverified' });
+  await flush();
+  assert.equal(ui.view().file.firmwareId, 'second');
+  assert.equal(ui.view().file.verification.phase, 'passed');
+
+  selected = file('third');
+  await ui.view().act('file');
+  selected = { ok: false, code: 'missing-files', fileName: 'invalid.img' };
+  await ui.view().act('file');
+  assert.equal(ui.view().file.fileName, 'invalid.img');
+  assert.equal(ui.view().file.verification, undefined);
+  checks[2].resolve({ ok: true, modes: ['upgrade'] });
+  await flush();
+  assert.equal(ui.view().file.fileName, 'invalid.img');
+  assert.equal(ui.view().file.verification, undefined);
+  ui.unmount();
+});
+
+test('a replacement mismatch copies only its exact fingerprint and opens the tool only on an explicit request', async () => {
+  const filePath = 'C:/download/merged/download_agent/flash.xml';
+  const attempts = [];
+  let number = 0;
+  const ui = mount({
+    firmwareStatus: async () => vendorStatus('installed'),
+    firmwareChooseFile: async () => ({ ok: true, fileName: 'flash.xml', filePath, firmwareId: 'ticket-' + ++number }),
+    firmwareDirectValidateFile: async (_platform, { firmwareId }) => firmwareId === 'ticket-1'
+      ? { ok: false, code: 'flash-firmware-content-unverified', fingerprint: 'A'.repeat(64) }
+      : { ok: false, code: 'flash-profile-no-match', fingerprint: 'B'.repeat(64) },
+    firmwareOpenTool: async (...args) => { attempts.push(args); return { ok: true }; },
+    firmwareDirectArm: () => assert.fail('A fingerprint handoff is not an in-app write'),
+  }, { platformHint: 'mtk', requestId: 'replacement' });
+  await flush();
+  await ui.view().act('file');
+  await flush();
+  assert.equal(ui.view().file.verification.fingerprint, 'a'.repeat(64));
+  assert.deepEqual(attempts, []);
+  assert.deepEqual(ui.copied, []);
+  await ui.view().act('copy-fingerprint');
+  assert.deepEqual(ui.copied, ['a'.repeat(64)]);
+  assert.equal(ui.view().notice, '固件指纹已复制');
+  await ui.view().act('copy');
+  assert.deepEqual(ui.copied, ['a'.repeat(64), filePath]);
+  assert.deepEqual(attempts, []);
+  await ui.view().act('vendor');
+  assert.deepEqual(attempts, [['mtk']], 'The launcher receives no file path, target or write mode');
+  await ui.view().act('file');
+  await flush();
+  assert.equal(ui.view().file.verification.fingerprint, undefined);
+  await ui.view().act('copy-fingerprint');
+  assert.deepEqual(ui.copied, ['a'.repeat(64), filePath]);
+  ui.unmount();
+});
+
+test('restored MTK performs validation only on review; mode cancellation and same-path replacement do not reuse approval', async () => {
+  const calls = [], modes = ['download-only', 'format-all-download'];
+  const file = firmwareId => ({ ok: true, fileName: 'flash.xml', filePath: 'C:/firmware/flash.xml', firmwareId });
+  let approve = true, validationFingerprint = 'a'.repeat(64);
+  const storage = new Map();
+  const ui = mount({
+    firmwareRestoreFile: async () => file('restored'),
+    firmwareChooseFile: async () => file('replacement'),
+    firmwareDirectValidateFile: async (platform, { firmwareId }) => {
+      calls.push(['validate', platform, firmwareId]);
+      return { ok: true, reviewRequired: true, modes, fingerprint: validationFingerprint, board: 'IFPD-G520' };
+    },
+    firmwareDirectReviewFile: async (platform, { firmwareId, mode }) => {
+      calls.push(['review', platform, firmwareId, mode]);
+      return approve ? { ok: true, mode } : { ok: false, cancelled: true };
+    },
+    firmwareDirectArm: async () => assert.fail('Reviewing is not starting'),
+  }, { platformHint: 'mtk', requestId: 'restored-mtk' }, storage);
+  await flush();
+  assert.equal(ui.view().file.firmwareId, 'restored');
+  assert.deepEqual(calls, []);
+  assert.equal(await ui.view().act('review', 'download-only'), true);
+  assert.deepEqual(calls, [['validate', 'mtk', 'restored'], ['review', 'mtk', 'restored', 'download-only']]);
+  assert.equal(ui.view().file.verification.approvedMode, 'download-only');
+  approve = false;
+  assert.equal(await ui.view().act('review', 'format-all-download'), false);
+  assert.equal(ui.view().file.verification.approvedMode, 'download-only');
+  assert.deepEqual(calls.at(-1), ['review', 'mtk', 'restored', 'format-all-download']);
+  approve = true;
+  validationFingerprint = 'b'.repeat(64);
+  assert.equal(await ui.view().act('review', 'format-all-download', { refresh: true, jobId: 'stale' }), true);
+  assert.equal(ui.view().file.verification.approvedMode, 'format-all-download');
+  assert.equal(ui.view().file.verification.reviewedJobId, 'stale');
+  assert.equal(ui.view().file.verification.fingerprint, validationFingerprint);
+  assert.deepEqual(calls.slice(-2), [['validate', 'mtk', 'restored'], ['review', 'mtk', 'restored', 'format-all-download']]);
+  await ui.view().act('file');
+  await flush();
+  assert.equal(ui.view().file.filePath, file('restored').filePath);
+  assert.equal(ui.view().file.verification.approvedMode, undefined);
+  assert.deepEqual(calls.at(-1), ['validate', 'mtk', 'replacement']);
+  assert.equal(storage.size, 0);
+  ui.unmount();
+});
+
+test('leaving a restored MTK review before validation finishes never opens a late confirmation', async () => {
+  let finishValidation;
+  const ui = mount({
+    firmwareRestoreFile: async () => ({ ok: true, fileName: 'flash.xml', firmwareId: 'restored' }),
+    firmwareDirectValidateFile: () => new Promise(resolve => { finishValidation = resolve; }),
+    firmwareDirectReviewFile: () => assert.fail('Left the page before review'),
+  }, { platformHint: 'mtk', requestId: 'restored-mtk' });
+  await flush();
+  const review = ui.view().act('review', 'download-only');
+  assert.equal(ui.view().file.verification.phase, 'checking');
+  ui.active(false);
+  ui.view();
+  finishValidation({ ok: true, reviewRequired: true, modes: ['download-only'], fingerprint: 'a'.repeat(64), board: 'IFPD-G520' });
+  assert.equal(await review, false);
+  assert.equal(ui.view().file.verification.approvedMode, undefined);
+  ui.unmount();
+});
+
+test('MTK quick checks revalidate each picker ticket and never open a separate review dialog', async () => {
+  const calls = [];
+  let next = 0;
+  let finish;
+  const quickReview = { ok: true, reviewRequired: true, quickReview: true, modes: ['download-only', 'format-all-download'], board: 'IFPD-G520' };
+  const api = {
+    firmwareStatus: async () => vendorStatus('installed'),
+    firmwareChooseFile: async () => ({ ok: true, fileName: 'flash.xml', filePath: 'C:/firmware/flash.xml', firmwareId: 'picked-' + ++next }),
+    firmwareDirectValidateFile: (_platform, { firmwareId }) => {
+      calls.push(firmwareId);
+      if (firmwareId !== 'picked-2') return Promise.resolve(quickReview);
+      return new Promise(resolve => { finish = resolve; });
+    },
+    firmwareDirectReviewFile: () => assert.fail('Quick check must not request a separate review'),
+  };
+  const ui = mount(api, { platformHint: 'mtk', requestId: 'mtk' });
+  await ui.view().act('file');
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.view().file.verification)), {
+    phase: 'review-required', modes: ['download-only', 'format-all-download'], board: 'IFPD-G520', quickReview: true,
+  });
+
+  await ui.view().act('file');
+  assert.equal(ui.view().file.verification.phase, 'checking');
+  await ui.view().act('file');
+  await flush();
+  finish({ ok: false, code: 'flash-firmware-changed' });
+  await flush();
+  assert.equal(ui.view().file.firmwareId, 'picked-3');
+  assert.equal(ui.view().file.verification.quickReview, true);
+  assert.deepEqual(calls, ['picked-1', 'picked-2', 'picked-3']);
+
+  assert.equal(await ui.view().act('review', 'format-all-download', { checkOnly: true, jobId: 'expired' }), true);
+  assert.equal(ui.view().file.verification.reviewedJobId, 'expired');
+  assert.equal(ui.view().file.verification.approvedMode, undefined);
+  assert.equal(Object.hasOwn(ui.view().file.verification, 'fingerprint'), false);
+  assert.deepEqual(calls, ['picked-1', 'picked-2', 'picked-3', 'picked-3']);
+  ui.unmount();
+});
+
+test('RK recent file receives fresh verification and review only for whole-package upgrade', async () => {
+  const calls = [];
+  const ui = mount({
+    firmwareRestoreFile: async () => ({ ok: true, fileName: 'update.img', firmwareId: 'restored-rk' }),
+    firmwareDirectValidateFile: async (platform, { firmwareId }) => {
+      calls.push(['validate', platform, firmwareId]);
+      return { ok: true, reviewRequired: true, modes: ['upgrade', 'download-only'], fingerprint: 'c'.repeat(64), board: 'RK board' };
+    },
+    firmwareDirectReviewFile: async (platform, { firmwareId, mode }) => {
+      calls.push(['review', platform, firmwareId, mode]);
+      return { ok: true, mode };
+    },
+    firmwareDirectArm: () => assert.fail('Reviewing is not starting'),
+  }, { platformHint: 'rk', requestId: 'restored-rk' });
+  await flush();
+  assert.deepEqual(calls, []);
+  assert.equal(await ui.view().act('review', 'download-only'), false);
+  assert.deepEqual(calls, []);
+  assert.equal(await ui.view().act('review', 'upgrade'), true);
+  assert.deepEqual(calls, [['validate', 'rk', 'restored-rk'], ['review', 'rk', 'restored-rk', 'upgrade']]);
+  assert.deepEqual(ui.view().file.verification.modes, ['upgrade']);
+  assert.equal(ui.view().file.verification.approvedMode, 'upgrade');
+  ui.unmount();
 });
 
 test('driver action preserves installation and offers reinstallation for known installed packages only', () => {

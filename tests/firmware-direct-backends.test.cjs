@@ -389,3 +389,47 @@ test('MTK elevation delegates only after parent revalidation and uses exact argv
   assert.equal(progress, 52);
   assert.deepEqual(calls, []);
 });
+
+test('MTK no-port native scanning cannot launch without elevation and a passed dispatch guard', async () => {
+  const target = { verified: true, stage: 'preloader-auto' };
+  let launches = 0;
+  const { instance, calls } = backend([], { async elevatedMtk(request) {
+    launches++;
+    assert.equal(request.target, target);
+    assert.deepEqual(request.args, ['-c', 'download', '-f', mtkFirmware.path, '-t', 'auto', '-r']);
+    return { transferCompleted: true, code: 'elevated-result' };
+  } });
+  const tool = (await instance.inspect('mtk', root)).tool;
+  const request = { platform: 'mtk', tool, target, firmware: mtkFirmware, options: mtkOptions };
+  const elevated = { ...request, options: { ...request.options, elevated: true } };
+  const guard = beforeDispatch => ({ beforeDispatch });
+  assert.deepEqual(await instance.write(request, guard(async () => true)),
+    { transferCompleted: false, code: 'MTK_TARGET_UNVERIFIED' });
+  assert.deepEqual(await instance.write(elevated), { transferCompleted: false, code: 'flash-plan-changed' });
+  assert.deepEqual(await instance.write(elevated, guard(async () => false)),
+    { transferCompleted: false, code: 'flash-plan-changed' });
+  assert.deepEqual(await instance.write(elevated, guard(async () => true)),
+    { transferCompleted: true, code: 'elevated-result' });
+  assert.equal(launches, 1);
+  assert.deepEqual(calls, []);
+});
+
+test('MTK protected staging files reach only the elevated backend after a passed dispatch guard', async () => {
+  const path = 'D:\\veylo-flash-test12\\download_agent\\flash.xml';
+  const protectedFiles = [path, 'D:\\veylo-flash-test12\\super.img'];
+  let elevated = 0;
+  const { instance, calls } = backend([], { async elevatedMtk(request) {
+    elevated++;
+    assert.equal(request.protectedFiles, protectedFiles);
+    assert.equal(request.args[3], path);
+    return { transferCompleted: true, code: 'elevated-result' };
+  } });
+  const tool = (await instance.inspect('mtk', root)).tool;
+  const request = { platform: 'mtk', tool, target: mtkTarget, firmware: { path }, options: { ...mtkOptions, protectedFiles } };
+  const approved = { ...request, options: { ...request.options, elevated: true } };
+  assert.deepEqual(await instance.write(request, { beforeDispatch: async () => true }), { transferCompleted: false, code: 'flash-plan-changed' });
+  assert.deepEqual(await instance.write(approved, { beforeDispatch: async () => false }), { transferCompleted: false, code: 'flash-plan-changed' });
+  assert.deepEqual(await instance.write(approved, { beforeDispatch: async () => true }), { transferCompleted: true, code: 'elevated-result' });
+  assert.equal(elevated, 1);
+  assert.deepEqual(calls, []);
+});

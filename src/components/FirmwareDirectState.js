@@ -8,6 +8,9 @@ function stateFrom(previous, response) {
   return {
     enabled: typeof response.enabled === 'boolean' ? response.enabled : previous?.enabled,
     modes: Array.isArray(response.modes) ? response.modes : previous?.modes,
+    sessionReviewRequired: typeof response.sessionReviewRequired === 'boolean' ? response.sessionReviewRequired : previous?.sessionReviewRequired,
+    mtkAutoPowerOn: typeof response.mtkAutoPowerOn === 'boolean' ? response.mtkAutoPowerOn : previous?.mtkAutoPowerOn,
+    mtkFastReview: typeof response.mtkFastReview === 'boolean' ? response.mtkFastReview : previous?.mtkFastReview,
     job: Object.hasOwn(response, 'job') ? response.job : previous?.job,
     globalBusy: typeof response.busy === 'boolean' ? response.busy : previous?.globalBusy,
     savedTarget: Object.hasOwn(response, 'savedTarget') ? response.savedTarget : previous?.savedTarget,
@@ -15,7 +18,7 @@ function stateFrom(previous, response) {
   };
 }
 
-export function useFirmwareDirect({ platform, active, api = globalThis.window?.electronAPI }) {
+export function useFirmwareDirect({ platform, active, firmwareId, api = globalThis.window?.electronAPI }) {
   const [snapshots, setSnapshots] = useState({});
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -77,9 +80,9 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
       const next = stateFrom(lastState.current[platform], response);
       lastState.current[platform] = next;
       setSnapshots(previous => ({ ...previous, [platform]: next }));
-      if (!response?.ok && !response?.job && !response?.cancelled) setActionError({ platform, code: response?.code });
+      if (!response?.ok && !response?.job && !response?.cancelled) setActionError({ platform, firmwareId, code: response?.code });
     } catch {
-      if (mounted.current && sequence === command.current.sequence) setActionError({ platform });
+      if (mounted.current && sequence === command.current.sequence) setActionError({ platform, firmwareId });
     } finally {
       command.current[channel] = false;
       if (mounted.current) {
@@ -102,13 +105,16 @@ export function useFirmwareDirect({ platform, active, api = globalThis.window?.e
 
   return {
     ...snapshot,
-    error: actionError?.platform === platform ? actionError : readError?.platform === platform ? readError : null,
+    error: actionError?.platform === platform && actionError.firmwareId === firmwareId ? actionError
+      : readError?.platform === platform ? readError : null,
     busy, running, cancelling, unavailable: !api?.firmwareDirectState,
     arm: value => request(() => api?.firmwareDirectArm?.(platform, value)),
     choose: value => request(() => api?.firmwareDirectChoose?.(platform, value)),
     enterLoader: id => request(() => api?.firmwareDirectEnterLoader?.(platform, id)),
     cancel: id => request(() => api?.firmwareDirectCancel?.(platform, id), true),
     registerTarget: api?.firmwareDirectRegisterTarget ? () => setup('register', () => api.firmwareDirectRegisterTarget(platform)) : undefined,
+    clearReviewError: () => setActionError(previous => previous?.platform === platform && previous.firmwareId === firmwareId &&
+      ['flash-firmware-changed', 'flash-firmware-review-required'].includes(previous.code) ? null : previous),
     prepareTool: api?.firmwareDirectPrepareTool ? options => setup(options?.local ? 'tool-local' : 'tool', () => options?.local
       ? api.firmwareDirectPrepareTool(platform, { local: true }) : api.firmwareDirectPrepareTool(platform)) : undefined,
     registeringTarget: setupAction === 'register',

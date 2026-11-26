@@ -51,6 +51,17 @@ test('restored firmware is ready to replace and vendor fallback is expanded if d
   assert.ok(button(tree, '打开厂商工具'));
 });
 
+test('a passed structural check is described separately from direct content admission', () => {
+  const tree = renderWorkspace({ file: { ok: true, fileName: 'flash.xml', firmwareId: 'receipt' } }, { enabled: true });
+  const preflight = nodes(tree).find(node => node.props['aria-labelledby'] === 'firmware-preflight-title');
+  assert.match(text(preflight), /固件结构检查通过/);
+  assert.match(text(preflight), /应用内直刷还需校验整包内容/);
+
+  const invalid = renderWorkspace({ file: { ok: false, fileName: 'flash.xml', code: 'missing-files' } }, { enabled: true });
+  assert.match(text(invalid), /部分依赖文件缺失或不可用/);
+  assert.doesNotMatch(text(invalid), /应用内直刷还需校验整包内容/);
+});
+
 test('manual tools visibility overrides the automatic fallback and the summary uses one controlled toggle', () => {
   for (const [expanded, direct] of [[true, { enabled: true }], [false, { enabled: false, unavailable: true }]]) {
     const calls = [];

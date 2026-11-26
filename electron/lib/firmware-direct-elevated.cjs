@@ -8,7 +8,10 @@ const { MTK_VERSION, buildMtkFlashArgs, mtkProgress, parseMtkTraceLine } = requi
 const dumpName = /^SP_FT_V6_Dump_\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-\d{2}$/;
 const traceFile = 'QT_FLASH_TOOL_V6.log';
 const maxTraceBytes = 2 * 1024 * 1024;
+const maxLeaseFiles = 512;
+const maxLeaseBytes = 512 * 1024;
 const winPath = path.win32;
+const preloaderInstance = /^USB\\VID_0E8D&PID_2000(?:&MI_[a-f0-9]{2})?\\[a-z0-9._&-]{1,160}$/i;
 const writeCommand = Object.freeze({
   'download-only': 'WRITE-PARTITIONS',
   'firmware-upgrade': 'FLASH-UPDATE',
@@ -18,23 +21,49 @@ const formatMode = 'format-all-download';
 const progressStageOrder = Object.freeze({ connecting: 1, formatting: 2, writing: 3, finalizing: 4 });
 const failure = code => ({ transferCompleted: false, code });
 const notify = (callback, ...args) => { try { callback?.(...args); } catch { /* UI cannot stop the flasher. */ } };
+const localWindowsPath = value => typeof value === 'string' && /^[a-z]:[\\/]/i.test(value) &&
+  value.length <= 1024 && !/[\x00-\x1f\x7f"<>|?*]/.test(value) && !value.slice(2).includes(':');
 
 function isApprovedInvocation(tool, args, target, mode, permitFormatAll) {
-  const local = value => typeof value === 'string' && /^[a-z]:[\\/]/i.test(value) &&
-    value.length <= 1024 && !/[\x00-\x1f\x7f"<>|?*]/.test(value) && !value.slice(2).includes(':');
+  const autoPort = target?.stage === 'preloader-auto';
   if (tool?.version !== MTK_VERSION || !/^[a-f0-9]{64}$/.test(tool.sha256) ||
-      !local(tool.executable) || !local(tool.cwd) || winPath.basename(tool.executable) !== 'SPFlashToolV6.exe' ||
+      !localWindowsPath(tool.executable) || !localWindowsPath(tool.cwd) || winPath.basename(tool.executable) !== 'SPFlashToolV6.exe' ||
       winPath.dirname(winPath.normalize(tool.executable)).toLowerCase() !== winPath.normalize(tool.cwd).toLowerCase() ||
-      target?.stage !== 'preloader' || !Array.isArray(args) ||
-      (target.instanceId !== undefined && (typeof target.instanceId !== 'string' ||
-        !/^USB\\VID_0E8D&PID_2000(?:&MI_[a-f0-9]{2})?\\[a-z0-9._&-]{1,160}$/i.test(target.instanceId)))) return false;
+      (!autoPort && target?.stage !== 'preloader') || !Array.isArray(args) ||
+      (target.instanceId !== undefined && (typeof target.instanceId !== 'string' || !preloaderInstance.test(target.instanceId)))) return false;
   try {
     const expected = buildMtkFlashArgs({
-      executableVersion: tool.version, target, mode, permitFormatAll, battery: args[7],
-      firmware: { verified: true, manifestPath: args[3] }, reboot: args[9] === '-b',
+      executableVersion: tool.version, target, mode, permitFormatAll, permitAutoPort: autoPort,
+      battery: args[autoPort ? 5 : 7], firmware: { verified: true, manifestPath: args[3] },
+      reboot: args[autoPort ? 7 : 9] === '-b',
     });
     return expected.length === args.length && expected.every((token, index) => token === args[index]);
   } catch { return false; }
+}
+
+function stageFile(value) {
+  if (!localWindowsPath(value)) return null;
+  const parts = value.slice(3).split(/[\\/]/);
+  if (parts.some(part => !part || /[. ]$/.test(part) || /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part))) return null;
+  const stage = parts.findLastIndex(part => /^veylo-flash-[a-z0-9_-]{1,64}$/i.test(part));
+  if (stage < 0 || stage === parts.length - 1) return null;
+  return { file: winPath.normalize(value), root: winPath.join(value.slice(0, 3), ...parts.slice(0, stage + 1)).toLowerCase() };
+}
+
+function leasePayload(protectedFiles, manifest) {
+  if (protectedFiles === undefined) return undefined;
+  const main = stageFile(manifest);
+  if (!main || !Array.isArray(protectedFiles) || !protectedFiles.length || protectedFiles.length > maxLeaseFiles) return null;
+  const files = [], seen = new Set();
+  for (const value of protectedFiles) {
+    const entry = stageFile(value);
+    if (!entry || entry.root !== main.root || seen.has(entry.file.toLowerCase())) return null;
+    files.push(entry.file);
+    seen.add(entry.file.toLowerCase());
+  }
+  if (!seen.has(main.file.toLowerCase())) return null;
+  const json = Buffer.from(JSON.stringify({ files }), 'utf8');
+  return json.length <= maxLeaseBytes ? json.toString('base64') : null;
 }
 
 // Only accept a full-format XML block that directly follows this PID's erase command.
@@ -69,16 +98,24 @@ function traceEvent(line, pid, tail) {
   return null;
 }
 
-function elevatedCommand(tool, args) {
+function elevatedCommand(tool, args, lease = false) {
   // argv is already a fixed allowlist, with double quotes and controls rejected.
   const argumentLine = args.map(item => '"' + item + '"').join(' ');
   const encoded = Buffer.from(JSON.stringify({ executable: tool.executable, cwd: tool.cwd, argumentLine }), 'utf8').toString('base64');
   return [
     '$ErrorActionPreference = "Stop"',
     '$vendor = $null',
+    ...(lease ? ['$locks = [Collections.Generic.List[IO.FileStream]]::new()'] : []),
     'try {',
     '  $bytes = [Convert]::FromBase64String("' + encoded + '")',
     '  $cfg = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json',
+    ...(lease ? [
+      '  $lease = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())) | ConvertFrom-Json',
+      '  if (-not $lease.files) { throw "Missing firmware lease" }',
+      '  foreach ($file in $lease.files) {',
+      '    $locks.Add([IO.File]::Open($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read))',
+      '  }',
+    ] : []),
     '  $vendor = Start-Process -FilePath $cfg.executable -ArgumentList $cfg.argumentLine -WorkingDirectory $cfg.cwd -WindowStyle Hidden -Verb RunAs -PassThru',
     '  [Console]::WriteLine("VEYLO_MTK_PID:" + $vendor.Id)',
     '  $vendor.WaitForExit()',
@@ -95,20 +132,21 @@ function elevatedCommand(tool, args) {
     '  }',
     '  [Console]::WriteLine("VEYLO_MTK_LAUNCH_ERROR")',
     '}',
+    ...(lease ? ['finally { foreach ($handle in $locks) { $handle.Dispose() } }'] : []),
   ].join('\r\n');
 }
 
-function launchWindows(tool, args, onPid, spawnProcess = spawn) {
+function launchWindows(tool, args, onPid, spawnProcess = spawn, lease) {
   return new Promise(resolve => {
     const systemRoot = process.env.SystemRoot || 'C:\\Windows';
     const shell = winPath.join(systemRoot, 'System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-    const encoded = Buffer.from(elevatedCommand(tool, args), 'utf16le').toString('base64');
+    const encoded = Buffer.from(elevatedCommand(tool, args, lease !== undefined), 'utf16le').toString('base64');
     const env = { SystemRoot: systemRoot, windir: systemRoot, PATH: [winPath.join(systemRoot, 'System32'), systemRoot].join(';') };
     for (const key of ['TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA']) {
       if (process.env[key]) env[key] = process.env[key];
     }
     const child = spawnProcess(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
-      cwd: winPath.join(systemRoot, 'System32'), windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'],
+      cwd: winPath.join(systemRoot, 'System32'), windowsHide: true, shell: false, stdio: [lease === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'],
       env,
     });
     let pid = null, exitCode = null, cancelled = false, startFailed = false, tail = '';
@@ -138,6 +176,10 @@ function launchWindows(tool, args, onPid, spawnProcess = spawn) {
       }
       resolve({ startFailed: startFailed || !pid, cancelled, exitCode });
     });
+    if (lease !== undefined) {
+      child.stdin.on('error', () => { if (!pid) startFailed = true; });
+      child.stdin.end(lease, 'ascii');
+    }
   });
 }
 
@@ -191,7 +233,11 @@ function createTraceTail(io, root, previous) {
   };
 }
 
-function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgress } = {}) {
+function watchEvidence(target, mode, expectedMode, { onReady, onProgress } = {}) {
+  const autoPort = target.stage === 'preloader-auto';
+  const port = autoPort ? null : target.port.toUpperCase();
+  const { instanceId } = target;
+  let autoIdentity;
   let scan, modeConfirmed = false, ready = false, actual = false, written = false, completed = false, reason;
   let fullErase = false, formatted = false;
   let lastUpdate = 0, lastProgress;
@@ -208,6 +254,7 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
     notify(onProgress, percent, details);
   }
   function deviceCommand(event) {
+    if (autoPort && !actual) { reason ||= 'mtk-write-unverified'; return; }
     if (completed || (written && event.command === 'ERASE-FLASH')) {
       reason = 'mtk-mode-mismatch';
       return;
@@ -240,23 +287,37 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
           if (event.command !== expectedMode) reason = 'mtk-mode-mismatch';
           else modeConfirmed = true;
           break;
-        case 'scan': scan = modeConfirmed && event.timeoutMs > 0 && event.timeoutMs <= 300000 ? event.timeoutMs : undefined; break;
+        case 'scan':
+          if (autoPort && ready) reason ||= 'mtk-write-unverified';
+          scan = modeConfirmed && event.timeoutMs > 0 && event.timeoutMs <= 300000 ? event.timeoutMs : undefined;
+          break;
+        case 'scan-timeout':
+          if (autoPort && ready && !actual) reason ||= 'mtk-wait-expired';
+          break;
         case 'clue':
-          if (event.port !== port) reason = 'mtk-target-mismatch';
+          if (autoPort && (event.port !== null || event.invalid)) reason ||= 'mtk-write-unverified';
+          else if (event.port !== port) reason = 'mtk-target-mismatch';
           else if (scan && !ready && !reason) {
             ready = true;
-            if (running) notify(onReady, { port, timeoutMs: scan });
+            if (running) notify(onReady, autoPort ? { timeoutMs: scan } : { port, timeoutMs: scan });
           }
           break;
-        case 'tool-target':
-          if (event.port !== port) reason = 'mtk-target-mismatch';
+        case 'tool-target': {
+          if (autoPort) {
+            // This records whom the vendor acquired; it is not a pre-write device filter.
+            const observed = event.port && typeof event.instanceId === 'string' && preloaderInstance.test(event.instanceId)
+              ? event.port + '|' + event.instanceId : null;
+            if (!ready || !observed || autoIdentity && autoIdentity !== observed) reason ||= 'mtk-write-unverified';
+            else autoIdentity = observed;
+          } else if (event.port !== port) reason = 'mtk-target-mismatch';
           else if (instanceId && event.instanceId !== instanceId.toUpperCase()) reason = 'mtk-write-unverified';
-          else if (ready && !actual && !reason) {
+          if (ready && !actual && !reason) {
             actual = true;
             // Once the target appears, stop asking for another power cycle even before write progress.
             publishProgress(null, { stage: 'connecting' });
           }
           break;
+        }
         case 'erase-scope': fullErase = event.full; break;
         case 'device-command': deviceCommand(event); break;
         case 'tool-error': reason ||= 'mtk-write-failed'; break;
@@ -274,21 +335,23 @@ function watchEvidence(port, instanceId, mode, expectedMode, { onReady, onProgre
   return { consume, result: () => ({ confirmed: modeConfirmed && ready && actual && written && completed, reason }) };
 }
 
-async function writeElevatedMtk({ tool, args, target, mode = 'download-only', permitFormatAll } = {}, callbacks = {}, {
+async function writeElevatedMtk({ tool, args, target, mode = 'download-only', permitFormatAll, protectedFiles } = {}, callbacks = {}, {
   io = fs, launch,
   spawnProcess,
   logRoot = path.join(process.env.ProgramData || 'C:\\ProgramData', 'SP_FT_V6_Logs'),
   pollMs = 250,
 } = {}) {
   if (!isApprovedInvocation(tool, args, target, mode, permitFormatAll)) return failure('mtk-tool-start-failed');
+  const lease = leasePayload(protectedFiles, args[3]);
+  if (lease === null) return failure('mtk-tool-start-failed');
   let previous;
   try { previous = new Set(await traceDirectories(io, logRoot)); }
   catch { return failure('mtk-write-unverified'); }
   const tail = createTraceTail(io, logRoot, previous);
-  const evidence = watchEvidence(args[5], target.instanceId, mode, args[1], callbacks);
+  const evidence = watchEvidence(target, mode, args[1], callbacks);
   const stopPolling = new AbortController();
   let pid, end, damagedTrace = false;
-  const vendor = launch || ((exe, argv, register) => launchWindows(exe, argv, register, spawnProcess));
+  const vendor = launch || ((exe, argv, register) => launchWindows(exe, argv, register, spawnProcess, lease));
   const outcome = Promise.resolve().then(() => vendor(tool, args, value => {
     if (Number.isInteger(value) && value > 0 && pid === undefined) pid = value;
   })).catch(() => ({ startFailed: true })).then(result => {

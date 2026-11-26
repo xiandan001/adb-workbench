@@ -1,10 +1,11 @@
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const path = require('node:path');
 const { promisify } = require('node:util');
 
 const runFile = promisify(execFile);
 const maxRows = 96;
+const maxProbeBytes = 128 * 1024;
 const portsClass = '{4d36e978-e325-11ce-bfc1-08002be10318}';
 const rockusbClass = '{79dfc2a8-2574-493c-ae71-52958e41dd00}';
 const adbCompatibleId = 'usb\\class_ff&subclass_42&prot_01';
@@ -255,16 +256,31 @@ public static class FirmwareUsbProbe {
   }
 }
 '@
+`;
+
+const captureProbe = String.raw`
 $rows = [FirmwareUsbProbe]::Capture()
 $same = (ConvertTo-Json -InputObject $rows -Depth 4 -Compress) -ceq (ConvertTo-Json -InputObject ([FirmwareUsbProbe]::Capture()) -Depth 4 -Compress)
 [ordered]@{ complete = $same; rows = $rows } | ConvertTo-Json -Depth 4 -Compress
 `;
 
+const windowsPowerShell = () => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+const probeArgs = script => ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+
+const watchProbe = windowsProbe + String.raw`
+while ($true) {
+  try {
+    [Console]::WriteLine((& { ${captureProbe} }))
+  } catch {
+    [Console]::WriteLine('{"complete":false}')
+  }
+  [Threading.Thread]::Sleep(200)
+}
+`;
+
 async function captureWindowsUsb({ signal }) {
-  const shell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const encoded = Buffer.from(windowsProbe, 'utf16le').toString('base64');
-  const { stdout } = await runFile(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
-    windowsHide: true, timeout: 8000, maxBuffer: 128 * 1024, encoding: 'utf8', signal
+  const { stdout } = await runFile(windowsPowerShell(), probeArgs(windowsProbe + captureProbe), {
+    windowsHide: true, timeout: 8000, maxBuffer: maxProbeBytes, encoding: 'utf8', signal
   });
   return JSON.parse(stdout.trim());
 }
@@ -278,6 +294,61 @@ async function queryDirectUsb({ signal, hostPlatform = process.platform, capture
   } catch {
     return noCandidates(signal?.aborted ? 'usb-probe-cancelled' : 'usb-probe-failed');
   }
+}
+
+// Cold MTK discovery only. The writer still uses a fresh inventory and port proof.
+function watchDirectUsb({ signal, onSnapshot, hostPlatform = process.platform, spawnProcess = spawn } = {}) {
+  if (hostPlatform !== 'win32' || !signal || signal.aborted || typeof onSnapshot !== 'function') return () => {};
+  let child, startup, stopped = false, tail = '';
+  function stop(kill = true) {
+    if (stopped) return;
+    stopped = true;
+    clearTimeout(startup);
+    signal.removeEventListener('abort', abort);
+    child?.stdout?.removeListener('data', read);
+    if (kill) child?.kill();
+  }
+  const abort = () => stop();
+  const notify = result => {
+    if (signal.aborted) return;
+    try { onSnapshot(result); } catch { stop(); }
+  };
+  const failed = (kill = true) => {
+    if (stopped) return;
+    stop(kill);
+    notify(noCandidates('usb-probe-failed'));
+  };
+  function read(chunk) {
+    let start = 0, end;
+    while (!stopped && (end = chunk.indexOf('\n', start)) !== -1) {
+      const line = tail + chunk.slice(start, end);
+      tail = ''; start = end + 1;
+      if (Buffer.byteLength(line) > maxProbeBytes) { failed(); return; }
+      if (!line.trim()) continue;
+      let capture;
+      try { capture = JSON.parse(line); } catch { failed(); return; }
+      clearTimeout(startup);
+      notify(scanSnapshot(capture));
+    }
+    if (!stopped) {
+      tail += chunk.slice(start);
+      if (Buffer.byteLength(tail) > maxProbeBytes) failed();
+    }
+  }
+  try {
+    child = spawnProcess(windowsPowerShell(), probeArgs(watchProbe), {
+      windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    child.on('error', () => failed(false));
+    child.once('close', () => failed(false));
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', read);
+    signal.addEventListener('abort', abort, { once: true });
+    startup = setTimeout(failed, 8000);
+    startup.unref?.();
+    if (signal.aborted) stop();
+  } catch { failed(); }
+  return abort;
 }
 
 function reconcileRkTargets(inventoryRows, cliDevices) {
@@ -316,4 +387,4 @@ function reconcileRkTargets(inventoryRows, cliDevices) {
   });
 }
 
-module.exports = { queryDirectUsb, reconcileRkTargets };
+module.exports = { queryDirectUsb, watchDirectUsb, reconcileRkTargets };

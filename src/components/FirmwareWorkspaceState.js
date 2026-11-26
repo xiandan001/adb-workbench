@@ -4,6 +4,14 @@ import { tr } from '../shared/i18n.js';
 const platformKey = 'firmware-workspace-platform';
 const toolsExpandedKey = 'firmware-workspace-tools-expanded';
 const isPlatform = value => value === 'rk' || value === 'mtk';
+const fingerprintOf = result => typeof result?.fingerprint === 'string' &&
+  /^[a-f0-9]{64}$/i.test(result.fingerprint) ? result.fingerprint.toLowerCase() : '';
+const contentFingerprint = result => result?.code === 'flash-firmware-content-unverified' ? fingerprintOf(result) : '';
+const reviewModes = {
+  rk: new Set(['upgrade']),
+  mtk: new Set(['download-only', 'firmware-upgrade', 'format-all-download']),
+};
+const reviewExpired = code => code === 'flash-firmware-changed' || code === 'flash-firmware-review-required';
 
 export function readFirmwarePlatform(storage = globalThis.localStorage) {
   try { return storage?.getItem(platformKey) === 'mtk' ? 'mtk' : 'rk'; }
@@ -55,6 +63,7 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
   const request = useRef({});
   const recentRequest = useRef({});
   const operation = useRef(false);
+  const reviewScope = useRef(null);
   const update = useCallback((type, data) => {
     if (alive.current) setStates(prior => ({ ...prior, [type]: { ...prior[type], ...data } }));
   }, []);
@@ -78,6 +87,11 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
     alive.current = true;
     return () => { alive.current = false; request.current = {}; recentRequest.current = {}; };
   }, []);
+  useEffect(() => {
+    const scope = { active, platform };
+    reviewScope.current = scope;
+    return () => { reviewScope.current = null; };
+  }, [active, platform]);
 
   const requested = states[platform]?.requested === true;
   useEffect(() => {
@@ -150,22 +164,102 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
     }
   }
 
-  async function act(kind) {
+  function updateVerification(type, firmwareId, change, expected) {
+    if (!alive.current) return;
+    setStates(prior => {
+      const file = prior[type]?.file;
+      if (!file || file.firmwareId !== firmwareId || (expected && file.verification?.phase !== expected)) return prior;
+      const verification = typeof change === 'function' ? change(file.verification) : change;
+      return { ...prior, [type]: { ...prior[type], file: { ...file, verification } } };
+    });
+  }
+
+  async function verifyPickedFile(api, type, firmwareId) {
+    let result;
+    try {
+      result = await api.firmwareDirectValidateFile(type, { firmwareId });
+    } catch { /* Use the same inline failure for a broken IPC connection. */ }
+    if (!alive.current) return;
+    const modes = Array.isArray(result?.modes) ? result.modes : [];
+    let verification;
+    if (result?.ok && result.reviewRequired === true) {
+      const eligible = modes.filter(value => reviewModes[type]?.has(value));
+      const fingerprint = fingerprintOf(result);
+      const quickReview = type === 'mtk' && result.quickReview === true;
+      if (eligible.length && (quickReview || fingerprint) && typeof result.board === 'string' && result.board.trim()) {
+        verification = {
+          phase: 'review-required', modes: eligible, board: result.board, ...(quickReview ? { quickReview: true } : { fingerprint }),
+        };
+      }
+    } else if (result?.ok && modes.length) {
+      verification = { phase: 'passed', modes };
+    }
+    const fingerprint = contentFingerprint(result);
+    verification ??= { phase: 'failed', code: result?.code || 'flash-firmware-read-failed', ...(fingerprint ? { fingerprint } : {}) };
+    updateVerification(type, firmwareId, verification, 'checking');
+    return verification;
+  }
+
+  async function reviewPickedFile(api, type, mode, options) {
+    const file = states[type]?.file;
+    const checkOnly = type === 'mtk' && options?.checkOnly === true;
+    const scope = reviewScope.current, ticket = recentRequest.current[type];
+    const current = () => alive.current && scope?.active && scope.platform === type && reviewScope.current === scope &&
+      recentRequest.current[type] === ticket;
+    if (!current() || !reviewModes[type]?.has(mode) || !file?.ok || !file.firmwareId ||
+        (!checkOnly && typeof api?.firmwareDirectReviewFile !== 'function') || typeof api?.firmwareDirectValidateFile !== 'function' ||
+        file.verification?.phase === 'checking') return false;
+    const { firmwareId } = file;
+    let verification = file.verification;
+    if (checkOnly || options?.refresh || verification?.phase !== 'review-required') {
+      updateVerification(type, firmwareId, { phase: 'checking' });
+      verification = await verifyPickedFile(api, type, firmwareId);
+    }
+    if (!current() || verification?.phase !== 'review-required' || !verification.modes.includes(mode)) return false;
+    if (verification.quickReview) {
+      updateVerification(type, firmwareId, old => ({ ...old, reviewedJobId: options?.jobId }), 'review-required');
+      return true;
+    }
+    if (checkOnly) return false;
+    const result = await api.firmwareDirectReviewFile(type, { firmwareId, mode });
+    if (!current() || result?.cancelled) return false;
+    if (result?.ok && result.mode === mode) {
+      updateVerification(type, firmwareId, old => ({ ...old, approvedMode: mode, reviewedJobId: options?.jobId }), 'review-required');
+      return true;
+    }
+    if (reviewExpired(result?.code)) {
+      updateVerification(type, firmwareId, undefined, 'review-required');
+      update(type, { error: tr('本次核对已失效，请重新核对固件。') });
+    } else update(type, { error: actionError('review') });
+    return false;
+  }
+
+  async function act(kind, value, options) {
     if (operation.current) return;
     operation.current = true;
     if (kind === 'install') updateConfirm(false);
     const type = platform;
     setBusy(kind);
-    update(type, { feedbackKind: kind, error: '', notice: '' });
+    if (kind !== 'file') update(type, { feedbackKind: kind, error: '', notice: '' });
     const api = window.electronAPI;
     try {
       if (kind === 'file') {
         recentRequest.current[type] = Symbol();
         update(type, { restoringFile: false });
         const result = await api?.firmwareChooseFile?.(type);
-        if (result?.fileName || result?.code) update(type, { file: result });
-        else if (result?.cancelled && !states[type]?.file) delete recentRequest.current[type];
-        else if (!result?.cancelled) update(type, { error: result?.error || tr('固件文件不可访问，请重新选择。') });
+        if (!alive.current) return;
+        if (result?.cancelled) {
+          if (!states[type]?.file) delete recentRequest.current[type];
+        } else if (result?.fileName || result?.filePath || result?.code) {
+          const validate = result.ok && typeof result.firmwareId === 'string' && result.firmwareId &&
+            typeof api?.firmwareDirectValidateFile === 'function';
+          update(type, { feedbackKind: kind, error: '', notice: '', file: validate ? { ...result, verification: { phase: 'checking' } } : result });
+          if (validate) void verifyPickedFile(api, type, result.firmwareId);
+        } else {
+          update(type, { feedbackKind: kind, notice: '', error: result?.error || tr('固件文件不可访问，请重新选择。') });
+        }
+      } else if (kind === 'review') {
+        return await reviewPickedFile(api, type, value, options);
       } else if (kind === 'install') {
         const result = await api?.firmwareInstallDriver?.(type);
         if (result?.code === 'restart-required') update(type, { notice: result.error || tr('Windows 要求重启后才能完成驱动安装。') });
@@ -181,9 +275,14 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
       } else if (kind === 'copy' && states[type]?.file?.filePath) {
         await navigator.clipboard.writeText(states[type].file.filePath);
         update(type, { notice: tr('固件路径已复制') });
+      } else if (kind === 'copy-fingerprint') {
+        const fingerprint = contentFingerprint(states[type]?.file?.verification);
+        if (!fingerprint) return;
+        await navigator.clipboard.writeText(fingerprint);
+        update(type, { notice: tr('固件指纹已复制') });
       }
     } catch {
-      update(type, { error: actionError(kind) });
+      update(type, { feedbackKind: kind, notice: '', error: actionError(kind) });
       if (kind === 'install') await refresh(type);
     } finally {
       operation.current = false;
@@ -213,8 +312,9 @@ export function useFirmwareWorkspace({ active, entryDevice }) {
 
 function actionError(kind) {
   return {
-    install: installError(), copy: tr('复制失败'),
+    install: installError(), copy: tr('复制失败'), 'copy-fingerprint': tr('复制失败'),
     file: tr('固件文件不可访问，请重新选择。'),
+    review: tr('本次固件核对失败，请重试。'),
     vendor: openToolError(),
   }[kind];
 }

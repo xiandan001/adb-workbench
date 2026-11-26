@@ -34,14 +34,16 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     if (current?.platform !== platform) return { busy: active(), job: null };
     const { id, phase, percent, code, deadline, targetLabel, candidates, preparation, preparationPercent } = current;
     const entry = current.plan?.elevatedMtk ? {
-      entryAvailable: phase === 'armed' && !current.plan.useSavedTarget && !expired(current),
+      entryAvailable: phase === 'armed' && !current.plan.useSavedTarget && !current.autoPowerOn && !expired(current),
       entryRequested: current.entryRequested === true,
     } : {};
     const preparing = phase === 'preparing' ? { preparation, preparationPercent } : {};
-    const cold = current.plan?.coldStart ? { coldStart: true } : {};
+    const cold = current.coldStart || current.plan?.coldStart ? { coldStart: true } : {};
+    const file = current.firmwareId ? { firmwareId: current.firmwareId } : {};
     const { progressStage, stagePercent, part, total, partPercent } = current;
     return { busy: active(), job: { id, platform, phase, percent, code, deadline, targetLabel, candidates: candidates.map(publicTarget),
-      ...entry, ...preparing, ...cold, ...(progressStage ? { progressStage, stagePercent, part, total, partPercent } : {}) } };
+      ...entry, ...preparing, ...cold, ...file, ...(current.autoPowerOn ? { autoPowerOn: true } : {}),
+      ...(progressStage ? { progressStage, stagePercent, part, total, partPercent } : {}) } };
   };
   const expired = job => job.deadline !== undefined && now() >= job.deadline;
 
@@ -62,9 +64,11 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     job.timer?.unref?.();
   }
 
-  async function snapshot(job) {
-    const result = await services.scan(job.plan, { signal: job.abort.signal });
-    if (result?.code === 'flash-platform-mismatch') return { candidates: [], anchor: null, blocked: result.code };
+  async function snapshot(job, fresh = false) {
+    const result = await services.scan(job.plan, { signal: job.abort.signal, fresh });
+    if (result?.code === 'flash-platform-mismatch' || result?.code === 'flash-mtk-auto-target-present') {
+      return { candidates: [], anchor: null, blocked: result.code };
+    }
     if (!result?.ok || !Array.isArray(result.candidates)) return null;
     const unique = new Map();
     for (const item of result.candidates) {
@@ -77,10 +81,10 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
   const canCheckWriteTarget = job => alive(job) && !expired(job) && services.canStart(job.owner);
   async function writeGateSnapshot(job) {
     if (!canCheckWriteTarget(job)) return null;
-    const fresh = await snapshot(job);
+    const fresh = await snapshot(job, true);
     // Windows can miss one snapshot while an RK device settles in Loader. A
     // complete result (including empty, changed or blocked) is never retried.
-    if (fresh === null && job.platform === 'rk' && canCheckWriteTarget(job)) return snapshot(job);
+    if (fresh === null && job.platform === 'rk' && canCheckWriteTarget(job)) return snapshot(job, true);
     return fresh;
   }
 
@@ -88,7 +92,8 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     if (active()) return failure('flash-busy');
     if (!services.canStart(owner)) return failure('flash-busy');
     const job = { id: randomUUID(), platform: request.platform, phase: 'preparing', preparation: 'checking-environment',
-      candidates: [], percent: null, owner, abort: new AbortController() };
+      candidates: [], percent: null, owner, coldStart: request.coldStart === true, autoPowerOn: request.autoPowerOn === true,
+      firmwareId: request.firmwareId, abort: new AbortController() };
     current = job;
     void prepare(job, request);
     return { ok: true, ...status(job.platform) };
@@ -115,7 +120,7 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
       job.anchor = baseline.anchor || null;
       if (job.plan.profile?.product && !job.anchor && !job.plan.coldStart) { finish(job, 'failed', 'flash-anchor-required'); return; }
       const only = !job.plan.coldStart && !request.targetHint && baseline.candidates.length === 1 ? baseline.candidates[0] : null;
-      if (!job.plan.coldStart) {
+      if (!job.plan.coldStart || job.plan.autoPowerOn) {
         job.phase = 'confirming';
         if (!await services.confirm(job.plan, only || job.anchor, { owner: job.owner, signal: job.abort.signal })) {
           if (alive(job)) finish(job, 'cancelled', 'flash-cancelled');
@@ -126,7 +131,7 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
       job.phase = 'preparing';
       const staged = job.staged || await services.stage(job.plan, { signal: job.abort.signal });
       if (!alive(job)) { await staged?.release?.(); return; }
-      if (!staged?.firmware) { finish(job, 'failed', 'flash-plan-changed'); return; }
+      if (!staged?.firmware) { finish(job, 'failed', staged?.code || 'flash-plan-changed'); return; }
       job.staged = staged;
       job.deadline = now() + waitMs;
       if (job.plan.elevatedMtk) { await armVendor(job); return; }
@@ -202,8 +207,11 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
       if (fresh?.blocked) { finish(job, 'failed', fresh.blocked); return; }
       const exact = fresh?.candidates.find(sameTarget);
       if (!exact || !services.canStart(job.owner)) { finish(job, 'failed', 'flash-plan-changed'); return; }
+      const coldMtk = job.platform === 'mtk' && job.plan.coldStart === true;
       if (!job.plan.profile?.product) job.phase = 'writing';
       const result = await services.write(job.plan, exact, job.staged, {
+        signal: job.abort.signal,
+        canDispatch: () => canCheckWriteTarget(job),
         beforeDispatch: async (handoff = exact) => {
           const latest = await writeGateSnapshot(job);
           const stillApproved = item => item.id === handoff.id && item.identity === handoff.identity && item.selector === handoff.selector &&
@@ -211,7 +219,9 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
           return canCheckWriteTarget(job) && latest?.candidates.some(stillApproved);
         },
         onWriteStart: () => { if (alive(job) && job.phase === 'checking') job.phase = 'writing'; },
+        onReady: info => { if (coldMtk) markVendorReady(job, 'checking', info); },
         onProgress: (value, details) => {
+          if (coldMtk && alive(job) && job.phase === 'armed' && (value === null || percentValue(value))) job.phase = 'writing';
           if (alive(job) && job.phase === 'writing') writeProgress(job, value, details);
         },
       });
@@ -221,21 +231,22 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     }
   }
 
+  function markVendorReady(job, previous, info) {
+    if (!alive(job) || job.phase !== previous) return;
+    job.phase = 'armed';
+    if (Number.isInteger(info?.timeoutMs) && info.timeoutMs > 0) job.deadline = now() + Math.min(info.timeoutMs, waitMs);
+  }
+
   async function armVendor(job) {
-    if (!alive(job) || !job.anchor || !services.canStart(job.owner)) {
+    if (!alive(job) || (!job.anchor && !job.plan.autoPowerOn) || !services.canStart(job.owner)) {
       if (alive(job)) finish(job, 'failed', 'flash-anchor-required');
       return;
     }
     job.phase = 'authorizing';
-    job.targetLabel = job.anchor.label;
+    job.targetLabel = job.anchor?.label || job.plan.profile?.board;
     const result = await services.armVendor(job.plan, job.anchor, job.staged, {
       beforeDispatch: () => alive(job) && services.canStart(job.owner),
-      onReady: info => {
-        if (alive(job) && job.phase === 'authorizing') {
-          job.phase = 'armed';
-          if (Number.isInteger(info?.timeoutMs) && info.timeoutMs > 0) job.deadline = now() + Math.min(info.timeoutMs, waitMs);
-        }
-      },
+      onReady: info => markVendorReady(job, 'authorizing', info),
       onProgress: (value, details) => {
         if (!alive(job) || !['armed', 'writing'].includes(job.phase)) return;
         if (value !== null && !percentValue(value)) return;
@@ -249,7 +260,8 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
   async function conclude(job, target, result) {
     if (result?.transferCompleted !== true) {
       const safeCodes = new Set(['flash-plan-changed', 'flash-mtk-port-unknown', 'flash-cancelled', 'flash-wait-expired',
-        'flash-tool-unavailable', 'flash-rk-storage-unverified', 'flash-target-unavailable', 'flash-busy', 'flash-vendor-busy']);
+        'flash-tool-unavailable', 'flash-rk-storage-unverified', 'flash-target-unavailable', 'flash-busy', 'flash-vendor-busy',
+        'flash-mtk-auto-target-present']);
       const nativeCodes = { 'mtk-uac-cancelled': 'flash-cancelled', 'mtk-target-mismatch': 'flash-plan-changed', 'mtk-mode-mismatch': 'flash-mode-mismatch',
         'mtk-tool-start-failed': 'flash-tool-unavailable', 'mtk-wait-expired': 'flash-wait-expired' };
       const code = safeCodes.has(result?.code) ? result.code :
@@ -271,7 +283,7 @@ function createFirmwareDirectFlow({ services, now = Date.now, waitMs = 300000, s
     const job = current;
     const canSend = () => alive(job) && job.phase === 'armed' && !expired(job) && services.canStart(job.owner);
     if (!job || platform !== 'mtk' || job.platform !== platform || job.id !== jobId || job.owner !== owner ||
-      !job.plan?.elevatedMtk || job.plan.useSavedTarget || !job.anchor || job.entryRequested ||
+      !job.plan?.elevatedMtk || job.plan.useSavedTarget || job.plan.autoPowerOn || !job.anchor || job.entryRequested ||
       typeof services.enterLoader !== 'function' || !canSend()) return failure('flash-loader-request-failed');
     job.entryRequested = true;
     let attempted = false;

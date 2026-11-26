@@ -379,6 +379,7 @@ function createDirectFlashBackends({
 
   async function write({ platform, tool, target, firmware, options = {} } = {}, { onProgress, beforeDispatch, onReady } = {}) {
     if (!supported(platform)) return failure('flash-backend-unavailable');
+    if (options.protectedFiles !== undefined && (platform !== 'mtk' || options.elevated !== true)) return failure('flash-plan-changed');
     const fresh = await readTool(platform, tool);
     if (!fresh) return failure(platform + '-tool-untrusted');
     let args;
@@ -387,6 +388,7 @@ function createDirectFlashBackends({
         : buildMtkFlashArgs({
           executableVersion: fresh.version, target, firmware: { verified: true, manifestPath: firmware?.path },
           mode: options.mode, battery: options.battery, reboot: options.reboot, permitFormatAll: options.permitFormatAll,
+          permitAutoPort: options.elevated === true,
           authenticationFile: firmware?.authenticationFile, certificateFile: firmware?.certificateFile,
         });
     } catch (error) { return failure(error.code || 'flash-arguments-invalid'); }
@@ -410,7 +412,8 @@ function createDirectFlashBackends({
     if (beforeDispatch && !beforeConfirmed) return failure('flash-plan-changed');
     if (platform === 'mtk' && options.elevated === true) {
       if (!beforeConfirmed) return failure('flash-plan-changed');
-      return elevatedMtk({ tool: fresh, args, target, mode: options.mode, permitFormatAll: options.permitFormatAll === true },
+      return elevatedMtk({ tool: fresh, args, target, mode: options.mode, permitFormatAll: options.permitFormatAll === true,
+        protectedFiles: options.protectedFiles },
         { onReady, onProgress });
     }
     return writeMtk(spawnProcess, fresh, args, onProgress);

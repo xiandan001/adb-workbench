@@ -102,7 +102,7 @@ function DriverPanel({ view, theme, driverAction, driverActionLabel, flashing })
   </SupportPanel>;
 }
 
-function PreflightPanel({ view, theme }) {
+function PreflightPanel({ view, theme, quickCheck }) {
   const { file, platform, busy, restoringFile } = view;
   const dependencies = Array.isArray(file?.files) ? file.files : [];
   const unavailable = dependencies.filter(item => item.status !== 'present');
@@ -134,8 +134,11 @@ function PreflightPanel({ view, theme }) {
       <p className={`mt-2 text-xs font-medium ${file.ok ? accentText(theme) : warningText(theme)}`}>
         {file.ok ? tr('固件结构检查通过') : tr('固件需要检查')}
       </p>
-      {!file.ok && <p className={`mt-1 text-xs leading-5 ${muted}`}>{file.error || (preflightErrors[file.code] || preflightErrors['file-unavailable'])()}</p>}
-      {dependencies.length > 0 && <details key={file.filePath || file.fileName} open={unavailable.length > 0 || undefined} className="mt-2 border-t border-current/10 pt-2">
+      <p className={`mt-1 text-xs leading-5 ${muted}`}>{file.ok
+        ? quickCheck ? tr('结构检查仅核对文件格式和依赖，不验证固件来源。')
+          : tr('结构检查仅核对文件格式和依赖；应用内直刷还需校验整包内容。')
+        : file.error || (preflightErrors[file.code] || preflightErrors['file-unavailable'])()}</p>
+      {dependencies.length > 0 && <details key={file.firmwareId || file.filePath || file.fileName} open={unavailable.length > 0 || undefined} className="mt-2 border-t border-current/10 pt-2">
         <summary className="cursor-pointer text-xs font-medium">{tr('依赖文件')} · {dependencies.length - unavailable.length}/{dependencies.length}</summary>
         <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
           {[...unavailable, ...dependencies.filter(item => item.status === 'present')].map((item, index) => (
@@ -182,7 +185,7 @@ function VendorPanel({ view, theme, direct }) {
 export default function FirmwareWorkspace({ theme, active = true, entryDevice }) {
   useLocale();
   const view = useFirmwareWorkspace({ active, entryDevice });
-  const direct = useFirmwareDirect({ active, platform: view.platform });
+  const direct = useFirmwareDirect({ active, platform: view.platform, firmwareId: view.file?.firmwareId });
   const locked = Boolean(direct.busy || direct.running || direct.globalBusy);
   const stepView = locked && !view.busy ? { ...view, busy: 'direct' } : view;
   const dark = isDarkTheme(theme);
@@ -207,9 +210,20 @@ export default function FirmwareWorkspace({ theme, active = true, entryDevice })
     <section className={`min-w-0 rounded-xl border p-4 sm:p-5 ${theme.card}`} aria-labelledby="firmware-workflow-title">
       <h3 id="firmware-workflow-title" className="mb-3 text-sm font-semibold">{tr('刷机操作')}</h3>
       <div className="firmware-steps">
-        <PreflightPanel view={stepView} theme={theme} />
+        <PreflightPanel view={stepView} theme={theme}
+          quickCheck={view.platform === 'mtk' && (direct.mtkFastReview === true || view.file?.verification?.quickReview === true)} />
         <FirmwareDirectPanel direct={direct} platform={view.platform} theme={theme} file={view.file}
           targetHint={entryDevice?.platformHint && entryDevice.platformHint !== view.platform ? undefined : entryDevice?.targetHint}
+          onCopyFirmwarePath={view.file?.filePath ? () => view.act('copy') : undefined}
+          onCopyFirmwareFingerprint={() => view.act('copy-fingerprint')}
+          onOpenVendor={() => view.act('vendor')}
+          onReviewFirmware={async (mode, options) => {
+            if (await view.act('review', mode, options)) direct.clearReviewError();
+          }}
+          reviewPending={view.busy === 'review'}
+          reviewFeedback={<Feedback view={view} actions={['review']} theme={theme} />}
+          handoffDisabled={Boolean(locked || view.busy || view.confirm || view.checking)}
+          handoffFeedback={<Feedback view={view} actions={['vendor', 'copy', 'copy-fingerprint']} theme={theme} />}
           blocked={Boolean(view.busy || view.confirm || direct.globalBusy && !direct.running)} />
       </div>
     </section>

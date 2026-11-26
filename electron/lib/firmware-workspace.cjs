@@ -217,6 +217,7 @@ function register(ipcMain, options = {}) {
       if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
       if (checked.ok) await recentFiles.remember(platform, filePath).catch(() => {});
       if (ownerFor(event) !== owner || direct.isActive()) return cancelled();
+      if (!checked.ok) direct.forgetFile(platform, event.senderFrame);
       return { ...checked, filePath, ...(checked.ok ? { firmwareId: direct.rememberFile(platform, filePath, event.senderFrame) } : {}) };
     } finally { choosingFiles.delete(platform); }
   });

@@ -298,6 +298,57 @@ void Keyboard(WORD key, bool shift = false) {
   Check(handled, "native dialog keyboard message handled");
   Pump();
 }
+bool HighContrast() {
+  HIGHCONTRASTW setting{sizeof(setting)};
+  return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(setting), &setting, 0) &&
+    (setting.dwFlags & HCF_HIGHCONTRASTON);
+}
+void CheckLanguagePaint(const Capture& image, const char* name) {
+  if (HighContrast()) return; // Do not change the host accessibility preference.
+  size_t dark = 0, ink = 0;
+  for (const DWORD pixel : image.pixels) {
+    const DWORD red = (pixel >> 16) & 0xff, green = (pixel >> 8) & 0xff, blue = pixel & 0xff;
+    if (std::max({red, green, blue}) <= 88) ++dark;
+    if (std::min({red, green, blue}) >= 145) ++ink;
+  }
+  Check(dark >= image.pixels.size() * 2 / 3 && ink >= 8, name);
+}
+void LanguageChecks() {
+  const HWND combo = Control(Language);
+  const int beforeInstall = okCommands, beforeCancel = cancelCommands;
+  const wchar_t* choices[] = {L"简体中文", L"繁體中文", L"English", L"日本語", L"한국어"};
+  Check(SendMessageW(combo, CB_GETCOUNT, 0, 0) == 5, "language combo exposes five native choices");
+  for (int choice = 0; choice < 5; ++choice) {
+    wchar_t value[24]{};
+    const auto length = SendMessageW(combo, CB_GETLBTEXTLEN, choice, 0);
+    Check(length >= 0 && length < static_cast<LRESULT>(sizeof(value) / sizeof(value[0])) &&
+      SendMessageW(combo, CB_GETLBTEXT, choice, reinterpret_cast<LPARAM>(value)) == length &&
+      wcscmp(value, choices[choice]) == 0, "language combo retains native item text");
+  }
+  CheckLanguagePaint(Screenshot(combo, L"language-zh-CN-closed", 3), "collapsed language combo renders a dark field and visible text");
+  SetFocus(combo);
+  Check(GetFocus() == combo, "native language combo accepts keyboard focus");
+  SendMessageW(combo, WM_KEYDOWN, VK_F4, 1);
+  Pump(80);
+  COMBOBOXINFO info{sizeof(info)};
+  Check(SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) && GetComboBoxInfo(combo, &info) &&
+    IsWindowVisible(info.hwndList), "F4 opens the native language list");
+  CheckLanguagePaint(Screenshot(info.hwndList, L"language-zh-CN-open", 3), "expanded language list renders dark rows and visible text");
+  SendMessageW(combo, WM_KEYDOWN, VK_ESCAPE, 1);
+  Pump();
+  Check(!SendMessageW(combo, CB_GETDROPPEDSTATE, 0, 0) && Call("GetLanguage") == L"2052" &&
+    cancelCommands == beforeCancel, "Escape closes the language list without cancelling setup");
+  SendMessageW(combo, WM_KEYDOWN, VK_DOWN, 1);
+  Pump();
+  Check(SendMessageW(combo, CB_GETCURSEL, 0, 0) == 1 && Call("GetLanguage") == L"1028" &&
+    Text(parent) == L"卓控臺安裝", "arrow selection applies the native language and refreshes the caption");
+  Keyboard(VK_RETURN);
+  Check(okCommands == beforeInstall && Call("GetLanguage") == L"1028" && Text(parent) == L"卓控臺安裝",
+    "Enter on language keeps the selection and caption and never starts setup");
+  SendMessageW(combo, WM_KEYDOWN, VK_UP, 1);
+  Pump();
+  Check(Call("GetLanguage") == L"2052", "arrow back restores the initial language before testing other pages");
+}
 void WelcomeChecks(const std::wstring& initial) {
   Check(Call("GetPath") == initial, "default path roundtrip");
   Check(Call("GetShortcut") == L"1", "shortcut defaults enabled");
@@ -709,6 +760,7 @@ int Run() {
     Screenshot(skin, L"welcome-" + std::to_wstring(locale));
     Screenshot(skin, L"welcome-" + std::to_wstring(locale) + L"-window-dc", 3);
     Check(ParentEvidence(L"welcome-" + std::to_wstring(locale)), "whole welcome parent contains no visible native siblings");
+    if (locale == 2052 && !offscreen) LanguageChecks();
     if (locale == 1033) {
       Screenshot(Control(Cancel), L"cancel-direct");
       Screenshot(Control(Language), L"language-direct");

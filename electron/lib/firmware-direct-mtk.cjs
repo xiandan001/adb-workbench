@@ -18,7 +18,12 @@ function comPort(value) {
   return match && Number(match[1]) <= 4096 ? 'COM' + match[1] : null;
 }
 
-function targetPort(target) {
+function targetPort(target, permitAutoPort) {
+  if (target?.stage === 'preloader-auto') {
+    if (permitAutoPort !== true || target.verified !== true ||
+        target.port !== undefined || target.daPort !== undefined || target.instanceId !== undefined) fail('MTK_TARGET_UNVERIFIED');
+    return null;
+  }
   const port = comPort(target?.port);
   if (target?.verified !== true || !port) fail('MTK_TARGET_UNVERIFIED');
   if (target.stage === 'preloader' && !target.daPort) return port;
@@ -43,15 +48,16 @@ function verifiedFile(descriptor, filename, extension, code) {
 
 function buildMtkFlashArgs({
   executableVersion, target, firmware, mode, battery = 'auto', reboot = false,
-  permitFormatAll = false, authenticationFile, certificateFile,
+  permitFormatAll = false, permitAutoPort = false, authenticationFile, certificateFile,
 } = {}) {
   if (executableVersion !== MTK_VERSION) fail('MTK_VERSION_UNSUPPORTED');
   if (typeof mode !== 'string' || !Object.hasOwn(operations, mode)) fail('MTK_MODE_UNSUPPORTED');
   if (mode === 'format-all-download' && permitFormatAll !== true) fail('MTK_FORMAT_NOT_CONFIRMED');
   if (!batteryModes.has(battery) || typeof reboot !== 'boolean') fail('MTK_OPTIONS_INVALID');
-  const port = targetPort(target);
+  const port = targetPort(target, permitAutoPort);
   const manifest = verifiedFile(firmware, 'manifestPath', '.xml', 'MTK_MANIFEST_UNVERIFIED');
-  const args = ['-c', operations[mode], '-f', manifest, '-p', port, '-t', battery, '-r'];
+  // V6's native scanner is selected by omitting -p, not by passing a wildcard port.
+  const args = ['-c', operations[mode], '-f', manifest, ...(port === null ? [] : ['-p', port]), '-t', battery, '-r'];
   if (authenticationFile !== undefined) args.push('-a', verifiedFile(authenticationFile, 'path', '.auth', 'MTK_AUTH_UNVERIFIED'));
   if (certificateFile !== undefined) args.push('-e', verifiedFile(certificateFile, 'path', '.cert', 'MTK_CERT_UNVERIFIED'));
   if (reboot) args.push('-b');
@@ -101,8 +107,14 @@ function parseMtkTraceLine(line, pid) {
   if (mode) return { phase: 'input-mode', command: mode[1].toLowerCase() };
   const scan = /^Connection::scan_com_port\(\): scan device START, timeout set as (\d{1,7}) ms\.$/.exec(body);
   if (scan) return { phase: 'scan', timeoutMs: Number(scan[1]) };
+  if (body === 'Connection::scan_com_port(): scan device com port failed, error code: -1, error msg: .') {
+    return { phase: 'scan-timeout' };
+  }
   const clue = /^Connection::scan_com_port\(\): com port clue: COM:\/\/([^.]*)\.$/i.exec(body);
-  if (clue) return { phase: 'clue', port: comPort(clue[1]) };
+  if (clue) {
+    const port = comPort(clue[1]);
+    return { phase: 'clue', port, ...(clue[1] && !port ? { invalid: true } : {}) };
+  }
   const friendly = /^ConsoleModeCallBack::cb_com_port_status\(\): (com port friendly name:.*)$/.exec(body);
   if (friendly) {
     const target = parseMtkFlashLine(friendly[1]);
