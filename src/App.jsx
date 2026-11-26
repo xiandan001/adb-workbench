@@ -104,7 +104,6 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
-  const [firmwareEntry, setFirmwareEntry] = useState(null);
   const [firmwareVisited, setFirmwareVisited] = useState(activeTab === 'firmware');
   const [aiUsageTarget, setAiUsageTarget] = useState(null);
   const [membershipOrigin, setMembershipOrigin] = useState(null);
@@ -137,8 +136,7 @@ function App() {
       return { activeTab: tab, sshVisited: previous.sshVisited || tab === 'ssh', aiToolsVisited: previous.aiToolsVisited || tab === 'ai-tools', aiVisited: previous.aiVisited || tab === 'ai-workspace' };
     });
   }, [rememberMembershipOrigin]);
-  const openFirmware = (entry = null) => {
-    setFirmwareEntry(entry);
+  const openFirmware = () => {
     setFirmwareVisited(true);
     setActiveTab('firmware');
   };
@@ -2190,14 +2188,6 @@ function App() {
                       onScreenRecordStop={(deviceId) => handleScreenRecordStop(deviceId)}
                       onReboot={() => handleReboot(device.id)}
                       onRebootLoader={() => handleRebootLoader(device.id)}
-                      onOpenFirmware={() => {
-                        const hint = [device.model, device.manufacturer, device.board].filter(Boolean).join(' ');
-                        const platformHint = /rockchip|\brk\d{4}\b/i.test(hint) ? 'rk'
-                          : /mediatek|\bmt\d{4}\b/i.test(hint) ? 'mtk' : null;
-                        const targetHint = device.transport === 'adb' && device.status === 'device' &&
-                          /^[a-z0-9_-]{1,128}$/i.test(device.id) ? device.id : undefined;
-                        openFirmware({ id: device.id, name: deviceNames[device.id] || device.model || device.id, platformHint, targetHint, requestId: crypto.randomUUID() });
-                      }}
                       onUnlock={() => handleUnlock(device.id)}
                       onRoot={() => handleRoot(device.id)}
                       onRemount={() => handleRemount(device.id)}
@@ -2262,7 +2252,7 @@ function App() {
           {firmwareVisited && (
             <div hidden={activeTab !== 'firmware'}>
               <Suspense fallback={<Loader2 className="animate-spin" />}>
-                <FirmwareWorkspace theme={t} active={activeTab === 'firmware'} entryDevice={firmwareEntry} />
+                <FirmwareWorkspace theme={t} active={activeTab === 'firmware'} />
               </Suspense>
             </div>
           )}

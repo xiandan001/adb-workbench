@@ -1,0 +1,10 @@
+.serial-desk { container: serial-desk / inline-size; }
+.serial-desk-layout, .serial-record-panes { display: grid; gap: 14px; min-width: 0; align-items: start; }
+.serial-desk-layout > *, .serial-record-panes > * { min-width: 0; }
+.serial-records { container: serial-records / inline-size; }
+@container serial-desk (min-width: 55rem) {
+  .serial-desk-layout { grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 2fr); }
+}
+@container serial-records (min-width: 35rem) {
+  .serial-record-panes[data-split="true"] { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+}

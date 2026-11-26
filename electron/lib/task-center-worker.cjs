@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { writeRunManifest, createRunComparisonIdentity, deviceComparisonIdentity } = require('./task-run-manifest.cjs');
+const { taskStepLogIdentity, taskEvidenceFileStem } = require('./task-step-evidence.cjs');
 const { AI_BRIDGE_TOTAL_MS, normalizeSummary } = require('./task-ai-summary-bridge.cjs');
 const { isHarmonyDevice, deviceTarget } = require('./device-platform.cjs');
 const { resolveDeviceRef } = require('./device-registry.cjs');
@@ -233,7 +234,7 @@ async function runDevice(task, run) {
     run.steps.push(stepRun);
     stepRun.status = 'running';
     stepRun.startedAt = new Date().toISOString();
-    appendTaskLog(task, tr("[{0}] {1} 开始", { 0: run.deviceId, 1: stepRun.label }));
+    appendTaskLog(task, tr("[{0}] {1} 开始", { 0: run.deviceId, 1: stepRun.label }), taskStepLogIdentity(run, stepRun));
     broadcastTask(task);
 
     try {
@@ -243,13 +244,14 @@ async function runDevice(task, run) {
       stepRun.output = trimOutput(result.output || result.stdout || '');
       stepRun.error = result.error || '';
       stepRun.artifact = result.artifact || '';
+      if (result.imageCompare?.currentPath) stepRun.screenshotArtifact = result.imageCompare.currentPath;
       stepRun.endedAt = new Date().toISOString();
       if (result.ok) {
         task.completedSteps += 1;
-        appendTaskLog(task, tr("[{0}] {1} 完成", { 0: run.deviceId, 1: stepRun.label }));
+        appendTaskLog(task, tr("[{0}] {1} 完成", { 0: run.deviceId, 1: stepRun.label }), taskStepLogIdentity(run, stepRun));
       } else {
         task.failedSteps += 1;
-        appendTaskLog(task, tr("[{0}] {1} 失败：{2}", { 0: run.deviceId, 1: stepRun.label, 2: stepRun.error || tr("未知错误") }));
+        appendTaskLog(task, tr("[{0}] {1} 失败：{2}", { 0: run.deviceId, 1: stepRun.label, 2: stepRun.error || tr("未知错误") }), taskStepLogIdentity(run, stepRun));
         if (!task.continueOnError && !step.continueOnError) {
           run.status = 'failed';
           break;
@@ -260,7 +262,7 @@ async function runDevice(task, run) {
       stepRun.error = error.message;
       stepRun.endedAt = new Date().toISOString();
       task.failedSteps += 1;
-      appendTaskLog(task, tr("[{0}] {1} 异常：{2}", { 0: run.deviceId, 1: stepRun.label, 2: error.message }));
+      appendTaskLog(task, tr("[{0}] {1} 异常：{2}", { 0: run.deviceId, 1: stepRun.label, 2: error.message }), taskStepLogIdentity(run, stepRun));
       if (!task.continueOnError && !step.continueOnError) {
         run.status = 'failed';
         break;
@@ -348,16 +350,16 @@ async function runStressDevice(task, run) {
       stepRun.status = 'running';
       stepRun.startedAt = new Date().toISOString();
       appendStressStep(run, round, stepRun);
-      appendTaskLog(task, tr("[{0}] 第 {1} 轮 {2} 开始", { 0: run.deviceId, 1: roundIndex, 2: stepRun.label }));
+      appendTaskLog(task, tr("[{0}] 第 {1} 轮 {2} 开始", { 0: run.deviceId, 1: roundIndex, 2: stepRun.label }), taskStepLogIdentity(run, stepRun));
       broadcastTask(task);
 
       try {
         const activeDeviceId = await resolveRunDeviceId(task, run, step);
         const result = await executeStep(task, activeDeviceId, step);
-        finishStressStep(task, stepRun, result);
+        finishStressStep(task, run, stepRun, result);
         if (!result.ok && shouldStopStressOnFailure(task, step)) stopRound = true;
       } catch (error) {
-        finishStressStep(task, stepRun, { ok: false, error: error.message });
+        finishStressStep(task, run, stepRun, { ok: false, error: error.message });
         if (shouldStopStressOnFailure(task, step)) stopRound = true;
       } finally {
         broadcastTask(task);
@@ -373,11 +375,11 @@ async function runStressDevice(task, run) {
       try {
         const activeDeviceId = await resolveRunDeviceId(task, run, { type: 'perfSnapshot', timeoutMs: DEFAULT_TIMEOUT_MS });
         const result = await capturePerformance(task, activeDeviceId, { timeoutMs: DEFAULT_TIMEOUT_MS });
-        finishStressStep(task, perfStep, result);
+        finishStressStep(task, run, perfStep, result);
         const warnings = evaluatePerformanceSnapshot(result.snapshot, task.script.acceptance?.thresholds);
         round.warnings.push(...warnings);
       } catch (error) {
-        finishStressStep(task, perfStep, { ok: false, error: error.message });
+        finishStressStep(task, run, perfStep, { ok: false, error: error.message });
       }
     }
 
@@ -505,7 +507,7 @@ async function captureScreenshot(task, deviceId, step) {
   const artifactDir = await ensureTaskArtifactDir(task, 'screenshots');
   const filePath = step.localPath
     ? path.resolve(String(step.localPath))
-    : path.join(artifactDir, `${sanitizeName(deviceId)}-${formatStamp(new Date())}.png`);
+    : path.join(artifactDir, `${taskEvidenceFileStem('', sanitizeName(deviceId), formatStamp(new Date()))}.png`);
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   if (isHarmonyDevice(deviceId)) {
     const result = await withHarmonyTask(task, deviceId, options => require('./harmony-media.cjs').captureScreenshot(deviceId, filePath, { ...options, timeoutMs: step.timeoutMs || DEFAULT_TIMEOUT_MS }));
@@ -530,7 +532,8 @@ async function compareScreenshot(task, deviceId, step) {
   if (!fs.existsSync(resolvedBaseline)) return { ok: false, error: `baseline_not_found:${resolvedBaseline}` };
 
   const artifactDir = await ensureTaskArtifactDir(task, 'image-compare');
-  const currentPath = path.join(artifactDir, `compare-${sanitizeName(deviceId)}-${formatStamp(new Date())}.png`);
+  const compareStem = taskEvidenceFileStem('compare', sanitizeName(deviceId), formatStamp(new Date()));
+  const currentPath = path.join(artifactDir, `${compareStem}.png`);
   const capture = await captureScreenshot(task, deviceId, { ...step, localPath: currentPath });
   if (!capture.ok) return capture;
 
@@ -539,7 +542,7 @@ async function compareScreenshot(task, deviceId, step) {
   const result = compareImageBuffers(baselineBuffer, currentBuffer);
   const threshold = clampNumber(step.threshold, 0, 100, 98);
   const passed = result.similarity >= threshold;
-  const resultPath = path.join(artifactDir, `compare-${sanitizeName(deviceId)}-${formatStamp(new Date())}.json`);
+  const resultPath = path.join(artifactDir, `${compareStem}.json`);
   await fs.promises.writeFile(resultPath, JSON.stringify({
     deviceId,
     baselinePath: resolvedBaseline,
@@ -1529,7 +1532,7 @@ async function runExternalScriptStep(task, deviceId, step) {
   const finalArgs = args.map(arg => replaceStepPlaceholders(arg, { ...context, scriptPath }));
   const timeoutMs = hasUnlimitedExternalScriptTimeout(scriptPath) ? 0 : (step.timeoutMs || LONG_TIMEOUT_MS);
   const result = await runProcess(task, finalCommand, finalArgs, timeoutMs, workingDir);
-  const logPath = path.join(artifactDir, `external-${sanitizeName(deviceId)}-${formatStamp(new Date())}.log`);
+  const logPath = path.join(artifactDir, `${taskEvidenceFileStem('external', sanitizeName(deviceId), formatStamp(new Date()))}.log`);
   await fs.promises.writeFile(logPath, [
     `adapter=${adapter || 'custom'}`,
     `command=${finalCommand}`,
@@ -1858,18 +1861,19 @@ function appendStressStep(run, round, stepRun) {
   round.steps.push(stepRun);
 }
 
-function finishStressStep(task, stepRun, result) {
+function finishStressStep(task, run, stepRun, result) {
   stepRun.status = result.ok ? 'success' : task.cancelled ? 'cancelled' : 'failed';
   stepRun.output = trimOutput(result.output || result.stdout || '');
   stepRun.error = result.error || '';
   stepRun.artifact = result.artifact || '';
+  if (result.imageCompare?.currentPath) stepRun.screenshotArtifact = result.imageCompare.currentPath;
   stepRun.endedAt = new Date().toISOString();
   if (result.ok) {
     task.completedSteps += 1;
-    appendTaskLog(task, tr("{0} 完成", { 0: stepRun.label }));
+    appendTaskLog(task, tr("{0} 完成", { 0: stepRun.label }), taskStepLogIdentity(run, stepRun));
   } else {
     task.failedSteps += 1;
-    appendTaskLog(task, tr("{0} 失败：{1}", { 0: stepRun.label, 1: stepRun.error || tr("未知错误") }));
+    appendTaskLog(task, tr("{0} 失败：{1}", { 0: stepRun.label, 1: stepRun.error || tr("未知错误") }), taskStepLogIdentity(run, stepRun));
   }
 }
 
@@ -2280,11 +2284,13 @@ function rebaseTaskArtifactPaths(task, fromDir, toDir) {
     for (const step of run.steps || []) {
       step.artifact = replacePath(step.artifact);
       step.output = replacePath(step.output);
+      if (step.screenshotArtifact) step.screenshotArtifact = replacePath(step.screenshotArtifact);
     }
     for (const round of run.stressRounds || []) {
       for (const step of round.steps || []) {
         step.artifact = replacePath(step.artifact);
         step.output = replacePath(step.output);
+        if (step.screenshotArtifact) step.screenshotArtifact = replacePath(step.screenshotArtifact);
       }
     }
   }
@@ -2334,8 +2340,8 @@ function killCurrentProcess(task) {
   task.currentProc = null;
 }
 
-function appendTaskLog(task, message) {
-  task.logs.push({ at: new Date().toISOString(), message });
+function appendTaskLog(task, message, stepIdentity) {
+  task.logs.push({ at: new Date().toISOString(), message, ...stepIdentity });
   if (task.logs.length > 120) task.logs.splice(0, task.logs.length - 120);
 }
 

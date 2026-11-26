@@ -31,7 +31,7 @@ const RULE_IDS = new Set(['builtin-crash', 'builtin-anr', 'builtin-native-crash'
   'builtin-harmony-js-crash', 'builtin-harmony-app-freeze', 'builtin-harmony-cpp-crash']);
 const STEP_TYPES = new Set(['shell', 'installApk', 'pushFile', 'screenshot', 'imageCompare', 'perfSnapshot', 'tap',
   'longPress', 'swipe', 'input', 'keyevent', 'waitText', 'assertText', 'inspection', 'waitLog', 'delay', 'externalScript', 'launchApp']);
-const EVIDENCE_KEYS = new Set(['artifact', 'artifactDir', 'artifactBaseDir', 'artifactWorkDir', 'runResultPath',
+const EVIDENCE_KEYS = new Set(['artifact', 'screenshotArtifact', 'artifactDir', 'artifactBaseDir', 'artifactWorkDir', 'runResultPath',
   'stressReportPath', 'stressResultPath', 'reportPath', 'resultPath', 'outputPath', 'outputDir']);
 
 function invalid(label) { throw new Error(tr("迁移数据格式无效：{0}", { 0: label })); }

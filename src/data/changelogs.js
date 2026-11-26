@@ -3,6 +3,16 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.3': {
+    title: 'v5.0.3',
+    date: '2026-11-26',
+    items: [
+      { type: 'feature', get text() { return tr('性能监控新增异常时间线，可从 CPU、FPS 和告警查看同设备附近日志；日志支持临时查看被筛选隐藏的证据。'); } },
+      { type: 'feature', get text() { return tr('RS232 新增协议应答台，同页查看原始收发与 TCL 应答状态，并可定位原始字节。'); } },
+      { type: 'feature', get text() { return tr('任务中心新增多设备结果矩阵，支持仅看异常，并查看对应步骤的截图、错误和日志。'); } },
+      { type: 'improve', get text() { return tr('设备卡片移除固件刷机快捷入口，独立刷机页面保留。'); } },
+    ],
+  },
   '5.0.2': {
     title: 'v5.0.2',
     date: '2026-11-26',

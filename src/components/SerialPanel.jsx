@@ -14,6 +14,7 @@ import SerialSchemeControls from './SerialSchemeControls';
 import { applyAndConnectSerialScheme, readSerialSchemeSelection, resetSerialSchemeSelection, saveSerialSchemeSelection } from '../shared/serialSchemeConnection';
 import { confirmAppMessage } from '../shared/appMessageDialog';
 import { effectiveProtocolMemoryScope } from '../shared/rs232ProtocolMemory.js';
+import './SerialDesk.css';
 
 const SerialTerminal = lazy(() => import('./SerialTerminal'));
 const IpControlPanel = lazy(() => import('./IpControlPanel.jsx'));
@@ -343,10 +344,13 @@ export default function SerialPanel({ theme, showToast, worksetRequest, onWorkse
       {persistenceError && <p role="alert" className="break-words text-xs text-amber-500">{tr(persistenceError)}</p>}
       {terminalStyleError && <p role="alert" className="break-words text-xs text-amber-500">{tr(terminalStyleError)}</p>}
       {terminalOpened && <div hidden={mode !== 'terminal'}><Suspense fallback={<p className={`py-8 text-center text-sm ${theme.textMuted}`}>{tr("正在打开串口终端…")}</p>}><SerialTerminal key={snapshots.terminal.sessionId || 'unconnected'} active={mode === 'terminal'} theme={theme} isDark={isDark} snapshot={snapshots.terminal} settings={workspace.terminal} onSettings={changeTerminalSettings} onSave={() => save('terminal')} saving={pending.terminal === 'save'} busy={Boolean(pending.terminal)} showToast={showToast} /></Suspense></div>}
-      {!ipControl && mode === 'rs232' && <>
-        <SerialDataView memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
-        <SerialSendPanel memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />
-      </>}
+      {!ipControl && mode === 'rs232' && <section aria-label={tr('协议应答台')} className="serial-desk space-y-3 border-t border-slate-400/20 pt-4">
+        <h3 className="text-sm font-semibold">{tr('协议应答台')}</h3>
+        <div className="serial-desk-layout">
+          <SerialSendPanel desk memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} preferences={preferences} onPreferences={changePreferences} draft={workspace.draft} onDraft={draft => updateWorkspace({ draft })} commandsOpen={workspace.commandsOpen} onCommandsOpen={commandsOpen => updateWorkspace({ commandsOpen })} connected={snapshots.rs232.status === 'connected'} sending={snapshots.rs232.sending || pending.rs232 === 'send'} busy={Boolean(pending.rs232)} onSend={send} history={history} showToast={showToast} />
+          <SerialDataView memoryScope={protocolMemoryScope} theme={theme} isDark={isDark} snapshot={snapshots.rs232} receiveMode={preferences.receiveMode} onMode={receiveMode => changePreferences({ receiveMode })} following={workspace.following} onFollowing={following => updateWorkspace({ following })} onSave={() => save('rs232')} onClear={() => act('rs232', 'clear', () => window.electronAPI.serialClear({ workspace: 'rs232' }))} saving={pending.rs232 === 'save'} busy={Boolean(pending.rs232)} showToast={showToast} />
+        </div>
+      </section>}
     </div>
   </section>;
 }

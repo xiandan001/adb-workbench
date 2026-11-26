@@ -78,7 +78,7 @@ export function applySerialWorkspaceSnapshot(current, snapshot) { return applyWo
 export function applySerialWorkspaceDelta(current, delta) { return applyWorkspace(current, delta, applySerialDelta); }
 
 // UI-only session state survives page navigation, never connects or sends on restoration.
-const workspace = { selectedPath: '', draft: '', advanced: false, terminalSelectedPath: '', terminalAdvanced: false, commandsOpen: false, following: true, mode: 'rs232', terminal: { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' } };
+const workspace = { selectedPath: '', draft: '', advanced: false, terminalSelectedPath: '', terminalAdvanced: false, commandsOpen: true, following: true, mode: 'rs232', terminal: { enter: 'cr', backspace: 'del', localEcho: false, expanded: false, style: 'current' } };
 export function readSerialWorkspace() { return { ...workspace, terminal: { ...workspace.terminal } }; }
 export function updateSerialWorkspace(changes) { Object.assign(workspace, changes); }
 

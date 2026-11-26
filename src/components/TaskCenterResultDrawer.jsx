@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, Square, X, Sparkles, RotateCcw } from 'lucide-react';
 import TaskRerunPanel from './TaskRerunPanel';
+import TaskResultMatrix from './TaskResultMatrix';
 import { isDarkTheme } from '../shared/theme';
 import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
+import { taskMatrixStepStatus } from '../shared/taskResultMatrix.js';
 import { exportTaskResult } from '../shared/taskResultDelivery.js';
 import { taskTechnicalActions } from '../shared/resultActions.js';
 import ResultActionsMenu from './ResultActionsMenu';
@@ -29,10 +31,9 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
   const running = task.status === 'running' || task.status === 'queued';
   const panel = isDark ? 'bg-[#202124] text-[#E8EAED] border-[#3E4145]' : 'bg-white text-slate-800 border-slate-200';
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const steps = (task.deviceRuns || []).flatMap(run => (run.steps || []).map(step => ({ ...step, deviceId: run.deviceId })));
-  const failures = steps.filter(step => step.status === 'failed' || step.error);
-  const visibleSteps = failures.length ? failures : steps;
-  const canRerun = !running && ((task.deviceRuns || []).some(run => run.status === 'failed') || failures.length > 0);
+  const deviceRuns = task.deviceRuns || [];
+  const hasFailures = deviceRuns.some(run => run.status === 'failed' || (run.steps || []).some(step => taskMatrixStepStatus(step) === 'failed'));
+  const canRerun = !running && hasFailures;
   async function analyzeRun() {
     if (handoffBusy) return;
     setHandoffBusy(true); setHandoffError('');
@@ -58,7 +59,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
       ref={dialogRef}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       aria-labelledby="task-result-title"
-      className={`fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-2xl border-l p-0 shadow-2xl backdrop:bg-black/50 ${panel}`}
+      className={`fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full border-l p-0 shadow-2xl backdrop:bg-black/50 ${deviceRuns.length > 1 ? 'max-w-5xl' : 'max-w-2xl'} ${panel}`}
     >
       <div className="flex h-full flex-col">
         <header className="flex items-start justify-between gap-4 border-b border-current/10 p-5">
@@ -69,7 +70,7 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           <button type="button" autoFocus onClick={onClose} className="rounded-lg p-2 hover:bg-slate-500/10" aria-label={tr("关闭任务详情")}><X size={20} /></button>
         </header>
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
-          <section aria-label={tr('运行结果概览')} className={`rounded-xl border p-4 ${task.error || failures.length ? 'border-red-500/25 bg-red-500/5' : running ? 'border-slate-400/25' : 'border-emerald-500/25 bg-emerald-500/5'}`}>
+          <section aria-label={tr('运行结果概览')} className={`rounded-xl border p-4 ${task.error || hasFailures ? 'border-red-500/25 bg-red-500/5' : running ? 'border-slate-400/25' : 'border-emerald-500/25 bg-emerald-500/5'}`}>
             <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-semibold">{tr('运行结果概览')}</h4><span className={`text-xs ${muted}`}>{getTaskStatusLabel(task.status)}</span></div>
             <p className={`mt-2 text-sm leading-6 ${muted}`}>{running ? tr('运行尚未结束，结果会继续更新。') : canRerun ? tr('优先处理失败步骤，再决定是否复跑。') : tr('本次运行已结束，可查看步骤证据或导出证据包。')}</p>
             {task.error && <p role="alert" className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-red-500">{tr(task.error)}</p>}
@@ -79,30 +80,9 @@ export default function TaskCenterResultDrawer({ task, theme, onClose, onCancel,
           {handoffError && <p role="alert" className="text-sm text-red-500">{handoffError}</p>}
           {delivery && <div role={delivery.error ? 'alert' : 'status'} className={`rounded-lg border border-current/10 p-3 text-sm ${delivery.error ? 'text-red-500' : 'text-emerald-500'}`}><p>{delivery.error || delivery.message}</p>{delivery.path && <button type="button" onClick={() => onOpenPath(delivery.path)} className="mt-2 hover:underline">{tr('打开已导出的证据包')}</button>}{delivery.error && <button type="button" disabled={exporting} onClick={exportRun} className="mt-2 hover:underline disabled:opacity-40">{tr('重试导出')}</button>}</div>}
           {task.stressSummary?.reason && task.stressSummary.reason !== task.error && <p className="text-sm text-amber-500">{task.stressSummary.reason}</p>}
-          <section>
-            <h4 className="font-medium">{tr("运行设备")}</h4>
-            {task.targetPlatform === 'harmony' && (task.deviceRuns || []).some(run => !run.comparisonIdentity?.harmonyUdid) && <p className="mt-2 text-xs text-amber-500">{tr('未记录可靠鸿蒙 UDID；本连接可执行，但不能据此跨连接恢复、比较或自动复跑。')}</p>}
-            <div className="mt-2 space-y-2">
-              {(task.deviceRuns || []).map(run => <div key={run.originalDeviceId || run.deviceId} className="flex flex-wrap justify-between gap-2 rounded-lg border border-current/10 p-3 text-sm"><span className="font-mono break-all">{run.deviceId}</span><span>{getTaskStatusLabel(run.status)}</span></div>)}
-            </div>
-          </section>
-          <section>
-            <h4 className="font-medium">{failures.length ? tr("失败步骤（{0}）", { 0: failures.length }) : tr("执行步骤")}</h4>
-            {visibleSteps.length === 0 && <p className={`mt-2 text-sm ${muted}`}>{tr("暂无步骤结果；任务可能尚未执行。")}</p>}
-            <div className="mt-2 space-y-2">
-              {visibleSteps.map((step, index) => (
-                <div key={`${step.deviceId}-${step.id}-${index}`} className="rounded-lg border border-current/10 p-3 text-sm">
-                  <div className="flex flex-wrap justify-between gap-2"><span>{step.label || tr("步骤 {0}", { 0: (step.index ?? index) + 1 })}</span><span className={step.status === 'failed' ? 'text-red-500' : muted}>{getTaskStatusLabel(step.status)}</span></div>
-                  <div className={`mt-1 text-xs font-mono break-all ${muted}`}>{step.deviceId}</div>
-                  {step.error && <p className="mt-2 whitespace-pre-wrap break-words text-red-500">{tr(step.error)}</p>}
-                  {step.output && <details className="mt-2"><summary className="cursor-pointer">{tr("查看输出")}</summary><pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words text-xs">{step.output}</pre></details>}
-                  {step.artifact && <button type="button" onClick={() => onOpenPath(step.artifact)} className="mt-2 text-emerald-500 hover:underline">{tr("打开该步骤证据")}</button>}
-                </div>
-              ))}
-            </div>
-            {failures.length > 0 && <p className={`mt-2 text-xs ${muted}`}>{tr("优先显示失败项；完整执行记录可查看运行数据。")}</p>}
-          </section>
-          <details open={Boolean(task.error) || failures.length > 0}>
+          {task.targetPlatform === 'harmony' && deviceRuns.some(run => !run.comparisonIdentity?.harmonyUdid) && <p className="text-xs text-amber-500">{tr('未记录可靠鸿蒙 UDID；本连接可执行，但不能据此跨连接恢复、比较或自动复跑。')}</p>}
+          <TaskResultMatrix task={task} isDark={isDark} muted={muted} onOpenPath={onOpenPath} />
+          <details open={Boolean(task.error) || hasFailures}>
             <summary className="cursor-pointer font-medium">{tr("运行日志")}</summary>
             <pre className={`mt-2 max-h-80 overflow-auto rounded-lg border border-current/10 p-3 text-xs whitespace-pre-wrap break-words ${muted}`}>{(task.logs || []).map(line => typeof line === 'string' ? line : `${line.at || ''} ${line.message || ''}`).join('\n') || tr("暂无日志")}</pre>
           </details>

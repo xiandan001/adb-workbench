@@ -295,6 +295,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   logClear: (args) => ipcRenderer.invoke('log:clear', args),
   logGetState: () => ipcRenderer.invoke('log:getState'),
+  logIncidentContext: args => ipcRenderer.invoke('log:incidentContext', args),
   onLogCaptureState: callback => {
     const listener = safeListener(callback); ipcRenderer.on('log:capture-state', listener);
     return () => ipcRenderer.off('log:capture-state', listener);
@@ -581,6 +582,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   taskHistory: () => ipcRenderer.invoke('task-center:history'),
   taskHistoryClear: () => ipcRenderer.invoke('task-center:history:clear'),
   taskState: () => ipcRenderer.invoke('task-center:state'),
+  taskStepEvidence: input => ipcRenderer.invoke('task:step-evidence', input),
   onTaskCenterUpdate: (callback) => {
     const listener = safeListener(callback);
     ipcRenderer.on('task-center:update', listener);

@@ -1,4 +1,8 @@
 {
+  "性能监控新增异常时间线，可从 CPU、FPS 和告警查看同设备附近日志；日志支持临时查看被筛选隐藏的证据。": "The performance timeline shows nearby logs from the same device for CPU, FPS, and alert events. You can also temporarily view evidence hidden by log filters.",
+  "RS232 新增协议应答台，同页查看原始收发与 TCL 应答状态，并可定位原始字节。": "The RS232 response desk brings raw traffic and TCL response status together, with links to the original bytes.",
+  "任务中心新增多设备结果矩阵，支持仅看异常，并查看对应步骤的截图、错误和日志。": "Task Center now shows a multi-device results matrix. Filter to exceptions and inspect screenshots, errors, and logs for each step.",
+  "设备卡片移除固件刷机快捷入口，独立刷机页面保留。": "Removed the flash shortcut from device cards. The dedicated firmware flashing page is still available.",
   "我确认固件来自可信渠道且适用于此板卡，并了解格式化会清除数据": "I confirm this firmware comes from a trusted source and is suitable for this board, and I understand that formatting erases data.",
   "请确认固件来自可信渠道，且适用于当前板卡和刷机模式。": "Confirm that the firmware comes from a trusted source and is suitable for the current board and flashing mode.",
   "重新检查固件": "Recheck firmware",
@@ -2136,5 +2140,23 @@
   "MTK 选择 XML 后可快速完成预检，应用内确认一次即可准备刷机。": "MTK preflight is faster after selecting an XML file, and preparing to flash takes just one in-app confirmation.",
   "RK 未登记设备可在上电识别后，直接在应用内选择并刷机。": "Once an unregistered RK device is detected after power-on, it can be selected and flashed in the app.",
   "更换 RK 或 MTK 固件后会重新检查，不沿用上一次的核对结果。": "Changing RK or MTK firmware runs a fresh check without reusing the previous confirmation.",
-  "优化安装器的语言选择界面。": "Improved the installer’s language picker."
+  "优化安装器的语言选择界面。": "Improved the installer’s language picker.",
+  "异常时间线": "Anomaly timeline",
+  "临时日志上下文": "Temporary log context",
+  "原日志被当前筛选隐藏。关闭这里会保留原筛选与视图。": "Current filters hide this log. Close this view to return with your filters unchanged.",
+  "返回原视图": "Back to filtered view",
+  "点击曲线查看同一设备附近的日志。": "Select a point to see nearby logs from the same device.",
+  "查看该时刻日志": "View logs at this time",
+  "近期异常与告警": "Recent anomalies and alerts",
+  "CPU 突升": "CPU spike",
+  "前台 FPS 下降": "Foreground FPS drop",
+  "合成 FPS 下降": "Compositor FPS drop",
+  "附近的日志": "Nearby logs",
+  "按本机接收时间查看前后 30 秒，仅显示已保留的抓取日志。时间接近不代表因果。": "Shows retained log entries received by this computer within 30 seconds either side. Timing alone does not establish a cause.",
+  "正在读取附近日志…": "Reading nearby logs…",
+  "这台设备没有当前保留的抓取日志，未读取其他设备。": "No retained capture for this device. No other-device logs were read.",
+  "这个时间窗口没有找到已保留的日志。": "No retained log entries were found in this time window.",
+  "当前仅展示附近有限的日志，记录可能不完整。": "Only a limited set of nearby entries is shown. The record may be incomplete.",
+  "该日志行仅展示部分原文。": "This line shows only part of the original log.",
+  "日志时间标记": "Log time markers"
 }

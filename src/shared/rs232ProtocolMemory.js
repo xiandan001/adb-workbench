@@ -26,7 +26,7 @@ export function normalizeRs232Memory(value) {
   const scopes = list(value.scopes, 20).map(scope => {
     fields(scope, ['workspace', 'schemeId', 'selectedId', 'category', 'parameters', 'viewMode']);
     if (!['rs232', 'terminal'].includes(scope.workspace) || !text(scope.schemeId, 200) || scope.schemeId && !scope.schemeId.trim()
-      || scope.selectedId !== '' && !commandId(scope.selectedId) || !text(scope.category, 40) || !['raw', 'transactions'].includes(scope.viewMode)) fail();
+      || scope.selectedId !== '' && !commandId(scope.selectedId) || !text(scope.category, 40) || !['raw', 'transactions', 'desk'].includes(scope.viewMode)) fail();
     const scopeKey = JSON.stringify([scope.workspace, scope.schemeId]); if (scopesSeen.has(scopeKey)) fail(); scopesSeen.add(scopeKey);
     const seen = new Set(), parameters = list(scope.parameters, 16).map(item => {
       fields(item, ['commandId', 'template', 'values']); fields(item.values, ['XX']);
@@ -53,7 +53,7 @@ export function writeRs232Memory(value, storage = globalThis.localStorage) {
 }
 const scopeMatches = (left, right) => left.workspace === right.workspace && left.schemeId === right.schemeId;
 export function getRs232MemoryScope(value, scope) {
-  return normalizeRs232Memory(value).scopes.find(item => scopeMatches(item, scope)) || { ...scope, selectedId: 'lango-005', category: '', parameters: [], viewMode: 'raw' };
+  return normalizeRs232Memory(value).scopes.find(item => scopeMatches(item, scope)) || { ...scope, selectedId: 'lango-005', category: '', parameters: [], viewMode: scope.workspace === 'rs232' ? 'desk' : 'raw' };
 }
 function updateScope(value, scope, changes) {
   const current = normalizeRs232Memory(value), previous = getRs232MemoryScope(current, scope);

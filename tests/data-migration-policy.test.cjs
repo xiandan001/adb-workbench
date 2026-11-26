@@ -93,7 +93,8 @@ test('Harmony shortcut preferences migrate separately from the Android child-loc
 
 test('run history keeps identity and results but strips every nontransferred clickable evidence link', () => {
   const run = { id: 'run-a', scriptName: '任务', status: 'failed', scriptHash: 'hash', stressSummary: null, artifactDir: 'C:/evidence', runResultPath: 'C:/evidence/run.json',
-    stressReportPath: 'C:/report.md', stressResultPath: 'C:/result.json', deviceRuns: [{ deviceId: 'device-a', steps: [{ id: 'a', artifact: 'C:/screen.png', output: 'failure', error: 'original' }] }] };
+    stressReportPath: 'C:/report.md', stressResultPath: 'C:/result.json', deviceRuns: [{ deviceId: 'device-a',
+      steps: [{ id: 'a', artifact: 'C:/screen.png', screenshotArtifact: 'C:/compare.png', output: 'failure', error: 'original' }] }] };
   const restored = sanitizeFile('task-center-history.json', { version: 1, history: [run] }).history[0];
   assert.equal(restored.scriptHash, 'hash');
   assert.equal(restored.artifactDir, undefined);

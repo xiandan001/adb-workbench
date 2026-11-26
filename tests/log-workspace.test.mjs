@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   LOG_PRESETS_KEY, captureLogEvidence, deleteLogPreset, findEvidenceReferences,
-  fingerprintLogLines, logEvidenceScopeKey, normalizeLogFilter, readLogPresets, resolveLogEvidenceRow, saveLogPreset
+  fingerprintLogLines, logEvidenceScopeKey, nearbyHiddenLogEvidence, normalizeLogFilter, readLogPresets, resolveLogEvidenceRow, saveLogPreset
 } from '../src/shared/logWorkspace.js';
-import { PERFORMANCE_METRICS, makePerformancePath, performanceAxisMax, performanceSampleIndex } from '../src/shared/performanceChart.js';
+import { PERFORMANCE_METRICS, buildPerformanceTimeline, makePerformancePath, nearestPerformanceSample, performanceAxisMax, performanceLogPositions, performanceSampleIndex, performanceTimelinePositions } from '../src/shared/performanceChart.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -84,6 +84,41 @@ test('exact evidence navigation distinguishes reused capture data from hidden an
   assert.deepEqual(resolveLogEvidenceRow(frozen, { ...context, scopeKey: otherDocument }), { status: 'source-changed' });
   assert.deepEqual(resolveLogEvidenceRow({ ...frozen, evidenceScopeKey: '' }, context), { status: 'unsupported' });
   assert.deepEqual(resolveLogEvidenceRow({ ...frozen, source: 'diagnostic-snapshot' }, context), { status: 'unsupported' });
+});
+
+test('temporary evidence preserves the filter and only reads neighbors from the matching device/source', () => {
+  const scopeKey = logEvidenceScopeKey('document-a', 'source-a');
+  const entry = { id: 'a', raw: 'an exact line', source: 'realtime', deviceId: 'device-a' };
+  const neighbor = { ...entry, id: 'another' };
+  const otherDevice = { ...entry, id: 'other', deviceId: 'device-b' };
+  const otherSource = { ...entry, id: 'file', source: 'file' };
+  const { evidence: [evidence] } = captureLogEvidence([entry], [], entry.deviceId, scopeKey);
+  const doc = { scopeKey, deviceId: entry.deviceId, entries: [neighbor, otherDevice, entry, otherSource], filter: { text: 'keep' } };
+  const original = structuredClone(doc);
+  assert.deepEqual(nearbyHiddenLogEvidence(evidence, doc), { entry, context: [neighbor, entry] });
+  assert.deepEqual(doc, original);
+  assert.equal(nearbyHiddenLogEvidence(evidence, { ...doc, scopeKey: 'another source' }), null);
+  assert.equal(nearbyHiddenLogEvidence(evidence, { ...doc, entries: [entry, { ...entry }] }), null);
+});
+
+test('incident timeline keeps real spacing, deduplicates samples, and marks actual warnings and local deltas', () => {
+  const samples = buildPerformanceTimeline([
+    { timestamp: 30_500, cpu: 98, surfaceFps: 5 }, // gap too long for a new drop/spike
+    { timestamp: 1_000, cpu: 20, foregroundFps: 60, surfaceFps: 60 },
+    { timestamp: Number.NaN, cpu: 99 },
+    { timestamp: 2_000, cpu: 12, foregroundFps: 62 },
+    { timestamp: 2_000, cpu: 90, foregroundFps: 20, warnings: [{ label: 'CPU 90%' }] },
+  ]);
+  const positions = performanceTimelinePositions(samples);
+  assert.deepEqual(samples.map(sample => sample.timestamp), [1_000, 2_000, 30_500]);
+  assert.deepEqual(positions, [0, 1000 / 29500, 1]);
+  assert.equal(nearestPerformanceSample(.2, positions), 1);
+  assert.equal(nearestPerformanceSample(.9, positions), 2);
+  assert.deepEqual(samples[1].notices.map(item => item.kind), ['warning', 'cpu-spike', 'foregroundFps']);
+  assert.deepEqual(samples[2].notices, []);
+  assert.match(makePerformancePath(samples.map(sample => sample.cpu), 100, 100, 0, 100, positions), /L 3\.4 10\.0/);
+  assert.match(makePerformancePath(samples.map(sample => sample.cpu), 100, 100, 0, 100, positions, samples.map(sample => sample.timestamp)), /M 100\.0 2\.0$/);
+  assert.deepEqual(performanceLogPositions(samples, [1_000, 10_000, 10_000, 30_500, 30_501, '2000']), [0, 9000 / 29500, 1]);
 });
 
 test('same length log changes do not reuse a stale conversation fingerprint', () => {

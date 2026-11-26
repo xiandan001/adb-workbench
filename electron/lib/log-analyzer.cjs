@@ -15,6 +15,7 @@ const ctx = require('./app-context.cjs');
 const { runAdb, spawnAdb } = require('./adb-runtime.cjs');
 const { createLogCaptureBuffer } = require('./log-capture-buffer.cjs');
 const { parseLogLine } = require('./log-line-parser.cjs');
+const { normalizeLogIncidentRequest, readLogIncidentContext } = require('./log-incident-context.cjs');
 const { createLogFileImporter, idleImportState } = require('./log-file-importer.cjs');
 const { createBoundedLines } = require('./log-bounded-lines.cjs');
 const { createLogArchive, normalizeArchiveOptions, emptyArchiveState, ownedArchiveDirectory } = require('./log-archive.cjs');
@@ -580,6 +581,18 @@ function register(ipcMain) {
       import: fileImporter?.getState() || idleImportState(), entries: limited,
       archive: archiveSession?.info() || { ...archiveState }, capture: { ...captureOmitted },
       truncated: entries.length !== limited.length || (currentLogSource === 'realtime' ? realtimeSourceTruncated || realtimeLogStore.truncated || captureOmitted.omittedLines > 0 : fileLogTruncated) };
+  });
+
+  ipcMain.handle('log:incidentContext', (event, args) => {
+    const main = ctx.getMainWindow?.();
+    if (!main || main.isDestroyed() || event?.sender !== main.webContents || !event.senderFrame
+      || event.senderFrame !== main.webContents.mainFrame) return { ok: false };
+    const request = normalizeLogIncidentRequest(args);
+    if (!request) return { ok: false };
+    return readLogIncidentContext(request, {
+      entries: realtimeLogStore.toArray(), deviceId: realtimeLogDeviceId,
+      truncated: realtimeSourceTruncated || realtimeLogStore.truncated || captureOmitted.omittedLines > 0,
+    });
   });
 
   // 导出日志到文件

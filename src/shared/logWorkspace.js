@@ -63,6 +63,21 @@ export function resolveLogEvidenceRow(evidence, { scopeKey, filtered = [], windo
   return { status: windowRows.some(matches) || entries.some(matches) ? 'hidden' : 'evicted' };
 }
 
+export function nearbyHiddenLogEvidence(evidence, { scopeKey, entries = [], windowRows = [], deviceId = '' } = {}) {
+  if (!scopeKey || scopeKey !== evidence?.evidenceScopeKey || evidence.source === 'diagnostic-snapshot') return null;
+  const matches = row => sameLogEvidenceRow(row, evidence, deviceId);
+  for (const rows of [entries, windowRows]) {
+    const index = rows.findIndex(matches);
+    if (index < 0) continue;
+    if (rows.some((row, at) => at > index && matches(row))) return null;
+    const entry = rows[index];
+    const context = rows.slice(Math.max(0, index - 5), index + 6).filter(row =>
+      row.source === entry.source && (row.deviceId || deviceId) === (entry.deviceId || deviceId));
+    return { entry, context };
+  }
+  return null;
+}
+
 export function saveLogEvidenceInSession(evidence, rows, { documentId, sourceIdentity, deviceId } = {}) {
   const scope = logEvidenceScopeKey(documentId, sourceIdentity);
   const byId = new Map();

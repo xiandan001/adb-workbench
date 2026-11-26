@@ -11,6 +11,10 @@ import { encodeMessage } from '../src/shared/serialSettings.js';
 import { formatHex } from '../src/shared/serialFormat.js';
 import { trapAppMessageFocus } from '../src/shared/appMessageDialog.js';
 import * as protocolMemory from '../src/shared/rs232ProtocolMemory.js';
+import * as serialTransactions from '../src/shared/serialTransactions.js';
+import { formatAscii } from '../src/shared/serialFormat.js';
+import { SERIAL_VIEW_LIMIT } from '../src/shared/serialWorkspace.js';
+import { SUPPORTED_LOCALES } from '../src/shared/localeStore.js';
 import { completeManualTclHex, previewManualTclHex } from '../src/shared/tclFactoryProtocol.js';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -29,7 +33,8 @@ function environment({ manualFrames = false } = {}) {
   const hookEffect = kind => (callback, deps) => { const owner = active, index = owner.cursor++, slot = owner.slots[index] || (owner.slots[index] = {}); if (deps && same(slot.deps, deps)) return; slot.deps = deps; owner[kind].push(() => { slot.cleanup?.(); slot.cleanup = callback(); }); };
   const runtime = { console, URL, TextEncoder, Uint8Array, crypto: { randomUUID }, document, Fragment: 'fragment', Suspense: 'Suspense', SelectMenu: 'SelectMenu', lazy: () => ({ lazy: true }),
     jsx: (type, props, ...children) => ({ type, props: { ...props, children } }), tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), getLocale: () => locale, useLocale: () => locale,
-    trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex, completeManualTclHex, previewManualTclHex,
+    trapAppMessageFocus, confirmAppMessage: async options => { confirms.push(options); return choices.shift() ?? false; }, encodeMessage, formatHex, formatAscii, completeManualTclHex, previewManualTclHex,
+    SERIAL_VIEW_LIMIT, SUPPORTED_LOCALES, ...serialTransactions,
     isDarkTheme: value => value?.isDark === true,
     ...Object.fromEntries(Object.entries(protocol).filter(([, value]) => typeof value === 'function').map(([name, fn]) => [name, (...args) => fn(...args.map(arg => structuredClone(arg)))])),
     ...Object.fromEntries(Object.entries(draftHelpers).filter(([, value]) => typeof value === 'function')),
@@ -47,9 +52,9 @@ function environment({ manualFrames = false } = {}) {
     useCallback(callback, deps) { const owner = active, index = owner.cursor++, slot = owner.slots[index]; if (slot && same(slot.deps, deps)) return slot.value; owner.slots[index] = { deps, value: callback }; return callback; },
     useEffect: hookEffect('effects'), useLayoutEffect: hookEffect('layouts'),
   };
-  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Calculator', 'Code2', 'List', 'Pencil', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
+  for (const name of ['AlertTriangle', 'ArrowDownToLine', 'Calculator', 'Code2', 'Copy', 'List', 'Pause', 'Pencil', 'Play', 'Plug', 'Plus', 'RotateCcw', 'Search', 'Trash2', 'X', 'Save', 'ChevronDown', 'Clock', 'Send', 'Star']) runtime[name] = 'icon';
   const context = vm.createContext(runtime), components = {};
-  for (const name of ['Rs232ProtocolParametersEditor', 'Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'TclFrameDialog', 'SerialSendPanel', 'SerialSchemeControls']) {
+  for (const name of ['Rs232ProtocolParametersEditor', 'Rs232ProtocolCommandEditor', 'Rs232ProtocolPanel', 'TclFrameDialog', 'SerialSendPanel', 'SerialSchemeControls', 'SerialTransactionsView', 'SerialDataView']) {
     const source = fs.readFileSync(new URL('../src/components/' + name + '.jsx', import.meta.url), 'utf8').replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
     components[name] = vm.runInContext('(function(){' + transformSync(name + '.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx', pragmaFrag: 'Fragment' } }).code + ';return ' + name + ';})()', context); runtime[name] = components[name];
   }
@@ -72,6 +77,37 @@ function environment({ manualFrames = false } = {}) {
 }
 const editorNode = h => nodes(h.tree()).find(node => typeof node.type === 'function' && node.type.name === 'Rs232ProtocolCommandEditor');
 const command = (h, id) => nodes(h.tree()).find(node => node.type === 'button' && node.props.onClick && text(node).includes(protocol.getProtocolDisplayName(protocol.listProtocolCommands().find(item => item.id === id))));
+
+test('RS232 desk shows raw traffic alongside TCL replies and clicking a receipt locates its exact HEX row', async t => {
+  const e = environment(); t.after(e.dispose);
+  const entries = Array.from({ length: 35 }, (_, index) => {
+    const id = index + 1;
+    const hex = id === 3 ? 'ab050adf4e' : '02';
+    return { id, direction: 'RX', kind: 'frame', protocol: 'ab', time: 1700000000000, path: 'COM_TEST_ONLY', bytes: hex.length / 2, hex, text: 'decoded' };
+  });
+  const [ackRow] = entries.filter(entry => entry.id === 3);
+  let changes = 0;
+  const raw = e.mount('SerialDataView', { theme, receiveMode: 'text', following: true,
+    snapshot: { entries, rxBytes: 41, txBytes: 6, transactions: [{ id: 1, protocol: 'tcl', commandId: 'tcl-007',
+      status: 'accepted', txRecordId: 1, ackRecordId: 3, requestAt: 1700000000000 }] },
+    onFollowing(value) { if (!value) changes++; raw.setProps({ following: value }); },
+    onSave() { assert.fail('locating a record must not save or transmit'); },
+  });
+  await raw.drain();
+  assert.equal(find(raw, '协议应答台').props['aria-pressed'], true);
+  assert.ok(region(raw, '串口收发记录'));
+  assert.equal(nodes(raw.tree()).some(item => item.props?.['data-serial-entry-id'] === 3), false, 'old row is outside the initial viewport');
+  const reply = e.mount('SerialTransactionsView', nodes(raw.tree()).find(node => node.type?.name === 'SerialTransactionsView').props);
+  await reply.drain();
+  assert.match(text(reply.tree()), /设备已接收，等待结果/);
+  find(reply, '查看事务 1 的 ACK1 原文').props.onClick();
+  await raw.drain();
+  assert.equal(changes, 1);
+  const target = nodes(raw.tree()).find(item => item.props?.['data-serial-entry-id'] === 3);
+  assert.equal(target.props['aria-current'], 'true');
+  assert.match(text(target), new RegExp(formatHex(ackRow.hex), 'i'));
+  assert.match(text(raw.tree()), /已定位到原始记录 3（HEX）/);
+});
 
 test('actual protocol callbacks restore safe parameters in the same scheme only and never invoke onUse', async t => {
   const e = environment(); t.after(e.dispose); let sends = 0;

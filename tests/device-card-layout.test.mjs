@@ -254,7 +254,16 @@ test('real terminal layout transitions preserve draft, output, font size and a r
   find(tree, node => node.type === 'button' && text(node) === tr('更多工具')).props.onClick(); tree = draw();
   assert.ok(find(tree, node => node.props.label === tr('设备日志'))); assert.ok(find(tree, node => node.props.label === tr('巡检')));
   assert.ok(find(tree, node => node.type === 'button' && text(node).includes(tr('设备维护'))));
+  assert.equal(walk(tree, node => node.type === 'button' && text(node) === tr('固件刷机')).length, 0,
+    'device maintenance has no firmware shortcut');
   props.deviceCardDensity = 'full'; tree = draw();
   assert.equal(walk(tree, node => node.type === 'button' && text(node) === tr('更多工具')).length, 0);
   assert.ok(find(tree, node => node.props.label === tr('设备日志')));
+});
+
+test('the dedicated firmware page stays available after removing the device-card shortcut', () => {
+  const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  assert.match(app, /<FirmwareWorkspace theme=\{t\} active=\{activeTab === 'firmware'\} \/>/);
+  assert.match(app, /onClick=\{\(\) => openFirmware\(\)\}/);
+  assert.doesNotMatch(app, /onOpenFirmware=/);
 });

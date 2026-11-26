@@ -21,7 +21,7 @@ test('memory policy agrees across main and renderer and scopes safe values witho
   assert.equal(restored.selectedId, volume.id); assert.deepEqual(restored.values, { XX: 50 });
   assert.deepEqual(memory.restoreProtocolSelection(saved, { ...scope, schemeId: 'scheme-b' }, commands).values, {});
   assert.deepEqual(memory.restoreProtocolSelection(saved, { workspace: 'terminal', schemeId: 'scheme-a' }, commands).values, {});
-  assert.equal(memory.getRs232MemoryScope(saved, scope).viewMode, 'raw');
+  assert.equal(memory.getRs232MemoryScope(saved, scope).viewMode, 'desk');
   assert.ok(!JSON.stringify(saved).includes('send'));
 });
 

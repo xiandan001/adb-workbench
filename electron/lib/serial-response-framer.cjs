@@ -2,6 +2,7 @@ const { tr } = require('./localization.cjs');
 const AB_HEADER = 0xab;
 const XBH_HEADER = 0xfe;
 const XBH_SIGNATURE = [0x58, 0x42, 0x48, 0x43, 0x4d, 0x44];
+const TCL_EXTENDED_MAX = 16 * 1024;
 // CRC-16/CCITT: poly 0x1021, init 0xffff, non-reflected, no final XOR.
 const CRC_NIBBLES = [
   0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
@@ -18,13 +19,25 @@ function crcMatches(bytes, start, length) {
   return crc === bytes.readUInt16BE(checksum);
 }
 
-function candidateAt(bytes, start) {
+function candidateAt(bytes, start, tcl = true) {
   const header = bytes[start];
+  if (tcl && header === 0xaa) {
+    // The catalog documents one AA response (the NFC result). Do not frame ordinary AA requests as replies.
+    const prefix = [0x07, 0x98, 0x43];
+    if (prefix.some((byte, index) => bytes[start + 1 + index] !== undefined && bytes[start + 1 + index] !== byte)) return null;
+    return { protocol: 'tcl-nfc', length: 7 };
+  }
   if (header !== AB_HEADER && header !== XBH_HEADER) return null;
   const protocol = header === AB_HEADER ? 'ab' : 'xbh';
   const declared = bytes[start + 1];
   if (declared === undefined) return { protocol };
   if (declared < (protocol === 'ab' ? 5 : 8)) return null;
+  if (tcl && protocol === 'ab' && declared === 0xfe && bytes.length >= start + 4) {
+    const length = bytes.readUInt16BE(start + 2);
+    if (length >= 256 && length <= TCL_EXTENDED_MAX &&
+      (bytes[start + 4] === undefined || bytes[start + 4] === 0xed) &&
+      (bytes[start + 5] === undefined || bytes[start + 5] === 0x02)) return { protocol: 'tcl-extended', length };
+  }
   if (protocol === 'xbh') {
     // Validate every available signature byte before waiting on a long candidate.
     for (let index = 0; index < XBH_SIGNATURE.length && start + index + 2 < bytes.length; index++) {
@@ -35,13 +48,13 @@ function candidateAt(bytes, start) {
 }
 
 function validEnd(bytes, start, length, protocol) {
-  return protocol === 'ab' ? crcMatches(bytes, start, length) : bytes[start + length - 1] === 0xcf;
+  return protocol === 'xbh' ? bytes[start + length - 1] === 0xcf : crcMatches(bytes, start, length);
 }
 
 // Classify one retained network record without splitting, joining, or copying it.
 function wholeSerialResponseProtocol(bytes) {
   if (bytes.length < 5 || bytes.length > 258) return undefined;
-  const frame = candidateAt(bytes, 0);
+  const frame = candidateAt(bytes, 0, false);
   return frame?.length === bytes.length && validEnd(bytes, 0, frame.length, frame.protocol) ? frame.protocol : undefined;
 }
 
@@ -78,4 +91,4 @@ function splitSerialResponses(bytes, { final = false } = {}) {
   return segments;
 }
 
-module.exports = { splitSerialResponses, wholeSerialResponseProtocol };
+module.exports = { splitSerialResponses, wholeSerialResponseProtocol, crcMatches };

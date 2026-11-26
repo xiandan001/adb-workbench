@@ -3,7 +3,7 @@ import { tr, useLocale, getLocale } from '../shared/i18n';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useDeferredValue, useRef, memo } from 'react';
 import { Copy, Terminal, Radio, X, Sparkles, Loader2, Maximize2, Minimize2, FileDown, Brain, ChevronDown, BookmarkPlus } from "lucide-react";
 import { isDarkTheme } from '../shared/theme';
-import { fingerprintLogLines, logEvidenceScopeKey, normalizeLogBuffers, normalizeLogFilter, resolveLogEvidenceRow, restoreLogEvidenceFromSession, sameLogEvidenceRow } from '../shared/logWorkspace';
+import { fingerprintLogLines, logEvidenceScopeKey, nearbyHiddenLogEvidence, normalizeLogBuffers, normalizeLogFilter, resolveLogEvidenceRow, restoreLogEvidenceFromSession, sameLogEvidenceRow } from '../shared/logWorkspace';
 import LogFilterPresets from './LogFilterPresets';
 import LogSessionManager from './LogSessionManager';
 import LogMarkers from './LogMarkers';
@@ -617,7 +617,12 @@ export default function LogAnalyzer({ theme }) {
     const match = resolveLogEvidenceRow(entry, { ...doc, scopeKey });
     if (match.status === 'unsupported') return tr("此证据没有可定位的原始记录。");
     if (match.status === 'source-changed') return tr("日志来源已变化，无法在当前列表中定位。");
-    if (match.status === 'hidden') return tr("原始日志被当前筛选或时间范围隐藏，请调整后重试。");
+    if (match.status === 'hidden') {
+      const neighborhood = nearbyHiddenLogEvidence(entry, { ...doc, scopeKey });
+      if (!neighborhood) return tr("此证据没有可定位的原始记录。");
+      setDetailEntry({ ...neighborhood, documentId: doc.documentId, sourceIdentity: doc.sourceIdentity, temporary: true });
+      return true;
+    }
     if (match.status === 'evicted') return tr("原始日志已不在当前保留范围内。");
     if (match.status !== 'visible' || !scrollToLogRow(match.index)) return tr("日志视图尚未就绪，请稍后再试。");
     if (runningRef.current) setPaused(true);
@@ -2092,7 +2097,10 @@ url = "http://127.0.0.1:${mcpPort}/mcp"`}
       )}
 
       {/* 日志诊断规则库弹窗 */}
-      {detailEntry && <LogEntryDetail key={detailEntry.documentId + ':' + detailEntry.entry.id} entry={detailEntry.entry} context={detailEntry.context} scopeLabel={detailEntry.label} theme={logTheme}
+      {detailEntry?.temporary && detailEntry.documentId === documentId && detailEntry.sourceIdentity === sourceIdentity && <LogEntryDetail
+        key={detailEntry.documentId + ':temporary:' + detailEntry.entry.id} entry={detailEntry.entry} context={detailEntry.context} theme={logTheme}
+        temporary onClose={() => setDetailEntry(null)} />}
+      {detailEntry && !detailEntry.temporary && <LogEntryDetail key={detailEntry.documentId + ':' + detailEntry.entry.id} entry={detailEntry.entry} context={detailEntry.context} scopeLabel={detailEntry.label} theme={logTheme}
         wrap={viewPreferences.view.detailWrap} onWrapChange={value => viewPreferences.setField('detailWrap', value)}
         onClose={() => setDetailEntry(null)} onFilter={rowFilter} onTimeWindow={aroundEntry} busy={analysisBlocked || aiAnalyzing || aiHistoryReadOnly}
         onAnalyze={rows => { const expected = detailEntry.documentId; setDetailEntry(null); void onAiAnalyze(tr('请核对所选上下文中的日志事实与待验证线索。'), rows, expected); }}

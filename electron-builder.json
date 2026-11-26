@@ -85,6 +85,7 @@
     "electron/locales/*.json",
     "electron/lib/performance-worker.cjs",
     "electron/lib/task-center-worker.cjs",
+    "electron/lib/task-step-evidence.cjs",
     "electron/lib/task-run-manifest.cjs",
     "electron/lib/task-rerun.cjs",
     "electron/lib/task-platform.cjs",

@@ -7,6 +7,8 @@ import { createPortal, flushSync } from 'react-dom';
 import { Activity, AlertTriangle, Check, ChevronDown, Cpu, Database, Download, FileText, FolderOpen, Gauge, Lock, Play, RefreshCw, Save, Smartphone, Square, Thermometer, Zap } from 'lucide-react';
 import { isDarkTheme } from '../shared/theme';
 import PerformanceTrendChart from './PerformanceTrendChart';
+import PerformanceIncidentEvidence from './PerformanceIncidentEvidence';
+import { buildPerformanceTimeline } from '../shared/performanceChart';
 
 const INTERVAL_OPTIONS = () => ([
   { value: 1000, label: tr("1 秒"), description: tr("高频采样") },
@@ -31,6 +33,8 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
   const [intervalMs, setIntervalMs] = useState(3000);
   const [storedSnapshot, setSnapshot] = useState(null);
   const [storedHistory, setHistory] = useState([]);
+  const [incident, setIncident] = useState(null);
+  const selectedIncident = incident?.deviceId === selectedDeviceId ? incident : null;
   const snapshot = dataDeviceId === selectedDeviceId ? storedSnapshot : null;
   const history = useMemo(() => { void locale; return dataDeviceId === selectedDeviceId ? storedHistory : []; }, [dataDeviceId, selectedDeviceId, storedHistory, locale]);
   const [thresholds, setThresholds] = useState({ cpu: 85, memory: 85, batteryTemp: 45, dataUsed: 90 });
@@ -72,15 +76,26 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
     ...option,
     description: option.value < 5000 && !isVip ? tr("{0} · 会员", { 0: option.description }) : option.description
   })); }, [isVip, locale]);
-  const chartPoints = useMemo(() => { void locale; return history.slice(-80).map(item => ({
+  const chartPoints = useMemo(() => { void locale; return buildPerformanceTimeline(history.map(item => ({
     timestamp: item.timestamp,
     cpu: item.cpu?.usage,
     memory: item.memory?.usage,
     data: getDataDisk(item)?.usage,
     temp: getDeviceTemperature(item),
     foregroundFps: item.fps?.foreground?.fps,
-    surfaceFps: item.fps?.surfaceFlinger?.fps
-  })); }, [history, locale]);
+    surfaceFps: item.fps?.surfaceFlinger?.fps,
+    warnings: item.warnings
+  }))); }, [history, locale]);
+  const selectIncident = point => {
+    if (point && selectedDeviceId && selectedDeviceIdRef.current === selectedDeviceId) {
+      setIncident(previous => previous?.deviceId === selectedDeviceId && previous.point.timestamp === point.timestamp
+        ? previous : { deviceId: selectedDeviceId, point });
+    }
+  };
+  const updateIncidentLogTimes = useCallback((deviceId, timestamp, logTimes) => {
+    setIncident(previous => previous?.deviceId === deviceId && previous.point.timestamp === timestamp
+      ? { ...previous, logTimes } : previous);
+  }, []);
   const dataDisk = getDataDisk(snapshot);
   const deviceTemperature = getDeviceTemperature(snapshot);
   // 当前 FPS 指标快照。
@@ -471,7 +486,10 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             <div className={`p-4 rounded-xl border flex items-start gap-3 ${isDark ? 'bg-red-500/10 border-red-500/20 text-red-300' : 'bg-red-50 border-red-200 text-red-600'}`}>
               <AlertTriangle size={18} className="mt-0.5" />
               <div className="flex flex-wrap gap-2 text-sm">
-                {snapshot.warnings.map(item => <span key={`${item.type}-${item.label}`} className="px-2 py-1 rounded bg-red-500/10">{item.label}</span>)}
+                {snapshot.warnings.map(item => <button type="button" key={`${item.type}-${item.label}`}
+                  disabled={!chartPoints.some(point => point.timestamp === snapshot.timestamp)}
+                  onClick={() => selectIncident(chartPoints.find(point => point.timestamp === snapshot.timestamp))}
+                  className="rounded border border-red-500/20 bg-red-500/10 px-2 py-1 hover:border-red-500/45 disabled:opacity-50">{item.label}</button>)}
               </div>
             </div>
           )}
@@ -496,15 +514,19 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
             </div>
           )}
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(250px,340px)]">
+            <div className={`min-w-0 rounded-xl border p-5 shadow-sm ${panelClass}`}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("趋势")}</h3>
+                <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("异常时间线")}</h3>
               </div>
-              <PerformanceTrendChart points={chartPoints} isDark={isDark} />
+              <PerformanceTrendChart key={selectedDeviceId} points={chartPoints} isDark={isDark}
+                selectedTimestamp={selectedIncident?.point.timestamp} logTimes={selectedIncident?.logTimes}
+                onSelectIncident={selectIncident} />
             </div>
 
-            <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
+            {selectedIncident ? <PerformanceIncidentEvidence key={`${selectedIncident.deviceId}:${selectedIncident.point.timestamp}`}
+              incident={selectedIncident} deviceName={selectedDevice?.name} onClose={() => setIncident(null)}
+              onLogTimes={updateIncidentLogTimes} theme={t} panelClass={panelClass} /> : <div className={`p-5 rounded-xl border shadow-sm ${panelClass}`}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`text-base font-semibold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{tr("阈值")}</h3>
                 {!isVip && <span className="text-xs text-amber-400 flex items-center gap-1"><Lock size={12} />{tr("会员")}</span>}
@@ -517,7 +539,7 @@ function PerformanceDashboard({ devices, theme, vipStatus, performancePath, show
                 <button onClick={saveThresholds} disabled={savingThresholds} className="w-full px-4 py-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2">
                   {savingThresholds ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}{tr("保存阈值")}</button>
               </div>
-            </div>
+            </div>}
           </div>
 
           <div className={`rounded-xl border shadow-sm overflow-hidden ${panelClass}`}>
