@@ -38,7 +38,7 @@ function sourceHook(file, name) {
     },
     CallExpression({ node }) {
       if (name === 'initialTargets' && node.callee.name === 'useEffect'
-        && source.slice(node.arguments[1]?.start, node.arguments[1]?.end) === '[activeDeviceId, onlineDevices, loading]') selected = node;
+        && /defaultTargetChosen\.current[\s\S]*setSelectedDeviceIds\(/.test(source.slice(node.arguments[0]?.start, node.arguments[0]?.end))) selected = node;
     },
   });
   assert.ok(selected, `${file}: actual ${name} hook must exist`);
@@ -79,9 +79,11 @@ test('changing language preserves the online-device memo and does not reselect i
   const online = memoHarness(hook, scope);
   const first = online.render();
   let selected = []; let selectionWrites = 0;
-  const selectionScope = { activeDeviceId: 'A', loading: false, onlineDevices: first,
+  const selectionScope = { activeDeviceId: 'A', loading: false, onlineDevices: first, defaultTargetChosen: { current: false },
     setSelectedDeviceIds(update) { selected = update(selected); selectionWrites++; } };
-  const selection = memoHarness(sourceHook('TaskCenter.jsx', 'initialTargets'), selectionScope);
+  const initialTargets = sourceHook('TaskCenter.jsx', 'initialTargets');
+  assert.deepEqual(initialTargets.dependencyNames, ['activeDeviceId', 'loading']);
+  const selection = memoHarness(initialTargets, selectionScope);
   selection.render(); assert.deepEqual([...selected], ['A']);
   selected = []; // The user explicitly clears all run targets after initial selection.
 
@@ -93,7 +95,10 @@ test('changing language preserves the online-device memo and does not reselect i
 
   // A real device-prop change still invalidates the memo, unlike a locale change.
   scope.devices = [{ id: 'C', status: 'device' }];
-  assert.notStrictEqual(online.render(), first);
+  selectionScope.onlineDevices = online.render(); selectionScope.activeDeviceId = 'C'; selection.render();
+  assert.notStrictEqual(selectionScope.onlineDevices, first);
+  assert.deepEqual(selected, []);
+  assert.equal(selectionWrites, 1);
   assert.deepEqual([...online.render()].map(device => device.id), ['C']);
   assert.equal(online.executions(), 2);
 });

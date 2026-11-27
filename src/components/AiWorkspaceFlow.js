@@ -26,23 +26,70 @@ export function collectedPreviewCanReview(current, token, previewId) {
     && current.preview?.id === previewId && workspacePreviewFresh(current.preview));
 }
 
-export function workspacePrimaryBlock(current, { devices = [], sources = [], loading, entitled, reportBusy } = {}) {
-  if (current.busy || reportBusy) return 'busy';
-  if (loading) return 'loading';
-  if (!current.question.trim()) return 'question';
+const isApplicationCheck = id => id.startsWith('app_');
+
+export function workspaceApplicationChecks(checks) {
+  return checks.filter(isApplicationCheck);
+}
+
+export function clearWorkspaceApplicationSelection(current) {
+  return {
+    diagnostic: { ...current.diagnostic, packageName: '', symptom: '' },
+    checks: current.checks.filter(id => !isApplicationCheck(id)),
+    plan: null, planUsage: null,
+  };
+}
+
+// Same precedence as generateTask in the main process; the renderer only describes and gates the target.
+export function workspaceTaskTarget(current) {
+  const tokens = current.targetSelection.tokens;
+  const controls = tokens.length && (current.targets.find(target => tokens.includes(target.token))?.deviceId || current.handoff?.deviceId);
+  if (controls) return { deviceId: controls, source: 'controls' };
+  if (current.deviceId) return { deviceId: current.deviceId, source: 'selected' };
+  if (current.contextRef && current.context?.deviceId) return { deviceId: current.context.deviceId, source: 'report' };
+  return { deviceId: '', source: '' };
+}
+
+export function workspaceHasAlternateEvidence(current, availableIds) {
+  return Boolean(current.sourceIds.some(id => availableIds.has(id)) || current.contextRef || current.handoffId || current.basketItems?.length);
+}
+
+export function workspaceReadiness(current, { devices = [], sources = [], loading, entitled, reportBusy } = {}) {
+  const missing = [];
+  if (current.busy || reportBusy) return { missing, status: 'busy' };
+  if (loading) return { missing, status: 'loading' };
+  if (!current.question.trim()) missing.push('question');
   if (current.mode === 'task') {
-    if (current.deviceId.startsWith('hdc:') && !workspaceDeviceOnline(devices, current.deviceId)) return 'device';
-    return entitled ? '' : 'membership';
+    const target = workspaceTaskTarget(current);
+    const conflict = target.source === 'controls' && current.deviceId && current.deviceId !== target.deviceId;
+    if (conflict || (target.deviceId.startsWith('hdc:') && !workspaceDeviceOnline(devices, target.deviceId))) missing.push('device');
+    return { missing, status: entitled ? '' : 'membership' };
   }
   if (current.mode === 'diagnose') {
-    if (!workspaceDeviceOnline(devices, current.deviceId)) return 'device';
-    if (!current.checks.length) return 'checks';
-    if (current.checks.some(id => id.startsWith('app_')) && !current.diagnostic.packageName.trim()) return 'package';
+    if (!workspaceDeviceOnline(devices, current.deviceId)) missing.push('device');
+    if (!current.checks.length) missing.push('checks');
+    if (workspaceApplicationChecks(current.checks).length && !current.diagnostic.packageName.trim()) missing.push('package');
   } else {
-    if (current.sourceIds.some(id => !sources.some(source => source.id === id))) return 'stale';
-    if (!current.sourceIds.length && !current.text.trim() && !current.contextRef && !current.handoffId && !current.basketItems?.length) return 'source';
+    const availableIds = new Set(sources.map(source => source.id));
+    if (current.sourceIds.some(id => !availableIds.has(id))) missing.push('stale');
+    if (!workspaceHasAlternateEvidence(current, availableIds) && !current.text.trim()) missing.push('source');
   }
-  return '';
+  return { missing, status: '' };
+}
+
+export function workspacePrimaryBlock(current, options) {
+  const { missing, status } = workspaceReadiness(current, options);
+  return missing[0] || status;
+}
+
+export function focusWorkspaceRequiredField(root, key) {
+  const field = root?.querySelector(`#ai-workspace-required-${key}`);
+  if (!field) return;
+  for (let section = field.closest('details:not([open])'); section; section = field.closest('details:not([open])')) section.open = true;
+  const control = field.querySelector('[data-ai-required-input]')
+    || field.querySelector('textarea:not([disabled]), input:not([disabled]), button:not([disabled])') || field;
+  control.scrollIntoView({ block: 'center' });
+  control.focus({ preventScroll: true });
 }
 
 function reportDevice(report) {
@@ -59,7 +106,7 @@ export function prepareWorkspaceVerification(current, view, card, availableCheck
   if (!view?.reportRef || !Array.isArray(ids) || !ids.length || ids.length > 3 || new Set(ids).size !== ids.length
     || ids.some(id => !CHECK_IDS.includes(id) || !availableChecks.some(check => check.id === id))) return { state: current, reason: 'checks' };
   const report = view.report, diagnostic = report.preview.diagnostic || { packageName: '', symptom: '' };
-  if (ids.some(id => id.startsWith('app_')) && !diagnostic.packageName) return { state: current, reason: 'package' };
+  if (workspaceApplicationChecks(ids).length && !diagnostic.packageName) return { state: current, reason: 'package' };
   const state = editWorkspaceCase(current, { question: report.preview.question, deviceId: reportDevice(report),
     checks: [...ids], sourceIds: [], text: '', handoffId: '', handoff: null, targets: [], targetSelection: { tokens: [] }, findingIndex: null,
     contextRef: { ...view.reportRef }, context: { question: report.preview.question, summary: report.result.summary,

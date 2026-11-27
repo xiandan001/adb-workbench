@@ -527,8 +527,9 @@ function QualityCenter({ devices, deviceLoading, onRefreshDevices, theme, showTo
               <div className="grid lg:grid-cols-2 gap-3">
                 {(suiteId === 'install-launch' || suiteId === 'launch-stability') && (
                   <div className="space-y-1">
+                    <p className={`text-xs ${muted}`}>{tr('应用包名（必填）')}</p>
                     <ApplicationPicker device={devices.find(item => item.id === selectedDeviceId) || { id: selectedDeviceId, status: 'offline', generation: 0 }} value={packageName}
-                      onChange={value => { markApplicationEdited(); setPackageName(value); }} theme={theme} disabled={Boolean(busy)} label={tr('应用包名')} />
+                      onChange={value => { markApplicationEdited(); setPackageName(value); }} theme={theme} disabled={Boolean(busy)} label={tr('应用包名（必填）')} allowEmpty={false} />
                     <FieldError message={acceptanceErrors.packageName} />
                   </div>
                 )}

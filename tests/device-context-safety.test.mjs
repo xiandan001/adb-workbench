@@ -18,7 +18,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 function recorderContext(api) {
   const state = { recorder: { deviceId: 'A', nodes: [], selectedNodeIndex: '', recording: false }, steps: [], refreshes: [] };
   const context = {
-    recorder: state.recorder, onlineDevices: [{ id: 'A' }, { id: 'B' }], workspaceView: 'recording',
+    recorder: state.recorder, onlineDevices: [{ id: 'A' }, { id: 'B' }], supplementalRecording: false,
     draft: { steps: [] }, taskPlatformMismatch, taskPlatformForDevice,
     recorderMountedRef: { current: true }, recorderActionInFlightRef: { current: false },
     recorderContextRef: { current: { deviceId: 'A', generation: 1 } },

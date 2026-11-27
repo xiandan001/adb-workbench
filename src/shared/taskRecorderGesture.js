@@ -58,3 +58,31 @@ export function classifyRecorderGesture({ points, elapsedMs, width, height, tapO
       points: curve ? sample(points, replayPointLimit) : [start, end], curve },
   };
 }
+
+const hasCoordinate = value => value !== '' && value != null && Number.isFinite(Number(value));
+
+export function decodeRecordedSwipePath(value) {
+  let raw = value;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch { return []; }
+  }
+  if (!Array.isArray(raw) || raw.length < 2) return [];
+  const points = raw.map(point => Array.isArray(point) ? { x: point[0], y: point[1] } : point);
+  return points.every(point => hasCoordinate(point?.x) && hasCoordinate(point?.y)) ? points.map(({ x, y }) => ({ x: Number(x), y: Number(y) })) : [];
+}
+
+export function mergeRecordedStepPatch(step, patch) {
+  const next = { ...step, ...patch };
+  if (step.type !== 'swipe' || next.type !== 'swipe') return next;
+  if (Object.hasOwn(patch, 'points')) {
+    const points = decodeRecordedSwipePath(patch.points);
+    return points.length ? { ...next, x: points[0].x, y: points[0].y, endX: points.at(-1).x, endY: points.at(-1).y } : next;
+  }
+  const fields = [['x', 'x', 0], ['y', 'y', 0], ['endX', 'x', -1], ['endY', 'y', -1]];
+  if (!fields.some(([key]) => Object.hasOwn(patch, key))) return next;
+  const path = typeof step.points === 'string' ? decodeRecordedSwipePath(step.points) : step.points;
+  if (!Array.isArray(path) || path.length < 2) return next;
+  const points = path.map(point => Array.isArray(point) ? { x: point[0], y: point[1] } : { ...point });
+  for (const [key, coordinate, index] of fields) if (Object.hasOwn(patch, key)) points.at(index)[coordinate] = patch[key];
+  return { ...next, points };
+}

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { isConfirmSuppressed, rememberConfirmSuppressed } from '../shared/confirmMemory';
 import { isDarkTheme } from '../shared/theme';
 import { draftFingerprint, readTaskDraft, writeTaskDraft, resolveScriptAfterSave } from '../shared/taskCenterWorkspace';
-import { appendRecorderGesturePoint, classifyRecorderGesture, recorderPreviewPoint } from '../shared/taskRecorderGesture.js';
+import { appendRecorderGesturePoint, classifyRecorderGesture, decodeRecordedSwipePath, mergeRecordedStepPatch, recorderPreviewPoint } from '../shared/taskRecorderGesture.js';
 import { taskPlatformForDevice, taskPlatformMismatch, adaptPristineBuiltin, createHarmonyTaskTemplate } from '../shared/taskPlatform';
 import {
   advanceOnboardingStage,
@@ -17,14 +17,16 @@ import {
   ONBOARDING_STAGES
 } from '../shared/taskCenterOnboarding';
 import TaskCenterOnboarding from './TaskCenterOnboarding';
-import TaskCenterQuickStart from './TaskCenterQuickStart';
+import TaskCenterQuickStart, { targetNames } from './TaskCenterQuickStart';
 import TaskSavedRunDialog from './TaskSavedRunDialog';
 import { prepareSavedTaskRun } from '../shared/taskQuickRun';
+import { getTaskReadiness, getTaskRequiredFields, TASK_PACKAGE_PLACEHOLDER } from '../shared/taskLibrary.js';
 import TaskCenterRecordingWorkspace from './TaskCenterRecordingWorkspace';
 import TaskCenterResultDrawer from './TaskCenterResultDrawer';
 import TaskAiTargets from './TaskAiTargets';
 import TaskCenterDraftDialog from './TaskCenterDraftDialog';
 import TaskRunComparisonDialog from './TaskRunComparisonDialog';
+import SelectMenu from './SelectMenu';
 import {
   AlertCircle,
   ArrowLeft,
@@ -46,6 +48,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Settings2,
   Smartphone,
   Square,
   Terminal,
@@ -154,7 +157,6 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const [savedFingerprint, setSavedFingerprint] = useState('');
   const [draftStorageError, setDraftStorageError] = useState('');
   const [draftStorageBlocked, setDraftStorageBlocked] = useState(false);
-  const [draftRecovered, setDraftRecovered] = useState(false);
   const [pendingDraftAction, setPendingDraftAction] = useState(null);
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [starting, setStarting] = useState(false);
@@ -170,6 +172,14 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const [recorder, setRecorder] = useState(createRecorderState());
   const [editorMode, setEditorMode] = useState('simple');
   const [workspaceView, setWorkspaceView] = useState('home');
+  const [configurationFocus, setConfigurationFocus] = useState(null);
+  const [selectedRecordingStepId, setSelectedRecordingStepId] = useState('');
+  const [supplementalRecording, setSupplementalRecording] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const defaultTargetChosen = useRef(false);
+  const lastDraftView = useRef('');
+  const editorRef = useRef(null);
+  const recordingRunInFlightRef = useRef(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingLoaded, setOnboardingLoaded] = useState(false);
   const [onboardingLoadError, setOnboardingLoadError] = useState('');
@@ -238,10 +248,14 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         setDraftStorageError(restored.error);
         setDraftStorageBlocked(Boolean(restored.error));
         if (restored.workspace) {
-          setDraftRecovered(true);
-          setWorkspaceView(['home', 'recording', 'editor'].includes(restored.workspace.workspaceView) ? restored.workspace.workspaceView : 'home');
+          const view = restored.workspace.workspaceView;
+          if (view === 'editor' || view === 'recording') lastDraftView.current = view;
+          if (view === 'recording') setSupplementalRecording(first.mode === 'stress' || nextScripts.some(script => script.id === first.id));
           setEditorMode(restored.workspace.editorMode === 'advanced' ? 'advanced' : 'simple');
-          setSelectedDeviceIds(Array.isArray(restored.workspace.selectedDeviceIds) ? restored.workspace.selectedDeviceIds : []);
+          if (Array.isArray(restored.workspace.selectedDeviceIds)) {
+            defaultTargetChosen.current = true;
+            setSelectedDeviceIds(restored.workspace.selectedDeviceIds);
+          }
         }
         const incoming = nextScripts.find(script => script.id === initialScriptIdRef.current);
         if (incoming) {
@@ -279,14 +293,27 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   }, []);
 
   useEffect(() => {
-    if (loading) return;
-    setSelectedDeviceIds(prev => prev.length ? prev : [activeDeviceId || onlineDevices[0]?.id].filter(Boolean));
-  }, [activeDeviceId, onlineDevices, loading]);
+    if (loading || !activeDeviceId || defaultTargetChosen.current) return;
+    defaultTargetChosen.current = true;
+    setSelectedDeviceIds(prev => prev.length ? prev : [activeDeviceId]);
+  }, [activeDeviceId, loading]);
+
+  useEffect(() => {
+    if (workspaceView === 'editor' || workspaceView === 'recording') lastDraftView.current = workspaceView;
+  }, [workspaceView]);
+
+  useLayoutEffect(() => {
+    if (!configurationFocus || workspaceView !== 'editor') return;
+    const target = editorRef.current?.querySelector(`[data-task-config="${configurationFocus.key}"]`);
+    if (target?.tagName === 'SUMMARY') target.parentElement.open = true;
+    target?.scrollIntoView({ block: 'nearest' });
+    target?.focus({ preventScroll: true });
+  }, [configurationFocus, workspaceView]);
 
   useEffect(() => {
     if (loading || draftStorageBlocked) return;
     setDraftStorageError(writeTaskDraft({
-      draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds
+      draft, savedFingerprint, workspaceView: workspaceView === 'runs' || workspaceView === 'home' ? lastDraftView.current || 'home' : workspaceView, editorMode, selectedDeviceIds
     }));
   }, [draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds, loading, draftStorageBlocked]);
 
@@ -325,6 +352,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
         }
         setActiveTasks(response.activeTasks || []); setHistory(response.history || []);
       }
+      setWorkspaceView('runs');
       setSelectedTaskId(incomingTaskId);
       onTaskRequestHandled?.({ id: incomingTaskId, requestId: incomingTaskRequestId });
     }).catch(error => { if (recorderMountedRef.current && incomingTaskRef.current === requestKey) showToast?.(error.message); });
@@ -500,12 +528,13 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     else action();
   };
 
-  const selectScript = (script) => {
+  const selectScript = (script, onSelected) => {
     replaceDraft((savedScript) => {
       const next = resolveScriptAfterSave(script, savedScript);
       setSelectedScriptId(next.id);
       setDraft(cloneScript(next));
       setSavedFingerprint(draftFingerprint(next));
+      onSelected?.(next);
     });
   };
 
@@ -516,6 +545,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setDraft(next);
       setSavedFingerprint(draftFingerprint(next));
       setEditorMode('simple');
+      setWorkspaceView('editor');
+      setConfigurationFocus({ key: 'targets' });
     });
   };
 
@@ -537,18 +568,25 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       if (templateId === 'crash-capture') showToast?.(tr("已创建崩溃复现采集模板，请填写目标应用包名"));
       if (templateId === 'smoke') showToast?.(tr("已创建基础冒烟检查模板，可直接选择设备运行"));
       if (templateId === 'performance-watch') showToast?.(tr("已创建性能观察模板，请填写目标应用包名"));
-      afterApply?.();
+      if (afterApply) afterApply();
+      else {
+        setWorkspaceView('editor');
+        setConfigurationFocus({ key: getTaskReadiness(next, selectedDeviceIds, devices).issue?.key || 'targets' });
+      }
     });
   };
 
-  const openScriptEditor = (script) => {
-    selectScript(script);
+  const openScriptEditor = (script, issue) => selectScript(script, next => {
     setEditorMode('simple');
     setWorkspaceView('editor');
-  };
+    const latest = issue && getTaskReadiness(next, selectedDeviceIds, devices).issue;
+    setConfigurationFocus(latest ? { key: latest.key } : null);
+  });
 
   const previewSavedRun = script => {
     if (runInFlightRef.current) return;
+    const readiness = getTaskReadiness(script, selectedDeviceIds, devices);
+    if (!readiness.ready) { openScriptEditor(script, readiness.issue); return; }
     const targets = [...selectedDeviceIds];
     const adapted = targets.length && targets.every(id => taskPlatformForDevice(id) === 'harmony') ? adaptPristineBuiltin(script, targets[0]) : null;
     setSavedRun({ script: cloneScript(adapted || script), deviceIds: targets, error: '' });
@@ -557,6 +595,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const startRecording = () => {
     applyQuickTemplate('record', () => {
       setRecordingTaskId('');
+      setSelectedRecordingStepId('');
+      setSupplementalRecording(false);
       if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY) {
         setSelectedDeviceIds([]);
         setRecorder(createRecorderState());
@@ -630,6 +670,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setDraft(cloneScript(res.script));
       setSavedFingerprint(draftFingerprint(res.script));
       setWorkspaceView('editor');
+      setConfigurationFocus({ key: getTaskReadiness(res.script, selectedDeviceIds, devices).issue?.key || 'targets' });
       showToast?.(tr("脚本已导入"));
       return true;
     }
@@ -714,7 +755,11 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setStarting(false);
     }
   };
-  const runScript = () => executeRun(draft, selectedDeviceIds);
+  const runScript = () => {
+    const readiness = getTaskReadiness(draft, selectedDeviceIds, devices);
+    if (!readiness.ready) { setConfigurationFocus({ key: readiness.issue.key }); return; }
+    executeRun(draft, selectedDeviceIds);
+  };
   const confirmSavedRun = async () => {
     if (!savedRun) return;
     const request = savedRun;
@@ -805,13 +850,12 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     }, RECORDER_BACKGROUND_REFRESH_DELAY_MS);
   };
 
-  const appendRecordedStep = (step, mode = 'stress', platform = 'android') => {
-    setDraft(prev => ({
+  const appendRecordedStep = (step, platform, draftId) => {
+    setDraft(prev => prev.id === draftId ? ({
       ...prev,
-      targetPlatform: platform === 'harmony' ? 'harmony' : undefined,
-      mode,
+      targetPlatform: prev.steps.length || supplementalRecording ? prev.targetPlatform : platform === 'harmony' ? 'harmony' : undefined,
       steps: [...(prev.steps || []), { ...step, id: `step-${Date.now()}-${Math.random().toString(16).slice(2)}` }]
-    }));
+    }) : prev);
   };
 
   const recordAction = async (action, extra = {}, options = {}) => {
@@ -823,8 +867,12 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       showToast?.(tr("录制设备已离线，请重新连接或主动选择另一台设备"));
       return null;
     }
-    if (draft.steps.length && taskPlatformMismatch(draft, [recorder.deviceId])) {
+    if ((draft.steps.length || supplementalRecording) && taskPlatformMismatch(draft, [recorder.deviceId])) {
       showToast?.(tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。'));
+      return null;
+    }
+    if (draft.aiTargetDeviceId && draft.aiTargetDeviceId !== recorder.deviceId) {
+      showToast?.(tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: draft.aiTargetDeviceId }));
       return null;
     }
     if (recorderActionInFlightRef.current || recorder.loading || recorder.recording || recorder.backgroundLoading) return null;
@@ -847,8 +895,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       });
       if (!isCurrent()) return null;
       if (res?.ok && res.step) {
-        const recordingMode = workspaceView === 'recording' ? 'replay' : 'stress';
-        appendRecordedStep(res.step, recordingMode, taskPlatformForDevice(deviceId));
+        appendRecordedStep(res.step, taskPlatformForDevice(deviceId), draft.id);
         recordedStep = res.step;
         if (RECORD_ACTIONS_REFRESH_SNAPSHOT.has(action) && !options.skipRefresh) {
           shouldRefreshSnapshot = true;
@@ -872,8 +919,11 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const changeRecordingDevice = (patch) => {
     updateRecorder(patch);
     if (!Object.prototype.hasOwnProperty.call(patch, 'deviceId')) return;
-    if (patch.deviceId) setDraft(prev => prev.steps.length ? prev : { ...prev, targetPlatform: taskPlatformForDevice(patch.deviceId) === 'harmony' ? 'harmony' : undefined });
-    setSelectedDeviceIds(patch.deviceId ? [patch.deviceId] : []);
+    setSelectedRecordingStepId('');
+    if (!supplementalRecording) {
+      if (patch.deviceId) setDraft(prev => prev.steps.length ? prev : { ...prev, targetPlatform: taskPlatformForDevice(patch.deviceId) === 'harmony' ? 'harmony' : undefined });
+      setSelectedDeviceIds(patch.deviceId ? [patch.deviceId] : []);
+    }
     setRecordingTaskId('');
     if (onboardingOpen && onboardingStage === ONBOARDING_STAGES.DEVICE_SELECT && patch.deviceId) {
       setOnboardingStage(current => advanceOnboardingStage(current, ONBOARDING_EVENTS.SELECT_DEVICE));
@@ -899,6 +949,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   };
 
   const runRecordingReplay = async ({ tutorial = false } = {}) => {
+    if (recordingRunInFlightRef.current || recordingTaskView?.status === 'running' || recordingTaskView?.status === 'queued') return false;
     const deviceId = recorder.deviceId;
     if (!deviceId || !onlineDevices.some(device => device.id === deviceId)) {
       showToast?.(tr("请选择一台在线设备"));
@@ -909,8 +960,14 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       return false;
     }
     const replayScript = createSingleReplayScript(draft);
-    setDraft(replayScript);
-    setSelectedDeviceIds([deviceId]);
+    const readiness = getTaskReadiness(replayScript, [deviceId], devices);
+    if (!readiness.ready) {
+      setWorkspaceView('editor');
+      setConfigurationFocus({ key: readiness.issue.key });
+      return false;
+    }
+    recordingRunInFlightRef.current = true;
+    if (!supplementalRecording) setSelectedDeviceIds([deviceId]);
     setRecordingTaskId('pending');
     try {
       const res = await window.electronAPI?.taskRun?.({
@@ -938,6 +995,8 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
       setRecordingTaskId('');
       showToast?.(tr("启动失败：{0}", { 0: error.message || tr("未知错误") }));
       return false;
+    } finally {
+      recordingRunInFlightRef.current = false;
     }
   };
 
@@ -1030,7 +1089,7 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   const updateStep = (index, patch) => {
     setDraft(prev => ({
       ...prev,
-      steps: prev.steps.map((step, i) => i === index ? { ...step, ...patch } : step)
+      steps: prev.steps.map((step, i) => i === index ? mergeRecordedStepPatch(step, patch) : step)
     }));
   };
 
@@ -1059,6 +1118,52 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
     });
   };
 
+  const requiredFields = useMemo(() => { void locale; return getTaskRequiredFields(draft); }, [draft, locale]);
+  const draftReadiness = useMemo(() => { void locale; return getTaskReadiness(draft, selectedDeviceIds, devices); }, [draft, selectedDeviceIds, devices, locale]);
+  const readinessById = useMemo(() => {
+    void locale;
+    return workspaceView === 'home' ? new Map(scripts.map(script => [script.id, getTaskReadiness(script, selectedDeviceIds, devices)])) : null;
+  }, [workspaceView, scripts, selectedDeviceIds, devices, locale]);
+  const selectedRecordingStepIndex = draft.steps.findIndex(step => step.id === selectedRecordingStepId);
+  const navigation = (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className={`inline-flex rounded-lg border p-0.5 ${panelClass}`} aria-label={tr('任务中心')}>
+        {[['home', tr('任务库')], ['runs', tr('运行记录')]].map(([view, label]) => (
+          <button key={view} type="button" aria-pressed={workspaceView === view} onClick={() => setWorkspaceView(view)}
+            className={`min-h-9 rounded-md px-3 py-2 text-sm ${workspaceView === view ? 'bg-emerald-500/12 font-semibold text-emerald-600 dark:text-emerald-400' : `${muted} hover:bg-slate-500/10`}`}>
+            {label}{view === 'runs' && activeCount > 0 ? ` · ${activeCount}` : ''}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={openOnboarding} className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 py-2 text-sm hover:bg-slate-500/10 ${muted}`}>
+        <HelpCircle size={15} />{tr('新手教程')}
+      </button>
+    </div>
+  );
+  const targetPicker = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 data-task-config="targets" tabIndex={-1} className={`rounded-md font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 ${text}`}>{tr('运行目标')}</h3>
+        {selectedDeviceIds.length > 0 && <button type="button" onClick={() => { defaultTargetChosen.current = true; setSelectedDeviceIds([]); }} className={`text-xs underline-offset-2 hover:underline ${muted}`}>{tr('清空')}</button>}
+      </div>
+      {onlineDevices.length > 0 ? <div className="flex flex-wrap gap-2">
+        {onlineDevices.map(device => (
+          <button type="button" key={device.id} aria-pressed={selectedDeviceIds.includes(device.id)} onClick={() => { defaultTargetChosen.current = true; toggleDevice(device.id); }}
+            className={`inline-flex min-h-9 max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm ${selectedDeviceIds.includes(device.id) ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : t.button.secondary}`}>
+            <Smartphone size={14} className="shrink-0" /><span className="truncate" title={device.id}>{device.model || device.name || device.id}</span>
+          </button>
+        ))}
+        {onlineDevices.length > 1 && <button type="button" onClick={() => { defaultTargetChosen.current = true; setSelectedDeviceIds(onlineDevices.map(device => device.id)); }} className={`min-h-9 rounded-lg border px-3 py-2 text-sm ${t.button.secondary}`}>{tr('全选')}</button>}
+      </div> : <p className={`text-sm ${muted}`}>{tr('暂无在线设备')}</p>}
+      {offlineTargets.length > 0 && <div className="text-xs leading-5 text-amber-600 dark:text-amber-400" role="status">
+        {tr('目标设备离线或未授权：{0}。不会自动切换设备。', { 0: offlineTargets.join('、') })}
+        <button type="button" className="ml-2 underline" onClick={() => setSelectedDeviceIds(prev => prev.filter(id => !offlineTargets.includes(id)))}>{tr('取消勾选离线目标')}</button>
+      </div>}
+      {workspaceView === 'editor' && draft.aiTargetDeviceId && <p className={`text-xs ${muted}`}>{tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: draft.aiTargetDeviceId })}</p>}
+      {workspaceView === 'editor' && platformMismatch && <p className="text-xs text-amber-600 dark:text-amber-400">{tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。')}</p>}
+    </div>
+  );
+
   if (loading) {
     return (
       <div className={`rounded-xl border p-8 text-center ${panelClass}`}>
@@ -1069,102 +1174,78 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   }
 
   return (
-    <div className="space-y-6">
-      <div className={`rounded-xl border p-5 shadow-sm ${panelClass}`}>
-        <div className="flex flex-col xl:flex-row xl:items-center gap-4">
-          <div className="flex-1 min-w-0">
-            <h3 className={`text-lg font-semibold flex items-center gap-2 ${text}`}>
-              <ClipboardList size={20} className="text-emerald-500" />{tr("任务中心")}</h3>
-            <p className={`text-sm mt-1 ${muted}`}>{tr("先选择目标，复杂设置会在需要时再显示。")}</p>
-            <p className={`mt-1 text-xs ${muted}`}>{draft.targetPlatform === 'harmony' ? tr('任务平台：Harmony/OpenHarmony') : tr('任务平台：Android（旧脚本默认）')}</p>
-            <p className={`mt-2 text-xs ${draftStorageError ? 'text-red-500' : muted}`}>
-              {draftDirty ? tr("有未保存修改 · ") : ''}{draftRecovered ? tr("已恢复上次工作 · ") : ''}{draftStorageError || tr("当前草稿已自动保存在本机")}
-            </p>
-            {draftStorageError && (
-              <button type="button" className="mt-2 text-xs text-emerald-500 hover:underline" onClick={() => {
-                const error = writeTaskDraft({ draft, savedFingerprint, workspaceView, editorMode, selectedDeviceIds });
-                setDraftStorageError(error);
-                if (!error) setDraftStorageBlocked(false);
-              }}>{draftStorageBlocked ? tr("以当前草稿重新保存（覆盖无法读取的草稿）") : tr("重试保存本地草稿")}</button>
-            )}
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto xl:items-center">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={openOnboarding}
-                className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${t.button.secondary}`}
-              >
-                <HelpCircle size={15} />{tr("新手教程")}</button>
-              {workspaceView === 'editor' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setWorkspaceView('home')}
-                    className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${t.button.secondary}`}
-                  >
-                    <ArrowLeft size={15} />{tr("返回快速入口")}</button>
-                  <div className={`inline-flex rounded-lg border p-1 ${isDark ? 'border-[#3E4145] bg-[#2D2F33]' : 'border-slate-200 bg-slate-50'}`}>
-                    <button
-                      type="button"
-                      onClick={() => setEditorMode('simple')}
-                      className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'simple' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
-                    >{tr("普通模式")}</button>
-                    <button
-                      type="button"
-                      onClick={() => setEditorMode('advanced')}
-                      className={`px-3 py-1.5 rounded-md text-sm transition-colors ${editorMode === 'advanced' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-[#BDC1C6] hover:bg-[#3E4145]' : 'text-slate-600 hover:bg-white'}`}
-                    >{tr("高级编排")}</button>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-3 w-full sm:min-w-[420px]">
-              <StatCard label={tr("在线设备")} value={onlineDevices.length} theme={t} />
-              <StatCard label={tr("运行任务")} value={activeCount} theme={t} />
-              <StatCard label={tr("历史记录")} value={history.length} theme={t} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {draft.aiTargetDeviceId && <div role="status" className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3 text-sm">{tr('此 AI 控件任务仅适用于来源设备 {0}；请选回原设备，或在新设备重新读取并选择控件。', { 0: draft.aiTargetDeviceId })}</div>}
-      {(offlineTargets.length > 0 || (activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId))) && (
-        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-600">
-          <span>{tr("目标设备离线或未授权：{0}。不会自动切换设备。", { 0: Array.from(new Set([...offlineTargets, ...((activeDeviceId && !onlineDevices.some(device => device.id === activeDeviceId)) ? [activeDeviceId] : [])])).join('、') })}</span>
-          {offlineTargets.length > 0 && <button type="button" onClick={() => setSelectedDeviceIds(prev => prev.filter(id => !offlineTargets.includes(id)))} className="underline">{tr("取消勾选离线目标")}</button>}
-        </div>
-      )}
-      {platformMismatch && <p role="status" className="rounded-lg border border-amber-500/30 p-3 text-sm text-amber-500">{tr('任务平台与设备不一致，请为当前设备新建任务；旧脚本不会自动转换。')}</p>}
+    <div className="space-y-4">
       {workspaceView === 'home' ? (
         <TaskCenterQuickStart
           theme={t}
+          navigation={navigation}
+          targetPicker={(
+            <details className={`relative text-sm ${text}`}>
+              <summary className={`flex min-h-10 max-w-xs cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 [&::-webkit-details-marker]:hidden ${t.button.secondary}`}>
+                <Smartphone size={15} className="shrink-0 text-emerald-500" /><span className="truncate">{targetNames(selectedDeviceIds, devices)}</span><ChevronDown size={14} className="shrink-0" />
+              </summary>
+              <div className={`absolute right-0 top-full z-10 mt-2 w-[min(24rem,80vw)] rounded-xl border p-4 shadow-xl ${panelClass}`}>
+                {targetPicker}
+              </div>
+            </details>
+          )}
           scripts={scripts}
-          activeTasks={activeTasks}
+          readiness={readinessById}
+          devices={devices}
+          targetIds={selectedDeviceIds}
           history={history}
-          onCompare={() => { setComparisonSelection({}); setComparisonOpen(true); }}
+          draft={draftDirty ? draft : null}
+          templates={QUICK_TEMPLATES().filter(template => template.id !== 'record' && template.id !== 'external')}
           onRecord={startRecording}
+          recordingGuide={onboardingInteractionActive && onboardingStage === ONBOARDING_STAGES.RECORDING_ENTRY}
           onImport={importStressScript}
+          onCreate={createScript}
+          onTemplate={applyQuickTemplate}
           onOpenScript={openScriptEditor}
           onRunScript={previewSavedRun}
+          onResume={() => setWorkspaceView(lastDraftView.current || (draft.mode === 'replay' ? 'recording' : 'editor'))}
           running={starting}
-          onOpenAdvanced={openAdvancedEditor}
-          onOpenTask={(task) => setSelectedTaskId(task.id)}
         />
+      ) : workspaceView === 'runs' ? (
+        <>
+          {navigation}
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.7fr)_minmax(0,1.3fr)]">
+            <TaskList title={tr("运行中")} tasks={activeTasks.filter(task => task.status === 'running' || task.status === 'queued')}
+              empty={tr("当前没有运行中的任务")} theme={t} onCancel={cancelTask} onOpenTask={task => setSelectedTaskId(task.id)} />
+            <TaskList title={tr("运行历史")} tasks={historyFilter === 'all' ? history : history.filter(task => task.status === historyFilter)}
+              empty={history.length ? tr("没有符合条件的记录") : tr("暂无运行历史")} theme={t}
+              onCompare={history.length > 1 ? () => { setComparisonSelection({}); setComparisonOpen(true); } : null}
+              onClear={history.length ? clearHistory : null}
+              filter={(
+                <SelectMenu ariaLabel={tr('筛选运行结果')} value={historyFilter} onChange={setHistoryFilter} isDark={isDark} compact options={[
+                  { value: 'all', label: tr('全部结果') }, { value: 'failed', label: tr('失败') },
+                  { value: 'success', label: tr('成功') }, { value: 'cancelled', label: tr('已取消') }
+                ]} />
+              )}
+              onOpenTask={task => setSelectedTaskId(task.id)} />
+          </div>
+        </>
       ) : workspaceView === 'recording' ? (
         <TaskCenterRecordingWorkspace
           theme={t}
           tapOnly={recordingTapOnly}
+          guided={onboardingOpen}
           harmony={recordingHarmony}
           draft={draft}
           saving={saving}
           task={recordingTaskView}
-          onBack={() => setWorkspaceView('home')}
+          onBack={() => setWorkspaceView(supplementalRecording ? 'editor' : 'home')}
           onSave={saveScript}
           onReplay={runRecordingReplay}
           onCancel={cancelRecordingReplay}
           onClearSteps={clearRecordedSteps}
           onOpenAdvanced={openAdvancedEditor}
+          selectedStepIndex={selectedRecordingStepIndex}
+          onSelectStep={index => setSelectedRecordingStepId(draft.steps[index]?.id || '')}
+          onUpdateStep={updateStep}
+          onRemoveStep={removeStep}
+          onMoveStep={moveStep}
+          renderSelectedStep={(step, index) => renderStepFields(step, patch => updateStep(index, patch), isDark, draft.targetPlatform)}
           recorderPanel={(
             <StressRecorder
               recorder={recorder}
@@ -1172,7 +1253,9 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
               isDark={isDark}
               softClass={softClass}
               focusedMode
+              allowControlPicker={!onboardingInteractionActive}
               tapOnly={recordingTapOnly}
+              selectedStep={draft.steps[selectedRecordingStepIndex]}
               onChange={changeRecordingDevice}
               onRefresh={refreshRecordingSnapshot}
               onRefreshDevices={onRefreshDevices}
@@ -1182,232 +1265,92 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
           )}
         />
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[240px_minmax(0,1fr)] min-[1920px]:grid-cols-[240px_minmax(760px,1fr)_340px] items-start">
-        <section className={`rounded-xl border shadow-sm overflow-hidden min-w-0 ${panelClass}`}>
-          <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-            <div className={`font-semibold ${text}`}>{tr("复现脚本")}</div>
-            <div className="flex items-center gap-2">
-              <button onClick={importStressScript} className={`p-2 rounded-lg border ${t.button.secondary}`} title={tr("导入压测脚本")}>
-                <Upload size={15} />
-              </button>
-              <button onClick={createScript} className={`p-2 rounded-lg border ${t.button.secondary}`} title={tr("新建脚本")}>
-                <Plus size={15} />
-              </button>
+        <div ref={editorRef} className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onClick={() => setWorkspaceView('home')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${t.button.secondary}`}><ArrowLeft size={15} />{tr('返回任务库')}</button>
+            <div className="flex flex-wrap gap-2">
+              {draft.mode === 'stress' && <button type="button" onClick={exportStressScript} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${t.button.secondary}`}><Download size={15} />{tr('导出')}</button>}
+              {selectedScript && <button type="button" onClick={deleteScript} className="flex items-center gap-2 rounded-lg border border-red-500/25 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10"><Trash2 size={15} />{tr('删除')}</button>}
             </div>
           </div>
-          <div className="max-h-[720px] overflow-y-auto p-3 space-y-2">
-            {scripts.length === 0 ? (
-              <div className={`py-12 text-center text-sm ${muted}`}>{tr("暂无脚本")}</div>
-            ) : scripts.map(script => (
-              <button
-                key={script.id}
-                onClick={() => selectScript(script)}
-                className={`w-full text-left rounded-lg border p-3 transition-colors ${draft.id === script.id ? 'border-emerald-500/40 bg-emerald-500/10' : isDark ? 'border-[#3E4145] hover:bg-[#2D2F33]' : 'border-slate-200 hover:bg-slate-50'}`}
-              >
-                <div className={`font-medium truncate ${text}`}>{script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name}</div>
-                <div className={`text-xs mt-1 line-clamp-2 ${muted}`}>{(script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.description) : script.description) || tr("无描述")}</div>
-                <div className={`text-[11px] mt-2 ${muted}`}>{script.mode === 'stress' ? tr("自动化压测") : tr("复现脚本")} · {script.steps?.length || 0}{tr(" 个步骤")}</div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className={`rounded-xl border shadow-sm min-w-0 ${panelClass}`}>
-          <div className={`px-5 py-4 border-b flex flex-wrap items-center gap-3 ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
-            <div className="flex-1 min-w-[260px]">
-              <input
-                value={draft.name}
-                onChange={(e) => setDraft(prev => ({ ...prev, name: e.target.value }))}
-                className={`w-full text-lg font-semibold bg-transparent outline-none ${text}`}
-                placeholder={tr("脚本名称")}
-              />
-              <input
-                value={draft.description}
-                onChange={(e) => setDraft(prev => ({ ...prev, description: e.target.value }))}
-                className={`w-full mt-1 text-sm bg-transparent outline-none ${muted}`}
-                placeholder={tr("描述这个脚本的用途")}
-              />
+          <section className={`rounded-xl border p-4 sm:p-5 ${panelClass}`}>
+            <FieldLabel label={tr('任务名称')} isDark={isDark} />
+            <input aria-label={tr('任务名称')} value={draft.name} onChange={event => setDraft(prev => ({ ...prev, name: event.target.value }))} className={`max-w-xl font-semibold ${fieldClass(isDark)}`} />
+            <input aria-label={tr('任务描述')} value={draft.description} onChange={event => setDraft(prev => ({ ...prev, description: event.target.value }))} placeholder={tr('描述这个脚本的用途')} className={`mt-2 block max-w-xl ${fieldClass(isDark)}`} />
+            <p className={`mt-3 text-xs ${muted}`}>{draft.targetPlatform === 'harmony' ? tr('任务平台：Harmony/OpenHarmony') : tr('任务平台：Android（旧脚本默认）')}</p>
+          </section>
+          <section className={`space-y-4 rounded-xl border p-4 sm:p-5 ${panelClass}`}>
+            {targetPicker}
+          {requiredFields.length > 0 && <div className={`border-t border-current/10 pt-4 ${text}`}>
+              <h3 className="text-sm font-semibold">{tr('必填参数')}</h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {requiredFields.map(field => {
+                  const step = draft.steps[field.index];
+                  return <RequiredTaskField key={field.key} field={field} step={step} theme={t} harmony={draft.targetPlatform === 'harmony'} onChange={value => setDraft(current => {
+                    if (current.id !== draft.id || current.steps[field.index]?.id !== step.id) return current;
+                    return { ...current, steps: current.steps.map((item, index) => index === field.index ? { ...item, ...field.patch(value) } : item) };
+                  })} />;
+                })}
+              </div>
+            </div>}
+          </section>
+          <section className={`rounded-xl border p-4 sm:p-5 ${panelClass}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div data-task-config="steps" tabIndex={-1} className="rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500">
+                <h3 className={`font-semibold ${text}`}>{tr('操作步骤')}</h3>
+                <p className={`mt-1 text-xs ${muted}`}>{tr('{0} 个步骤，默认按顺序执行。', { 0: draft.steps.length })}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => { setSupplementalRecording(true); setSelectedRecordingStepId(''); setConfigurationFocus(null); setWorkspaceView('recording'); }} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${t.button.secondary}`}><Smartphone size={15} />{tr('录制补充步骤')}</button>
+                <SelectMenu ariaLabel={tr('添加步骤')} placeholder={tr('添加步骤')} value="" onChange={addStep} isDark={isDark} compact options={STEP_TYPES(draft.targetPlatform)} />
+              </div>
             </div>
-            {editorMode === 'advanced' && (
-              <>
-                <label className={`flex items-center gap-2 text-xs ${muted}`}>
-                  <input
-                    type="checkbox"
-                    checked={draft.continueOnError}
-                    onChange={(e) => setDraft(prev => ({ ...prev, continueOnError: e.target.checked }))}
-                    className="accent-emerald-500"
-                  />{tr("失败后继续执行")}</label>
-                <label className={`flex items-center gap-2 text-xs ${muted}`}>
-                  <input
-                    type="checkbox"
-                    checked={draft.mode === 'stress'}
-                    onChange={(e) => setDraft(prev => ({ ...prev, mode: e.target.checked ? 'stress' : 'replay' }))}
-                    className="accent-emerald-500"
-                  />{tr("自动化压测")}</label>
-              </>
-            )}
-            <button onClick={saveScript} disabled={saving} className={`px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 ${t.button.secondary}`}>
-              {saving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}{tr("保存")}</button>
-            {draft.mode === 'stress' && (
-              <button onClick={exportStressScript} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${t.button.secondary}`}>
-                <Download size={15} />{tr("导出")}</button>
-            )}
-            <button onClick={deleteScript} className="px-4 py-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 flex items-center gap-2">
-              <Trash2 size={15} />{tr("删除")}</button>
-          </div>
-
-          <div className="p-5 space-y-5">
-            {editorMode === 'simple' ? (
-              <SimpleModePanel
-                draft={draft}
-                theme={t}
-                isDark={isDark}
-                softClass={softClass}
-                muted={muted}
-                text={text}
-                onlineDevices={onlineDevices}
-                selectedDeviceIds={selectedDeviceIds}
-                recorder={recorder}
-                saving={saving}
-                runDisabled={starting || platformMismatch || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0}
-                onApplyTemplate={applyQuickTemplate}
-                onDraftChange={(patch) => setDraft(prev => ({ ...prev, ...patch }))}
-                onToggleDevice={toggleDevice}
-                onSelectAllDevices={() => setSelectedDeviceIds(onlineDevices.map(device => device.id))}
-                onClearDevices={() => setSelectedDeviceIds([])}
-                onRun={runScript}
-                onSave={saveScript}
-                onRecorderChange={updateRecorder}
-                onRecorderRefresh={refreshRecorderSnapshot}
-                onRecord={recordAction}
-                onClearSteps={clearRecordedSteps}
-                onUpdateStep={updateStep}
-                onRemoveStep={removeStep}
-                onMoveStep={moveStep}
-                onOpenAdvanced={() => setEditorMode('advanced')}
-              />
-            ) : (
-              <>
-                <div className={`rounded-xl border p-4 ${softClass}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className={`font-semibold ${text}`}>{tr("运行目标")}</div>
-                      <div className={`text-xs mt-1 ${muted}`}>{tr("默认串行执行，保护 ADB 和设备稳定性。")}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setSelectedDeviceIds(onlineDevices.map(device => device.id))} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>{tr("全选")}</button>
-                      <button onClick={() => setSelectedDeviceIds([])} className={`px-3 py-2 text-xs rounded-lg border ${t.button.secondary}`}>{tr("清空")}</button>
-                      <button onClick={runScript} disabled={starting || platformMismatch || selectedDeviceIds.length === 0 || offlineTargets.length > 0 || draft.steps.length === 0} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
-                        <Play size={15} />
-                        {draft.mode === 'stress' ? tr("开始压测") : tr("运行")}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {onlineDevices.length === 0 ? (
-                      <div className={`text-sm ${muted}`}>{tr("暂无在线设备")}</div>
-                    ) : onlineDevices.map(device => {
-                      const selected = selectedDeviceIds.includes(device.id);
-                      return (
-                        <button
-                          key={device.id}
-                          onClick={() => toggleDevice(device.id)}
-                          className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors ${selected ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}
-                        >
-                          <Smartphone size={14} />
-                          <span>{device.model || device.id}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+            {draft.steps.length ? <div className="mt-4 space-y-2">{draft.steps.map((step, index) => {
+              const summary = getStepSummary(step);
+              const Icon = summary.icon;
+              return <details key={step.id || index} className={`rounded-lg border ${softClass}`}>
+                <summary data-task-config={`edit-step-${index}`} className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-emerald-500/10 text-emerald-500"><Icon size={14} /></span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{index + 1}. {summary.title}</span><span className={`block truncate text-xs ${muted}`}>{summary.detail}</span></span>
+                  {step.critical === true && <span className="shrink-0 rounded-md bg-emerald-500/10 px-2 py-1 text-xs text-emerald-500">{tr('验收点')}</span>}
+                  <ChevronDown size={14} className="shrink-0" />
+                </summary>
+                <div className="px-2 pb-2">
+                  <StepEditor step={step} index={index} theme={t} isDark={isDark} platform={draft.targetPlatform}
+                    onChange={patch => updateStep(index, patch)} onRemove={() => removeStep(index)} onMoveUp={() => moveStep(index, -1)} onMoveDown={() => moveStep(index, 1)} />
                 </div>
-
-                {draft.mode === 'stress' && (
-                  <>
-                    <StressConfig
-                      script={draft}
-                      isDark={isDark}
-                      softClass={softClass}
-                      onChange={(patch) => setDraft(prev => ({ ...prev, ...patch }))}
-                    />
-                    <StressRecorder
-                      recorder={recorder}
-                      onlineDevices={onlineDevices}
-                      isDark={isDark}
-                      softClass={softClass}
-                      onChange={updateRecorder}
-                      onRefresh={refreshRecorderSnapshot}
-                      onRecord={recordAction}
-                      onClearSteps={clearRecordedSteps}
-                    />
-                  </>
-                )}
-
-                <div className={`rounded-xl border overflow-hidden ${softClass}`}>
-                  <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-                    <div>
-                      <div className={`font-semibold ${text}`}>{tr("步骤编排")}</div>
-                      <div className={`text-xs mt-1 ${muted}`}>{tr("{0} 个步骤", { 0: draft.steps.length })}</div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {STEP_TYPES(draft.targetPlatform).map(type => {
-                        const Icon = type.icon;
-                        return (
-                          <button key={type.value} onClick={() => addStep(type.value)} className={`px-2.5 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 ${t.button.secondary}`}>
-                            <Icon size={12} />
-                            {type.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-3">
-                    {draft.steps.length === 0 ? (
-                      <div className={`py-12 text-center text-sm ${muted}`}>{tr("添加一个步骤开始编排复现流程")}</div>
-                    ) : draft.steps.map((step, index) => (
-                      <StepEditor
-                        platform={draft.targetPlatform}
-                        key={step.id}
-                        step={step}
-                        index={index}
-                        theme={t}
-                        isDark={isDark}
-                        onChange={(patch) => updateStep(index, patch)}
-                        onRemove={() => removeStep(index)}
-                        onMoveUp={() => moveStep(index, -1)}
-                        onMoveDown={() => moveStep(index, 1)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
+              </details>;
+            })}</div> : <p className={`py-7 text-center text-sm ${muted}`}>{tr('添加一个步骤开始编排复现流程')}</p>}
+          </section>
+          <details open={editorMode === 'advanced'} onToggle={event => setEditorMode(event.currentTarget.open ? 'advanced' : 'simple')} className={`rounded-xl border p-4 sm:p-5 ${panelClass}`}>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden"><span className="flex items-center gap-2"><Settings2 size={16} />{tr('高级设置')}</span><ChevronDown size={15} /></summary>
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap gap-3">
+                <CheckOption label={tr("失败后继续执行")} checked={draft.continueOnError} onChange={checked => setDraft(prev => ({ ...prev, continueOnError: checked }))} isDark={isDark} />
+                <CheckOption label={tr("自动化压测")} checked={draft.mode === 'stress'} onChange={checked => setDraft(prev => ({ ...prev, mode: checked ? 'stress' : 'replay' }))} isDark={isDark} />
+              </div>
+              {draft.mode === 'stress' && <StressConfig script={draft} isDark={isDark} softClass={softClass} onChange={patch => setDraft(prev => ({ ...prev, ...patch }))} />}
+            </div>
+          </details>
+          <div className={`sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm ${panelClass}`}>
+            <p className={`text-xs ${draftReadiness.ready ? muted : 'text-amber-600 dark:text-amber-400'}`}>
+              {draftReadiness.ready ? tr('已选择 {0} 台设备，默认串行运行。', { 0: selectedDeviceIds.length }) : (draftReadiness.issue.name ? tr('请填写：{0}', { 0: draftReadiness.issue.label }) : draftReadiness.issue.label)}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={saveScript} disabled={saving} className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm disabled:opacity-50 ${t.button.secondary}`}><Save size={15} />{tr('保存')}</button>
+              <button type="button" onClick={runScript} disabled={starting} className={`flex min-h-10 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${t.button.primary}`}>{draftReadiness.ready ? <Play size={15} /> : <Settings2 size={15} />}{draftReadiness.ready ? tr('开始运行') : tr('定位缺项')}</button>
+            </div>
           </div>
-        </section>
-
-        <section className="space-y-6 xl:col-span-2 min-[1920px]:col-span-1">
-          <TaskList
-            title={tr("运行中")}
-            tasks={activeTasks}
-            empty={tr("当前没有运行中的任务")}
-            theme={t}
-            onCancel={cancelTask}
-            onOpenPath={openTaskPath}
-            onOpenTask={(task) => setSelectedTaskId(task.id)}
-          />
-          <TaskList
-            title={tr("运行历史")}
-            onCompare={history.length > 1 ? () => { setComparisonSelection({}); setComparisonOpen(true); } : null}
-            tasks={history}
-            empty={tr("暂无运行历史")}
-            theme={t}
-            onClear={history.length > 0 ? clearHistory : null}
-            onOpenPath={openTaskPath}
-            onOpenTask={(task) => setSelectedTaskId(task.id)}
-          />
-        </section>
         </div>
       )}
+      {draftStorageError && <div role="status" className="rounded-xl border border-red-500/20 p-3 text-sm text-red-500">
+        {draftStorageError}
+        <button type="button" className="ml-3 underline" onClick={() => {
+          const error = writeTaskDraft({ draft, savedFingerprint, workspaceView: workspaceView === 'runs' || workspaceView === 'home' ? lastDraftView.current || 'home' : workspaceView, editorMode, selectedDeviceIds });
+          setDraftStorageError(error);
+          if (!error) setDraftStorageBlocked(false);
+        }}>{draftStorageBlocked ? tr("以当前草稿重新保存（覆盖无法读取的草稿）") : tr("重试保存本地草稿")}</button>
+      </div>}
       {onboardingLoaded && (
         <TaskCenterOnboarding
           open={onboardingOpen}
@@ -1477,227 +1420,22 @@ function TaskCenter({ devices, theme, taskCenterPath, showToast, onRefreshDevice
   );
 }
 
-function SimpleModePanel({
-  draft,
-  theme,
-  isDark,
-  softClass,
-  muted,
-  text,
-  onlineDevices,
-  selectedDeviceIds,
-  recorder,
-  saving,
-  runDisabled,
-  onApplyTemplate,
-  onDraftChange,
-  onToggleDevice,
-  onSelectAllDevices,
-  onClearDevices,
-  onRun,
-  onSave,
-  onRecorderChange,
-  onRecorderRefresh,
-  onRecord,
-  onClearSteps,
-  onUpdateStep,
-  onRemoveStep,
-  onMoveStep,
-  onOpenAdvanced
-}) {
-  useLocale();
-  const loop = draft.loop || {};
-  const acceptance = draft.acceptance || {};
-  const report = draft.report || {};
-  const launchStepIndex = (draft.steps || []).findIndex(step => step.type === 'launchApp' || step.type === 'shell' && /^monkey\s+-p\s+/i.test(step.command || ''));
-  const launchPackage = launchStepIndex < 0 ? '' : draft.steps[launchStepIndex].type === 'launchApp' ? draft.steps[launchStepIndex].packageName || '' : extractMonkeyPackage(draft.steps[launchStepIndex].command);
-  const setLoop = (patch) => onDraftChange({ loop: { ...loop, ...patch } });
-  const setAcceptance = (patch) => onDraftChange({ acceptance: { ...acceptance, ...patch } });
-  const setReport = (patch) => onDraftChange({ report: { ...report, ...patch } });
-  const selectedCount = selectedDeviceIds.length;
-
-  const updateLaunchPackage = (value) => {
-    if (launchStepIndex < 0) return;
-    if (draft.steps[launchStepIndex].type === 'launchApp') { onUpdateStep(launchStepIndex, { packageName: value.trim() }); return; }
-    onUpdateStep(launchStepIndex, { command: value.trim() ? `monkey -p ${value.trim()} 1` : 'monkey -p com.example.app 1' });
-  };
-
+function RequiredTaskField({ field, step, harmony, theme, onChange }) {
+  const formats = field.name === 'baselinePath' ? ['png', 'jpg', 'jpeg'] : field.name === 'localPath' ? (harmony ? ['hap', 'hsp'] : ['apk']) : null;
+  const chooseFile = formats && (async () => {
+    const result = await window.electronAPI?.showOpenDialog?.({ title: field.label, properties: ['openFile'], filters: [{ name: field.label, extensions: formats }] });
+    if (result?.filePaths?.[0]) onChange(result.filePaths[0]);
+  });
+  const muted = theme.textMuted;
   return (
-    <>
-      <div className={`rounded-xl border p-4 ${softClass}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className={`font-semibold ${text}`}>{tr("选择场景")}</div>
-            <div className={`text-xs mt-1 ${muted}`}>{tr("从模板开始，后续可以录制补充步骤。")}</div>
-          </div>
-          <button type="button" onClick={onOpenAdvanced} className={`px-3 py-2 rounded-lg border text-xs flex items-center gap-1.5 ${theme.button.secondary}`}>
-            <Terminal size={13} />{tr("高级编排")}</button>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-          {QUICK_TEMPLATES().map(template => {
-            const Icon = template.icon;
-            return (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => onApplyTemplate(template.id)}
-                className={`rounded-xl border p-4 text-left transition-colors ${isDark ? 'border-[#3E4145] bg-[#202124] hover:bg-[#25272B]' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
-                  <Icon size={18} />
-                </span>
-                <span className={`mt-3 block text-sm font-semibold ${text}`}>{template.title}</span>
-                <span className={`mt-1 block text-xs leading-relaxed ${muted}`}>{template.description}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className={`rounded-xl border p-4 ${softClass}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className={`font-semibold ${text}`}>{tr("运行设备")}</div>
-            <div className={`text-xs mt-1 ${muted}`}>{tr("已选择 {0} 台设备，默认串行运行。", { 0: selectedCount })}</div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={onSelectAllDevices} className={`px-3 py-2 text-xs rounded-lg border ${theme.button.secondary}`}>{tr("全选")}</button>
-            <button type="button" onClick={onClearDevices} className={`px-3 py-2 text-xs rounded-lg border ${theme.button.secondary}`}>{tr("清空")}</button>
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {onlineDevices.length === 0 ? (
-            <div className={`text-sm ${muted}`}>{tr("暂无在线设备")}</div>
-          ) : onlineDevices.map(device => {
-            const selected = selectedDeviceIds.includes(device.id);
-            return (
-              <button
-                key={device.id}
-                type="button"
-                onClick={() => onToggleDevice(device.id)}
-                className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors ${selected ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-white'}`}
-              >
-                <Smartphone size={14} />
-                <span>{device.model || device.id}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {launchStepIndex >= 0 && (
-        <div className={`rounded-xl border p-4 ${softClass}`}>
-          <div className={`font-semibold ${text}`}>{tr("应用启动设置")}</div>
-          <div className="mt-3 max-w-xl">
-            <TextField label={tr("应用包名")} value={launchPackage} onChange={updateLaunchPackage} placeholder="com.example.app" isDark={isDark} />
-          </div>
-        </div>
-      )}
-
-      <StressRecorder
-        recorder={recorder}
-        onlineDevices={onlineDevices}
-        isDark={isDark}
-        softClass={softClass}
-        simpleMode
-        onChange={onRecorderChange}
-        onRefresh={onRecorderRefresh}
-        onRecord={onRecord}
-        onClearSteps={onClearSteps}
-      />
-
-      <SimpleStepList
-        steps={draft.steps || []}
-        theme={theme}
-        isDark={isDark}
-        text={text}
-        muted={muted}
-        onUpdateStep={onUpdateStep}
-        onRemoveStep={onRemoveStep}
-        onMoveStep={onMoveStep}
-        onOpenAdvanced={onOpenAdvanced}
-      />
-
-      <div className={`rounded-xl border p-4 ${softClass}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className={`font-semibold ${text}`}>{tr("运行设置")}</div>
-            <div className={`text-xs mt-1 ${muted}`}>{tr("只保留常用选项，高级阈值和脚本参数可去高级编排调整。")}</div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={onSave} disabled={saving} className={`px-4 py-2 rounded-lg border text-sm flex items-center gap-2 disabled:opacity-50 ${theme.button.secondary}`}>
-              {saving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}{tr("保存")}</button>
-            <button type="button" onClick={onRun} disabled={runDisabled} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-2 disabled:opacity-50">
-              <Play size={15} />{tr("开始运行")}</button>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <NumberField label={tr("运行次数")} value={loop.count ?? 1} onChange={(value) => setLoop({ count: value })} isDark={isDark} />
-          <NumberField label={tr("最长时长(ms)")} value={loop.durationMs ?? 0} onChange={(value) => setLoop({ durationMs: value })} isDark={isDark} />
-          <NumberField label={tr("每轮间隔(ms)")} value={loop.intervalMs ?? 1000} onChange={(value) => setLoop({ intervalMs: value })} isDark={isDark} />
-          <NumberField label={tr("最低成功率(%)")} value={acceptance.minSuccessRate ?? 100} onChange={(value) => setAcceptance({ minSuccessRate: value })} isDark={isDark} />
-        </div>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <CheckOption label={tr("失败后继续")} checked={loop.continueOnError !== false} onChange={(checked) => setLoop({ continueOnError: checked })} isDark={isDark} />
-          <CheckOption label={tr("检测崩溃日志")} checked={acceptance.failOnCrash !== false} onChange={(checked) => setAcceptance({ failOnCrash: checked })} isDark={isDark} />
-          <CheckOption label={tr("检测 ANR 日志")} checked={acceptance.failOnAnr !== false} onChange={(checked) => setAcceptance({ failOnAnr: checked })} isDark={isDark} />
-          <CheckOption label={tr("生成 AI 分析")} checked={report.includeAiSummary === true} onChange={(checked) => setReport({ includeAiSummary: checked })} isDark={isDark} />
-        </div>
-      </div>
-    </>
-  );
-}
-
-function SimpleStepList({ steps, theme, isDark, text, muted, onUpdateStep, onRemoveStep, onMoveStep, onOpenAdvanced }) {
-  useLocale();
-  return (
-    <div className={`rounded-xl border overflow-hidden ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-      <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-3 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-        <div>
-          <div className={`font-semibold ${text}`}>{tr("已录制步骤")}</div>
-          <div className={`text-xs mt-1 ${muted}`}>{tr("{0} 个步骤，默认按顺序执行。", { 0: steps.length })}</div>
-        </div>
-        <button type="button" onClick={onOpenAdvanced} className={`px-3 py-2 rounded-lg border text-xs ${theme.button.secondary}`}>{tr("编辑高级字段")}</button>
-      </div>
-      <div className="p-4 space-y-2">
-        {steps.length === 0 ? (
-          <div className={`py-10 text-center text-sm ${muted}`}>{tr("选择模板或在设备画面上点击、拖拽，系统会自动生成步骤。")}</div>
-        ) : steps.map((step, index) => {
-          const summary = getStepSummary(step);
-          const Icon = summary.icon;
-          const simpleEditable = isSimpleEditableStep(step);
-          return (
-            <div key={step.id || index} className={`rounded-lg border p-3 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
-                  <Icon size={15} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <input
-                    value={step.label || summary.title}
-                    onChange={(event) => onUpdateStep(index, { label: event.target.value })}
-                    className={`w-full bg-transparent text-sm font-semibold outline-none ${text}`}
-                    placeholder={summary.title}
-                  />
-                  <div className={`mt-1 text-xs truncate ${muted}`}>{summary.detail}</div>
-                </div>
-                {step.critical === true && (
-                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-400">{tr("验收点")}</span>
-                )}
-                {!simpleEditable && (
-                  <span className={`rounded-full border px-2 py-1 text-[11px] ${isDark ? 'border-[#5F6368] text-[#9AA0A6]' : 'border-slate-200 text-slate-500'}`}>{tr("高级步骤")}</span>
-                )}
-                <button type="button" onClick={() => onUpdateStep(index, { critical: step.critical !== true })} className={`px-2 py-1.5 rounded-lg border text-xs ${theme.button.secondary}`}>{tr("验收点")}</button>
-                <button type="button" onClick={() => onMoveStep(index, -1)} className={`px-2 py-1.5 rounded-lg border text-xs ${theme.button.secondary}`}>{tr("上移")}</button>
-                <button type="button" onClick={() => onMoveStep(index, 1)} className={`px-2 py-1.5 rounded-lg border text-xs ${theme.button.secondary}`}>{tr("下移")}</button>
-                <button type="button" onClick={() => onRemoveStep(index)} className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10" title={tr("删除步骤")}>
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className="space-y-1.5">
+      <label className="block">
+        <span className="block text-sm font-medium">{field.label}{field.missing && <span className="ml-1 text-amber-500" aria-hidden="true">*</span>}</span>
+        <span className={`mb-1.5 mt-0.5 block text-xs ${muted}`}>{field.index + 1}. {getStepSummary(step).title}</span>
+        <input data-task-config={field.key} value={field.value} onChange={event => onChange(event.target.value)} aria-required="true"
+          placeholder={field.name === 'packageName' ? 'com.example.app' : undefined} className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500 ${theme.input}`} />
+      </label>
+      {chooseFile && <button type="button" onClick={chooseFile} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${theme.button.secondary}`}><FolderOpen size={14} />{tr('选择文件')}</button>}
     </div>
   );
 }
@@ -1925,7 +1663,7 @@ function CheckOption({ label, checked, onChange, isDark }) {
   );
 }
 
-function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode = false, focusedMode = false, tapOnly = false, onChange, onRefresh, onRefreshDevices, onRecord, onClearSteps }) {
+function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode = false, focusedMode = false, tapOnly = false, allowControlPicker = true, selectedStep, onChange, onRefresh, onRefreshDevices, onRecord, onClearSteps }) {
   const harmony = taskPlatformForDevice(recorder.deviceId) === 'harmony';
   const keyValue = harmony && /^\d+$/.test(String(recorder.keyCode || '')) ? '' : recorder.keyCode;
   useLocale();
@@ -2066,6 +1804,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             recorder={recorder}
             previewRef={detachedPreviewRef}
             gesture={gesture}
+            selectedStep={selectedStep}
             busy={recorderBusy}
             busyLabel={recorderBusyLabel}
             isDark={isDark}
@@ -2151,7 +1890,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                   <Loader2 size={12} className="animate-spin" />{tr("后台刷新中")}</span>
               )}
             </div>
-            {hasScreenshot && !focusedMode && (
+            {hasScreenshot && allowControlPicker && (
               <button
                 type="button"
                 onClick={() => setDetachedOpen(true)}
@@ -2167,6 +1906,7 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                 recorder={recorder}
                 previewRef={previewRef}
                 gesture={gesture}
+                selectedStep={selectedStep}
                 busy={recorderBusy}
                 busyLabel={recorderBusyLabel}
                 isDark={isDark}
@@ -2191,8 +1931,12 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             )}
           </div>
 
-          {!focusedMode && (
-            <>
+        </div>
+      </div>
+      {allowControlPicker && <details className="mt-4 rounded-lg border border-current/10">
+        <summary className={`flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden ${text}`}>{tr('控件与更多录制方式')}<ChevronDown size={15} /></summary>
+        <div className="space-y-3 p-3 pt-0">
+          <div className="overflow-hidden rounded-lg border border-current/10">
               <div className={`border-t px-3 py-2 flex items-center justify-between gap-3 text-xs ${isDark ? 'border-[#3E4145] text-[#9AA0A6]' : 'border-slate-100 text-slate-500'}`}>
                 <span>{tr("当前界面控件")}</span>
                 <span>{recorder.nodes.length > 0 ? tr("{0} 个", { 0: recorder.nodes.length }) : tr("未读取")}</span>
@@ -2217,11 +1961,8 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
                   </button>
                 ))}
               </div>
-            </>
-          )}
-        </div>
-
-        {!focusedMode && <div className="space-y-3 min-w-0">
+          </div>
+          <div className="space-y-3 min-w-0">
           <TaskAiTargets key={recorder.deviceId} recorder={recorder} busy={recorderBusy} isDark={isDark} />
           <div className={`rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
             <div className={`text-xs mb-2 ${muted}`}>{tr("选中控件")}</div>
@@ -2261,10 +2002,8 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
               </div>
             )}
           </div>
-        </div>}
-      </div>
-
-      {!focusedMode && <div className={`mt-4 rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
+          </div>
+          <div className={`rounded-lg border p-4 ${isDark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white'}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className={`text-sm font-semibold ${text}`}>{tr("手势与等待")}</div>
@@ -2299,7 +2038,9 @@ function StressRecorder({ recorder, onlineDevices, isDark, softClass, simpleMode
             </div>
           </details>
         )}
-      </div>}
+          </div>
+        </div>
+      </details>}
       {detachedPreview}
     </div>
   );
@@ -2309,8 +2050,9 @@ function recorderButtonClass(isDark, full = false) {
   return `${full ? 'w-full ' : ''}inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`;
 }
 
-function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, busyLabel = tr("正在读取设备画面..."), isDark = false, tapOnly = false, guideTarget, showNodeOverlays = true, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
+function RecorderPreviewSurface({ recorder, previewRef, gesture, selectedStep, busy = false, busyLabel = tr("正在读取设备画面..."), isDark = false, tapOnly = false, guideTarget, showNodeOverlays = true, className, style, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
   useLocale();
+  const selectedPath = getSelectedRecorderPath(selectedStep, recorder);
   return (
     <div
       ref={previewRef}
@@ -2341,6 +2083,12 @@ function RecorderPreviewSurface({ recorder, previewRef, gesture, busy = false, b
             style={nodeOverlayStyle(node, recorder)}
           />
         ))}
+        {!gesture && selectedPath.length > 0 && (
+          <svg aria-hidden="true" className="absolute inset-0 h-full w-full" viewBox={`0 0 ${recorder.screenshotWidth} ${recorder.screenshotHeight}`}>
+            {selectedPath.length > 1 && <polyline points={formatSvgPoints(selectedPath)} fill="none" stroke="#2dd4bf" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />}
+            {[selectedPath[0], ...(selectedPath.length > 1 ? [selectedPath.at(-1)] : [])].map(({ x, y }, index) => <circle key={index} cx={x} cy={y} r={Math.max(8, Math.min(recorder.screenshotWidth, recorder.screenshotHeight) / 100)} fill="#2dd4bf" stroke="#0f766e" strokeWidth="2" vectorEffect="non-scaling-stroke" />)}
+          </svg>
+        )}
         {gesture && (
           <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 ${recorder.screenshotWidth} ${recorder.screenshotHeight}`} preserveAspectRatio="none">
             <polyline points={formatSvgPoints(gesture.points || [gesture.start, gesture.current])} fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
@@ -2393,6 +2141,20 @@ function formatSvgPoints(points) {
   return (Array.isArray(points) ? points : [])
     .map(point => `${Math.round(point.x)},${Math.round(point.y)}`)
     .join(' ');
+}
+
+function getSelectedRecorderPath(step, { screenshotWidth, screenshotHeight }) {
+  if (!step || !['tap', 'longPress', 'swipe'].includes(step.type)) return [];
+  const stored = step.points || step.curvePoints || step.pathPoints;
+  let points = step.type === 'swipe' ? decodeRecordedSwipePath(stored) : [];
+  if (!points.length) {
+    if (step.type === 'swipe' && stored?.length) return [];
+    points = [{ x: step.x, y: step.y }];
+    if (step.type === 'swipe') points.push({ x: step.endX, y: step.endY });
+  }
+  if (!points.every(p => p && p.x !== '' && p.x != null && p.y !== '' && p.y != null)) return [];
+  const path = points.map(p => ({ x: Number(p.x), y: Number(p.y) }));
+  return path.every(p => Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.y >= 0 && p.x < screenshotWidth && p.y < screenshotHeight) ? path : [];
 }
 
 function formatGesturePointsInput(points) {
@@ -2599,6 +2361,7 @@ function StepEditor({ step, index, theme, isDark, onChange, onRemove, onMoveUp, 
           isDark={isDark}
           onChange={(value) => onChange({ ...createStep(value, platform), id: step.id, label: getTypeLabel(value, platform) })}
         />
+        <button type="button" onClick={() => onChange({ critical: step.critical !== true })} aria-pressed={step.critical === true} className={`rounded-lg border px-2 py-2 text-xs ${step.critical === true ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' : t.button.secondary}`}>{tr('验收点')}</button>
         <button onClick={onMoveUp} className={`px-2 py-2 rounded-lg border text-xs ${t.button.secondary}`}>{tr("上移")}</button>
         <button onClick={onMoveDown} className={`px-2 py-2 rounded-lg border text-xs ${t.button.secondary}`}>{tr("下移")}</button>
         <button onClick={onRemove} className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10" title={tr("删除步骤")}>
@@ -2703,12 +2466,17 @@ function renderStepFields(step, onChange, isDark, platform = 'android') {
   if (step.type === 'waitText' || step.type === 'assertText') {
     return (
       <>
-        <TextField label={tr("文本")} value={step.text} onChange={(value) => onChange({ text: value })} placeholder={tr("需要等待或断言的文本")} isDark={isDark} />
-        <TextField label={tr("包含文本（可选）")} value={step.textContains} onChange={(value) => onChange({ textContains: value })} placeholder={tr("只要求控件文本包含该内容")} isDark={isDark} />
-        <TextField label={tr("resource-id（可选）")} value={step.resourceId} onChange={(value) => onChange({ resourceId: value })} placeholder={tr("可选：进一步限定控件")} isDark={isDark} />
-        <TextField label={tr("content-desc（可选）")} value={step.contentDesc} onChange={(value) => onChange({ contentDesc: value })} placeholder={tr("可选：无文本控件的描述")} isDark={isDark} />
-        <TextField label={tr("className（可选）")} value={step.className} onChange={(value) => onChange({ className: value })} placeholder="android.widget.TextView" isDark={isDark} />
-        <TextField label={tr("XPath-like 路径（可选）")} value={step.xpath} onChange={(value) => onChange({ xpath: value })} placeholder={tr("录制后自动生成，可手动调整")} isDark={isDark} />
+        <fieldset className="col-span-full min-w-0 rounded-lg border border-current/15 px-3 pb-3">
+          <legend className="px-1 text-xs font-medium">{tr('控件定位（至少填写一项）')}</legend>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <TextField label={tr("文本")} value={step.text} onChange={(value) => onChange({ text: value })} placeholder={tr("需要等待或断言的文本")} isDark={isDark} />
+            <TextField label={tr("包含文本")} value={step.textContains} onChange={(value) => onChange({ textContains: value })} placeholder={tr("只要求控件文本包含该内容")} isDark={isDark} />
+            <TextField label="resource-id" value={step.resourceId} onChange={(value) => onChange({ resourceId: value })} placeholder="com.example:id/login" isDark={isDark} />
+            <TextField label="content-desc" value={step.contentDesc} onChange={(value) => onChange({ contentDesc: value })} placeholder={tr("例如：登录按钮")} isDark={isDark} />
+            <TextField label="className" value={step.className} onChange={(value) => onChange({ className: value })} placeholder="android.widget.TextView" isDark={isDark} />
+            <TextField label={tr("XPath-like 路径")} value={step.xpath} onChange={(value) => onChange({ xpath: value })} placeholder={tr("录制后自动生成，可手动调整")} isDark={isDark} />
+          </div>
+        </fieldset>
         {step.type === 'waitText' && <NumberField label={tr("轮询间隔(ms)")} value={step.intervalMs} onChange={(value) => onChange({ intervalMs: value })} isDark={isDark} />}
       </>
     );
@@ -2751,8 +2519,13 @@ function renderStepFields(step, onChange, isDark, platform = 'android') {
   if (step.type === 'waitLog') {
     return (
       <>
-        <TextField label={tr("关键词")} value={step.keyword} onChange={(value) => onChange({ keyword: value })} placeholder={tr("等待出现的日志关键词")} isDark={isDark} />
-        <TextField label={tr("正则（可选）")} value={step.regex} onChange={(value) => onChange({ regex: value })} placeholder={tr("优先使用正则匹配")} isDark={isDark} />
+        <fieldset className="col-span-full min-w-0 rounded-lg border border-current/15 px-3 pb-3">
+          <legend className="px-1 text-xs font-medium">{tr('匹配条件（至少填写一项）')}</legend>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <TextField label={tr("关键词")} value={step.keyword} onChange={(value) => onChange({ keyword: value })} placeholder={tr("等待出现的日志关键词")} isDark={isDark} />
+            <TextField label={tr("正则")} value={step.regex} onChange={(value) => onChange({ regex: value })} placeholder={tr("优先使用正则匹配")} isDark={isDark} />
+          </div>
+        </fieldset>
         <NumberField label={tr("轮询间隔(ms)")} value={step.intervalMs} onChange={(value) => onChange({ intervalMs: value })} isDark={isDark} />
       </>
     );
@@ -2765,16 +2538,17 @@ function renderStepFields(step, onChange, isDark, platform = 'android') {
   );
 }
 
-function TaskList({ title, tasks, empty, theme, onCancel, onClear, onCompare, onOpenPath, onOpenTask }) {
+function TaskList({ title, tasks, empty, theme, onCancel, onClear, onCompare, onOpenTask, filter }) {
   useLocale();
   const isDark = isDarkTheme(theme);
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
   const text = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
   return (
     <div className={`rounded-xl border shadow-sm overflow-hidden ${isDark ? 'bg-slate-800/80 border-[#3E4145]' : 'bg-white border-slate-200'}`}>
-      <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
+      <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2 ${isDark ? 'border-[#3E4145]' : 'border-slate-100'}`}>
         <div className={`font-semibold ${text}`}>{title}</div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {filter}
           {onCompare && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">{tr("比较两次运行")}</button>}
           {onClear && <button onClick={onClear} className="text-xs text-red-400 hover:underline">{tr("清空")}</button>}
         </div>
@@ -2783,14 +2557,14 @@ function TaskList({ title, tasks, empty, theme, onCancel, onClear, onCompare, on
         {tasks.length === 0 ? (
           <div className={`py-10 text-center text-sm ${muted}`}>{empty}</div>
         ) : tasks.map(task => (
-          <TaskCard key={task.id} task={task} theme={theme} onCancel={onCancel} onOpenPath={onOpenPath} onOpenTask={onOpenTask} />
+          <TaskCard key={task.id} task={task} theme={theme} onCancel={onCancel} onOpenTask={onOpenTask} />
         ))}
       </div>
     </div>
   );
 }
 
-function TaskCard({ task, theme, onCancel, onOpenPath, onOpenTask }) {
+function TaskCard({ task, theme, onCancel, onOpenTask }) {
   useLocale();
   const isDark = isDarkTheme(theme);
   const muted = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
@@ -2801,46 +2575,19 @@ function TaskCard({ task, theme, onCancel, onOpenPath, onOpenTask }) {
     <div className={`rounded-lg border p-3 ${isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={`font-medium truncate ${text}`}>{task.scriptName}</div>
+          <button type="button" onClick={() => onOpenTask(task)} className={`max-w-full truncate text-left font-medium hover:text-emerald-500 ${text}`}>{task.scriptName}</button>
           <div className={`text-xs mt-1 ${muted}`}>{formatTime(task.startedAt || task.createdAt)} · {task.deviceRuns?.length || 0}{tr(" 台设备")}</div>
         </div>
         <StatusPill status={task.status} />
       </div>
-      <div className={`mt-3 h-2 rounded-full overflow-hidden ${isDark ? 'bg-[#2D2F33]' : 'bg-slate-200'}`}>
+      {running && <div className={`mt-3 h-2 rounded-full overflow-hidden ${isDark ? 'bg-[#2D2F33]' : 'bg-slate-200'}`}>
         <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
-      </div>
+      </div>}
       <div className={`mt-2 text-xs ${muted}`}>{tr("完成 ")}{task.completedSteps || 0}{tr("，失败 ")}{task.failedSteps || 0}{tr("，总计 ")}{task.totalSteps || 0}</div>
       {task.error && <p className="mt-2 text-xs text-red-500 break-words">{tr(task.error)}</p>}
       <button type="button" onClick={() => onOpenTask?.(task)} className="mt-2 text-xs text-emerald-500 hover:underline">{tr("查看设备、步骤与日志")}</button>
       {task.mode === 'stress' && task.stressSummary && (
         <div className={`mt-2 text-xs ${task.stressSummary.passed ? 'text-emerald-400' : 'text-red-400'}`}>{tr("压测轮次 ")}{task.stressSummary.successRounds || 0}/{task.stressSummary.totalRounds || 0}{tr("，成功率 ")}{task.stressSummary.successRate || 0}%
-        </div>
-      )}
-      {task.artifactDir && (
-        <div className={`mt-2 rounded border px-2 py-2 ${isDark ? 'border-[#3E4145] bg-[#2D2F33]' : 'border-slate-200 bg-white'}`}>
-          <div className={`text-[11px] truncate ${muted}`}>{task.artifactDir}</div>
-          <button
-            onClick={() => onOpenPath?.(task.artifactDir)}
-            className={`mt-2 w-full px-2 py-1.5 rounded-lg border text-xs flex items-center justify-center gap-1.5 ${theme.button.secondary}`}
-          >
-            <FolderOpen size={12} />{tr("打开目录")}</button>
-        </div>
-      )}
-      {(task.deviceRuns || []).length > 0 && (
-        <div className="mt-3 space-y-2">
-          {(task.deviceRuns || []).map(run => (
-            <div key={run.deviceId} className={`rounded border px-2 py-1.5 ${isDark ? 'border-[#3E4145]' : 'border-slate-200'}`}>
-              <div className="flex items-center justify-between gap-2">
-                <span className={`text-xs font-mono truncate ${text}`}>{run.deviceId}</span>
-                <StatusPill status={run.status} compact />
-              </div>
-              {(run.steps || []).slice(-2).map(step => (
-                <div key={`${step.id}-${step.index}`} className={`text-[11px] mt-1 truncate ${step.status === 'failed' ? 'text-red-400' : muted}`}>
-                  {step.label}{step.error ? `：${step.error}` : step.artifact ? `：${step.artifact}` : ''}
-                </div>
-              ))}
-            </div>
-          ))}
         </div>
       )}
       {running && onCancel && (
@@ -2866,17 +2613,6 @@ function StatusPill({ status, compact }) {
       <Icon size={compact ? 10 : 12} className={status === 'running' ? 'animate-spin' : ''} />
       {label}
     </span>
-  );
-}
-
-function StatCard({ label, value, theme }) {
-  useLocale();
-  const isDark = isDarkTheme(theme);
-  return (
-    <div className={`rounded-lg border px-4 py-3 ${isDark ? 'bg-[#2D2F33] border-[#3E4145]' : 'bg-slate-50 border-slate-200'}`}>
-      <div className={`text-xs ${isDark ? 'text-[#9AA0A6]' : 'text-slate-500'}`}>{label}</div>
-      <div className={`text-xl font-bold mt-1 ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>{value}</div>
-    </div>
   );
 }
 
@@ -2937,7 +2673,7 @@ function createTemplateScript(templateId, platform = 'android') {
       name: tr("启动应用稳定性压测"),
       description: tr("循环启动应用，采集截图和性能快照，用于验证启动稳定性。"),
       steps: [
-        { ...createStep('shell'), label: tr("启动应用"), command: 'monkey -p com.example.app 1', timeoutMs: 15000, critical: true },
+        { ...createStep('shell'), label: tr("启动应用"), command: `monkey -p ${TASK_PACKAGE_PLACEHOLDER} 1`, timeoutMs: 15000, critical: true },
         { ...createStep('delay'), label: tr("等待应用稳定"), durationMs: 2000, timeoutMs: 5000 },
         { ...createStep('screenshot'), label: tr("保存启动截图"), timeoutMs: 30000 },
         { ...createStep('perfSnapshot'), label: tr("采集性能快照"), timeoutMs: 30000 }
@@ -2967,7 +2703,7 @@ function createTemplateScript(templateId, platform = 'android') {
       steps: [
         { ...createStep('installApk'), label: tr("安装 APK"), localPath: '', timeoutMs: 120000, critical: true },
         { ...createStep('shell'), label: tr("清理历史日志"), command: 'logcat -c', timeoutMs: 10000 },
-        { ...createStep('shell'), label: tr("启动应用"), command: 'monkey -p com.example.app 1', timeoutMs: 15000, critical: true },
+        { ...createStep('shell'), label: tr("启动应用"), command: `monkey -p ${TASK_PACKAGE_PLACEHOLDER} 1`, timeoutMs: 15000, critical: true },
         { ...createStep('delay'), label: tr("等待首屏稳定"), durationMs: 2500, timeoutMs: 5000 },
         { ...createStep('screenshot'), label: tr("保存首屏截图"), timeoutMs: 30000 },
         { ...createStep('perfSnapshot'), label: tr("采集启动后性能"), timeoutMs: 30000 }
@@ -2984,7 +2720,7 @@ function createTemplateScript(templateId, platform = 'android') {
       acceptance: { ...script.acceptance, minSuccessRate: 100, failOnCrash: true, failOnAnr: true },
       steps: [
         { ...createStep('shell'), label: tr("清理历史日志"), command: 'logcat -c', timeoutMs: 10000 },
-        { ...createStep('shell'), label: tr("启动应用"), command: 'monkey -p com.example.app 1', timeoutMs: 15000, critical: true },
+        { ...createStep('shell'), label: tr("启动应用"), command: `monkey -p ${TASK_PACKAGE_PLACEHOLDER} 1`, timeoutMs: 15000, critical: true },
         { ...createStep('delay'), label: tr("等待复现场景"), durationMs: 3000, timeoutMs: 5000 },
         { ...createStep('waitLog'), label: tr("等待崩溃或 ANR 日志"), regex: 'FATAL EXCEPTION|ANR in|Application Not Responding', intervalMs: 2000, timeoutMs: 60000, critical: true },
         { ...createStep('screenshot'), label: tr("保存现场截图"), timeoutMs: 30000 },
@@ -3024,7 +2760,7 @@ function createTemplateScript(templateId, platform = 'android') {
         thresholds: { cpu: 85, memory: '', batteryTemp: 50, dataUsed: '' }
       },
       steps: [
-        { ...createStep('shell'), label: tr("启动应用"), command: 'monkey -p com.example.app 1', timeoutMs: 15000, critical: true },
+        { ...createStep('shell'), label: tr("启动应用"), command: `monkey -p ${TASK_PACKAGE_PLACEHOLDER} 1`, timeoutMs: 15000, critical: true },
         { ...createStep('delay'), label: tr("等待应用稳定"), durationMs: 3000, timeoutMs: 5000 },
         { ...createStep('perfSnapshot'), label: tr("采集性能快照"), timeoutMs: 30000 },
         { ...createStep('screenshot'), label: tr("保存观察截图"), timeoutMs: 30000 }
@@ -3085,15 +2821,6 @@ function getSwipeSummary(step) {
   if (!hasStart || !hasEnd) return tr("未设置滑动坐标");
   const curve = Array.isArray(step.points) && step.points.length > 2;
   return `${curve ? tr("曲线") : tr("直线")} ${step.x},${step.y} -> ${step.endX},${step.endY}`;
-}
-
-function isSimpleEditableStep(step) {
-  return ['shell', 'screenshot', 'imageCompare', 'perfSnapshot', 'tap', 'longPress', 'swipe', 'input', 'waitText', 'assertText', 'delay', 'externalScript'].includes(step.type);
-}
-
-function extractMonkeyPackage(command) {
-  const match = String(command || '').match(/\bmonkey\s+-p\s+([^\s]+)\s+1\b/i);
-  return match?.[1] || '';
 }
 
 function createEmptyScript(platform = 'android') {

@@ -71,14 +71,16 @@ function StepEvidence({ task, row, cell, roundIndex, isDark, muted, onOpenPath }
   );
 }
 
-export default function TaskResultMatrix({ task, isDark, muted, onOpenPath }) {
+export default function TaskResultMatrix({ task, isDark, muted, onOpenPath, firstFailure = null }) {
   const title = useId();
   const [onlyAbnormal, setOnlyAbnormal] = useState(false);
   const [requestedRound, setRequestedRound] = useState(null);
   const [selected, setSelected] = useState(null);
-  const matrix = useMemo(() => buildTaskResultMatrix(task, { onlyAbnormal, requestedRound }), [task, onlyAbnormal, requestedRound]);
-  const activeRow = selected?.roundIndex === matrix.roundIndex ? matrix.rows.find(row => row.key === selected?.row) : null;
-  const activeCell = activeRow?.cells.find(cell => cell.column.key === selected.column && (!onlyAbnormal || cell.abnormal));
+  const activeSelection = selected ?? (requestedRound === null ? firstFailure : null);
+  const effectiveRound = requestedRound ?? firstFailure?.roundIndex ?? null;
+  const matrix = useMemo(() => buildTaskResultMatrix(task, { onlyAbnormal, requestedRound: effectiveRound }), [task, onlyAbnormal, effectiveRound]);
+  const activeRow = activeSelection?.roundIndex === matrix.roundIndex ? matrix.rows.find(row => row.key === activeSelection?.row) : null;
+  const activeCell = activeRow?.cells.find(cell => cell.column.key === activeSelection.column && (!onlyAbnormal || cell.abnormal));
   const stickyBackground = isDark ? 'bg-[#202124]' : 'bg-white';
   return (
     <section aria-labelledby={title} className="min-w-0 space-y-2.5">
@@ -96,6 +98,13 @@ export default function TaskResultMatrix({ task, isDark, muted, onOpenPath }) {
           </label>
         </div>
       </div>
+      {activeCell && activeSelection === firstFailure && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs">
+          <CircleX size={14} className="text-red-500" aria-hidden="true" />
+          <span className="font-semibold">{tr('首个失败步骤')}</span>
+          <span className="break-all">{stepLabel(activeCell.column)} · {activeRow.label}</span>
+        </div>
+      )}
       {matrix.rows.length > 0 && matrix.columns.length > 0 ? (
         <div className={`grid min-w-0 gap-3 ${activeCell ? 'lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]' : ''}`}>
           <div className="max-h-[22rem] min-w-0 overflow-auto rounded-xl border border-current/10 focus-visible:outline focus-visible:outline-emerald-500" role="region" tabIndex={0} aria-label={tr('多设备结果矩阵')}>
@@ -117,7 +126,7 @@ export default function TaskResultMatrix({ task, isDark, muted, onOpenPath }) {
                   {row.cells.map(cell => {
                     const [name, Icon, background, light = '', dark = ''] = statusView[cell.status];
                     const status = name();
-                    const pressed = matrix.roundIndex === selected?.roundIndex && selected?.row === row.key && selected?.column === cell.column.key;
+                    const pressed = matrix.roundIndex === activeSelection?.roundIndex && activeSelection?.row === row.key && activeSelection?.column === cell.column.key;
                     return <td key={cell.column.key} className="border-b border-current/10 p-1.5">
                       {onlyAbnormal && !cell.abnormal ? <span aria-label={tr('已隐藏正常结果')} className={`block text-center ${muted}`}>—</span>
                         : <button type="button" aria-label={`${row.label} · ${stepLabel(cell.column)} · ${status}`}

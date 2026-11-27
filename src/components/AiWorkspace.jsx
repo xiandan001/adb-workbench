@@ -1,4 +1,4 @@
-import { ChevronDown, ClipboardCheck, Database, FileSearch, Layers3, Loader2, RefreshCw, RotateCcw, ShieldCheck, Sparkles, Square, Stethoscope } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, CircleAlert, ClipboardCheck, Database, FileSearch, Layers3, Loader2, RefreshCw, RotateCcw, ShieldCheck, Sparkles, Square, Stethoscope } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
 import useAiWorkspace from './AiWorkspaceController';
@@ -10,7 +10,7 @@ import { AiWorkspaceReportActions, AiWorkspaceNextActions } from './AiWorkspaceH
 import AiWorkspaceDiagnostics from './AiWorkspaceDiagnostics';
 import AiWorkspaceHandoff from './AiWorkspaceHandoff';
 import AiWorkspaceRelated from './AiWorkspaceRelated';
-import { workspacePhase, workspacePrimaryBlock } from './AiWorkspaceFlow';
+import { focusWorkspaceRequiredField, workspaceApplicationChecks, workspaceHasAlternateEvidence, workspacePhase, workspaceReadiness, workspaceTaskTarget } from './AiWorkspaceFlow';
 import SelectMenu from './SelectMenu';
 import AiContextTextInput from './AiContextTextInput';
 import { useEffect, useRef, useState } from 'react';
@@ -39,6 +39,25 @@ function SelectionCards({ items, selected, onToggle, disabled, theme, empty }) {
     <input type="checkbox" checked={selected.includes(item.id)} disabled={disabled} onChange={() => onToggle(item.id)} className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-500" />
     <span className="min-w-0"><span className="block break-words text-xs font-medium">{item.label}</span>{(item.description || item.detail) && <span className={`mt-1 block break-all text-[11px] leading-5 ${theme.textMuted}`}>{item.description || item.detail}</span>}</span>
   </label>)}</div>;
+}
+
+function applicationCheckReason(checks, availableChecks) {
+  const appChecks = workspaceApplicationChecks(checks);
+  if (!appChecks.length) return '';
+  const labels = {
+    app_package: tr('应用版本与安装状态'), app_process: tr('应用进程状态'),
+    app_memory: tr('应用内存快照'), app_activity: tr('应用页面状态'),
+  };
+  const names = appChecks.map(id => availableChecks?.find(check => check.id === id)?.label || labels[id] || id);
+  return tr('以下检查需要指定目标应用：{0}。不选应用时，可取消这些检查。', { 0: names.join(' · ') });
+}
+
+function taskDefaultDeviceLabel(target, devices) {
+  if (!target.deviceId) return tr('暂不指定设备（Android 草案）');
+  const model = devices.find(device => device.id === target.deviceId)?.model;
+  const name = model && model !== target.deviceId ? `${model} · ${target.deviceId}` : target.deviceId;
+  const label = workspaceDeviceOnline(devices, target.deviceId) ? name : tr('{0} · 已断开', { 0: name });
+  return target.source === 'controls' ? tr('沿用控件设备：{0}', { 0: label }) : tr('沿用报告设备：{0}', { 0: label });
 }
 
 export default function AiWorkspace({ theme, active = true, devices = [], activeDeviceId = '', applicationContext, incomingHandoffId = '', incomingReportRef, onOpenTasks, onOpenRelatedTask, onOpenMembership, membershipActive, showToast, usageTargetRef }) {
@@ -79,6 +98,12 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
   const onlineDevices = devices.filter(device => device.status === 'device');
   const availableSources = new Set((sources.sources || []).map(source => source.id));
   const staleSources = current.sourceIds.some(id => !availableSources.has(id));
+  const analysisHasAlternateEvidence = mode === 'analysis' && workspaceHasAlternateEvidence(current, availableSources);
+  const evidenceTextField = availableSources.size ? 'text' : 'source';
+  const taskTarget = mode === 'task' ? workspaceTaskTarget(current) : null;
+  const taskTargetNote = taskTarget?.source !== 'selected' && taskTarget?.deviceId.startsWith('hdc:') && !workspaceDeviceOnline(devices, taskTarget.deviceId)
+    ? tr('原设备未连接。请重新连接，或移除带入的内容后重新选择。')
+    : taskTarget?.source === 'controls' ? tr('控件已绑定到上述设备。要更换设备，请先移除控件。') : '';
   const input = `w-full min-w-0 rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500/25 disabled:opacity-60 ${theme.input}`;
   const button = `inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.secondary}`;
   const primary = `inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${theme.button.primary}`;
@@ -91,10 +116,25 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     plan: tr('正在生成只读检查计划…'), collect: tr('正在本机采集并脱敏…'), analyze: tr('正在使用内置 AI 分析…'),
     generate: tr('正在生成测试任务草案…'), save: tr('正在确认并保存任务…'), cancelling: tr('正在取消…'), compare: tr('正在本机准备对比预览…'),
   }[current.busy];
-  const blocked = workspacePrimaryBlock(current, { devices, sources: sources.sources, loading, entitled, reportBusy: state.reportBusy });
+  const { missing, status: readinessStatus } = workspaceReadiness(current, { devices, sources: sources.sources, loading, entitled, reportBusy: state.reportBusy });
+  const blocked = Boolean(missing.length || readinessStatus);
   const canCollect = !blocked && draftBudget?.status !== 'over-limit';
   const phase = workspacePhase(current);
-  const blockedReasons = { question: tr('先描述要分析的问题或测试目标。'), device: tr('请选择在线设备；不会自动替换已选目标。'), checks: tr('至少选择一项只读检查。'), package: tr('所选专项检查需要目标应用包名。'), source: tr('选择一个来源、带入上下文或补充文本即可。'), stale: tr('请移除已失效的来源，再准备预览。'), loading: tr('正在读取可用来源，请稍候。'), membership: tr('生成任务需要现有会员权限。'), busy: tr('当前操作尚未完成，可等待或取消。') };
+  const noDeviceHint = tr('暂无在线设备，请连接并授权设备后刷新。');
+  const applicationLabel = current.deviceId.startsWith('hdc:') ? tr('目标应用 Bundle 名称') : tr('目标应用包名');
+  const applicationReason = mode === 'diagnose' ? applicationCheckReason(current.checks, sources.checks) : '';
+  const materialReason = tr('选择已有来源、带入上下文或证据篮材料，或补充文本，任选一种即可。');
+  const missingFields = {
+    question: [mode === 'task' ? tr('测试目标') : tr('描述你要分析的问题'), tr('先描述要分析的问题或测试目标。')],
+    device: mode === 'task'
+      ? [tr('任务准备设备（不会执行）'), taskTargetNote || tr('请选择在线设备；不会自动替换已选目标。')]
+      : [tr('本次排障设备'), onlineDevices.length ? tr('请选择在线设备；不会自动替换已选目标。') : noDeviceHint],
+    checks: [tr('只读检查项目'), tr('至少选择一项只读检查。')],
+    package: [applicationLabel, applicationReason],
+    source: [tr('证据材料'), materialReason],
+    stale: [tr('移除不可用来源'), tr('请移除已失效的来源，再准备预览。')],
+  };
+  const readinessMessages = { loading: tr('正在读取可用来源，请稍候。'), membership: tr('生成任务需要现有会员权限。'), busy: tr('当前操作尚未完成，可等待或取消。') };
   const view = current.reportView;
   const output = view || current.preview || current.draft || current.savedTask;
   const previousOutput = useRef({ mode, output });
@@ -177,7 +217,7 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
     {(state.pendingHandoff || state.pendingBasket) && <div className={`flex items-center gap-3 rounded-xl border p-3 ${theme.card}`}><p className="flex-1 text-xs">{state.pendingHandoff && !state.pendingHandoff.basketItem ? tr('带入新上下文会替换当前输入；已完成报告会保留。') : tr('新材料已加入本地证据篮；应用后保留问题与报告，重新核对预览。')}</p><button type="button" disabled={Boolean(state.reportBusy) || Object.values(state.cases).some(value => value.busy)} onClick={state.pendingHandoff ? state.acceptPendingHandoff : state.refreshBasket} className={button}>{tr('带入等待中的上下文')}</button></div>}
     {!entitled && !loading && <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${theme.card}`}><ShieldCheck size={21} className="shrink-0 text-emerald-500" /><p className={`min-w-0 flex-1 text-xs leading-5 ${theme.textMuted}`}>{tr('AI 调用沿用本软件会员权限。请在会员中心确认激活；无需新建 AI 账号。')}</p><button type="button" onClick={() => onOpenMembership?.({ deviceId: current.deviceId, feature: tr('AI 工作区'), capability: 'ai-workspace' })} disabled={!onOpenMembership} className={button}>{tr('打开会员中心')}</button></div>}
     {current.busy && <div role="status" className={`flex items-center gap-2 rounded-lg border p-3 ${theme.card}`}><Loader2 size={16} className="shrink-0 animate-spin text-emerald-500" /><span className={`flex-1 text-xs ${theme.textMuted}`}>{busyLabel}</span>{current.busy !== 'save' && <button type="button" onClick={state.cancel} disabled={current.busy === 'cancelling'} className={button}><Square size={12} />{tr('取消')}</button>}</div>}
-    <div role="tabpanel" id={`ai-workspace-panel-${mode}`} aria-labelledby={`ai-workspace-tab-${mode}`} className="ai-workspace-grid">
+    <div role="tabpanel" id={`ai-workspace-panel-${mode}`} aria-labelledby={`ai-workspace-tab-${mode}`} data-ai-preparing={!output || undefined} className="ai-workspace-grid">
       <div className="min-w-0 space-y-4">
         <section ref={preparingRef} aria-labelledby="ai-workspace-input-label" className={`rounded-xl border ${theme.card}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-current/10 px-4 py-3">
@@ -189,35 +229,48 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
           </div>
           {phase !== 'prepare' && adjusting !== preparationKey && current.question && <p className={`line-clamp-3 break-words px-4 py-3 text-sm leading-6 ${theme.textMuted}`}>{current.question}</p>}
           <div hidden={phase !== 'prepare' && adjusting !== preparationKey} className="space-y-4 p-4">
-          <label className="block space-y-2"><span className="sr-only">{mode === 'task' ? tr('测试目标') : tr('描述你要分析的问题')}</span><textarea ref={questionRef} value={current.question} onChange={event => state.edit({ question: event.target.value })} disabled={busy} maxLength={4000} rows={4} className={`${input} resize-y leading-6`} placeholder={mode === 'task' ? tr('例如：等待首页出现“设置”，点击坐标 (100, 200)，截图并采集性能。请给出可核对的参数。') : tr('说明现象、复现条件和期望结果。不要填写密码、密钥或账号信息。')} /></label>
+          <label id="ai-workspace-required-question" className="block space-y-2"><span className="sr-only">{missingFields.question[0]}</span><textarea ref={questionRef} value={current.question} onChange={event => state.edit({ question: event.target.value })} disabled={busy} maxLength={4000} rows={4} className={`${input} resize-y leading-6`} placeholder={mode === 'task' ? tr('例如：等待首页出现“设置”，点击坐标 (100, 200)，截图并采集性能。请给出可核对的参数。') : tr('说明现象、复现条件和期望结果。不要填写密码、密钥或账号信息。')} /></label>
           <AiWorkspaceContext context={current.context} disabled={busy} onClear={() => state.edit({ contextRef: null, context: null, findingIndex: null })} theme={theme} />
           <AiWorkspaceHandoff handoff={current.handoff} targets={current.targets} disabled={busy} onClear={() => state.edit({ handoffId: '', handoff: null, targets: [], targetSelection: { tokens: [] } })} theme={theme} />
           {mode === 'analysis' && <AiWorkspaceHandoff basket={current.basketItems} disabled={busy} onRemove={state.removeBasketItem} onClearBasket={state.clearBasket} theme={theme} />}
-          {mode === 'task' && <div className="space-y-2"><p className="text-xs font-medium">{tr('任务准备设备（不会执行）')}</p><SelectMenu ariaLabel={tr('任务准备设备（不会执行）')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
-            { value: '', label: tr('暂不指定设备（Android 草案）') }, ...(current.deviceId && !online ? [{ value: current.deviceId, label: tr('{0} · 已断开', { 0: current.deviceId }) }] : []),
-            ...onlineDevices.map(device => ({ value: device.id, label: `${device.model || device.id} · ${device.id}` })),
-          ]} /><p className={`text-xs ${theme.textMuted}`}>{current.deviceId.startsWith('hdc:') ? tr('按鸿蒙原生能力准备草案，不使用 Android 命令。') : tr('按 Android 能力准备草案，保存后仍需核对设备再执行。')}</p></div>}
+          {mode === 'task' && <div id="ai-workspace-required-device" className="space-y-2"><p className="text-xs font-medium">{tr('任务准备设备（不会执行）')}</p>
+            {taskTarget.source === 'controls'
+              ? <p data-ai-required-input tabIndex={-1} className={`break-words rounded-lg border px-3 py-2 text-sm ${theme.input}`}>{taskDefaultDeviceLabel(taskTarget, devices)}</p>
+              : <SelectMenu ariaLabel={tr('任务准备设备（不会执行）')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
+                { value: '', label: taskDefaultDeviceLabel(workspaceTaskTarget({ ...current, deviceId: '' }), devices) }, ...(current.deviceId && !online ? [{ value: current.deviceId, label: tr('{0} · 已断开', { 0: current.deviceId }) }] : []),
+                ...onlineDevices.map(device => ({ value: device.id, label: `${device.model || device.id} · ${device.id}` })),
+              ]} />}
+            <p className={`text-xs ${theme.textMuted}`}>{taskTarget.deviceId.startsWith('hdc:') ? tr('按鸿蒙原生能力准备草案，不使用 Android 命令。') : tr('按 Android 能力准备草案，保存后仍需核对设备再执行。')}</p>
+            {taskTargetNote && <p className={`text-xs leading-5 ${missing.includes('device') ? 'text-amber-700 dark:text-amber-400' : theme.textMuted}`}>{taskTargetNote}</p>}
+          </div>}
           {mode === 'diagnose' && <>
-            <div className="space-y-2"><p className="text-xs font-medium">{tr('本次排障设备')}</p><SelectMenu ariaLabel={tr('本次排障设备')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
+            <div id="ai-workspace-required-device" className="space-y-2"><p className="text-xs font-medium">{tr('本次排障设备')}</p><SelectMenu ariaLabel={tr('本次排障设备')} value={current.deviceId} disabled={busy} onChange={deviceId => state.edit({ deviceId })} isDark={dark} className="w-full" options={[
               { value: '', label: tr('请选择在线设备') },
               ...(current.deviceId && !online ? [{ value: current.deviceId, label: tr('{0} · 已断开', { 0: current.deviceId }) }] : []),
               ...onlineDevices.map(device => ({ value: device.id, label: device.model ? `${device.model} · ${device.id}` : device.id })),
-            ]} /></div>
+            ]} />{!onlineDevices.length && <p data-ai-required-input tabIndex={-1} className={`text-xs leading-5 ${theme.textMuted}`}>{noDeviceHint}</p>}</div>
             {current.deviceId && !online && <p className="text-xs leading-5 text-amber-600">{tr('所选设备已断开，不会自动改用其他设备。已有证据仍属于原设备。')}</p>}
             <details className={`rounded-lg border p-3 ${theme.input}`}><summary className="cursor-pointer text-xs font-medium">{tr('调整只读检查与专项排查')}</summary><div className="mt-3 space-y-3">
-            <AiWorkspaceDiagnostics current={current} presets={sources.diagnosticPresets || []} onChange={state.edit} disabled={busy} online={online} device={devices.find(item => item.id === current.deviceId)} theme={theme} />
+            <AiWorkspaceDiagnostics current={current} presets={sources.diagnosticPresets || []} onChange={state.edit} disabled={busy} online={online} device={devices.find(item => item.id === current.deviceId)} theme={theme} applicationLabel={applicationLabel} applicationReason={applicationReason} />
             <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-medium">{tr('只读检查项目')}</span><button type="button" onClick={state.plan} disabled={busy || !entitled || !online || !current.question.trim()} className={button}><Sparkles size={14} />{tr('AI 建议检查计划')}</button></div>
-            <SelectionCards items={sources.checks || []} selected={current.checks} onToggle={id => state.edit({ checks: toggleWorkspaceSelection(current.checks, id) })} disabled={busy} theme={theme} empty={loading ? tr('正在读取可用检查…') : tr('未读取到检查项目，请刷新来源。')} />
+            <div id="ai-workspace-required-checks" tabIndex={-1}><SelectionCards items={sources.checks || []} selected={current.checks} onToggle={id => state.edit({ checks: toggleWorkspaceSelection(current.checks, id) })} disabled={busy} theme={theme} empty={loading ? tr('正在读取可用检查…') : tr('未读取到检查项目，请刷新来源。')} /></div>
             {current.plan && <div className="space-y-2 rounded-lg bg-emerald-500/5 p-3"><p className={`whitespace-pre-wrap break-words text-xs leading-5 ${theme.textMuted}`}>{current.plan.reason}</p><AiWorkspaceUsage usage={current.planUsage} theme={theme} /></div>}
             <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('可直接手选检查，无需先调用 AI。点击采集只执行固定读取，不修改设备或清空日志。')}</p>
             </div></details><p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('本次检查：{0}', { 0: current.checks.map(id => sources.checks?.find(check => check.id === id)?.label || id).join(' · ') })}</p>
           </>}
-          {mode === 'analysis' && <>
+          {mode === 'analysis' && <section id="ai-workspace-evidence-materials" aria-labelledby="ai-workspace-evidence-title" className={`space-y-3 rounded-lg border p-3 ${theme.card}`}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-2"><h4 id="ai-workspace-evidence-title" className="text-xs font-semibold">{tr('证据材料')}</h4><span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">{tr('至少一种')}</span></div>
+                <p className={`text-xs leading-5 ${theme.textMuted}`}>{materialReason}</p>
+              </div>
+              {missing.includes('source') && <button type="button" aria-controls={`ai-workspace-required-${evidenceTextField}`} onClick={() => focusWorkspaceRequiredField(preparingRef.current, evidenceTextField)} className={button}>{tr('填写或粘贴文本')}</button>}
+            </div>
             {current.contextRef && <p className={`text-xs leading-5 ${theme.textMuted}`}>{tr('不选择新来源时复用所选报告的冻结证据；只有主动选择的来源或补充文本会加入新预览。')}</p>}
-            <div className="space-y-2"><h4 className="text-xs font-medium">{tr('选择已有证据来源')}</h4><SelectionCards items={sources.sources || []} selected={current.sourceIds} onToggle={id => state.edit({ sourceIds: toggleWorkspaceSelection(current.sourceIds, id) })} disabled={busy} theme={theme} empty={tr('暂无可用来源。可先打开日志、串口或 SSH 终端，再刷新；也可粘贴文本分析。')} /></div>
-            {staleSources && <div className="space-y-2 rounded-lg border border-amber-500/25 p-3"><p className="text-xs text-amber-600">{tr('部分所选来源已不可用，请移除后重新采集。')}</p><button type="button" disabled={busy} onClick={() => state.edit({ sourceIds: current.sourceIds.filter(id => availableSources.has(id)) })} className={button}>{tr('移除不可用来源')}</button></div>}
-            <AiContextTextInput key={current.caseId} value={current.text} onChange={text => state.edit({ text })} disabled={busy} className={input} label={tr('补充文本（可选）')} placeholder={tr('仅粘贴本次需要分析的片段；采集后会显示脱敏预览。')} />
-          </>}
+            <div id={availableSources.size ? 'ai-workspace-required-source' : undefined} className="space-y-2"><h5 className="text-xs font-medium">{tr('选择已有证据来源')}</h5><SelectionCards items={sources.sources || []} selected={current.sourceIds} onToggle={id => state.edit({ sourceIds: toggleWorkspaceSelection(current.sourceIds, id) })} disabled={busy} theme={theme} empty={tr('暂无可用来源。可先打开日志、串口或 SSH 终端，再刷新；也可粘贴文本分析。')} /></div>
+            {staleSources && <div id="ai-workspace-required-stale" className="space-y-2 rounded-lg border border-amber-500/25 p-3"><p className="text-xs text-amber-600">{tr('部分所选来源已不可用，请移除后重新采集。')}</p><button type="button" disabled={busy} onClick={() => state.edit({ sourceIds: current.sourceIds.filter(id => availableSources.has(id)) })} className={button}>{tr('移除不可用来源')}</button></div>}
+            <div id={`ai-workspace-required-${evidenceTextField}`}><AiContextTextInput key={current.caseId} value={current.text} onChange={text => state.edit({ text })} disabled={busy} className={input} label={analysisHasAlternateEvidence ? tr('补充文本（可选）') : tr('补充文本')} placeholder={tr('仅粘贴本次需要分析的片段；采集后会显示脱敏预览。')} /></div>
+          </section>}
           {mode === 'task' ? <details className={`rounded-lg border p-3 ${theme.input}`}>
             <summary className="cursor-pointer text-xs font-medium">{tr('补充测试参数（可选）')}</summary>
             <div className="mt-3 space-y-2">
@@ -232,16 +285,29 @@ export default function AiWorkspace({ theme, active = true, devices = [], active
             </div>
           </details>}
           {overBudget && budget}
-          <div className="space-y-2 border-t border-current/10 pt-3">
-            {blocked && blocked !== 'busy' && <p role="status" className={`text-xs leading-5 ${theme.textMuted}`}>{blockedReasons[blocked]}</p>}
-            {mode === 'task'
-              ? <button type="button" onClick={state.generate} disabled={Boolean(blocked)} className={`w-full ${primary}`}><Sparkles size={15} />{tr('生成任务草案')}</button>
-              : <button type="button" onClick={state.collectAndReview} disabled={!canCollect} className={`w-full ${primary}`}><Database size={15} />{tr('采集并核对发送')}</button>}
-          </div>
           </div>
         </section>
       </div>
       <div className="min-w-0 space-y-3">
+        {(phase === 'prepare' || adjusting === preparationKey) && <section aria-labelledby="ai-workspace-readiness-label" className={`overflow-hidden rounded-xl border ${theme.card}`}>
+          <h3 id="ai-workspace-readiness-label" className="border-b border-current/10 px-4 py-3 text-sm font-semibold">{tr('继续前检查')}</h3>
+          <div className="space-y-3 p-4">
+            {missing.length > 0 && <section aria-labelledby="ai-workspace-guide-title" className="space-y-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 id="ai-workspace-guide-title" className="flex items-center gap-1.5 text-xs font-semibold"><CircleAlert size={15} aria-hidden="true" className="text-amber-600 dark:text-amber-400" />{tr('继续前请补全')}</h4>
+                <span role="status" className={`text-xs ${theme.textMuted}`}>{tr('还差 {0} 项', { 0: missing.length })}</span>
+              </div>
+              <ul className="divide-y divide-current/10">{missing.map(key => <li key={key} className="flex items-center gap-2 py-2 last:pb-0">
+                <div className="min-w-0 flex-1"><p className="text-xs font-medium">{missingFields[key][0]}</p><p className={`mt-0.5 text-xs leading-5 ${theme.textMuted}`}>{missingFields[key][1]}</p></div>
+                <button type="button" aria-label={`${tr('去补全')} · ${missingFields[key][0]}`} aria-controls={`ai-workspace-required-${key}`} onClick={() => focusWorkspaceRequiredField(preparingRef.current, key)} className={`shrink-0 whitespace-nowrap ${button}`}>{tr('去补全')}<ArrowUpRight size={13} aria-hidden="true" /></button>
+              </li>)}</ul>
+            </section>}
+            {readinessStatus && !(readinessStatus === 'busy' && current.busy) && <p role="status" className={`text-xs leading-5 ${theme.textMuted}`}>{readinessMessages[readinessStatus]}</p>}
+            {mode === 'task'
+              ? <button type="button" onClick={state.generate} disabled={blocked} className={`w-full ${primary}`}><Sparkles size={15} />{tr('生成任务草案')}</button>
+              : <button type="button" onClick={state.collectAndReview} disabled={!canCollect} className={`w-full ${primary}`}><Database size={15} />{tr('采集并核对发送')}</button>}
+          </div>
+        </section>}
         <details ref={toolsRef} id="ai-workspace-tools" onToggle={event => { if (event.currentTarget.open) setToolsMounted(true); }}
           className={`ai-workspace-section-link rounded-xl border px-4 py-3 ${theme.card}`}>
           <summary className="cursor-pointer text-xs font-medium">{tr('报告与工具')}</summary>

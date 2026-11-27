@@ -3,10 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { transformSync } from 'rolldown/utils';
-import { appendRecorderGesturePoint, classifyRecorderGesture, recorderPreviewPoint } from '../src/shared/taskRecorderGesture.js';
+import { appendRecorderGesturePoint, classifyRecorderGesture, mergeRecordedStepPatch, recorderPreviewPoint } from '../src/shared/taskRecorderGesture.js';
 
 const source = readFileSync(new URL('../src/components/TaskCenter.jsx', import.meta.url), 'utf8');
-const model = source.slice(source.indexOf('function StressRecorder('), source.indexOf('function recorderButtonClass(')) +
+const model = source.slice(source.indexOf('function StressRecorder('), source.indexOf('function RecorderPreviewSurface(')) +
   source.slice(source.indexOf('function clearRecorderPointer('), source.indexOf('function formatSvgPoints('));
 const code = transformSync('StressRecorder.jsx', model, { jsx: { runtime: 'classic', pragma: 'jsx', pragmaFrag: 'Fragment' } }).code;
 const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props.children].flat(Infinity).flatMap(nodes)];
@@ -20,7 +20,7 @@ function mount({ recorder = snapshot(), tapOnly = false } = {}) {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 500, height: 500 }),
     setPointerCapture: id => captures.add(id), hasPointerCapture: id => captures.has(id), releasePointerCapture: id => captures.delete(id),
   };
-  const icons = Object.fromEntries('CheckCircle2 Clock3 Loader2 Maximize2 NumberField RefreshCw Smartphone TaskAiTargets Terminal TextField Trash2'.split(' ').map(name => [name, 'icon']));
+  const icons = Object.fromEntries('CheckCircle2 ChevronDown Clock3 Loader2 Maximize2 NumberField RefreshCw Smartphone TaskAiTargets Terminal TextField Trash2'.split(' ').map(name => [name, 'icon']));
   const render = runInNewContext(`(function(){${code};return StressRecorder;})()`, {
     ...icons, RecorderPreviewSurface: 'preview', Fragment: 'fragment', tr: label => label, useLocale() {}, useEffect() {},
     appendRecorderGesturePoint, classifyRecorderGesture, recorderPreviewPoint,
@@ -102,4 +102,13 @@ test('geometry excludes letterbox presses and long paths retain original endpoin
   assert.equal(swipe.args.curve, true);
   assert.deepEqual(swipe.args.points[0], raw[0]);
   assert.deepEqual(swipe.args.points.at(-1), raw.at(-1));
+});
+
+test('edited endpoints and recorded trajectory stay synchronized', () => {
+  const step = { type: 'swipe', x: 1, y: 2, endX: 5, endY: 6, points: [point(1, 2), point(3, 4), point(5, 6)] };
+  assert.deepEqual(mergeRecordedStepPatch(step, { x: 0, endY: 20 }).points, [point(0, 2), point(3, 4), point(5, 20)]);
+  const curve = mergeRecordedStepPatch(step, { points: '[{"x":10,"y":20},{"x":30,"y":40}]' });
+  assert.deepEqual([curve.x, curve.y, curve.endX, curve.endY], [10, 20, 30, 40]);
+  assert.equal(mergeRecordedStepPatch(step, { x: '' }).points[0].x, '');
+  assert.equal(step.points[0].x, 1);
 });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { prepareSavedTaskRun } from '../src/shared/taskQuickRun.js';
+import { getTaskReadiness } from '../src/shared/taskLibrary.js';
 import { applyAndConnectSerialScheme } from '../src/shared/serialSchemeConnection.js';
 import { defaultSerialPreferences } from '../src/shared/serialSettings.js';
 import { addSerialScheme } from '../src/shared/serialSchemes.js';
@@ -28,6 +29,7 @@ test('actual saved-card callback opens a detached preview and never starts a tas
   let request, calls = 0;
   const selected = ['A'], source = sample(), dirtyDraft = { name: 'unsaved', steps: [] };
   const preview = instantiate(task.previewSavedRun, { runInFlightRef: { current: false }, selectedDeviceIds: selected,
+    getTaskReadiness, devices: [{ id: 'A', status: 'device' }],
     taskPlatformForDevice, adaptPristineBuiltin, cloneScript: value => JSON.parse(JSON.stringify(value)), setSavedRun: value => { request = value; },
     draft: dirtyDraft, window: { electronAPI: { taskRun: () => calls++ } } });
   preview(source); source.steps[0].durationMs = 999; selected.push('B');
@@ -42,18 +44,36 @@ test('actual saved-card Run and Edit handlers are independent and Edit retains t
     if (node.name.name !== 'onClick' || !node.value?.expression) return;
     const expression = source.slice(node.value.expression.start, node.value.expression.end);
     if (expression.includes('onRunScript')) handlers.run = expression;
-    if (expression.includes('onOpenScript')) handlers.edit = expression;
+    if (expression.includes('onOpenScript(script)')) handlers.edit = expression;
+    if (expression.includes('onOpenScript(script, issue)')) handlers.configure = expression;
   } });
   let runs = 0, edits = 0, pending, changed = 0;
+  const views = [], focus = [];
+  const devices = [{ id: 'A', status: 'device' }], selectedDeviceIds = ['A'];
   const selected = sample();
   instantiate(handlers.run, { script: selected, onRunScript: script => { assert.equal(script, selected); runs++; } })();
   assert.equal(runs, 1); assert.equal(edits, 0);
   const replaceDraft = instantiate(task.replaceDraft, { draftDirty: true, setPendingDraftAction: update => { pending = update(); } });
   const selectScript = instantiate(task.selectScript, { replaceDraft, resolveScriptAfterSave: value => value, setSelectedScriptId() {}, setDraft() { changed++; }, setSavedFingerprint() {}, cloneScript: value => value, draftFingerprint: () => '' });
-  const open = instantiate(task.openScriptEditor, { selectScript, setEditorMode() {}, setWorkspaceView() {} });
+  const open = instantiate(task.openScriptEditor, { selectScript, getTaskReadiness, selectedDeviceIds, devices, setEditorMode() {}, setWorkspaceView: view => views.push(view), setConfigurationFocus: next => focus.push(next) });
   instantiate(handlers.edit, { script: selected, onOpenScript: script => { edits++; open(script); } })();
   assert.equal(runs, 1); assert.equal(edits, 1); assert.equal(changed, 0); assert.equal(typeof pending, 'function');
+  assert.deepEqual(views, []);
   pending(); assert.equal(changed, 1);
+  assert.deepEqual(views, ['editor']); assert.deepEqual(focus, [null]);
+
+  const unconfigured = { ...sample(), steps: [{ id: 'shot', type: 'imageCompare', baselinePath: '' }] };
+  const issue = getTaskReadiness(unconfigured, selectedDeviceIds, devices).issue;
+  instantiate(handlers.configure, { script: unconfigured, issue, onOpenScript: open })();
+  assert.equal(changed, 1); assert.deepEqual(views, ['editor']);
+  pending(); assert.equal(changed, 2);
+  assert.equal(focus.at(-1).key, 'step-0-baselinePath');
+
+  const preview = instantiate(task.previewSavedRun, { runInFlightRef: { current: false }, selectedDeviceIds, devices,
+    getTaskReadiness, openScriptEditor: open, setSavedRun: () => assert.fail('an incomplete task may not enter confirmation') });
+  preview(unconfigured); assert.equal(changed, 2);
+  pending(); assert.equal(changed, 3);
+  assert.equal(focus.at(-1).key, issue.key);
 });
 
 test('actual task executor is same-tick single-flight and freezes the reviewed target across changes', async () => {

@@ -3,6 +3,15 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.7': {
+    title: 'v5.0.7',
+    date: '2026-11-27',
+    items: [
+      { type: 'improve', get text() { return tr('任务中心分为任务库和运行记录，支持快捷运行、就地编辑录制步骤和定位失败步骤。'); } },
+      { type: 'improve', get text() { return tr('AI 工作区支持定位缺项，并明确证据材料和应用专项检查的填写要求。'); } },
+      { type: 'improve', get text() { return tr('优化质量中心和 AI 工具管理的必填提示，明确应用选择和密钥更换条件。'); } },
+    ],
+  },
   '5.0.6': {
     title: 'v5.0.6',
     date: '2026-11-27',

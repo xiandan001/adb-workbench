@@ -1,4 +1,9 @@
 {
+  "额度查询设置": "Quota query settings",
+  "保存后移除已保存的密钥": "Saving will remove the saved key.",
+  "额度查询已关闭：请移除原额度密钥，或恢复原额度设置。": "Quota queries are off. Remove the previous quota key or restore the previous settings.",
+  "可先保存，跨域查询前必须填写独立额度密钥。": "You can save now, but cross-origin queries require a separate quota key.",
+  "需要处理": "Needs attention",
   "此功能暂不可用，请检查会员状态或工具权限。": "This feature is currently unavailable. Check your membership status or tool permissions.",
   "重新连接此主机": "Reconnect to this host",
   "已建立新连接；旧输出和未保存编辑保留在原会话，不会重放命令": "A new connection was established. Previous output and unsaved edits remain in the original session; commands are not replayed.",

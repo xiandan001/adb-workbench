@@ -32,6 +32,7 @@ export function prepareWorkspaceContext(current, reportView, kind, findingIndex 
   const finding = Number.isInteger(findingIndex) ? report.result?.findings?.[findingIndex] : null;
   return editWorkspaceCase(current, { question: '', sourceIds: [], checks: [], text: '', selection: workspaceSelection(), selectionChanged: false,
     contextRef: { ...reportRef }, context: { question: report.preview?.question || '', summary: report.result?.summary || '', ...(finding ? { finding } : {}),
+      ...(kind === 'task' && report.preview?.deviceId ? { deviceId: report.preview.deviceId } : {}),
       ...(report.review ? { caseReview: report.review, caseName: report.name } : {}) },
     findingIndex: finding ? findingIndex : null, requirements: workspaceRequirements(),
     handoffId: '', handoff: null, targetSelection: { tokens: [] }, targets: [],

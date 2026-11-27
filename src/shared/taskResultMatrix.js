@@ -88,6 +88,30 @@ export function buildTaskResultMatrix(task, { onlyAbnormal = false, requestedRou
   };
 }
 
+export function findFirstTaskFailure(task) {
+  const rounds = new Set();
+  if (task?.mode === 'stress') {
+    for (const run of task.deviceRuns || []) {
+      for (const round of run.stressRounds || []) {
+        if (roundNumber(round.index) && (round.steps || []).some(step => taskMatrixStepStatus(step) === 'failed')) rounds.add(round.index);
+      }
+      for (const step of run.steps || []) {
+        if (roundNumber(step.roundIndex) && taskMatrixStepStatus(step) === 'failed') rounds.add(step.roundIndex);
+      }
+    }
+  } else {
+    rounds.add(null);
+  }
+  for (const requestedRound of [...rounds].sort((a, b) => a - b)) {
+    const { rows, columns, roundIndex } = buildTaskResultMatrix(task, { requestedRound });
+    for (let index = 0; index < columns.length; index += 1) {
+      const row = rows.find(candidate => candidate.cells[index].step && candidate.cells[index].status === 'failed');
+      if (row) return { row: row.key, column: columns[index].key, roundIndex };
+    }
+  }
+  return null;
+}
+
 export function buildTaskStepEvidenceReference(taskId, row, cell, roundIndex) {
   const { step } = cell;
   if (!step || !row.deviceId || typeof step.id !== 'string' || !step.id) return null;

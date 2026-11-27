@@ -14,18 +14,42 @@ export function providerDraft(provider, { defaultToolId, tools = [] } = {}) {
     ...(provider?.cliConfig === undefined ? {} : { cliConfig: cliConfigDraft(provider.cliConfig) }),
     quota: provider?.quota ? { ...provider.quota } : null, quotaTemplate: stringifyQuotaTemplate(provider?.quota?.adapter === 'custom' ? provider.quota : null) };
 }
+
+function providerAddress(value) {
+  let url;
+  try { url = new URL(value.trim()); } catch { return { url: null, error: tr("请填写完整的 HTTP 或 HTTPS 服务地址") }; }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    return { url: null, error: tr("服务地址不能包含登录信息、查询参数或片段") };
+  }
+  return { url, error: '' };
+}
+
+const quotaIdentity = (quota, origin) => JSON.stringify([quota?.adapter || null, quota?.credentialOrigin?.trim() || origin]);
+
+export function providerCredentialContext(draft, original) {
+  const address = providerAddress(draft.baseUrl);
+  const origin = address.url?.origin;
+  const previous = original && providerAddress(original.baseUrl).url?.origin;
+  const explicit = draft.quota?.credentialOrigin?.trim();
+  const quotaUrl = explicit ? providerAddress(explicit).url : null;
+  const apiScopeChanged = Boolean(origin && original?.hasCredential && previous !== origin);
+  const quotaScopeChanged = Boolean(origin && original?.hasQuotaCredential && quotaIdentity(original.quota, previous) !== quotaIdentity(draft.quota, origin));
+  return { ...address,
+    apiScopeChanged, quotaScopeChanged,
+    apiKeyError: apiScopeChanged && !draft.apiKey.trim() && !draft.clearKey ? tr("服务地址已变化，请填写新密钥或明确移除原密钥") : '',
+    quotaKeyError: quotaScopeChanged && !draft.quotaKey.trim() && !draft.clearQuotaKey ? tr("额度查询身份已变化，请填写新的额度密钥或明确移除原额度密钥") : '',
+    crossOriginQuota: Boolean(origin && quotaUrl?.protocol === 'https:' && explicit.replace(/\/$/, '') === quotaUrl.origin && quotaUrl.origin !== origin),
+  };
+}
+
 export function providerInput(draft, original) {
   const name = draft.name.trim(); const model = draft.model.trim(); const apiKey = draft.apiKey.trim(); const quotaKey = draft.quotaKey.trim();
   if (!name || name.length > 120) throw new Error(tr("请填写不超过 120 字的供应商名称"));
   if (!AI_PROTOCOLS.some(item => item.value === draft.protocol)) throw new Error(tr("请选择支持的接口协议"));
-  let url;
-  try { url = new URL(draft.baseUrl.trim()); } catch { throw new Error(tr("请填写完整的 HTTP 或 HTTPS 服务地址")); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error(tr("服务地址不能包含登录信息、查询参数或片段"));
+  const { url, error, apiKeyError, quotaKeyError } = providerCredentialContext(draft, original);
+  if (error) throw new Error(error);
   const endpointError = cliEndpointError(draft.protocol, url.href, draft.targetApps); if (endpointError) throw new Error(endpointError);
-  if (original?.hasCredential && new URL(original.baseUrl).origin !== url.origin && !apiKey && !draft.clearKey) throw new Error(tr("服务地址已变化，请填写新密钥或明确移除原密钥"));
-  const quotaIdentity = (quota, origin) => JSON.stringify([quota?.adapter || null, quota?.credentialOrigin?.trim() || origin]);
-  if (original?.hasQuotaCredential && quotaIdentity(original.quota, new URL(original.baseUrl).origin) !== quotaIdentity(draft.quota, url.origin)
-    && !quotaKey && !draft.clearQuotaKey) throw new Error(tr("额度查询身份已变化，请填写新的额度密钥或明确移除原额度密钥"));
+  if (apiKeyError || quotaKeyError) throw new Error(apiKeyError || quotaKeyError);
   if (model.length > 256 || apiKey.length > 8192 || quotaKey.length > 8192) throw new Error(tr("模型或密钥长度超过限制"));
   const result = { ...(draft.id ? { id: draft.id } : {}), name, protocol: draft.protocol, baseUrl: url.href.replace(/\/$/, ''), ...modelConfigurationInput(draft),
     targetApps: [...new Set(draft.targetApps)] };

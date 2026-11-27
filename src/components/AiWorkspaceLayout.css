@@ -13,6 +13,12 @@
   scroll-margin-block: 1rem;
 }
 
+.ai-workspace-shell [id^="ai-workspace-required-"]:focus-within {
+  border-radius: 0.5rem;
+  outline: 2px solid #00a87c;
+  outline-offset: 3px;
+}
+
 .ai-workspace-mode-tabs {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -27,5 +33,9 @@
 @container ai-workspace (min-width: 57rem) {
   .ai-workspace-grid {
     grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .ai-workspace-grid[data-ai-preparing] {
+    grid-template-columns: minmax(0, 1.55fr) minmax(17rem, 1fr);
   }
 }

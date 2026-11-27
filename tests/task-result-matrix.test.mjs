@@ -71,6 +71,19 @@ test('pending rows do not become anomalies before execution; old snapshot-less r
   assert.equal(old.columns[0].label, 'read');
 });
 
+test('the first failure follows step order and the earliest retained failed stress round', () => {
+  const task = { ...example, deviceRuns: [example.deviceRuns[0], {
+    deviceId: 'earlier', status: 'failed', steps: [step('launch', 0, 'failed')],
+  }] };
+  assert.deepEqual(model.findFirstTaskFailure(task), { row: 'earlier:1', column: 'index:0', roundIndex: null });
+  const stress = { ...example, mode: 'stress', deviceRuns: [{ deviceId: 'A', status: 'failed',
+    stressRounds: [{ index: 2, steps: [step('image', 1, 'failed')] }],
+    steps: [step('image', 1, 'success', { roundIndex: 2 }), step('launch', 0, 'failed', { roundIndex: 3 })],
+  }] };
+  assert.deepEqual(model.findFirstTaskFailure(stress), { row: 'A:0', column: 'index:0', roundIndex: 3 });
+  assert.equal(model.findFirstTaskFailure({ ...example, deviceRuns: [{ deviceId: 'A', status: 'failed', steps: [] }] }), null);
+});
+
 const source = fs.readFileSync(new URL('../src/components/TaskResultMatrix.jsx', import.meta.url), 'utf8')
   .replace(/^import .+;\r?\n/gm, '').replace('export default function', 'function');
 const transpiled = transformSync('TaskResultMatrix.jsx', source, { jsx: { runtime: 'classic', pragma: 'jsx' } }).code;
@@ -91,9 +104,9 @@ test('rendered result table opens exact cell evidence, only abnormalities hides 
     tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (key, index) => args[index] ?? key),
     window: { electronAPI: { taskStepEvidence(input) { requested.push(input); return { ok: true, screenshot: sample }; } } },
   });
-  function render() {
+  function render(prioritizeFailure = false) {
     cursor = 0;
-    const tree = Component({ task: example, isDark: true, muted: 'muted' });
+    const tree = Component({ task: example, isDark: true, muted: 'muted', firstFailure: prioritizeFailure ? model.findFirstTaskFailure(example) : null });
     return { tree, html: renderToStaticMarkup(tree) };
   }
   function findElement(node, predicate) {
@@ -108,6 +121,14 @@ test('rendered result table opens exact cell evidence, only abnormalities hides 
   assert.match(first.html, /B · 对比截图 · 已跳过/);
   assert.match(first.html, /A-reconnected · 采证 · 未执行/);
   assert.equal(requested.length, 0);
+  const prioritized = render(true);
+  assert.match(prioritized.html, /A error/);
+  assert.match(prioritized.html, /A matched/);
+  assert.doesNotMatch(prioritized.html, /unrelated/);
+  findElement(prioritized.tree, node => node.props['aria-label'] === 'B · 启动 · 已通过').props.onClick();
+  const userSelection = render(true);
+  assert.doesNotMatch(userSelection.html, /A error/);
+  assert.match(userSelection.html, /启动 · 已通过/);
   findElement(first.tree, node => node.props['aria-label'] === 'A-reconnected · 对比截图 · 失败').props.onClick();
   const selected = render();
   assert.match(selected.html, /A error/);

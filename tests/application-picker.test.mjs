@@ -90,7 +90,7 @@ function componentHarness(api, storage = memory()) {
   const slots = []; let cursor = 0, props, effects = [], cleanups = [], changes = [], focus = 0;
   const source = fs.readFileSync(new URL('../src/components/ApplicationPicker.jsx', import.meta.url), 'utf8');
   const logic = source.slice(0, source.indexOf('  return <div')).replace(/^import .+;\n/gm, '').replace('export default function ApplicationPicker', 'function ApplicationPicker');
-  const component = vm.runInNewContext(`${logic}\nreturn { show, load, select, keyboard, change, current, filtered, open, trigger, search, position }; }\nApplicationPicker`, {
+  const component = vm.runInNewContext(`${logic}\nreturn { show, load, select, keyboard, change, current, filtered, open, trigger, search, position, manualValid }; }\nApplicationPicker`, {
     ...helpers, readApplicationRecents: () => readApplicationRecents(storage), rememberApplication: (id, name) => rememberApplication(id, name, storage),
     window: { electronAPI: api, innerWidth: 1000, innerHeight: 800 }, localStorage: storage, document: { body: {} },
     tr: text => text, useLocale: () => 'zh-CN', isDarkTheme: () => false, useId: () => 'fixture-picker',
@@ -98,7 +98,7 @@ function componentHarness(api, storage = memory()) {
     useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; },
     useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
   });
-  const render = (next = props) => { props = next; cursor = 0; const ui = component({ theme: {}, onChange: value => changes.push(value), ...props }); ui.trigger.current = { closest: () => null, focus: () => focus++, getBoundingClientRect: () => ({ left: 20, top: 60, bottom: 100, width: 400 }) }; ui.search.current = {}; return ui; };
+  const render = (next = props) => { props = next; cursor = 0; const ui = component({ theme: {}, onChange: value => changes.push(value), ...props }); ui.trigger.current = { closest: () => null, focus: () => focus++, getBoundingClientRect: () => ({ left: 20, top: 60, bottom: 100, width: 400 }) }; ui.search.current = { closest: () => null }; return ui; };
   const commit = () => { cleanups.push(...effects.splice(0).map(fn => fn()).filter(Boolean)); };
   return { render, commit, unmount: () => cleanups.splice(0).forEach(fn => fn()), changes, get focus() { return focus; } };
 }
@@ -120,7 +120,11 @@ test('actual picker callbacks lazily load and fence device/generation/unmount re
   pending[0].resolve({ ok: true, packages: ['com.stale'] }); await flush();
   ui = h.render(); assert.equal(ui.current.items[0].packageName, 'com.current');
   ui.change({ query: 'CURRENT', active: 0 }); ui = h.render(); assert.equal(ui.filtered.length, 1);
-  let prevented = 0; ui.keyboard({ key: 'Enter', preventDefault: () => prevented++, target: { closest: () => null } });
+  let prevented = 0;
+  ui.keyboard({ key: 'Enter', preventDefault: () => prevented++, target: { closest: () => null } });
+  assert.equal(prevented, 0, 'A focused option must retain its native Enter action');
+  assert.deepEqual(h.changes, []);
+  ui.keyboard({ key: 'Enter', preventDefault: () => prevented++, target: ui.search.current });
   assert.deepEqual(h.changes, ['com.current']); assert.equal(h.focus, 1); assert.equal(prevented, 1);
   ui = h.render({ device: device('component-B', 0) }); ui.show(); await flush(); h.unmount();
   pending[2].resolve({ ok: true, packages: ['com.unmounted'] }); await flush(); assert.equal(h.render().current.items.length, 0);
@@ -137,4 +141,22 @@ test('actual picker offline/manual/error paths remain usable and Escape returns 
   const before = h.changes.length; ui.select('bad;command'); assert.equal(h.changes.length, before);
   ui.keyboard({ key: 'Escape', preventDefault() {}, stopPropagation() {} }); assert.equal(h.render().open, false);
   ui.select('com.valid'); assert.deepEqual(h.changes, ['com.manual', 'com.valid']);
+});
+
+test('only a required picker blocks an empty value, without blocking manual package entry', () => {
+  const h = componentHarness({});
+  let ui = h.render({ device: device('required-picker'), allowEmpty: false });
+  assert.equal(ui.manualValid, false);
+  ui.select(''); assert.deepEqual(h.changes, []);
+  ui.change({ manualValue: 'com.manual' }); ui = h.render();
+  assert.equal(ui.manualValid, true);
+  ui.select(ui.current.manualValue); assert.deepEqual(h.changes, ['com.manual']);
+
+  ui = h.render({ device: device('optional-picker') });
+  assert.equal(ui.manualValid, true);
+  ui.select(''); assert.deepEqual(h.changes, ['com.manual', '']);
+  const special = [];
+  ui = h.render({ device: device('optional-picker'), emptyOption: { onSelect: value => special.push(value) } });
+  assert.equal(ui.manualValid, false);
+  ui.select('', value => special.push(value)); assert.deepEqual(special, ['']);
 });

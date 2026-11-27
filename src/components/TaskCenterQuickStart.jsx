@@ -1,189 +1,124 @@
-import { tr, useLocale, getLocale } from '../shared/i18n';
-import { useState } from 'react';
-import {
-  Clock3,
-  Play,
-  Pencil,
-  Search,
-  Settings2,
-  Smartphone,
-  Upload
-} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowRight, ChevronDown, ClipboardList, FilePlus, FilePenLine, Layers3, Pencil, Play, Plus, Search, Smartphone, Upload, X } from 'lucide-react';
+import { tr, useLocale } from '../shared/i18n';
 import { isDarkTheme } from '../shared/theme';
+import { getTaskStatusLabel } from '../shared/taskCenterWorkspace';
 
-function TaskCenterQuickStart({
-  theme,
-  scripts = [],
-  activeTasks,
-  history,
-  onRecord,
-  onImport,
-  onOpenScript,
-  onRunScript,
-  running = false,
-  onOpenAdvanced,
-  onOpenTask,
-  onCompare
+export default function TaskCenterQuickStart({
+  theme, navigation, targetPicker, scripts, readiness, devices, targetIds, history, draft, templates,
+  onRecord, recordingGuide, onImport, onCreate, onTemplate, onOpenScript, onRunScript, onResume, running
 }) {
-  useLocale();
-  const isDark = isDarkTheme(theme);
-  const panelClass = isDark ? 'bg-[#202124] border-[#3E4145]' : 'bg-white border-slate-200';
-  const cardClass = isDark
-    ? 'border-[#3E4145] bg-[#2D2F33] hover:border-emerald-500/60 hover:bg-[#34373B]'
-    : 'border-slate-200 bg-slate-50 hover:border-emerald-400 hover:bg-emerald-50/40';
-  const textClass = isDark ? 'text-[#E8EAED]' : 'text-slate-800';
-  const mutedClass = isDark ? 'text-[#9AA0A6]' : 'text-slate-500';
-  const secondaryButton = isDark
-    ? 'border-[#5F6368] text-[#E8EAED] hover:bg-[#3E4145]'
-    : 'border-slate-200 text-slate-700 hover:bg-slate-50';
-  const [showAll, setShowAll] = useState(false);
+  const locale = useLocale();
   const [query, setQuery] = useState('');
-  const scriptName = script => script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name;
-  const entries = [
-    {
-      id: 'record',
-      title: tr("录制操作"),
-      description: tr("在设备画面上操作，生成可以重复执行的步骤。"),
-      icon: Smartphone,
-      action: onRecord
-    },
-    {
-      id: 'import',
-      title: tr("导入脚本"),
-      description: tr("运行已有的 Python、Shell、JSON 或 YAML 脚本。"),
-      icon: Upload,
-      action: onImport
-    }
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const newMenuRef = useRef(null);
+  const dark = isDarkTheme(theme);
+  const panel = dark ? 'border-[#3E4145] bg-[#202124]' : 'border-slate-200 bg-white';
+  const divider = dark ? 'border-[#3E4145]' : 'border-slate-200';
+  const secondary = `inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 py-2 text-sm ${theme.button.secondary}`;
+  const search = query.trim().toLocaleLowerCase();
+  const rows = scripts.filter(script => !search || [scriptLabel(script), script.description].some(value => String(value || '').toLocaleLowerCase().includes(search)));
+  const latestById = new Map();
+  for (const run of history) if (run.scriptId && !latestById.has(run.scriptId)) latestById.set(run.scriptId, run);
+
+  useEffect(() => {
+    const close = event => {
+      const menu = newMenuRef.current;
+      if (menu?.open && ((event.type === 'pointerdown' && !menu.contains(event.target)) || event.key === 'Escape')) {
+        menu.open = false;
+        if (event.key === 'Escape') menu.querySelector('summary')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, []);
+
+  const newActions = [
+    [Smartphone, tr('录制操作'), onRecord],
+    [Layers3, tr('从模板新建'), () => setTemplatesOpen(open => !open)],
+    [Upload, tr('导入脚本'), onImport],
+    [FilePlus, tr('空白任务'), onCreate]
   ];
-  const matchingScripts = (scripts || []).filter(script => !query.trim() || [scriptName(script), script.description, script.id].some(value => String(value || '').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
-  const visibleScripts = showAll || query.trim() ? matchingScripts : matchingScripts.slice(0, 5);
-  const recentHistory = (history || []).slice(0, 5);
-  const runningTasks = (activeTasks || []).filter(
-    task => task.status === 'running' || task.status === 'queued'
-  );
-
-  return (
-    <div className="space-y-5">
-      <section className={'rounded-xl border p-5 shadow-sm ' + panelClass}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className={'text-lg font-semibold ' + textClass}>{tr("你想完成什么？")}</h3>
-            <p className={'mt-1 text-sm ' + mutedClass}>{tr("先选择目标，复杂设置会在需要时再显示。")}</p>
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      {navigation}
+      <div className="flex items-center gap-2">
+        {recordingGuide && <button type="button" data-task-center-guide="recording-entry" onClick={onRecord} className={secondary}><Smartphone size={16} />{tr('录制操作')}</button>}
+        <details ref={newMenuRef} className="relative">
+          <summary className={`flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden ${theme.button.primary}`}><Plus size={16} />{tr('新建任务')}<ChevronDown size={13} /></summary>
+          <div className={`absolute right-0 top-full z-20 mt-2 min-w-48 rounded-xl border p-1.5 shadow-xl ${panel}`}>
+            {newActions.map(([Icon, label, action]) => <button key={label} type="button" onClick={() => { newMenuRef.current.open = false; action(); }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm hover:bg-slate-500/10"><Icon size={16} className={theme.textMuted} />{label}</button>)}
           </div>
-          <button
-            type="button"
-            onClick={onOpenAdvanced}
-            className={'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ' + secondaryButton}
-          >
-            <Settings2 size={15} />{tr("高级编排")}</button>
-        </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {entries.map(entry => {
-            const Icon = entry.icon;
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={entry.action}
-                data-task-center-guide={entry.id === 'record' ? 'recording-entry' : undefined}
-                className={'rounded-xl border p-5 text-left transition-colors ' + cardClass}
-              >
-                <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-500">
-                  <Icon size={20} />
-                </span>
-                <span className={'block font-semibold ' + textClass}>{entry.title}</span>
-                <span className={'mt-2 block text-sm leading-6 ' + mutedClass}>{entry.description}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {runningTasks.length > 0 && (
-        <section className={'rounded-xl border p-5 ' + panelClass}>
-          <h4 className={'font-semibold ' + textClass}>{tr("正在运行")}</h4>
-          <div className="mt-3 space-y-2">
-            {runningTasks.map(task => (
-              <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full justify-between rounded-lg border p-3 text-left text-sm ' + cardClass}>
-                <span>{task.scriptName || task.id}</span>
-                <span className="text-emerald-500">{statusLabel(task.status)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className={'rounded-xl border p-5 ' + panelClass}>
-          <div className="flex flex-wrap items-center justify-between gap-2"><h4 className={'font-semibold ' + textClass}>{tr("已保存测试")}</h4>
-            <button type="button" onClick={() => setShowAll(value => !value)} className="text-xs text-emerald-500 hover:underline">{showAll ? tr('收起') : tr('全部测试')}</button>
-          </div>
-          {(showAll || scripts.length > 5) && <label className="relative mt-3 block"><span className="sr-only">{tr('搜索已保存测试')}</span><Search size={14} className={`pointer-events-none absolute left-2.5 top-2.5 ${mutedClass}`} /><input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder={tr('搜索已保存测试')} className={`w-full rounded-lg border py-2 pl-8 pr-3 text-xs ${theme.input}`} /></label>}
-          <div className="mt-3 max-h-96 space-y-2 overflow-y-auto">
-            {visibleScripts.length === 0 ? (
-              <p className={'py-6 text-center text-sm ' + mutedClass}>{tr("暂无已保存测试")}</p>
-            ) : visibleScripts.map(script => (
-              <article
-                key={script.id}
-                className={'flex flex-wrap items-center gap-3 rounded-lg border p-3 text-left transition-colors ' + cardClass}
-              >
-                <div className="min-w-0 flex-1 basis-32"><span title={scriptName(script)} className={'block truncate font-medium ' + textClass}>{scriptName(script)}</span>
-                  <span className={'mt-1 block text-xs ' + mutedClass}>{script.steps?.length || 0}{tr(" 个步骤")}</span></div>
-                <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={running || !script.steps?.length} onClick={() => onRunScript?.(script)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs disabled:opacity-40 ${theme.button.primary}`}><Play size={13} />{tr('运行')}</button>
-                  <button type="button" onClick={() => onOpenScript(script)} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs ${secondaryButton}`}><Pencil size={13} />{tr('编辑')}</button></div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className={'rounded-xl border p-5 ' + panelClass}>
-          <div className="flex items-center justify-between gap-3">
-            <h4 className={'font-semibold ' + textClass}>{tr("最近运行")}</h4>
-            {history.length > 1 && <button type="button" onClick={onCompare} className="text-xs text-emerald-500 hover:underline">{tr("比较两次运行")}</button>}
-          </div>
-          <div className="mt-3 space-y-2">
-            {recentHistory.length === 0 ? (
-              <p className={'py-6 text-center text-sm ' + mutedClass}>{tr("暂无运行记录")}</p>
-            ) : recentHistory.map(task => (
-              <button type="button" key={task.id} onClick={() => onOpenTask?.(task)} className={'flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm ' + cardClass}>
-                <div className="min-w-0">
-                  <div className={'truncate font-medium ' + textClass}>{task.scriptName || task.id}</div>
-                  <div className={'mt-1 flex items-center gap-1 text-xs ' + mutedClass}>
-                    <Clock3 size={11} />
-                    {formatTime(task.endedAt || task.createdAt)}
-                  </div>
-                </div>
-                <span className={statusColor(task.status)}>{statusLabel(task.status)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+        </details>
       </div>
     </div>
-  );
+    {templatesOpen && <section className={`rounded-xl border p-4 ${panel}`}>
+      <div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-semibold">{tr('选择场景')}</h3><button type="button" className={secondary} onClick={() => setTemplatesOpen(false)} aria-label={tr('关闭')}><X size={14} /></button></div>
+      <div className="grid gap-2 sm:grid-cols-2 min-[1400px]:grid-cols-3">
+        {templates.map(({ id, icon: Icon, title, description }) => <button type="button" className={`flex items-start gap-3 rounded-lg border p-3 text-left hover:bg-slate-500/10 ${divider}`} key={id} onClick={() => onTemplate(id)}>
+          <Icon size={17} className="mt-0.5 shrink-0 text-emerald-500" /><span className="min-w-0"><span className="block text-sm font-medium">{title}</span><span className={`mt-1 block text-xs leading-5 ${theme.textMuted}`}>{description}</span></span>
+        </button>)}
+      </div>
+    </section>}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="relative w-full sm:max-w-72">
+        <Search size={16} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+        <input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} aria-label={tr('搜索任务名称')} placeholder={tr('搜索任务名称')} className={`w-full rounded-lg border py-2.5 pl-9 pr-9 text-sm ${theme.input}`} />
+        {query && <button type="button" onClick={() => setQuery('')} className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-slate-500/10 ${theme.textMuted}`} aria-label={tr('清空搜索')}><X size={14} /></button>}
+      </div>
+      {targetPicker}
+    </div>
+    <div className={`overflow-hidden rounded-xl border ${panel}`}>
+      <div className={`hidden grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.3fr)_auto] gap-4 border-b px-4 py-3 text-xs lg:grid ${divider} ${theme.textMuted}`}>
+        <span>{tr('任务')}</span><span>{tr('运行目标')}</span><span>{tr('最近结果')}</span><span>{tr('操作')}</span>
+      </div>
+      {rows.length ? <ul className="divide-y divide-current/10">
+        {rows.map(script => {
+          const { ready, issue } = readiness.get(script.id);
+          const last = latestById.get(script.id);
+          const ScriptIcon = script.mode === 'stress' ? Layers3 : ClipboardList;
+          return <li key={script.id} className="grid items-center gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_minmax(0,1.3fr)_auto] lg:gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-500/10 text-emerald-500"><ScriptIcon size={18} /></span>
+              <div className="min-w-0">
+                <button type="button" onClick={() => onOpenScript(script)} className="max-w-full truncate text-left text-sm font-semibold hover:text-emerald-500" title={scriptLabel(script)}>{scriptLabel(script)}</button>
+                <p className={`truncate text-xs ${theme.textMuted}`}>{tr('{0} 个步骤', { 0: script.steps?.length || 0 })}{issue?.name && ` · ${issue.label}`}</p>
+              </div>
+            </div>
+            <p className={`min-w-0 truncate text-sm lg:block ${theme.textMuted}`} title={targetNames(targetIds, devices)}>{targetNames(targetIds, devices)}</p>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className={`whitespace-nowrap rounded-md px-2 py-1 ${last?.status === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : last?.status === 'failed' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-300' : `bg-slate-500/10 ${theme.textMuted}`}`}>{last ? getTaskStatusLabel(last.status) : tr('未执行')}</span>
+              {last && formatDate(last.endedAt || last.createdAt, locale) && <span className={theme.textMuted}>{formatDate(last.endedAt || last.createdAt, locale)}</span>}
+            </div>
+            <div className="flex items-center gap-1.5 sm:justify-self-end">
+              {ready ? <button type="button" disabled={running} className={`${secondary} disabled:opacity-50`} onClick={() => onRunScript(script)}><Play size={14} />{tr('运行')}</button> : <button type="button" className={secondary} onClick={() => onOpenScript(script, issue)} title={issue?.label}><Pencil size={14} />{tr('去配置')}</button>}
+            </div>
+          </li>;
+        })}
+      </ul> : <p className={`p-8 text-center text-sm ${theme.textMuted}`}>{search ? tr('没有符合条件的任务') : tr('暂无已保存测试')}</p>}
+      <div className={`flex flex-wrap items-center justify-between gap-2 border-t px-4 py-2.5 text-xs ${divider} ${theme.textMuted}`}><span>{tr('共 {0} 个任务', { 0: rows.length })}</span><span>{tr('点击任务名称可查看或编辑步骤')}</span></div>
+    </div>
+    {draft && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
+      <div className="flex min-w-0 items-center gap-2.5 text-sm"><FilePenLine size={16} className="shrink-0 text-emerald-500" /><span className="min-w-0 truncate">{tr('未保存草稿：{0}', { 0: draft.name })}</span><span className={`shrink-0 text-xs ${theme.textMuted}`}>{tr('{0} 个步骤', { 0: draft.steps?.length || 0 })}</span></div>
+      <button type="button" onClick={onResume} className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:underline dark:text-emerald-400">{tr('继续编辑')}<ArrowRight size={14} /></button>
+    </div>}
+  </div>;
 }
 
-function statusLabel(status) {
-  if (status === 'success') return tr("成功");
-  if (status === 'failed') return tr("失败");
-  if (status === 'cancelled') return tr("已取消");
-  if (status === 'running') return tr("执行中");
-  if (status === 'queued') return tr("等待中");
-  return status || tr("未知");
+function scriptLabel(script) {
+  return script.id === 'default-smoke-test' && script.createdAt === 'builtin' && script.updatedAt === 'builtin' ? tr(script.name) : script.name;
 }
 
-function statusColor(status) {
-  if (status === 'success') return 'shrink-0 text-emerald-500';
-  if (status === 'failed') return 'shrink-0 text-red-500';
-  if (status === 'running' || status === 'queued') return 'shrink-0 text-amber-500';
-  return 'shrink-0 text-slate-500';
+export function targetNames(ids, devices) {
+  if (!ids.length) return tr('未指定');
+  return ids.map(id => { const device = devices.find(item => item.id === id); return device?.model || device?.name || id; }).join(' · ');
 }
 
-function formatTime(value) {
-  if (!value) return tr("时间未知");
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString(getLocale(), { hour12: false });
+function formatDate(value, locale) {
+  const date = new Date(value || '');
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
-
-export default TaskCenterQuickStart;
