@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, Bot, SlidersHorizontal, DownloadCloud, CheckCircle2, AlertCircle, Crown, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, Cable, Server, MessageSquare, Sparkles, HardDriveDownload } from 'lucide-react';
+import { RefreshCw, Smartphone, Settings, Camera, RotateCcw, Wifi, Loader2, FolderOpen, Download, Folder, Package, Copy, X, Trash2, Palette, History, Video, DownloadCloud, CheckCircle2, AlertCircle, Lock, ClipboardCheck, Gauge, ClipboardList, ShieldCheck, ArrowLeft, Search, Star, MessageSquare } from 'lucide-react';
 import './index.css';
 import './styles/workbenchLayout.css';
 import './styles/preferences.css';
@@ -20,6 +20,9 @@ import ArtifactCenter from './components/ArtifactCenter';
 import QualityCenter from './components/QualityWorkspace';
 import AiOutboundPreviewHost from './components/AiOutboundPreviewHost';
 import WorkbenchActivity from './components/WorkbenchActivity';
+import WorkbenchSidebar, { WorkbenchSidebarButton } from './components/WorkbenchSidebar';
+import WorkbenchCenterTabs from './components/WorkbenchCenterTabs';
+import { centerPage, getWorkbenchCenter, readWorkbenchCenterPages, rememberWorkbenchCenterPage } from './shared/workbenchCenters';
 import ReproductionDialog from './components/ReproductionDialog';
 import EnvironmentCheckWizard from './components/EnvironmentCheckWizard';
 import GlobalCommandPalette, { GlobalCommandSettings } from './components/GlobalCommandPalette';
@@ -104,6 +107,12 @@ function App() {
   const [deviceOperationErrors, setDeviceOperationErrors] = useState({});
   const [navigation, setNavigation] = useState(readInitialNavigation);
   const { activeTab, sshVisited, aiToolsVisited, aiVisited } = navigation;
+  const activeCenter = getWorkbenchCenter(activeTab);
+  const rememberedCenterPages = useRef(null);
+  useEffect(() => {
+    const previous = rememberedCenterPages.current ?? readWorkbenchCenterPages();
+    rememberedCenterPages.current = rememberWorkbenchCenterPage(previous, activeTab);
+  }, [activeTab]);
   const [firmwareVisited, setFirmwareVisited] = useState(activeTab === 'firmware');
   const [aiUsageTarget, setAiUsageTarget] = useState(null);
   const [membershipOrigin, setMembershipOrigin] = useState(null);
@@ -681,6 +690,18 @@ function App() {
     } catch (err) {
       showToast(tr("日志窗口打开失败：{0}", { 0: err.message }));
     }
+  };
+
+  const selectCenterLeaf = leaf => {
+    if (leaf === 'quality') setIncomingGuardId('');
+    setActiveTab(leaf);
+  };
+  const navigateSidebar = destination => {
+    if (destination === 'logs') { void viewApplicationLogs(); return; }
+    if (destination === 'firmware') { openFirmware(); return; }
+    const leaf = centerPage(destination, rememberedCenterPages.current ?? readWorkbenchCenterPages()) || destination;
+    selectCenterLeaf(leaf);
+    if (leaf === 'member') refreshVipStatus();
   };
 
   const globalCommands = useMemo(() => {
@@ -1826,131 +1847,11 @@ function App() {
         </div>
       )}
       {/* Sidebar */}
-      <div className="workbench-sidebar shrink-0 flex flex-col pt-5 bg-[#202124] text-[#E8EAED]" data-locale={locale}>
-        <div className={`px-4 lg:px-5 mb-5 flex items-center space-x-3 ${t.primary === 'cyan' || t.primary === 'blue' ? 'text-cyan-400' : t.primary === 'pink' ? 'text-pink-400' : t.primary === 'green' ? 'text-green-400' : t.primary === 'orange' ? 'text-orange-400' : 'text-emerald-400'}`}>
-          <img src={brandIcon} width={32} height={32} alt="" aria-hidden="true" className="shrink-0" />
-          <h1 className="min-w-0 flex-1 text-xl font-bold tracking-wide">{tr('卓控台')}</h1>
-          <button type="button" aria-label={tr("打开问题反馈")} title={tr("问题反馈")} onClick={() => setFeedbackOpen(true)} className="shrink-0 rounded-lg p-2 text-[#9AA0A6] hover:bg-white/10 hover:text-emerald-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400" style={{ WebkitAppRegion: 'no-drag' }}><MessageSquare size={18} /></button>
-        </div>
-
-        <nav className="workbench-sidebar-nav flex-1 overflow-y-auto px-3 lg:px-4 space-y-1 [&>button]:py-2.5">
-          <div className="px-4 pb-1 text-[11px] text-[#9AA0A6]">{tr("设备与诊断")}</div>
-          <button
-            onClick={() => setActiveTab('devices')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'devices' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Smartphone size={20} />
-            <span className="font-medium">{tr("设备列表")}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openFirmware()}
-            aria-current={activeTab === 'firmware' ? 'page' : undefined}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'firmware' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <HardDriveDownload size={20} />
-            <span className="font-medium">{tr('固件刷机')}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('serial')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'serial' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Cable size={20} />
-            <span className="font-medium">{tr("串口 / RS232")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('ssh')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ssh' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Server size={20} />
-            <span className="font-medium">{tr("SSH 工作区")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('troubleshoot')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'troubleshoot' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <ClipboardCheck size={20} />
-            <span className="font-medium">{tr("问题排查")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('performance')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'performance' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Gauge size={20} />
-            <span className="font-medium">{tr("性能监控")}</span>
-          </button>
-          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("测试与证据")}</div>
-          <button
-            onClick={() => { setIncomingGuardId(''); setActiveTab('quality'); }}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'quality' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <ShieldCheck size={20} />
-            <span className="font-medium">{tr("质量中心")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('tasks')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'tasks' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <ClipboardList size={20} />
-            <span className="font-medium">{tr("任务中心")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('artifacts')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'artifacts' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <FolderOpen size={20} />
-            <span className="font-medium">{tr("产物中心")}</span>
-          </button>
-          <div className="px-4 pt-3 pb-1 text-[11px] text-[#9AA0A6]">{tr("工具与设置")}</div>
-          <button onClick={() => setActiveTab('ai-workspace')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-workspace' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}>
-            <Sparkles size={20} /><span className="font-medium">{tr('AI 工作区')}</span>
-          </button>
-          <button onClick={() => setActiveTab('ai-tools')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'ai-tools' ? 'bg-emerald-500/20 text-emerald-400' : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}>
-            <SlidersHorizontal size={20} /><span className="font-medium">{tr("AI 工具管理")}</span>
-          </button>
-          <button
-            onClick={() => viewApplicationLogs()}
-            className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors hover:bg-[#2D2F33]"
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Bot size={20} />
-            <span className="font-medium">{tr("AI 日志助手")}</span>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('member');
-              refreshVipStatus();
-            }}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'member' ? 'bg-amber-500/20 text-amber-400' : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Crown size={20} />
-            <span className="font-medium">{tr("会员中心")}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? `${t.primary === 'cyan' || t.primary === 'blue' ? 'bg-cyan-500/20 text-cyan-400' : t.primary === 'pink' ? 'bg-pink-500/20 text-pink-400' : t.primary === 'green' ? 'bg-green-500/20 text-green-400' : t.primary === 'orange' ? 'bg-orange-500/20 text-orange-400' : 'bg-emerald-500/20 text-emerald-400'}` : 'hover:bg-[#2D2F33]'}`}
-            style={{ WebkitAppRegion: 'no-drag' }}
-          >
-            <Settings size={20} />
-            <span className="font-medium">{tr("偏好设置")}</span>
-          </button>
-        </nav>
-
+      <WorkbenchSidebar activeTab={activeTab} activeCenter={activeCenter?.id || ''} locale={locale} primary={t.primary}
+        brandIcon={brandIcon} onNavigate={navigateSidebar} onFeedback={() => setFeedbackOpen(true)}
+        renderStatus={rail => <>
         <BackgroundTaskStack
+          rail={rail}
           theme={t}
           isDark={isDark}
           tasks={buildSidebarBackgroundTasks(backgroundTasks)}
@@ -1969,28 +1870,19 @@ function App() {
             setActiveTab(tab);
           }}
         />
-
-        {/* 左下角更新安装入口（已下载完成时显示） */}
-        {updaterState.downloaded && (
-          <div className="px-4 py-3 border-t border-[#3E4145]">
-            <button
+          {updaterState.downloaded && (
+            <WorkbenchSidebarButton
+              label={tr("新版本 v{0} 已就绪，点击安装并重启", { 0: updaterState.info?.version || '' })}
+              showHint={rail}
               disabled={updateActionBusy}
               onClick={() => { if (!manualUpdateCheckRef.current && !updateActionBusy) setUpdateInstallModal(true); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={tr("新版本 v{0} 已就绪，点击安装并重启", { 0: updaterState.info?.version || '' })}
+              className={`relative flex w-full min-h-9 items-center rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-50 ${rail ? 'justify-center' : 'gap-2 px-2'}`}
             >
-              <div className="relative">
-                <DownloadCloud size={20} />
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-xs font-semibold">{tr("新版本已就绪")}</div>
-                <div className="text-[10px] opacity-70">v{updaterState.info?.version || tr("未知")}{tr(" · 点击安装")}</div>
-              </div>
-            </button>
-          </div>
-        )}
-      </div>
+              <DownloadCloud size={18} aria-hidden="true" />
+              {!rail && <span className="min-w-0 break-words text-left text-xs">{tr("新版本已就绪")} · v{updaterState.info?.version || tr("未知")}</span>}
+            </WorkbenchSidebarButton>
+          )}
+        </>} />
 
       {/* Main Content */}
       <div className="workbench-main flex-1 flex flex-col pt-5 h-screen overflow-hidden">
@@ -1999,7 +1891,7 @@ function App() {
           <div className="workbench-header-title" style={{ flex: '1 1 18rem', minWidth: 'min(100%, 18rem)' }}>
             {/* 性能监控 Tab 标题与描述 */}
             <h2 className={`text-xl font-bold ${isDark ? 'text-[#E8EAED]' : 'text-slate-800'}`}>
-              {activeTab === 'devices' ? tr("已连接设备") : activeTab === 'firmware' ? tr('固件刷机') : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'ai-workspace' ? tr('AI 工作区') : activeTab === 'ai-tools' ? tr("AI 工具管理") : activeTab === 'troubleshoot' ? tr("问题排查") : activeTab === 'artifacts' ? tr("产物中心") : activeTab === 'quality' ? tr("质量中心") : activeTab === 'history' ? tr("连接历史") : activeTab === 'tasks' ? tr("任务中心") : activeTab === 'performance' ? tr("性能监控") : activeTab === 'member' ? tr("会员中心") : activeTab === 'settings' ? tr('偏好设置') : tr("全局设置")}
+              {activeCenter?.title || (activeTab === 'devices' ? tr("已连接设备") : activeTab === 'firmware' ? tr('固件刷机') : activeTab === 'serial' ? tr("串口 / RS232") : activeTab === 'ssh' ? tr("SSH 工作区") : activeTab === 'history' ? tr("连接历史") : activeTab === 'member' ? tr("会员中心") : activeTab === 'settings' ? tr('偏好设置') : tr("全局设置"))}
             </h2>
             {activeTab === 'devices' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr("每 5 秒自动刷新 · 当前设备断开后自动选用在线设备")}</p>}
             {activeTab === 'serial' && <p className={`text-xs mt-1 ${t.textMuted}`}>{tr('通过串口或网络连接设备，收发调试数据。')}</p>}
@@ -2037,10 +1929,13 @@ function App() {
           {['devices', 'troubleshoot', 'quality', 'tasks', 'performance', 'ai-workspace', 'artifacts'].includes(activeTab) &&
             <WorkbenchContextBar devices={deviceCards} activeDevice={activeDevice} deviceNames={deviceNames} onDeviceChange={chooseDevice}
               packageName={selectedApplication} onApplicationChange={chooseApplication} theme={t} onEnvironment={() => setEnvironmentCheckModalOpen(true)} />}
+          {activeCenter && <div className="w-full min-w-0"><WorkbenchCenterTabs center={activeCenter} activeTab={activeTab} onChange={selectCenterLeaf} theme={t} /></div>}
         </header>
 
         {/* Content Area */}
         <main ref={mainRef} className="flex-1 overflow-y-auto p-4 lg:p-6 xl:p-8">
+          <div id={activeCenter ? 'workbench-center-panel' : undefined} role={activeCenter ? 'tabpanel' : undefined}
+            aria-labelledby={activeCenter ? `workbench-center-tab-${activeTab}` : undefined} tabIndex={activeCenter ? 0 : undefined}>
           {activeTab === 'devices' && mirrorStateError && <p role="status" className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-600">{tr(mirrorStateError)}</p>}
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
           {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
@@ -3278,14 +3173,15 @@ function App() {
                 )}
               </div>
           )}
+          </div>
         </main>
       </div>
     </div>
   );
 }
 
-function BackgroundTaskStack({ tasks, onOpen, showToast, onNavigateConnection, theme, isDark }) {
-  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} onNavigateConnection={onNavigateConnection} theme={theme} isDark={isDark} />;
+function BackgroundTaskStack({ tasks, onOpen, showToast, onNavigateConnection, theme, isDark, rail }) {
+  return <WorkbenchActivity tasks={tasks} onOpen={onOpen} showToast={showToast} onNavigateConnection={onNavigateConnection} theme={theme} isDark={isDark} rail={rail} />;
 }
 
 function buildSidebarBackgroundTasks(backgroundTasks) {

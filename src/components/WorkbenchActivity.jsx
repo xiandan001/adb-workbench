@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CheckCircle2, CircleAlert, Loader2, Square, X } from 'lucide-react';
 import { tr, useLocale } from '../shared/i18n';
 import SidebarConnectionStatus from './SidebarConnectionStatus';
+import { WorkbenchSidebarButton } from './WorkbenchSidebar';
 import { activityPresentation } from '../shared/activityPresentation.js';
 import { activityRunning as running, buildActivityItems, isActivityDismissed, prepareActivityItems, readActivityDismissals, recordActivityDismissals } from '../shared/activityDismissals.js';
 
-export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection, theme, isDark }) {
+export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNavigateConnection, theme, isDark, rail = false }) {
   const locale = useLocale();
   const colors = activityPresentation(theme, isDark);
   const [registry, setRegistry] = useState({ items: [], olderCount: 0 });
@@ -95,8 +96,19 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
       const next = recordActivityDismissals(snapshot); focusAfterClear.current = true; setDismissals(next);
     } catch (failure) { setError(failure.message); } finally { actionLock.current = false; }
   };
-  return <div className="border-t border-[#3E4145] px-4 py-3">
-    <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center gap-2 rounded-lg bg-white/5 px-3 py-2.5 text-left text-xs text-slate-200 hover:bg-white/10"><Activity size={16} className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} /><span className="min-w-0 flex-1"><span className="block truncate">{tr('后台活动')}</span><span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · {tr('连接 {0}', { 0: connectionSummary.connections })}</span></span></button>
+  const activityLabel = tr('后台活动');
+  const activitySummary = `${tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · ${tr('连接 {0}', { 0: connectionSummary.connections })}`;
+  const activityCount = active + failed;
+  return <div className="min-w-0">
+    <WorkbenchSidebarButton label={`${activityLabel} · ${activitySummary}`} showHint={rail} onClick={() => setOpen(true)}
+      className={`relative flex w-full min-h-9 items-center rounded-lg bg-white/5 text-left text-xs text-slate-200 hover:bg-white/10 ${rail ? 'justify-center' : 'gap-2 px-2 py-1.5'}`}>
+      <Activity size={16} aria-hidden="true" className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} />
+      {!rail && <span className="min-w-0 flex-1">
+        <span className="block truncate">{activityLabel}</span>
+        <span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{activitySummary}</span>
+      </span>}
+      {rail && activityCount > 0 && <span aria-hidden="true" className={`absolute right-0.5 top-0.5 rounded-full px-1 text-[9px] ${failed ? 'bg-amber-900 text-amber-100' : 'bg-emerald-900 text-emerald-100'}`}>{activityCount > 99 ? '99+' : activityCount}</span>}
+    </WorkbenchSidebarButton>
     <dialog ref={dialog} style={open ? { display: 'flex', flexDirection: 'column' } : undefined} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
       <header className={`flex flex-wrap items-center gap-2 border-b p-4 ${colors.border}`}><h3 className="mr-auto font-semibold">{tr('后台活动')}</h3><button ref={clearButton} type="button" disabled={!endedItems.length || Boolean(busy)} onClick={() => clearRecords(endedItems)} title={tr('只移除列表记录，不取消任务、不删除产物。')} className={`rounded-lg px-2.5 py-2 text-xs disabled:opacity-40 ${colors.muted} ${colors.hover}`}>{tr('清除已结束记录')}</button><button ref={closeButton} type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>
       {error && <p role="alert" className="max-h-24 shrink-0 overflow-y-auto border-b border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-500">{tr(error)}</p>}

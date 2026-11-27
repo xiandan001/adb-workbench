@@ -194,29 +194,32 @@ test('current and historical release notes, including an already-open version di
   } finally { await setLanguage(previous); }
 });
 
-test('all five locales keep navigation labels readable by wrapping while changelog controls stay single-line', () => {
+test('all five locales keep sidebar and center labels localized while changelog controls stay single-line', async () => {
   const app = source('src/App.jsx');
-  const css = require('postcss').parse(source('src/styles/workbenchLayout.css'));
+  const side = source('src/components/WorkbenchSidebar.jsx');
+  const css = require('postcss').parse(source('src/styles/workbenchSidebar.css'));
   const declaration = (selector, property) => {
     let value;
-    css.walkRules(selector, rule => rule.walkDecls(property, node => { value = node.value; }));
+    css.walkRules(rule => {
+      if (rule.selectors.includes(selector)) rule.walkDecls(property, node => { value = node.value; });
+    });
     return value;
   };
   assert.match(app, /import '\.\/styles\/workbenchLayout\.css'/);
-  assert.match(app, /className="workbench-sidebar[^"]*" data-locale=\{locale\}/);
-  const navigation = /<nav className="workbench-sidebar-nav[^]*?<\/nav>/.exec(app)?.[0];
-  assert.ok(navigation);
-  assert.doesNotMatch(navigation, /whitespace-nowrap|truncate|line-clamp/);
-  assert.equal(declaration('.workbench-sidebar-nav > button', 'min-width'), '0');
-  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'min-width'), '0');
-  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'white-space'), 'normal');
-  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'overflow-wrap'), 'anywhere');
-  assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'flex-shrink'), '0');
-  const labels = [...navigation.matchAll(/<span className="font-medium">\{tr\(['"]([^'"]+)['"]\)\}<\/span>/g)].map(match => match[1]);
-  assert.equal(labels.length, 14);
+  assert.doesNotMatch(side, /whitespace-nowrap|truncate|line-clamp/);
+  assert.equal(declaration('.workbench-sidebar-item', 'min-width'), '0');
+  assert.equal(declaration('.workbench-sidebar-label', 'min-width'), '0');
+  assert.equal(declaration('.workbench-sidebar-label', 'white-space'), 'normal');
+  assert.equal(declaration('.workbench-sidebar-label', 'overflow-wrap'), 'anywhere');
+  assert.equal(declaration('.workbench-sidebar-item > svg', 'flex-shrink'), '0');
+  const labels = [...side.matchAll(/\['[\w-]+',\s*\w+,\s*\(\) => tr\(['"]([^'"]+)['"]\)\]/g)].map(match => match[1]);
+  assert.equal(labels.length, 10);
   assert.ok(labels.includes('固件刷机'));
-  for (const locale of locales) for (const label of labels) {
-    assert.ok(rendererMessage(label, {}, locale).trim(), `${locale}: ${label}`);
+  await Promise.all(locales.map(preloadLanguage));
+  for (const locale of locales) for (const label of [...labels, '质量', '任务', '产物', '工具管理', '展开侧栏', '折叠侧栏']) {
+    const message = rendererMessage(label, {}, locale);
+    assert.ok(message.trim(), `${locale}: ${label}`);
+    assert.equal(main.tr(label, {}, locale), message, `${locale}: ${label}`);
   }
   const end = app.indexOf('>{tr("知道了")}</button>'); assert.ok(end >= 0);
   const button = app.slice(app.lastIndexOf('<button', end), end);

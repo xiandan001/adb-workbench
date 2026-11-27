@@ -19,9 +19,11 @@ function environment({ registry = [], activeTasks = [], history = [], activeGuar
   let cursor = 0, changed = true, tree, effects = [], props = { theme, tasks: legacy, onOpen: () => forbidden.push('navigate') }; const slots = [], elements = new Map();
   const same = (a, b) => a && b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   const subscribe = name => callback => { subscribers.set(name, callback); return () => subscribers.delete(name); };
-  const runtime = { console, document, activityPresentation, ...helpers, running: helpers.activityRunning, crypto: webcrypto, SidebarConnectionStatus: 'SidebarConnectionStatus',
+  const runtime = { console, document, activityPresentation, ...helpers, running: helpers.activityRunning, crypto: webcrypto, SidebarConnectionStatus: 'SidebarConnectionStatus', WorkbenchSidebarButton: 'SidebarTrigger',
     readActivityDismissals: () => helpers.readActivityDismissals(storage), recordActivityDismissals: rows => helpers.recordActivityDismissals(rows, storage), prepareActivityItems: (rows, tracker) => hashFailure ? Promise.reject(Error('Synthetic hash failure')) : helpers.prepareActivityItems(rows, tracker, webcrypto),
-    tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), useLocale: () => 'zh-CN', jsx: (type, props, ...children) => ({ type, props: { ...props, children } }),
+    tr: (value, args = {}) => value.replace(/\{(\d+)\}/g, (all, key) => args[key] ?? all), useLocale: () => 'zh-CN',
+    jsx: (type, props, ...children) => type === 'SidebarTrigger'
+      ? { type: 'button', props: { ...props, 'aria-label': props.label, children } } : { type, props: { ...props, children } },
     window: { electronAPI: { workbenchActivityList: async () => ({ items: registry, olderCount: 7 }), taskState: async () => ({ activeTasks, history }), deviceGuardState: async () => ({ activeGuards, history: guards }), recordingSessionsList: async () => ({ sessions: recordings }),
       onWorkbenchActivity: subscribe('registry'), onTaskCenterUpdate: subscribe('tasks'), onDeviceGuardUpdate: subscribe('guards'), onRecordingState: subscribe('recordings'),
       workbenchActivityCancel: async value => { forbidden.push({ method: 'cancel', value }); return { ok: true }; }, workbenchActivityDismiss: async () => { forbidden.push('backend-dismiss'); return { ok: true }; }, serialConnect: () => forbidden.push('connect'), artifactsDelete: () => forbidden.push('delete') } },
@@ -40,6 +42,20 @@ function environment({ registry = [], activeTasks = [], history = [], activeGuar
   return { tree: () => tree, drain, storage, values, writes, forbidden, document, focus, emit(name, value) { subscribers.get(name)?.(value); }, setProps(next) { props = { ...props, ...next }; }, dispose() { for (const slot of slots) slot?.cleanup?.(); for (const timer of timers) { clearTimeout(timer); clearInterval(timer); } } };
 }
 const rows = h => nodes(h.tree()).filter(node => node.props?.['data-activity-id']);
+
+test('the icon-only background activity trigger retains its accessible label and opens the original panel', async t => {
+  const evidence = environment({ history: [{ id: 'fixture', scriptName: 'Fixture task', status: 'success', startedAt: 1, endedAt: 2 }] });
+  t.after(evidence.dispose);
+  evidence.setProps({ rail: true });
+  await evidence.drain();
+  const trigger = nodes(evidence.tree()).find(node => node.type === 'button' && node.props['aria-label']?.startsWith('后台活动 · '));
+  assert.ok(trigger);
+  assert.equal(trigger.props.showHint, true);
+  trigger.props.onClick();
+  await evidence.drain();
+  assert.equal(rows(evidence).length, 1);
+  assert.deepEqual(evidence.forbidden, []);
+});
 
 test('actual custom dialog clear-all removes every ended source including below the visible cap, without cancelling active or late work', async t => {
   const e = environment({ history: Array.from({ length: 90 }, (_, index) => ({ id: 'done-' + index, scriptName: 'Ended ' + index, status: 'success', startedAt: 1, endedAt: 10 + index })), activeTasks: [{ id: 'active', scriptName: 'Active unknown', status: 'future-active', startedAt: 200 }] }); t.after(e.dispose); await e.drain();

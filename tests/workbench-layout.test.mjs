@@ -6,9 +6,10 @@ import { runInNewContext } from 'node:vm';
 const require = createRequire(import.meta.url);
 const { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default, postcss = require('postcss');
 const read = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
-function declaration(selector, property, media = '') {
+function declaration(selector, property, media = '', file = 'src/styles/workbenchLayout.css') {
   let result;
-  postcss.parse(read('src/styles/workbenchLayout.css')).walkRules(selector, rule => {
+  postcss.parse(read(file)).walkRules(rule => {
+    if (!rule.selectors.includes(selector)) return;
     if ((rule.parent.type === 'atrule' ? rule.parent.params : '') !== media) return;
     rule.walkDecls(property, node => { result = node.value; });
   });
@@ -33,17 +34,29 @@ test('device grids use available content width and retain original maximum colum
   assert.equal(declaration('.workbench-device-list > *', 'min-width'), '0');
   assert.equal(declaration('.workbench-history-card', 'min-width'), '0');
 });
-test('sidebar retains original widths and centered icons while all translations may wrap', () => {
+test('sidebar uses compact and rail widths while full labels may wrap and navigation scrolls independently', () => {
   const app = read('src/App.jsx');
-  assert.match(app, /className="workbench-sidebar[^"]*" data-locale=\{locale\}/);
-  assert.equal(declaration('.workbench-sidebar', 'width'), '14rem');
-  assert.equal(declaration('.workbench-sidebar', 'width', '(min-width: 1024px)'), '15rem');
-  assert.equal(declaration('.workbench-sidebar[data-locale="ja-JP"]', 'width'), '18rem');
-  assert.equal(declaration('.workbench-sidebar-nav > button', 'align-items'), 'center');
-  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'white-space'), 'normal');
-  assert.equal(declaration('.workbench-sidebar-nav > button > span', 'min-width'), '0');
-  assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'flex-shrink'), '0');
-  assert.equal(declaration('.workbench-sidebar-nav > button > svg', 'margin-top'), undefined);
+  const sidebar = read('src/components/WorkbenchSidebar.jsx');
+  const sidebarDeclaration = (selector, property) => declaration(selector, property, '', 'src/styles/workbenchSidebar.css');
+  assert.match(app, /<WorkbenchSidebar\b[^>]*\blocale=\{locale\}/);
+  assert.match(sidebar, /className="workbench-sidebar" data-locale=\{locale\} data-mode=\{mode\}/);
+  assert.equal(sidebarDeclaration('.workbench-sidebar', 'width'), '12rem');
+  assert.equal(sidebarDeclaration('.workbench-sidebar[data-mode="rail"]', 'width'), '3.5rem');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-nav', 'overflow-y'), 'auto');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-item', 'align-items'), 'center');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-item', 'min-height'), '2.25rem');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-label', 'white-space'), 'normal');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-label', 'min-width'), '0');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-item > svg', 'flex-shrink'), '0');
+  assert.equal(sidebarDeclaration('.workbench-sidebar[data-mode="rail"] .workbench-sidebar-label', 'display'), 'none');
+  assert.equal(declaration('.workbench-sidebar', 'width', '(min-width: 1024px)'), undefined);
+});
+test('center layout retains the main landmark and scopes one panel to the selected tab', () => {
+  const app = read('src/App.jsx');
+  assert.match(app, /<WorkbenchCenterTabs center=\{activeCenter\} activeTab=\{activeTab\} onChange=\{selectCenterLeaf\}/);
+  assert.match(app, /<main ref=\{mainRef\}/);
+  assert.match(app, /id=\{activeCenter \? 'workbench-center-panel' : undefined\} role=\{activeCenter \? 'tabpanel' : undefined\}/);
+  assert.match(app, /aria-labelledby=\{activeCenter \? `workbench-center-tab-\$\{activeTab\}` : undefined\}/);
 });
 test('header selector and wireless fields keep original content proportions with safe localized wrapping', () => {
   const app = read('src/App.jsx');

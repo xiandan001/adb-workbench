@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.4': {
+    title: 'v5.0.4',
+    date: '2026-11-27',
+    items: [
+      { type: 'feature', get text() { return tr('新增测试中心、诊断中心和 AI 中心，通过顶部标签切换功能，并记住各中心上次打开的标签。'); } },
+      { type: 'improve', get text() { return tr('左侧导航支持紧凑和图标两种模式，重启后恢复上次状态。'); } },
+    ],
+  },
   '5.0.3': {
     title: 'v5.0.3',
     date: '2026-11-26',

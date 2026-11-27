@@ -263,7 +263,10 @@ test('real terminal layout transitions preserve draft, output, font size and a r
 
 test('the dedicated firmware page stays available after removing the device-card shortcut', () => {
   const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const sidebar = read('WorkbenchSidebar.jsx');
   assert.match(app, /<FirmwareWorkspace theme=\{t\} active=\{activeTab === 'firmware'\} \/>/);
-  assert.match(app, /onClick=\{\(\) => openFirmware\(\)\}/);
+  assert.match(app, /onNavigate=\{navigateSidebar\}/);
+  assert.match(app, /if \(destination === 'firmware'\) \{ openFirmware\(\); return; \}/);
+  assert.match(sidebar, /\['firmware', HardDriveDownload, \(\) => tr\('固件刷机'\)\]/);
   assert.doesNotMatch(app, /onOpenFirmware=/);
 });
