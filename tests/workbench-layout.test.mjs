@@ -44,7 +44,7 @@ test('sidebar uses compact and rail widths while full labels may wrap and naviga
   assert.equal(sidebarDeclaration('.workbench-sidebar[data-mode="rail"]', 'width'), '3.5rem');
   assert.equal(sidebarDeclaration('.workbench-sidebar-nav', 'overflow-y'), 'auto');
   assert.equal(sidebarDeclaration('.workbench-sidebar-item', 'align-items'), 'center');
-  assert.equal(sidebarDeclaration('.workbench-sidebar-item', 'min-height'), '2.25rem');
+  assert.equal(sidebarDeclaration('.workbench-sidebar-item', 'min-height'), '2.75rem');
   assert.equal(sidebarDeclaration('.workbench-sidebar-label', 'white-space'), 'normal');
   assert.equal(sidebarDeclaration('.workbench-sidebar-label', 'min-width'), '0');
   assert.equal(sidebarDeclaration('.workbench-sidebar-item > svg', 'flex-shrink'), '0');
@@ -57,6 +57,20 @@ test('center layout retains the main landmark and scopes one panel to the select
   assert.match(app, /<main ref=\{mainRef\}/);
   assert.match(app, /id=\{activeCenter \? 'workbench-center-panel' : undefined\} role=\{activeCenter \? 'tabpanel' : undefined\}/);
   assert.match(app, /aria-labelledby=\{activeCenter \? `workbench-center-tab-\$\{activeTab\}` : undefined\}/);
+});
+test('sidebar modes share navigation geometry while retaining readable expanded labels', () => {
+  const sidebar = 'src/styles/workbenchSidebar.css';
+  const get = (selector, property) => declaration(selector, property, '', sidebar);
+  const row = '.workbench-sidebar-item';
+  assert.equal(get(row, 'font-size'), '1rem');
+  assert.equal(get(row, 'line-height'), '1.5rem');
+  assert.equal(get(row, 'padding'), '.625rem 1rem');
+  assert.equal(get(row, 'gap'), '.75rem');
+  assert.equal(get('.workbench-sidebar-group > .workbench-sidebar-item', 'margin-block-start'), '.25rem');
+  assert.equal(get('.workbench-sidebar-group + .workbench-sidebar-group', 'margin-top'), '1rem');
+  assert.equal(get('.workbench-sidebar-brand > h1', 'font-size'), '1.25rem');
+  assert.equal(get('.workbench-sidebar[data-mode="rail"]', 'width'), '3.5rem');
+  assert.equal(get(row, 'min-height'), '2.75rem');
 });
 test('header selector and wireless fields keep original content proportions with safe localized wrapping', () => {
   const app = read('src/App.jsx');

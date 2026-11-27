@@ -3,6 +3,13 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.5': {
+    title: 'v5.0.5',
+    date: '2026-11-27',
+    items: [
+      { type: 'improve', get text() { return tr('恢复展开侧栏的字号和间距，并统一展开与折叠时的图标大小、导航行高和行间距。'); } },
+    ],
+  },
   '5.0.4': {
     title: 'v5.0.4',
     date: '2026-11-27',

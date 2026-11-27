@@ -106,7 +106,7 @@ export default function WorkbenchSidebar({
     <div className="workbench-sidebar-brand">
       <img src={brandIcon} width={26} height={26} alt="" aria-hidden="true" />
       <h1 className="workbench-sidebar-label">{tr('卓控台')}</h1>
-      {!rail && feedback}
+      {feedback}
       <WorkbenchSidebarButton className="workbench-sidebar-control" label={rail ? tr('展开侧栏') : tr('折叠侧栏')}
         showHint aria-controls={navId} aria-expanded={!rail} data-sidebar-toggle="" onClick={toggleMode}>
         {rail ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
@@ -124,7 +124,6 @@ export default function WorkbenchSidebar({
     </nav>
     <footer className="workbench-sidebar-footer">
       {utilityItems.map(renderItem)}
-      {rail && feedback}
       <div className="workbench-sidebar-status">{renderStatus?.(rail)}</div>
     </footer>
   </div>;

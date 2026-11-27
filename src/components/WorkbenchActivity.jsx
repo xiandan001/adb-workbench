@@ -101,7 +101,7 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
   const activityCount = active + failed;
   return <div className="min-w-0">
     <WorkbenchSidebarButton label={`${activityLabel} · ${activitySummary}`} showHint={rail} onClick={() => setOpen(true)}
-      className={`relative flex w-full min-h-9 items-center rounded-lg bg-white/5 text-left text-xs text-slate-200 hover:bg-white/10 ${rail ? 'justify-center' : 'gap-2 px-2 py-1.5'}`}>
+      className={`relative flex w-full min-h-[3.375rem] items-center rounded-lg bg-white/5 text-left text-xs text-slate-200 hover:bg-white/10 ${rail ? 'justify-center' : 'gap-2 px-3 py-2.5'}`}>
       <Activity size={16} aria-hidden="true" className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} />
       {!rail && <span className="min-w-0 flex-1">
         <span className="block truncate">{activityLabel}</span>
