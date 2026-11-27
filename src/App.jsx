@@ -1940,8 +1940,8 @@ function App() {
           {workspaceSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(workspaceSaveError)}</span><button type="button" onClick={retryWorkspaceSave} className="text-emerald-500 underline">{tr('重试保存界面设置')}</button></div>}
           {applicationSaveError && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(applicationSaveError)}</span><button type="button" onClick={retryApplicationSave} className="text-emerald-500 underline">{tr('重试保存应用选择')}</button></div>}
           {worksetNotice && <div role="status" className={`mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/25 p-3 text-xs ${t.textMuted}`}><span className="min-w-0 flex-1 break-words">{tr(worksetNotice)}</span><button type="button" onClick={() => setWorksetNotice('')} aria-label={tr('关闭')} className="rounded p-1 hover:bg-slate-500/10"><X size={14} /></button></div>}
-          {error && !['serial', 'ssh', 'firmware'].includes(activeTab) && (activeTab !== 'tasks' || taskDiscoveryWarning.visible) && (
-            <div className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
+          {error && !['serial', 'ssh', 'firmware', 'settings'].includes(activeTab) && (activeTab !== 'tasks' || taskDiscoveryWarning.visible) && (
+            <div data-device-discovery-warning="" className={`p-4 rounded-lg mb-6 border ${isDarkTheme(t) ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-red-50 text-red-600 border-red-200'}`}>
               {tr(error)}
             </div>
           )}
@@ -2386,7 +2386,7 @@ function App() {
 
           {activeTab === 'settings' && (
             <div className="preferences-frame">
-              <div className={`sticky -top-4 z-[8] -mt-4 pt-4 pb-4 lg:-top-6 lg:-mt-6 lg:pt-6 xl:-top-8 xl:-mt-8 xl:pt-8 ${settingsNavShellClass}`}>
+              <div data-settings-category-bar="" className={`sticky top-0 z-[8] pb-4 ${settingsNavShellClass}`}>
                 <SettingsCategoryTabs active={activeSettingsCategory} onChange={openSettingsCategory} theme={t} isDark={isDark} />
               </div>
 

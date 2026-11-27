@@ -5,25 +5,29 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { resolveActiveDeviceId, singleFlight } from '../src/shared/deviceWorkflow.js';
 import { tr } from '../src/shared/i18n.js';
+import { centerPage } from '../src/shared/workbenchCenters.js';
 
 const require = createRequire(import.meta.url), { parse } = require('@babel/parser'), traverse = require('@babel/traverse').default;
 const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8'), ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
-const declarations = new Map(), effects = [], sidebar = new Map();
-let discoveryNoticeGate;
+const declarations = new Map(), effects = [];
+let discoveryNoticeGate, sidebarNavigation, settingsStickyClasses;
 traverse(ast, {
   VariableDeclarator({ node, parent }) {
-    if (['setActiveTab', 'fetchDevices', 'previousDevicePageRef', 'refreshConnectionHistory'].includes(node.id.name)) declarations.set(node.id.name, parent);
+    if (['setActiveTab', 'fetchDevices', 'previousDevicePageRef', 'refreshConnectionHistory', 'selectCenterLeaf', 'navigateSidebar'].includes(node.id.name)) declarations.set(node.id.name, parent);
   },
   CallExpression({ node, parent }) {
     if (node.callee.name !== 'useEffect') return;
     const body = source.slice(node.arguments[0].start, node.arguments[0].end);
     if (body.includes('previousDevicePageRef.current') || body.includes("document.addEventListener('visibilitychange'") || body.includes('loadInitialSettings();')) effects.push(parent);
   },
-  JSXAttribute({ node }) {
-    if (node.name.name !== 'onClick' || node.value?.type !== 'JSXExpressionContainer') return;
-    const callback = node.value.expression, call = callback.body;
-    if (callback.type === 'ArrowFunctionExpression' && call?.type === 'CallExpression' && call.callee.name === 'setActiveTab'
-      && ['devices', 'settings', 'serial'].includes(call.arguments[0]?.value)) sidebar.set(call.arguments[0].value, source.slice(callback.start, callback.end));
+  JSXAttribute({ node, parent }) {
+    if (parent.name?.name === 'WorkbenchSidebar' && node.name.name === 'onNavigate' &&
+        node.value?.expression?.type === 'Identifier') sidebarNavigation = node.value.expression.name;
+  },
+  JSXElement({ node }) {
+    if (!node.children.some(child => child.type === 'JSXElement' && child.openingElement.name.name === 'SettingsCategoryTabs')) return;
+    const classes = node.openingElement.attributes.find(attribute => attribute.name?.name === 'className');
+    settingsStickyClasses = classes?.value?.expression?.quasis?.flatMap(quasi => quasi.value.cooked.trim().split(/\s+/));
   },
   JSXExpressionContainer({ node }) {
     const expression = node.expression;
@@ -34,12 +38,19 @@ traverse(ast, {
   },
 });
 
-test('only the device discovery notice is suppressed in the independent firmware workspace', () => {
+test('device discovery warnings do not appear in preferences or independent transport workspaces', () => {
   assert.ok(discoveryNoticeGate, 'Evaluate the actual discovery banner render gate');
   const available = (activeTab, error) => noticeVisible(activeTab, error, { visible: true });
-  for (const page of ['firmware', 'serial', 'ssh']) assert.equal(available(page, 'ADB unavailable'), false, page);
-  for (const page of ['devices', 'settings', 'tasks']) assert.equal(available(page, 'ADB unavailable'), true, page);
+  for (const page of ['firmware', 'serial', 'ssh', 'settings']) assert.equal(available(page, 'HDC unavailable'), false, page);
+  for (const page of ['devices', 'tasks', 'performance']) assert.equal(available(page, 'HDC unavailable'), true, page);
   assert.equal(available('devices', ''), false);
+});
+test('settings category tabs pin without pulling over preceding settings notices', () => {
+  assert.ok(settingsStickyClasses?.includes('sticky'));
+  assert.ok(settingsStickyClasses.includes('top-0'));
+  assert.equal(settingsStickyClasses.some(token => /(?:^|:)-(?:mt|top)-/.test(token)), false);
+  assert.match(source, /\{workspaceSaveError && <div role="status"/);
+  assert.match(source, /\{applicationSaveError && <div role="status"/);
 });
 const noticeVisible = (activeTab, error, taskDiscoveryWarning) =>
   Boolean(runInNewContext(discoveryNoticeGate, { activeTab, error, taskDiscoveryWarning }));
@@ -47,6 +58,7 @@ const noticeVisible = (activeTab, error, taskDiscoveryWarning) =>
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function fixture({ page = 'devices', initialRows = [], discover = async () => initialRows } = {}) {
   assert.ok(declarations.get('previousDevicePageRef'), 'App must fence a real device-page transition');
+  assert.ok(declarations.has(sidebarNavigation), 'Exercise the callback actually bound to the sidebar');
   assert.equal(effects.length, 3, 'Execute the actual entry, startup and polling effects');
   const ordered = [...declarations.values(), ...effects].sort((first, second) => first.start - second.start);
   const effectSlots = [], refs = [], memoSlots = [], jobs = [], listeners = new Map(), timers = new Map(), calls = [];
@@ -56,7 +68,8 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
   const target = name => ({ addEventListener: (event, callback) => listeners.set(name + ':' + event, callback), removeEventListener: event => listeners.delete(name + ':' + event) });
   const membershipOriginRef = { current: null };
   const context = {
-    tr, singleFlight, resolveActiveDeviceId, historyVersion: { current: 0 }, worksetTargetRef: { current: '' }, devicesRef: { current: initialRows },
+    tr, singleFlight, resolveActiveDeviceId, centerPage, rememberedCenterPages: { current: {} },
+    historyVersion: { current: 0 }, worksetTargetRef: { current: '' }, devicesRef: { current: initialRows },
     membershipOriginRef, rememberMembershipOrigin: origin => { membershipOriginRef.current = origin; },
     document: { ...target('document'), visibilityState: 'visible' },
     window: { ...target('window'), electronAPI: {
@@ -83,13 +96,13 @@ function fixture({ page = 'devices', initialRows = [], discover = async () => in
     setCustomThemes() {}, setCustomThemesLoaded() {}, setConnectionHistory() {}, setTerminalCommandHistory() {}, setHarmonyTerminalCommandHistory() {},
     inspectionPathLoadedRef: { current: false }, performancePathLoadedRef: { current: false }, taskCenterPathLoadedRef: { current: false }, qualityCenterPathLoadedRef: { current: false },
   };
-  const program = `(function renderEntry(navigation) { const { activeTab } = navigation; ${ordered.map(node => source.slice(node.start, node.end)).join('\n')} return { fetchDevices, setActiveTab, sidebar: { ${[...sidebar].map(([pageName, callback]) => JSON.stringify(pageName) + ': ' + callback).join(',')} } }; })`;
+  const program = `(function renderEntry(navigation) { const { activeTab } = navigation; ${ordered.map(node => source.slice(node.start, node.end)).join('\n')} return { fetchDevices, navigate: ${sidebarNavigation} }; })`;
   const renderActual = runInNewContext(program, context); let current;
   const render = () => { effectIndex = 0; refIndex = 0; memoIndex = 0; current = renderActual(navigation); for (const job of jobs.splice(0)) job(); return current; };
   render();
   return { state, calls, render, manual: () => current.fetchDevices(),
     notice: (page = navigation.activeTab) => noticeVisible(page, state.error, state.taskDiscoveryWarning),
-    click: next => { assert.ok(current.sidebar[next]); current.sidebar[next](); render(); },
+    click: next => { current.navigate(next); render(); },
     fire: event => { assert.ok(listeners.has(event)); listeners.get(event)(); },
     tick: () => { const [id, job] = timers.entries().next().value; assert.equal(job.delay, 5000); timers.delete(id); return job.callback(); },
     dispose: () => { for (const slot of effectSlots) slot.cleanup?.(); },

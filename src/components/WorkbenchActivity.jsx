@@ -99,15 +99,20 @@ export default function WorkbenchActivity({ tasks = [], onOpen, showToast, onNav
   const activityLabel = tr('后台活动');
   const activitySummary = `${tr('进行中 {0} · 待处理 {1}', { 0: active, 1: failed })} · ${tr('连接 {0}', { 0: connectionSummary.connections })}`;
   const activityCount = active + failed;
+  const icon = <Activity size={16} aria-hidden="true" className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} />;
   return <div className="min-w-0">
     <WorkbenchSidebarButton label={`${activityLabel} · ${activitySummary}`} showHint={rail} onClick={() => setOpen(true)}
-      className={`relative flex w-full min-h-[3.375rem] items-center rounded-lg bg-white/5 text-left text-xs text-slate-200 hover:bg-white/10 ${rail ? 'justify-center' : 'gap-2 px-3 py-2.5'}`}>
-      <Activity size={16} aria-hidden="true" className={`shrink-0 ${active ? 'text-emerald-400' : 'text-slate-400'}`} />
+      className={`group flex w-full min-h-[3.375rem] items-center rounded-lg text-left text-xs text-slate-200 ${rail ? 'justify-center' : 'gap-2 bg-white/5 px-3 py-2.5 hover:bg-white/10'}`}>
+      {rail ? <span data-rail-activity-icon="" aria-hidden="true"
+        className="relative grid size-8 shrink-0 place-items-center rounded-lg group-hover:bg-white/10 group-focus-visible:bg-white/10">
+        {icon}
+        {activityCount > 0 && <span className={`absolute -end-0.5 -top-0.5 rounded-full px-1 text-[9px] ${failed ? 'bg-amber-900 text-amber-100' : 'bg-emerald-900 text-emerald-100'}`}>
+          {activityCount > 99 ? '99+' : activityCount}</span>}
+      </span> : icon}
       {!rail && <span className="min-w-0 flex-1">
         <span className="block truncate">{activityLabel}</span>
         <span className={`mt-0.5 block truncate text-[10px] ${failed ? 'text-amber-400' : 'text-slate-400'}`}>{activitySummary}</span>
       </span>}
-      {rail && activityCount > 0 && <span aria-hidden="true" className={`absolute right-0.5 top-0.5 rounded-full px-1 text-[9px] ${failed ? 'bg-amber-900 text-amber-100' : 'bg-emerald-900 text-emerald-100'}`}>{activityCount > 99 ? '99+' : activityCount}</span>}
     </WorkbenchSidebarButton>
     <dialog ref={dialog} style={open ? { display: 'flex', flexDirection: 'column' } : undefined} onCancel={event => { event.preventDefault(); setOpen(false); }} className={`fixed m-auto max-h-[80vh] w-[min(34rem,calc(100vw-2rem))] rounded-2xl border p-0 shadow-2xl backdrop:bg-black/50 ${colors.panel} ${colors.text}`} aria-label={tr('后台活动')}>
       <header className={`flex flex-wrap items-center gap-2 border-b p-4 ${colors.border}`}><h3 className="mr-auto font-semibold">{tr('后台活动')}</h3><button ref={clearButton} type="button" disabled={!endedItems.length || Boolean(busy)} onClick={() => clearRecords(endedItems)} title={tr('只移除列表记录，不取消任务、不删除产物。')} className={`rounded-lg px-2.5 py-2 text-xs disabled:opacity-40 ${colors.muted} ${colors.hover}`}>{tr('清除已结束记录')}</button><button ref={closeButton} type="button" autoFocus aria-label={tr('关闭')} onClick={() => setOpen(false)} className={`rounded-lg p-2 ${colors.hover}`}><X size={18} /></button></header>

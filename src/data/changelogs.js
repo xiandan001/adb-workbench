@@ -3,6 +3,14 @@ import { tr } from '../shared/i18n.js';
 // 格式：{ title, date, items: [{ type: 'feature'|'fix'|'improve', text }] }
 // type 对应不同颜色标签：feature(绿色新增) fix(红色修复) improve(蓝色优化)
 const CHANGELOGS = {
+  '5.0.6': {
+    title: 'v5.0.6',
+    date: '2026-11-27',
+    items: [
+      { type: 'improve', get text() { return tr('偏好设置不再显示设备探测提示，顶部分类栏不再遮挡其他提示。'); } },
+      { type: 'improve', get text() { return tr('优化折叠侧栏的顶部按钮和底部间距，后台活动空闲时只显示图标。'); } },
+    ],
+  },
   '5.0.5': {
     title: 'v5.0.5',
     date: '2026-11-27',

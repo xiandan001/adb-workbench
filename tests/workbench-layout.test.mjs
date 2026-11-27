@@ -72,6 +72,20 @@ test('sidebar modes share navigation geometry while retaining readable expanded 
   assert.equal(get('.workbench-sidebar[data-mode="rail"]', 'width'), '3.5rem');
   assert.equal(get(row, 'min-height'), '2.75rem');
 });
+test('sidebar keeps only the mode control beside the rail logo and gives footer actions separate rows', () => {
+  const sidebar = read('src/components/WorkbenchSidebar.jsx');
+  const styles = 'src/styles/workbenchSidebar.css';
+  const get = (selector, property) => declaration(selector, property, '', styles);
+  const header = sidebar.match(/<div className="workbench-sidebar-brand">[\s\S]*?<\/div>/)?.[0];
+  const footer = sidebar.match(/<footer className="workbench-sidebar-footer">[\s\S]*?<\/footer>/)?.[0];
+  assert.ok(header && footer);
+  assert.match(header, /data-sidebar-toggle=""/);
+  assert.doesNotMatch(header, /onFeedback/);
+  assert.match(footer, /\{utilityItems\.map\(renderItem\)\}[\s\S]*?className="workbench-sidebar-item"[\s\S]*?onClick=\{onFeedback\}[\s\S]*?workbench-sidebar-status/);
+  assert.equal(get('.workbench-sidebar-brand', 'min-height'), '4.75rem');
+  assert.equal(get('.workbench-sidebar[data-mode="rail"] .workbench-sidebar-brand', 'flex-direction'), 'column');
+  assert.equal(get('.workbench-sidebar-status', 'margin-block-start'), '.25rem');
+});
 test('header selector and wireless fields keep original content proportions with safe localized wrapping', () => {
   const app = read('src/App.jsx');
   assert.doesNotMatch(app, /className="workbench-header-actions"/);

@@ -98,15 +98,11 @@ export default function WorkbenchSidebar({
       <span className="workbench-sidebar-label">{label}</span>
     </WorkbenchSidebarButton>;
   };
-  const feedback = <WorkbenchSidebarButton className="workbench-sidebar-control" label={tr('打开问题反馈')}
-    showHint onClick={onFeedback}><MessageSquare size={17} aria-hidden="true" /></WorkbenchSidebarButton>;
-
   return <div className="workbench-sidebar" data-locale={locale} data-mode={mode}
     data-accent={brandAccents.has(primary) ? primary : 'emerald'}>
     <div className="workbench-sidebar-brand">
       <img src={brandIcon} width={26} height={26} alt="" aria-hidden="true" />
       <h1 className="workbench-sidebar-label">{tr('卓控台')}</h1>
-      {feedback}
       <WorkbenchSidebarButton className="workbench-sidebar-control" label={rail ? tr('展开侧栏') : tr('折叠侧栏')}
         showHint aria-controls={navId} aria-expanded={!rail} data-sidebar-toggle="" onClick={toggleMode}>
         {rail ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
@@ -124,6 +120,10 @@ export default function WorkbenchSidebar({
     </nav>
     <footer className="workbench-sidebar-footer">
       {utilityItems.map(renderItem)}
+      <WorkbenchSidebarButton className="workbench-sidebar-item" label={tr('打开问题反馈')} showHint onClick={onFeedback}>
+        <MessageSquare size={17} aria-hidden="true" />
+        <span className="workbench-sidebar-label">{tr('问题反馈')}</span>
+      </WorkbenchSidebarButton>
       <div className="workbench-sidebar-status">{renderStatus?.(rail)}</div>
     </footer>
   </div>;

@@ -161,12 +161,14 @@ test('feedback receipt has no external action and ordinary submission has a conc
 
 test('one App-owned dialog is shared by settings and the sidebar without changing the current page', () => {
   const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const sidebar = readFileSync(new URL('../src/components/WorkbenchSidebar.jsx', import.meta.url), 'utf8');
   assert.match(component, /export function FeedbackDialog/);
   assert.match(component, /FeedbackSection\(\{ theme, onOpen \}\)/);
   assert.match(component, /onClick=\{onOpen\}/);
   assert.equal((app.match(/<FeedbackDialog\b/g) || []).length, 1);
   assert.match(app, /feedbackOpen && <FeedbackDialog theme=\{t\} currentPage=\{activeTab\}/);
-  assert.match(app, /aria-label=\{tr\(["']打开问题反馈["']\)\}[\s\S]*?onClick=\{\(\) => setFeedbackOpen\(true\)\}/);
+  assert.match(app, /<WorkbenchSidebar\b[\s\S]*?onFeedback=\{\(\) => setFeedbackOpen\(true\)\}/);
+  assert.match(sidebar, /<footer\b[\s\S]*?label=\{tr\(["']打开问题反馈["']\)\}[\s\S]*?onClick=\{onFeedback\}/);
   assert.match(app, /<FeedbackSection theme=\{t\} onOpen=\{\(\) => setFeedbackOpen\(true\)\}/);
 });
 

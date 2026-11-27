@@ -1,4 +1,6 @@
 {
+  "偏好设置不再显示设备探测提示，顶部分类栏不再遮挡其他提示。": "Preferences no longer shows device discovery notices, and the category bar leaves other messages visible.",
+  "优化折叠侧栏的顶部按钮和底部间距，后台活动空闲时只显示图标。": "Improved the header control and bottom spacing in the folded sidebar. Background Activity shows just its icon when idle.",
   "恢复展开侧栏的字号和间距，并统一展开与折叠时的图标大小、导航行高和行间距。": "Restored text size and spacing in the expanded sidebar, and matched icon sizes, row heights, and gaps across both modes.",
   "新增测试中心、诊断中心和 AI 中心，通过顶部标签切换功能，并记住各中心上次打开的标签。": "The new Test, Diagnostics, and AI centers use top tabs and each remember the last tab you opened.",
   "左侧导航支持紧凑和图标两种模式，重启后恢复上次状态。": "The sidebar supports compact and icon-only modes and restores your choice after a restart.",
